@@ -27,7 +27,10 @@ public:
 	{
 		TEST_ADD(FallbackDialogueTest::DefaultRulesDisableTargetedSayFallback);
 		TEST_ADD(FallbackDialogueTest::EligibleNpcTargetedSayReturnsUnavailableReplyEmote);
+		TEST_ADD(FallbackDialogueTest::EligibleBotTargetedSayReturnsUnavailableReplyEmote);
+		TEST_ADD(FallbackDialogueTest::EngagedBotTargetedSayReturnsUnavailableReplyEmote);
 		TEST_ADD(FallbackDialogueTest::AuthoredNpcDialogueSuppressesUnavailableReply);
+		TEST_ADD(FallbackDialogueTest::AuthoredBotDialogueSuppressesUnavailableReply);
 		TEST_ADD(FallbackDialogueTest::EngagedNpcDialogueSuppressesUnavailableReply);
 		TEST_ADD(FallbackDialogueTest::MercenaryTargetedSayReportsSkipWithoutReply);
 		TEST_ADD(FallbackDialogueTest::UnknownTargetedSayReportsSkipWithoutReply);
@@ -75,6 +78,47 @@ private:
 		TEST_ASSERT_EQUALS(result.message, std::string("seems lost in thought."));
 	}
 
+	void EligibleBotTargetedSayReturnsUnavailableReplyEmote()
+	{
+		RuleManager::Instance()->ResetRules(false);
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueUnavailableReply", "looks momentarily distracted.");
+
+		const FallbackDialogue::TargetedSayRequest request{
+			.speaker_id = 1,
+			.target_id = 2,
+			.message = "hello",
+			.target_type = FallbackDialogue::TargetType::Bot,
+			.authored_dialogue_handled = false
+		};
+
+		const auto result = FallbackDialogue::HandleTargetedSay(request);
+		TEST_ASSERT(result.handled);
+		TEST_ASSERT(result.output_type == FallbackDialogue::OutputType::Emote);
+		TEST_ASSERT_EQUALS(result.message, std::string("looks momentarily distracted."));
+	}
+
+	void EngagedBotTargetedSayReturnsUnavailableReplyEmote()
+	{
+		RuleManager::Instance()->ResetRules(false);
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueUnavailableReply", "seems distracted by the fight.");
+
+		const FallbackDialogue::TargetedSayRequest request{
+			.speaker_id = 1,
+			.target_id = 2,
+			.message = "hello",
+			.target_type = FallbackDialogue::TargetType::Bot,
+			.authored_dialogue_handled = false,
+			.target_engaged = true
+		};
+
+		const auto result = FallbackDialogue::HandleTargetedSay(request);
+		TEST_ASSERT(result.handled);
+		TEST_ASSERT(result.output_type == FallbackDialogue::OutputType::Emote);
+		TEST_ASSERT_EQUALS(result.message, std::string("seems distracted by the fight."));
+	}
+
 	void AuthoredNpcDialogueSuppressesUnavailableReply()
 	{
 		RuleManager::Instance()->ResetRules(false);
@@ -85,6 +129,26 @@ private:
 			.target_id = 2,
 			.message = "hail",
 			.target_type = FallbackDialogue::TargetType::NPC,
+			.authored_dialogue_handled = true
+		};
+
+		const auto result = FallbackDialogue::HandleTargetedSay(request);
+		TEST_ASSERT(!result.handled);
+		TEST_ASSERT(result.output_type == FallbackDialogue::OutputType::None);
+		TEST_ASSERT(result.message.empty());
+		TEST_ASSERT_EQUALS(result.debug_reason, std::string("authored_dialogue_handled"));
+	}
+
+	void AuthoredBotDialogueSuppressesUnavailableReply()
+	{
+		RuleManager::Instance()->ResetRules(false);
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
+
+		const FallbackDialogue::TargetedSayRequest request{
+			.speaker_id = 1,
+			.target_id = 2,
+			.message = "hail",
+			.target_type = FallbackDialogue::TargetType::Bot,
 			.authored_dialogue_handled = true
 		};
 

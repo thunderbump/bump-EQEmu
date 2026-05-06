@@ -33,13 +33,13 @@ TargetedSayResult HandleTargetedSay(const TargetedSayRequest &request)
 		};
 	}
 
-	if (request.target_engaged) {
+	if (request.target_engaged && request.target_type == TargetType::NPC) {
 		return {
 			.debug_reason = "target_engaged"
 		};
 	}
 
-	if (request.target_type != TargetType::NPC) {
+	if (request.target_type != TargetType::NPC && request.target_type != TargetType::Bot) {
 		return {
 			.debug_reason = "unsupported_target_type"
 		};
