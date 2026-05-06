@@ -1643,20 +1643,36 @@ void Client::ChannelMessageReceived(uint8 chan_num, uint8 language, uint8 lang_s
 				}
 			}
 
-			const auto fallback_result = FallbackDialogue::HandleTargetedSay({
-				.speaker_id = GetID(),
-				.target_id = t->GetID(),
-				.message = message,
-				.target_type = t->IsNPC() ? FallbackDialogue::TargetType::NPC : FallbackDialogue::TargetType::Unknown,
-				.authored_dialogue_handled = authored_dialogue_handled
-			});
+				const auto fallback_target_type = t->IsMerc() ?
+					FallbackDialogue::TargetType::Mercenary :
+					t->IsNPC() ?
+						FallbackDialogue::TargetType::NPC :
+						t->IsBot() ?
+							FallbackDialogue::TargetType::Bot :
+							FallbackDialogue::TargetType::Unknown;
 
-			if (fallback_result.handled && fallback_result.output_type == FallbackDialogue::OutputType::Emote) {
-				t->Emote("%s", fallback_result.message.c_str());
+				const auto fallback_result = FallbackDialogue::HandleTargetedSay({
+					.speaker_id = GetID(),
+					.target_id = t->GetID(),
+					.message = message,
+					.target_type = fallback_target_type,
+					.authored_dialogue_handled = authored_dialogue_handled,
+					.target_engaged = is_engaged
+				});
+
+				if (fallback_result.handled && fallback_result.output_type == FallbackDialogue::OutputType::Emote) {
+					t->Emote("%s", fallback_result.message.c_str());
+				} else if (!fallback_result.debug_reason.empty()) {
+					LogDebug(
+						"Fallback Dialogue skipped targeted say from [{}] to [{}]: {}",
+						GetID(),
+						t->GetID(),
+						fallback_result.debug_reason
+					);
+				}
 			}
+			break;
 		}
-		break;
-	}
 	case ChatChannel_UCSRelay:
 	{
 		// UCS Relay for Underfoot and later.

@@ -28,6 +28,9 @@ public:
 		TEST_ADD(FallbackDialogueTest::DefaultRulesDisableTargetedSayFallback);
 		TEST_ADD(FallbackDialogueTest::EligibleNpcTargetedSayReturnsUnavailableReplyEmote);
 		TEST_ADD(FallbackDialogueTest::AuthoredNpcDialogueSuppressesUnavailableReply);
+		TEST_ADD(FallbackDialogueTest::EngagedNpcDialogueSuppressesUnavailableReply);
+		TEST_ADD(FallbackDialogueTest::MercenaryTargetedSayReportsSkipWithoutReply);
+		TEST_ADD(FallbackDialogueTest::UnknownTargetedSayReportsSkipWithoutReply);
 	}
 
 private:
@@ -89,5 +92,67 @@ private:
 		TEST_ASSERT(!result.handled);
 		TEST_ASSERT(result.output_type == FallbackDialogue::OutputType::None);
 		TEST_ASSERT(result.message.empty());
+		TEST_ASSERT_EQUALS(result.debug_reason, std::string("authored_dialogue_handled"));
+	}
+
+	void EngagedNpcDialogueSuppressesUnavailableReply()
+	{
+		RuleManager::Instance()->ResetRules(false);
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
+
+		const FallbackDialogue::TargetedSayRequest request{
+			.speaker_id = 1,
+			.target_id = 2,
+			.message = "hail",
+			.target_type = FallbackDialogue::TargetType::NPC,
+			.authored_dialogue_handled = false,
+			.target_engaged = true
+		};
+
+		const auto result = FallbackDialogue::HandleTargetedSay(request);
+		TEST_ASSERT(!result.handled);
+		TEST_ASSERT(result.output_type == FallbackDialogue::OutputType::None);
+		TEST_ASSERT(result.message.empty());
+		TEST_ASSERT_EQUALS(result.debug_reason, std::string("target_engaged"));
+	}
+
+	void MercenaryTargetedSayReportsSkipWithoutReply()
+	{
+		RuleManager::Instance()->ResetRules(false);
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
+
+		const FallbackDialogue::TargetedSayRequest request{
+			.speaker_id = 1,
+			.target_id = 2,
+			.message = "hail",
+			.target_type = FallbackDialogue::TargetType::Mercenary,
+			.authored_dialogue_handled = false
+		};
+
+		const auto result = FallbackDialogue::HandleTargetedSay(request);
+		TEST_ASSERT(!result.handled);
+		TEST_ASSERT(result.output_type == FallbackDialogue::OutputType::None);
+		TEST_ASSERT(result.message.empty());
+		TEST_ASSERT_EQUALS(result.debug_reason, std::string("unsupported_target_type"));
+	}
+
+	void UnknownTargetedSayReportsSkipWithoutReply()
+	{
+		RuleManager::Instance()->ResetRules(false);
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
+
+		const FallbackDialogue::TargetedSayRequest request{
+			.speaker_id = 1,
+			.target_id = 2,
+			.message = "hail",
+			.target_type = FallbackDialogue::TargetType::Unknown,
+			.authored_dialogue_handled = false
+		};
+
+		const auto result = FallbackDialogue::HandleTargetedSay(request);
+		TEST_ASSERT(!result.handled);
+		TEST_ASSERT(result.output_type == FallbackDialogue::OutputType::None);
+		TEST_ASSERT(result.message.empty());
+		TEST_ASSERT_EQUALS(result.debug_reason, std::string("unsupported_target_type"));
 	}
 };

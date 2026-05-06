@@ -27,8 +27,22 @@ TargetedSayResult HandleTargetedSay(const TargetedSayRequest &request)
 		return {};
 	}
 
-	if (request.authored_dialogue_handled || request.target_type != TargetType::NPC) {
-		return {};
+	if (request.authored_dialogue_handled) {
+		return {
+			.debug_reason = "authored_dialogue_handled"
+		};
+	}
+
+	if (request.target_engaged) {
+		return {
+			.debug_reason = "target_engaged"
+		};
+	}
+
+	if (request.target_type != TargetType::NPC) {
+		return {
+			.debug_reason = "unsupported_target_type"
+		};
 	}
 
 	return {

@@ -24,6 +24,7 @@ namespace FallbackDialogue {
 
 enum class TargetType {
 	Unknown,
+	Mercenary,
 	NPC,
 	Bot
 };
@@ -39,12 +40,14 @@ struct TargetedSayRequest {
 	std::string message;
 	TargetType  target_type = TargetType::Unknown;
 	bool        authored_dialogue_handled = false;
+	bool        target_engaged = false;
 };
 
 struct TargetedSayResult {
 	bool        handled = false;
 	OutputType  output_type = OutputType::None;
 	std::string message;
+	std::string debug_reason;
 };
 
 TargetedSayResult HandleTargetedSay(const TargetedSayRequest &request);
