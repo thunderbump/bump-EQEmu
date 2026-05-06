@@ -45,6 +45,7 @@ set(common_sources
     events/player_event_logs.cpp
     evolving_items.cpp
     extprofile.cpp
+    fallback_dialogue.cpp
     faction.cpp
     file.cpp
     guild_base.cpp

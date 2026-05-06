@@ -17,6 +17,7 @@
 */
 #include "tests/atobool_test.h"
 #include "tests/data_verification_test.h"
+#include "tests/fallback_dialogue_test.h"
 #include "tests/fixed_memory_test.h"
 #include "tests/fixed_memory_variable_test.h"
 #include "tests/hextoi_32_64_test.h"
@@ -88,6 +89,7 @@ int main()
 		tests.add(new hextoi_32_64_Test());
 		tests.add(new StringUtilTest());
 		tests.add(new DataVerificationTest());
+		tests.add(new FallbackDialogueTest());
 		tests.add(new SkillsUtilsTest());
 		tests.add(new TaskStateTest());
 		const bool success = tests.run(*output, true);

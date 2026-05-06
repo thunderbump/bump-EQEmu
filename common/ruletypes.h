@@ -932,6 +932,9 @@ RULE_BOOL(Chat, AutoInjectSaylinksToClientMessage, true, "Automatically injects 
 RULE_BOOL(Chat, QuestDialogueUsesDialogueWindow, false, "Pipes all quest dialogue to dialogue window")
 RULE_BOOL(Chat, DialogueWindowAnimatesNPCsIfNoneSet, true, "If there is no animation specified in the dialogue window markdown then it will choose a random greet animation such as wave or salute")
 RULE_BOOL(Chat, AlwaysCaptureCommandText, false, "Consume command text (# and ^ by default), regardless of which channel it is sent to")
+RULE_BOOL(Chat, FallbackDialogueEnabled, false, "Enable rule-gated Fallback Dialogue for targeted say interactions")
+RULE_STRING(Chat, FallbackDialogueUnavailableReply, "appears distracted.", "Runtime emote text used when Fallback Dialogue cannot produce a Dialogue Line")
+RULE_INT(Chat, FallbackDialogueCooldownSeconds, 30, "Cooldown in seconds between Fallback Dialogue attempts for the same speaker and target")
 RULE_CATEGORY_END()
 
 RULE_CATEGORY(Merchant)

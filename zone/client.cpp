@@ -22,6 +22,7 @@
 #include "common/eqemu_logsys.h"
 #include "common/events/player_event_logs.h"
 #include "common/events/player_events.h"
+#include "common/fallback_dialogue.h"
 #include "common/features.h"
 #include "common/guilds.h"
 #include "common/profanity_manager.h"
@@ -1638,6 +1639,12 @@ void Client::ChannelMessageReceived(uint8 chan_num, uint8 language, uint8 lang_s
 					}
 				}
 			}
+
+			FallbackDialogue::HandleTargetedSay({
+				.speaker_id = GetID(),
+				.target_id = t->GetID(),
+				.message = message
+			});
 		}
 		break;
 	}
