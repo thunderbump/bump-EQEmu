@@ -26,6 +26,8 @@ public:
 	FallbackDialogueTest()
 	{
 		TEST_ADD(FallbackDialogueTest::DefaultRulesDisableTargetedSayFallback);
+		TEST_ADD(FallbackDialogueTest::EligibleNpcTargetedSayReturnsUnavailableReplyEmote);
+		TEST_ADD(FallbackDialogueTest::AuthoredNpcDialogueSuppressesUnavailableReply);
 	}
 
 private:
@@ -48,5 +50,44 @@ private:
 
 		const auto result = FallbackDialogue::HandleTargetedSay(request);
 		TEST_ASSERT(!result.handled);
+	}
+
+	void EligibleNpcTargetedSayReturnsUnavailableReplyEmote()
+	{
+		RuleManager::Instance()->ResetRules(false);
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueUnavailableReply", "seems lost in thought.");
+
+		const FallbackDialogue::TargetedSayRequest request{
+			.speaker_id = 1,
+			.target_id = 2,
+			.message = "hello",
+			.target_type = FallbackDialogue::TargetType::NPC,
+			.authored_dialogue_handled = false
+		};
+
+		const auto result = FallbackDialogue::HandleTargetedSay(request);
+		TEST_ASSERT(result.handled);
+		TEST_ASSERT(result.output_type == FallbackDialogue::OutputType::Emote);
+		TEST_ASSERT_EQUALS(result.message, std::string("seems lost in thought."));
+	}
+
+	void AuthoredNpcDialogueSuppressesUnavailableReply()
+	{
+		RuleManager::Instance()->ResetRules(false);
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
+
+		const FallbackDialogue::TargetedSayRequest request{
+			.speaker_id = 1,
+			.target_id = 2,
+			.message = "hail",
+			.target_type = FallbackDialogue::TargetType::NPC,
+			.authored_dialogue_handled = true
+		};
+
+		const auto result = FallbackDialogue::HandleTargetedSay(request);
+		TEST_ASSERT(!result.handled);
+		TEST_ASSERT(result.output_type == FallbackDialogue::OutputType::None);
+		TEST_ASSERT(result.message.empty());
 	}
 };

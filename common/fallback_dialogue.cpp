@@ -23,13 +23,19 @@ namespace FallbackDialogue {
 
 TargetedSayResult HandleTargetedSay(const TargetedSayRequest &request)
 {
-	(void) request;
-
 	if (!RuleB(Chat, FallbackDialogueEnabled)) {
 		return {};
 	}
 
-	return {};
+	if (request.authored_dialogue_handled || request.target_type != TargetType::NPC) {
+		return {};
+	}
+
+	return {
+		.handled = true,
+		.output_type = OutputType::Emote,
+		.message = RuleS(Chat, FallbackDialogueUnavailableReply)
+	};
 }
 
 }

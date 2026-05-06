@@ -22,14 +22,29 @@
 
 namespace FallbackDialogue {
 
+enum class TargetType {
+	Unknown,
+	NPC,
+	Bot
+};
+
+enum class OutputType {
+	None,
+	Emote
+};
+
 struct TargetedSayRequest {
 	uint32_t    speaker_id = 0;
 	uint32_t    target_id = 0;
 	std::string message;
+	TargetType  target_type = TargetType::Unknown;
+	bool        authored_dialogue_handled = false;
 };
 
 struct TargetedSayResult {
-	bool handled = false;
+	bool        handled = false;
+	OutputType  output_type = OutputType::None;
+	std::string message;
 };
 
 TargetedSayResult HandleTargetedSay(const TargetedSayRequest &request);

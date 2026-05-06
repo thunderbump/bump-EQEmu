@@ -1623,28 +1623,37 @@ void Client::ChannelMessageReceived(uint8 chan_num, uint8 language, uint8 lang_s
 		) {
 			const bool is_engaged = t->IsEngaged();
 
+			bool authored_dialogue_handled = false;
+
 			if (is_engaged) {
-				parse->EventBotMercNPC(EVENT_AGGRO_SAY, t, this, [&]() { return message; }, language);
+				authored_dialogue_handled = parse->EventBotMercNPC(EVENT_AGGRO_SAY, t, this, [&]() { return message; }, language) != 0;
 			} else {
-				parse->EventBotMercNPC(EVENT_SAY, t, this, [&]() { return message; }, language);
+				authored_dialogue_handled = parse->EventBotMercNPC(EVENT_SAY, t, this, [&]() { return message; }, language) != 0;
 			}
 
 			if (t->IsNPC() && !is_engaged) {
-				CheckLDoNHail(t->CastToNPC());
-				CheckEmoteHail(t->CastToNPC(), message);
+				authored_dialogue_handled = CheckLDoNHail(t->CastToNPC()) || authored_dialogue_handled;
+				authored_dialogue_handled = CheckEmoteHail(t->CastToNPC(), message) || authored_dialogue_handled;
 
 				if (RuleB(TaskSystem, EnableTaskSystem)) {
 					if (UpdateTasksOnSpeakWith(t->CastToNPC())) {
+						authored_dialogue_handled = true;
 						t->CastToNPC()->DoQuestPause(this);
 					}
 				}
 			}
 
-			FallbackDialogue::HandleTargetedSay({
+			const auto fallback_result = FallbackDialogue::HandleTargetedSay({
 				.speaker_id = GetID(),
 				.target_id = t->GetID(),
-				.message = message
+				.message = message,
+				.target_type = t->IsNPC() ? FallbackDialogue::TargetType::NPC : FallbackDialogue::TargetType::Unknown,
+				.authored_dialogue_handled = authored_dialogue_handled
 			});
+
+			if (fallback_result.handled && fallback_result.output_type == FallbackDialogue::OutputType::Emote) {
+				t->Emote("%s", fallback_result.message.c_str());
+			}
 		}
 		break;
 	}
@@ -6878,15 +6887,15 @@ void Client::AdventureFinish(bool win, int theme, int points)
 	FastQueuePacket(&outapp);
 }
 
-void Client::CheckLDoNHail(NPC* n)
+bool Client::CheckLDoNHail(NPC* n)
 {
 	if (!zone->adv_data || !n || n->GetOwnerID()) {
-		return;
+		return false;
 	}
 
 	auto* ds = (ServerZoneAdventureDataReply_Struct*) zone->adv_data;
 	if (ds->type != Adventure_Rescue || ds->data_id != n->GetNPCTypeID()) {
-		return;
+		return false;
 	}
 
 	if (entity_list.CheckNPCsClose(n)) {
@@ -6895,7 +6904,7 @@ void Client::CheckLDoNHail(NPC* n)
 			"far too many of those horrid things out there waiting to recapture me! Please get "
 			"rid of some more of those vermin and then we can try to leave."
 		);
-		return;
+		return true;
 	}
 
 	auto pet = GetPet();
@@ -6917,22 +6926,27 @@ void Client::CheckLDoNHail(NPC* n)
 		"I can rest easy. Please help me find my way out of here as soon as you can "
 		"I'll stay close behind you!"
 	);
+
+	return true;
 }
 
-void Client::CheckEmoteHail(NPC* n, const char* message)
+bool Client::CheckEmoteHail(NPC* n, const char* message)
 {
 	if (!Strings::BeginsWith(Strings::ToLower(message), "hail")) {
-		return;
+		return false;
 	}
 
 	if (!n || n->GetOwnerID()) {
-		return;
+		return false;
 	}
 
 	const uint32 emote_id = n->GetEmoteID();
 	if (emote_id) {
 		n->DoNPCEmote(EQ::constants::EmoteEventTypes::Hailed, emote_id, this);
+		return true;
 	}
+
+	return false;
 }
 
 void Client::MarkSingleCompassLoc(float in_x, float in_y, float in_z, uint8 count)
