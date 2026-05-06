@@ -29,6 +29,8 @@
 #include "common/path_manager.h"
 #include "common/platform.h"
 
+#include <chrono>
+#include <filesystem>
 #include <iostream>
 #include <fstream>
 #include <memory>
@@ -37,13 +39,45 @@ const EQEmuConfig *Config;
 
 int main()
 {
-	RegisterExecutablePlatform(ExePlatformClientImport);
-	EQEmuLogSys::Instance()->LoadLogSettingsDefaults();
-	PathManager::Instance()->Init();
+	const auto original_cwd = std::filesystem::current_path();
+	const auto runtime_path = std::filesystem::temp_directory_path() / (
+		"eqemu-tests-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())
+	);
 
-	auto ConfigLoadResult = EQEmuConfig::LoadConfig();
-	Config = EQEmuConfig::get();
 	try {
+		std::filesystem::create_directories(runtime_path / "shared");
+		std::filesystem::create_directories(runtime_path / "logs");
+		std::filesystem::create_directories(runtime_path / "maps");
+		std::filesystem::create_directories(runtime_path / "quests");
+		std::filesystem::create_directories(runtime_path / "plugins");
+		std::filesystem::create_directories(runtime_path / "lua_modules");
+
+		{
+			std::ofstream config(runtime_path / "eqemu_config.json");
+			config << R"json({
+  "server": {
+    "directories": {
+      "shared_memory": "shared",
+      "logs": "logs",
+      "maps": "maps",
+      "quests": "quests",
+      "plugins": "plugins",
+      "lua_modules": "lua_modules",
+      "patches": ".",
+      "opcodes": "."
+    }
+  }
+})json";
+		}
+
+		std::filesystem::current_path(runtime_path);
+
+		RegisterExecutablePlatform(ExePlatformClientImport);
+		EQEmuLogSys::Instance()->LoadLogSettingsDefaults();
+		PathManager::Instance()->Init();
+
+		auto ConfigLoadResult = EQEmuConfig::LoadConfig();
+		Config = EQEmuConfig::get();
 		std::unique_ptr<Test::Output> output(new Test::TextOutput(Test::TextOutput::Verbose));
 		Test::Suite                   tests;
 		tests.add(new MemoryMappedFileTest());
@@ -56,11 +90,15 @@ int main()
 		tests.add(new DataVerificationTest());
 		tests.add(new SkillsUtilsTest());
 		tests.add(new TaskStateTest());
-		tests.run(*output, true);
+		const bool success = tests.run(*output, true);
+		std::filesystem::current_path(original_cwd);
+		std::filesystem::remove_all(runtime_path);
+		return success ? 0 : 1;
 	}
 	catch (std::exception &ex) {
+		std::filesystem::current_path(original_cwd);
+		std::filesystem::remove_all(runtime_path);
 		LogError("Test Failure [{}]", ex.what());
-		return -1;
+		return 1;
 	}
-	return 0;
 }
