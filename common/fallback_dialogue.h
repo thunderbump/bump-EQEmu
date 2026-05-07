@@ -19,7 +19,11 @@
 
 #include <cstdint>
 #include <deque>
+#include <functional>
+#include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -154,8 +158,46 @@ public:
 	virtual bool PopCompletion(DelayedDialogueCompletion &completion) = 0;
 };
 
+struct OllamaHttpResponse {
+	bool        completed = false;
+	int         status = 0;
+	std::string body;
+};
+
+class OllamaHttpTransport {
+public:
+	virtual ~OllamaHttpTransport() = default;
+
+	virtual OllamaHttpResponse PostJson(
+		const std::string &endpoint,
+		const std::string &body,
+		int timeout_ms
+	) = 0;
+};
+
+class OllamaDelayedDialogueProvider : public DelayedDialogueProvider {
+public:
+	OllamaDelayedDialogueProvider();
+	explicit OllamaDelayedDialogueProvider(OllamaHttpTransport &transport);
+	~OllamaDelayedDialogueProvider() override;
+
+	void Enqueue(const DelayedDialogueRequest &request) override;
+	bool PopCompletion(DelayedDialogueCompletion &completion) override;
+
+private:
+	void PushCompletion(DelayedDialogueCompletion completion);
+
+	std::unique_ptr<OllamaHttpTransport> owned_transport_;
+	OllamaHttpTransport                  &transport_;
+	std::mutex                           completions_mutex_;
+	std::deque<DelayedDialogueCompletion> completions_;
+	std::vector<std::thread>             workers_;
+};
+
 class DelayedDialogueQueue {
 public:
+	using CurrentInteractionResolver = std::function<CurrentInteraction(const DelayedDialogueRequest &request)>;
+
 	explicit DelayedDialogueQueue(DelayedDialogueProvider &provider);
 
 	TargetedSayResult HandleTargetedSay(
@@ -163,6 +205,7 @@ public:
 		const LiveContext &context
 	);
 	bool PopReadyResult(const CurrentInteraction &interaction, TargetedSayResult &result);
+	bool PopReadyResult(const CurrentInteractionResolver &resolver, TargetedSayResult &result);
 
 private:
 	DelayedDialogueProvider                         &provider_;

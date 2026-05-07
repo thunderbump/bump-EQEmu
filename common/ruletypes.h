@@ -938,6 +938,9 @@ RULE_INT(Chat, FallbackDialogueCooldownSeconds, 30, "Cooldown in seconds between
 RULE_INT(Chat, FallbackDialogueNearbyContextRadius, 100, "Maximum distance for nearby entities included in Public Gameplay Context")
 RULE_INT(Chat, FallbackDialogueNearbyEntityLimit, 8, "Maximum number of nearby entities included in Public Gameplay Context")
 RULE_INT(Chat, FallbackDialogueMaxLineLength, 200, "Maximum characters allowed in a generated Fallback Dialogue Line")
+RULE_STRING(Chat, FallbackDialogueOllamaEndpoint, "http://127.0.0.1:11434/api/generate", "Ollama HTTP endpoint used for asynchronous Fallback Dialogue generation")
+RULE_STRING(Chat, FallbackDialogueOllamaModel, "llama3.2", "Ollama model used for asynchronous Fallback Dialogue generation")
+RULE_INT(Chat, FallbackDialogueOllamaTimeoutMs, 2000, "Timeout in milliseconds for asynchronous Fallback Dialogue Ollama requests")
 RULE_CATEGORY_END()
 
 RULE_CATEGORY(Merchant)

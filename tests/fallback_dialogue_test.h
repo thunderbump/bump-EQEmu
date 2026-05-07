@@ -22,8 +22,12 @@
 #include "common/timer.h"
 #include "cppunit/cpptest.h"
 
+#include <chrono>
+#include <mutex>
 #include <sstream>
 #include <string>
+#include <thread>
+#include <vector>
 
 class FallbackDialogueTest : public Test::Suite {
 public:
@@ -61,9 +65,52 @@ public:
 		TEST_ADD(FallbackDialogueTest::CompletedDelayedDialogueDropsWhenSpeakerTargetsSomethingElse);
 		TEST_ADD(FallbackDialogueTest::FailedDelayedDialogueDropsWhenSpeakerLeavesSayRange);
 		TEST_ADD(FallbackDialogueTest::CompletedDelayedDialogueDropsWhenTargetIsMissing);
+		TEST_ADD(FallbackDialogueTest::OllamaProviderSuccessfulResponseReturnsTargetSpeech);
+		TEST_ADD(FallbackDialogueTest::OllamaProviderUsesConfiguredEndpointModelTimeoutAndPublicPrompt);
+		TEST_ADD(FallbackDialogueTest::OllamaProviderTimeoutFallsBackToUnavailableReply);
+		TEST_ADD(FallbackDialogueTest::OllamaProviderUnavailableServiceFallsBackToUnavailableReply);
+		TEST_ADD(FallbackDialogueTest::OllamaProviderRequestFailureFallsBackToUnavailableReply);
+		TEST_ADD(FallbackDialogueTest::OllamaProviderDisabledModelFallsBackToUnavailableReply);
+		TEST_ADD(FallbackDialogueTest::OllamaProviderInvalidOutputFallsBackToUnavailableReply);
 	}
 
 private:
+	struct FakeOllamaHttpCall {
+		std::string endpoint;
+		std::string body;
+		int         timeout_ms = 0;
+	};
+
+	class FakeOllamaHttpTransport : public FallbackDialogue::OllamaHttpTransport {
+	public:
+		FallbackDialogue::OllamaHttpResponse response;
+
+		FallbackDialogue::OllamaHttpResponse PostJson(
+			const std::string &endpoint,
+			const std::string &body,
+			int timeout_ms
+		) override
+		{
+			std::lock_guard lock(mutex_);
+			calls_.push_back({
+				.endpoint = endpoint,
+				.body = body,
+				.timeout_ms = timeout_ms
+			});
+			return response;
+		}
+
+		std::vector<FakeOllamaHttpCall> Calls()
+		{
+			std::lock_guard lock(mutex_);
+			return calls_;
+		}
+
+	private:
+		std::mutex mutex_;
+		std::vector<FakeOllamaHttpCall> calls_;
+	};
+
 	void DefaultRulesDisableTargetedSayFallback()
 	{
 		ResetRules();
@@ -77,6 +124,12 @@ private:
 		TEST_ASSERT_EQUALS(RuleI(Chat, FallbackDialogueNearbyContextRadius), 100);
 		TEST_ASSERT_EQUALS(RuleI(Chat, FallbackDialogueNearbyEntityLimit), 8);
 		TEST_ASSERT_EQUALS(RuleI(Chat, FallbackDialogueMaxLineLength), 200);
+		TEST_ASSERT_EQUALS(
+			RuleS(Chat, FallbackDialogueOllamaEndpoint),
+			std::string("http://127.0.0.1:11434/api/generate")
+		);
+		TEST_ASSERT_EQUALS(RuleS(Chat, FallbackDialogueOllamaModel), std::string("llama3.2"));
+		TEST_ASSERT_EQUALS(RuleI(Chat, FallbackDialogueOllamaTimeoutMs), 2000);
 
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 1,
@@ -932,6 +985,163 @@ private:
 		TEST_ASSERT_EQUALS(ready_result.debug_reason, std::string("delayed_dialogue_dropped_missing_target"));
 	}
 
+	void OllamaProviderSuccessfulResponseReturnsTargetSpeech()
+	{
+		FakeOllamaHttpTransport transport;
+		transport.response = {
+			.completed = true,
+			.status = 200,
+			.body = "{\"response\":\"Mind the docks after sundown.\"}"
+		};
+
+		const auto ready_result = OllamaResultFor(transport);
+
+		TEST_ASSERT(ready_result.handled);
+		TEST_ASSERT(ready_result.output_type == FallbackDialogue::OutputType::Say);
+		TEST_ASSERT_EQUALS(ready_result.message, std::string("Mind the docks after sundown."));
+		TEST_ASSERT_EQUALS(ready_result.debug_reason, std::string("delayed_dialogue_ready"));
+	}
+
+	void OllamaProviderUsesConfiguredEndpointModelTimeoutAndPublicPrompt()
+	{
+		FakeOllamaHttpTransport transport;
+		transport.response = {
+			.completed = true,
+			.status = 200,
+			.body = "{\"response\":\"Well met.\"}"
+		};
+
+		auto speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f);
+		speaker.account_name = "private_account_name";
+		speaker.ip_address = "192.0.2.55";
+		speaker.private_chat = "private_tell_payload";
+		speaker.inventory_summary = "bag_of_private_items";
+		speaker.raw_quest_globals = "raw_global_state";
+		speaker.account_id = 9001;
+		speaker.character_id = 8001;
+		speaker.gm_status = true;
+
+		auto target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f);
+		target.raw_quest_globals = "target_raw_globals";
+
+		auto zone = PublicZone("qeynos", "South Qeynos");
+		zone.zone_id = 1;
+		zone.instance_id = 2;
+		zone.database_credentials = "db_password_secret";
+
+		const auto ready_result = OllamaResultFor(transport, {
+			.current_message = "hail friend",
+			.speaker = speaker,
+			.target = target,
+			.zone = zone,
+			.nearby_entities = {
+				PublicEntity("Dockhand", FallbackDialogue::EntityKind::NPC, 8, 10.0f, 0.0f, 0.0f)
+			}
+		});
+
+		TEST_ASSERT(ready_result.handled);
+		TEST_ASSERT_EQUALS(transport.Calls().size(), static_cast<size_t>(1));
+		TEST_ASSERT_EQUALS(transport.Calls()[0].endpoint, std::string("http://ollama.test:11434/api/generate"));
+		TEST_ASSERT_EQUALS(transport.Calls()[0].timeout_ms, 1234);
+		TEST_ASSERT(transport.Calls()[0].body.find("\"model\":\"test-model\"") != std::string::npos);
+		TEST_ASSERT(transport.Calls()[0].body.find("hail friend") != std::string::npos);
+		TEST_ASSERT(transport.Calls()[0].body.find("Aten") != std::string::npos);
+		TEST_ASSERT(transport.Calls()[0].body.find("Guard Teren") != std::string::npos);
+		TEST_ASSERT(transport.Calls()[0].body.find("Dockhand") != std::string::npos);
+		TEST_ASSERT(transport.Calls()[0].body.find("private_account_name") == std::string::npos);
+		TEST_ASSERT(transport.Calls()[0].body.find("192.0.2.55") == std::string::npos);
+		TEST_ASSERT(transport.Calls()[0].body.find("private_tell_payload") == std::string::npos);
+		TEST_ASSERT(transport.Calls()[0].body.find("bag_of_private_items") == std::string::npos);
+		TEST_ASSERT(transport.Calls()[0].body.find("raw_global_state") == std::string::npos);
+		TEST_ASSERT(transport.Calls()[0].body.find("target_raw_globals") == std::string::npos);
+		TEST_ASSERT(transport.Calls()[0].body.find("db_password_secret") == std::string::npos);
+		TEST_ASSERT(transport.Calls()[0].body.find("9001") == std::string::npos);
+		TEST_ASSERT(transport.Calls()[0].body.find("8001") == std::string::npos);
+	}
+
+	void OllamaProviderTimeoutFallsBackToUnavailableReply()
+	{
+		FakeOllamaHttpTransport transport;
+		transport.response = {
+			.completed = false
+		};
+
+		const auto ready_result = OllamaResultFor(transport);
+
+		TEST_ASSERT(ready_result.handled);
+		TEST_ASSERT(ready_result.output_type == FallbackDialogue::OutputType::Emote);
+		TEST_ASSERT_EQUALS(ready_result.message, std::string("seems lost in thought."));
+		TEST_ASSERT_EQUALS(ready_result.debug_reason, std::string("delayed_dialogue_unavailable"));
+	}
+
+	void OllamaProviderUnavailableServiceFallsBackToUnavailableReply()
+	{
+		FakeOllamaHttpTransport transport;
+		transport.response = {
+			.completed = true,
+			.status = 503,
+			.body = "service unavailable"
+		};
+
+		const auto ready_result = OllamaResultFor(transport);
+
+		TEST_ASSERT(ready_result.handled);
+		TEST_ASSERT(ready_result.output_type == FallbackDialogue::OutputType::Emote);
+		TEST_ASSERT_EQUALS(ready_result.message, std::string("seems lost in thought."));
+		TEST_ASSERT_EQUALS(ready_result.debug_reason, std::string("delayed_dialogue_unavailable"));
+	}
+
+	void OllamaProviderRequestFailureFallsBackToUnavailableReply()
+	{
+		FakeOllamaHttpTransport transport;
+		transport.response = {
+			.completed = true,
+			.status = 200,
+			.body = "{\"not_response\":\"missing dialogue\"}"
+		};
+
+		const auto ready_result = OllamaResultFor(transport);
+
+		TEST_ASSERT(ready_result.handled);
+		TEST_ASSERT(ready_result.output_type == FallbackDialogue::OutputType::Emote);
+		TEST_ASSERT_EQUALS(ready_result.message, std::string("seems lost in thought."));
+		TEST_ASSERT_EQUALS(ready_result.debug_reason, std::string("delayed_dialogue_unavailable"));
+	}
+
+	void OllamaProviderDisabledModelFallsBackToUnavailableReply()
+	{
+		FakeOllamaHttpTransport transport;
+
+		const auto ready_result = OllamaResultFor(
+			transport,
+			DefaultLiveContext(),
+			"   "
+		);
+
+		TEST_ASSERT(ready_result.handled);
+		TEST_ASSERT(ready_result.output_type == FallbackDialogue::OutputType::Emote);
+		TEST_ASSERT_EQUALS(ready_result.message, std::string("seems lost in thought."));
+		TEST_ASSERT_EQUALS(ready_result.debug_reason, std::string("delayed_dialogue_unavailable"));
+		TEST_ASSERT_EQUALS(transport.Calls().size(), static_cast<size_t>(0));
+	}
+
+	void OllamaProviderInvalidOutputFallsBackToUnavailableReply()
+	{
+		FakeOllamaHttpTransport transport;
+		transport.response = {
+			.completed = true,
+			.status = 200,
+			.body = "{\"response\":\"/say Follow me.\"}"
+		};
+
+		const auto ready_result = OllamaResultFor(transport);
+
+		TEST_ASSERT(ready_result.handled);
+		TEST_ASSERT(ready_result.output_type == FallbackDialogue::OutputType::Emote);
+		TEST_ASSERT_EQUALS(ready_result.message, std::string("seems lost in thought."));
+		TEST_ASSERT_EQUALS(ready_result.debug_reason, std::string("delayed_dialogue_rejected"));
+	}
+
 	void ResetRules()
 	{
 		RuleManager::Instance()->ResetRules(false);
@@ -962,6 +1172,16 @@ private:
 		return {
 			.short_name = short_name,
 			.long_name = long_name
+		};
+	}
+
+	FallbackDialogue::LiveContext DefaultLiveContext()
+	{
+		return {
+			.current_message = "hail",
+			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
+			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
+			.zone = PublicZone("qeynos", "South Qeynos")
 		};
 	}
 
@@ -1038,6 +1258,53 @@ private:
 			PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f)
 		), ready_result)) {
 			return ready_result;
+		}
+
+		return ready_result;
+	}
+
+	FallbackDialogue::TargetedSayResult OllamaResultFor(
+		FakeOllamaHttpTransport &transport,
+		const FallbackDialogue::LiveContext &live_context = FallbackDialogue::LiveContext{},
+		const std::string &model = "test-model"
+	)
+	{
+		ResetRules();
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueUnavailableReply", "seems lost in thought.");
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueOllamaEndpoint", "http://ollama.test:11434/api/generate");
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueOllamaModel", model);
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueOllamaTimeoutMs", "1234");
+
+		FallbackDialogue::OllamaDelayedDialogueProvider provider(transport);
+		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		const FallbackDialogue::TargetedSayRequest request{
+			.speaker_id = 101,
+			.target_id = 202,
+			.message = "hail",
+			.target_type = FallbackDialogue::TargetType::NPC,
+			.authored_dialogue_handled = false
+		};
+
+		const auto context = live_context.current_message.empty() ? DefaultLiveContext() : live_context;
+		const auto queued_result = queue.HandleTargetedSay(request, context);
+		if (!queued_result.handled) {
+			return {};
+		}
+
+		FallbackDialogue::TargetedSayResult ready_result;
+		for (int attempt = 0; attempt < 100; ++attempt) {
+			if (queue.PopReadyResult(CurrentInteractionFor(
+				101,
+				202,
+				202,
+				PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
+				PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f)
+			), ready_result)) {
+				return ready_result;
+			}
+
+			std::this_thread::sleep_for(std::chrono::milliseconds(10));
 		}
 
 		return ready_result;

@@ -76,6 +76,12 @@ extern uint32 numclients;
 extern volatile bool RunLoops;
 
 void UpdateWindowTitle(char* iNewTitle);
+FallbackDialogue::DelayedDialogueQueue &ZoneFallbackDialogueQueue();
+FallbackDialogue::LiveContext BuildZoneFallbackDialogueContext(
+	Mob *speaker,
+	Mob *target,
+	const std::string &message
+);
 
 // client constructor purely for testing / mocking
 Client::Client() : Mob(
@@ -1651,14 +1657,14 @@ void Client::ChannelMessageReceived(uint8 chan_num, uint8 language, uint8 lang_s
 							FallbackDialogue::TargetType::Bot :
 							FallbackDialogue::TargetType::Unknown;
 
-				const auto fallback_result = FallbackDialogue::HandleTargetedSay({
+				const auto fallback_result = ZoneFallbackDialogueQueue().HandleTargetedSay({
 					.speaker_id = GetID(),
 					.target_id = t->GetID(),
 					.message = message,
 					.target_type = fallback_target_type,
 					.authored_dialogue_handled = authored_dialogue_handled,
 					.target_engaged = is_engaged
-				});
+				}, BuildZoneFallbackDialogueContext(this, t, message));
 
 				if (fallback_result.handled && fallback_result.output_type == FallbackDialogue::OutputType::Emote) {
 					t->Emote("%s", fallback_result.message.c_str());

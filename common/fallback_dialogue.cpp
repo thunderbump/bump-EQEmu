@@ -18,12 +18,16 @@
 #include "fallback_dialogue.h"
 
 #include "common/eqemu_logsys_log_aliases.h"
+#include "common/http/httplib.h"
+#include "common/json/json.h"
 #include "common/rulesys.h"
 #include "common/timer.h"
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
+#include <sstream>
 #include <utility>
 #include <unordered_map>
 
@@ -284,6 +288,141 @@ bool IsRejectedDialogueLine(const std::string &dialogue_line)
 		lower_dialogue_line.find("provider timeout") != std::string::npos;
 }
 
+const char *EntityKindName(EntityKind kind)
+{
+	switch (kind) {
+	case EntityKind::Player:
+		return "player";
+	case EntityKind::NPC:
+		return "npc";
+	case EntityKind::Bot:
+		return "bot";
+	case EntityKind::Mercenary:
+		return "mercenary";
+	case EntityKind::Unknown:
+	default:
+		return "unknown";
+	}
+}
+
+std::string BuildOllamaPrompt(const PublicGameplayContext &context)
+{
+	std::ostringstream prompt;
+	prompt
+		<< "Write one short in-character Dialogue Line for this EverQuest interaction. "
+		<< "Use only the public gameplay context below. Do not include metadata, commands, JSON, or explanations.\n"
+		<< "Message: " << context.current_message << "\n"
+		<< "Speaker: " << context.speaker.name
+		<< " (" << EntityKindName(context.speaker.kind)
+		<< ", level " << context.speaker.level << ")\n"
+		<< "Target: " << context.target.name
+		<< " (" << EntityKindName(context.target.kind)
+		<< ", level " << context.target.level
+		<< ", distance " << context.target.distance
+		<< ", engaged " << (context.target.engaged ? "yes" : "no") << ")\n"
+		<< "Zone: " << context.zone.short_name << " - " << context.zone.long_name;
+
+	if (!context.nearby_entities.empty()) {
+		prompt << "\nNearby:";
+		for (const auto &entity : context.nearby_entities) {
+			prompt
+				<< "\n- " << entity.name
+				<< " (" << EntityKindName(entity.kind)
+				<< ", level " << entity.level
+				<< ", distance " << entity.distance
+				<< ", engaged " << (entity.engaged ? "yes" : "no") << ")";
+		}
+	}
+
+	return prompt.str();
+}
+
+std::string BuildOllamaRequestBody(const std::string &model, const PublicGameplayContext &context)
+{
+	Json::Value request;
+	request["model"] = model;
+	request["prompt"] = BuildOllamaPrompt(context);
+	request["stream"] = false;
+
+	Json::StreamWriterBuilder builder;
+	builder["indentation"] = "";
+	return Json::writeString(builder, request);
+}
+
+bool ParseOllamaDialogueLine(const std::string &body, std::string &dialogue_line)
+{
+	Json::Value root;
+	Json::CharReaderBuilder builder;
+	std::string errors;
+	std::istringstream stream(body);
+	if (!Json::parseFromStream(builder, stream, &root, &errors)) {
+		return false;
+	}
+
+	if (!root.isObject() || !root["response"].isString()) {
+		return false;
+	}
+
+	dialogue_line = root["response"].asString();
+	return true;
+}
+
+struct EndpointParts {
+	std::string base_url;
+	std::string path;
+};
+
+bool ParseEndpoint(const std::string &endpoint, EndpointParts &parts)
+{
+	const auto scheme_position = endpoint.find("://");
+	if (scheme_position == std::string::npos) {
+		return false;
+	}
+
+	const auto path_position = endpoint.find('/', scheme_position + 3);
+	if (path_position == std::string::npos) {
+		parts.base_url = endpoint;
+		parts.path = "/";
+		return true;
+	}
+
+	parts.base_url = endpoint.substr(0, path_position);
+	parts.path = endpoint.substr(path_position);
+	return !parts.base_url.empty() && !parts.path.empty();
+}
+
+class HttplibOllamaHttpTransport final : public OllamaHttpTransport {
+public:
+	OllamaHttpResponse PostJson(
+		const std::string &endpoint,
+		const std::string &body,
+		int timeout_ms
+	) override
+	{
+		EndpointParts endpoint_parts;
+		if (!ParseEndpoint(endpoint, endpoint_parts)) {
+			return {};
+		}
+
+		httplib::Client client(endpoint_parts.base_url);
+		const auto timeout = std::chrono::milliseconds(std::max(timeout_ms, 1));
+		client.set_connection_timeout(timeout);
+		client.set_read_timeout(timeout);
+		client.set_write_timeout(timeout);
+
+		auto result = client.Post(endpoint_parts.path, body, "application/json");
+		if (!result) {
+			return {};
+		}
+
+		return {
+			.completed = true,
+			.status = result->status,
+			.body = result->body
+		};
+	}
+};
+
 }
 
 TargetedSayResult HandleTargetedSay(const TargetedSayRequest &request)
@@ -387,6 +526,19 @@ bool DelayedDialogueQueue::PopReadyResult(
 	TargetedSayResult &result
 )
 {
+	return PopReadyResult(
+		[&interaction](const DelayedDialogueRequest &) {
+			return interaction;
+		},
+		result
+	);
+}
+
+bool DelayedDialogueQueue::PopReadyResult(
+	const CurrentInteractionResolver &resolver,
+	TargetedSayResult &result
+)
+{
 	DelayedDialogueCompletion completion;
 	if (!provider_.PopCompletion(completion)) {
 		return false;
@@ -400,7 +552,7 @@ bool DelayedDialogueQueue::PopReadyResult(
 	const auto request = std::move(pending_request->second);
 	pending_requests_.erase(pending_request);
 
-	const auto stale_reason = ValidateCurrentInteraction(request, interaction);
+	const auto stale_reason = ValidateCurrentInteraction(request, resolver(request));
 	if (!stale_reason.empty()) {
 		LogDebug(
 			"Fallback Dialogue dropped delayed result for speaker [{}] target [{}]: {}",
@@ -435,6 +587,90 @@ bool DelayedDialogueQueue::PopReadyResult(
 		.target_type = request.target_type
 	};
 	return true;
+}
+
+OllamaDelayedDialogueProvider::OllamaDelayedDialogueProvider()
+	: owned_transport_(std::make_unique<HttplibOllamaHttpTransport>()),
+	transport_(*owned_transport_)
+{
+}
+
+OllamaDelayedDialogueProvider::OllamaDelayedDialogueProvider(OllamaHttpTransport &transport)
+	: transport_(transport)
+{
+}
+
+OllamaDelayedDialogueProvider::~OllamaDelayedDialogueProvider()
+{
+	for (auto &worker : workers_) {
+		if (worker.joinable()) {
+			worker.join();
+		}
+	}
+}
+
+void OllamaDelayedDialogueProvider::Enqueue(const DelayedDialogueRequest &request)
+{
+	const auto endpoint = RuleS(Chat, FallbackDialogueOllamaEndpoint);
+	const auto model = TrimCopy(RuleS(Chat, FallbackDialogueOllamaModel));
+	const auto timeout_ms = RuleI(Chat, FallbackDialogueOllamaTimeoutMs);
+
+	workers_.emplace_back([this, request, endpoint, model, timeout_ms]() {
+		if (endpoint.empty() || model.empty() || timeout_ms <= 0) {
+			PushCompletion({
+				.request_id = request.request_id,
+				.succeeded = false
+			});
+			return;
+		}
+
+		const auto response = transport_.PostJson(
+			endpoint,
+			BuildOllamaRequestBody(model, request.context),
+			timeout_ms
+		);
+
+		if (!response.completed || response.status < 200 || response.status >= 300) {
+			PushCompletion({
+				.request_id = request.request_id,
+				.succeeded = false
+			});
+			return;
+		}
+
+		std::string dialogue_line;
+		if (!ParseOllamaDialogueLine(response.body, dialogue_line)) {
+			PushCompletion({
+				.request_id = request.request_id,
+				.succeeded = false
+			});
+			return;
+		}
+
+		PushCompletion({
+			.request_id = request.request_id,
+			.succeeded = true,
+			.dialogue_line = dialogue_line
+		});
+	});
+}
+
+bool OllamaDelayedDialogueProvider::PopCompletion(DelayedDialogueCompletion &completion)
+{
+	std::lock_guard lock(completions_mutex_);
+	if (completions_.empty()) {
+		return false;
+	}
+
+	completion = completions_.front();
+	completions_.pop_front();
+	return true;
+}
+
+void OllamaDelayedDialogueProvider::PushCompletion(DelayedDialogueCompletion completion)
+{
+	std::lock_guard lock(completions_mutex_);
+	completions_.push_back(std::move(completion));
 }
 
 void TestDelayedDialogueProvider::Enqueue(const DelayedDialogueRequest &request)
