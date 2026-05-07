@@ -18,10 +18,89 @@
 #include "fallback_dialogue.h"
 
 #include "common/rulesys.h"
+#include "common/timer.h"
+
+#include <algorithm>
+#include <cmath>
+#include <utility>
+#include <unordered_map>
 
 namespace FallbackDialogue {
 
-TargetedSayResult HandleTargetedSay(const TargetedSayRequest &request)
+namespace {
+
+uint64_t CooldownKey(uint32_t speaker_id, uint32_t target_id)
+{
+	return (static_cast<uint64_t>(speaker_id) << 32) | target_id;
+}
+
+std::unordered_map<uint64_t, uint32_t> dialogue_cooldowns;
+
+void RemoveExpiredDialogueCooldowns(uint32_t current_time, uint32_t cooldown_ms)
+{
+	for (auto cooldown = dialogue_cooldowns.begin(); cooldown != dialogue_cooldowns.end();) {
+		if (current_time - cooldown->second >= cooldown_ms) {
+			cooldown = dialogue_cooldowns.erase(cooldown);
+		} else {
+			++cooldown;
+		}
+	}
+}
+
+bool IsDialogueCooldownActive(const TargetedSayRequest &request)
+{
+	const int cooldown_seconds = RuleI(Chat, FallbackDialogueCooldownSeconds);
+	if (cooldown_seconds <= 0) {
+		return false;
+	}
+
+	const auto cooldown_ms = static_cast<uint32_t>(cooldown_seconds) * 1000;
+	const auto current_time = Timer::GetCurrentTime();
+	const auto key = CooldownKey(request.speaker_id, request.target_id);
+	const auto cooldown = dialogue_cooldowns.find(key);
+
+	if (cooldown == dialogue_cooldowns.end()) {
+		return false;
+	}
+
+	return current_time - cooldown->second < cooldown_ms;
+}
+
+void StartDialogueCooldown(const TargetedSayRequest &request)
+{
+	const int cooldown_seconds = RuleI(Chat, FallbackDialogueCooldownSeconds);
+	if (cooldown_seconds <= 0) {
+		return;
+	}
+
+	const auto cooldown_ms = static_cast<uint32_t>(cooldown_seconds) * 1000;
+	const auto current_time = Timer::GetCurrentTime();
+
+	RemoveExpiredDialogueCooldowns(current_time, cooldown_ms);
+	dialogue_cooldowns[CooldownKey(request.speaker_id, request.target_id)] = current_time;
+}
+
+float DistanceBetween(const LiveEntity &first, const LiveEntity &second)
+{
+	const auto x = first.x - second.x;
+	const auto y = first.y - second.y;
+	const auto z = first.z - second.z;
+
+	return std::sqrt((x * x) + (y * y) + (z * z));
+}
+
+PublicEntitySummary BuildPublicEntitySummary(const LiveEntity &entity, float distance = 0.0f)
+{
+	return {
+		.name = entity.name,
+		.kind = entity.kind,
+		.level = entity.level,
+		.engaged = entity.engaged,
+		.distance = distance
+	};
+}
+
+TargetedSayResult EligibleTargetedSayResult(const TargetedSayRequest &request)
 {
 	if (!RuleB(Chat, FallbackDialogueEnabled)) {
 		return {};
@@ -45,11 +124,198 @@ TargetedSayResult HandleTargetedSay(const TargetedSayRequest &request)
 		};
 	}
 
+	if (IsDialogueCooldownActive(request)) {
+		return {
+			.debug_reason = "dialogue_cooldown"
+		};
+	}
+
 	return {
 		.handled = true,
-		.output_type = OutputType::Emote,
-		.message = RuleS(Chat, FallbackDialogueUnavailableReply)
+		.speaker_id = request.speaker_id,
+		.target_id = request.target_id,
+		.target_type = request.target_type
 	};
+}
+
+}
+
+TargetedSayResult HandleTargetedSay(const TargetedSayRequest &request)
+{
+	auto result = EligibleTargetedSayResult(request);
+	if (!result.handled) {
+		return result;
+	}
+
+	StartDialogueCooldown(request);
+
+	result.output_type = OutputType::Emote;
+	result.message = RuleS(Chat, FallbackDialogueUnavailableReply);
+	return result;
+}
+
+PublicGameplayContext BuildPublicGameplayContext(const LiveContext &context)
+{
+	const auto nearby_radius = RuleI(Chat, FallbackDialogueNearbyContextRadius);
+	const auto nearby_limit = RuleI(Chat, FallbackDialogueNearbyEntityLimit);
+	PublicGameplayContext public_context{
+		.current_message = context.current_message,
+		.speaker = BuildPublicEntitySummary(context.speaker),
+		.target = BuildPublicEntitySummary(
+			context.target,
+			DistanceBetween(context.speaker, context.target)
+		),
+		.zone = {
+			.short_name = context.zone.short_name,
+			.long_name = context.zone.long_name
+		}
+	};
+
+	if (nearby_radius <= 0 || nearby_limit <= 0) {
+		return public_context;
+	}
+
+	for (const auto &entity : context.nearby_entities) {
+		const auto distance = DistanceBetween(context.speaker, entity);
+		if (distance > nearby_radius) {
+			continue;
+		}
+
+		public_context.nearby_entities.push_back(
+			BuildPublicEntitySummary(entity, distance)
+		);
+	}
+
+	std::sort(
+		public_context.nearby_entities.begin(),
+		public_context.nearby_entities.end(),
+		[](const PublicEntitySummary &first, const PublicEntitySummary &second) {
+			return first.distance < second.distance;
+		}
+	);
+
+	if (public_context.nearby_entities.size() > static_cast<size_t>(nearby_limit)) {
+		public_context.nearby_entities.resize(static_cast<size_t>(nearby_limit));
+	}
+
+	return public_context;
+}
+
+DelayedDialogueQueue::DelayedDialogueQueue(DelayedDialogueProvider &provider)
+	: provider_(provider)
+{
+}
+
+TargetedSayResult DelayedDialogueQueue::HandleTargetedSay(
+	const TargetedSayRequest &request,
+	const LiveContext &context
+)
+{
+	auto result = EligibleTargetedSayResult(request);
+	if (!result.handled) {
+		return result;
+	}
+
+	StartDialogueCooldown(request);
+
+	DelayedDialogueRequest delayed_request{
+		.request_id = next_request_id_++,
+		.speaker_id = request.speaker_id,
+		.target_id = request.target_id,
+		.target_type = request.target_type,
+		.context = BuildPublicGameplayContext(context),
+		.unavailable_reply = RuleS(Chat, FallbackDialogueUnavailableReply)
+	};
+
+	pending_requests_[delayed_request.request_id] = delayed_request;
+	provider_.Enqueue(delayed_request);
+
+	result.output_type = OutputType::None;
+	result.message.clear();
+	result.debug_reason = "delayed_dialogue_queued";
+	return result;
+}
+
+bool DelayedDialogueQueue::PopReadyResult(TargetedSayResult &result)
+{
+	DelayedDialogueCompletion completion;
+	if (!provider_.PopCompletion(completion)) {
+		return false;
+	}
+
+	const auto pending_request = pending_requests_.find(completion.request_id);
+	if (pending_request == pending_requests_.end()) {
+		return false;
+	}
+
+	const auto request = std::move(pending_request->second);
+	pending_requests_.erase(pending_request);
+
+	result = {
+		.handled = true,
+		.output_type = completion.succeeded ? OutputType::Say : OutputType::Emote,
+		.message = completion.succeeded ? completion.dialogue_line : request.unavailable_reply,
+		.debug_reason = completion.succeeded ? "delayed_dialogue_ready" : "delayed_dialogue_unavailable",
+		.speaker_id = request.speaker_id,
+		.target_id = request.target_id,
+		.target_type = request.target_type
+	};
+	return true;
+}
+
+void TestDelayedDialogueProvider::Enqueue(const DelayedDialogueRequest &request)
+{
+	pending_requests_.push_back(request);
+}
+
+bool TestDelayedDialogueProvider::PopCompletion(DelayedDialogueCompletion &completion)
+{
+	if (completions_.empty()) {
+		return false;
+	}
+
+	completion = completions_.front();
+	completions_.pop_front();
+	return true;
+}
+
+const std::vector<DelayedDialogueRequest> &TestDelayedDialogueProvider::PendingRequests() const
+{
+	return pending_requests_;
+}
+
+bool TestDelayedDialogueProvider::CompleteNextSuccess(const std::string &dialogue_line)
+{
+	if (pending_requests_.empty()) {
+		return false;
+	}
+
+	completions_.push_back({
+		.request_id = pending_requests_.front().request_id,
+		.succeeded = true,
+		.dialogue_line = dialogue_line
+	});
+	pending_requests_.erase(pending_requests_.begin());
+	return true;
+}
+
+bool TestDelayedDialogueProvider::CompleteNextFailure()
+{
+	if (pending_requests_.empty()) {
+		return false;
+	}
+
+	completions_.push_back({
+		.request_id = pending_requests_.front().request_id,
+		.succeeded = false
+	});
+	pending_requests_.erase(pending_requests_.begin());
+	return true;
+}
+
+void ResetDialogueCooldowns()
+{
+	dialogue_cooldowns.clear();
 }
 
 }
