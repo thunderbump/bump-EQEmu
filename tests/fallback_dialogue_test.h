@@ -540,6 +540,7 @@ private:
 		TEST_ASSERT_EQUALS(ready_result.message, std::string("Good day to you."));
 		TEST_ASSERT_EQUALS(ready_result.speaker_id, static_cast<uint32_t>(101));
 		TEST_ASSERT_EQUALS(ready_result.target_id, static_cast<uint32_t>(202));
+		TEST_ASSERT_EQUALS(ready_result.visible_speaker_id, static_cast<uint32_t>(202));
 		TEST_ASSERT(ready_result.target_type == FallbackDialogue::TargetType::Bot);
 		TEST_ASSERT_EQUALS(ready_result.debug_reason, std::string("delayed_dialogue_ready"));
 	}
@@ -623,6 +624,9 @@ private:
 		}, ready_result));
 		TEST_ASSERT(ready_result.output_type == FallbackDialogue::OutputType::Say);
 		TEST_ASSERT_EQUALS(ready_result.message, std::string("Well met."));
+		TEST_ASSERT_EQUALS(ready_result.speaker_id, static_cast<uint32_t>(101));
+		TEST_ASSERT_EQUALS(ready_result.target_id, static_cast<uint32_t>(202));
+		TEST_ASSERT_EQUALS(ready_result.visible_speaker_id, static_cast<uint32_t>(202));
 		TEST_ASSERT_EQUALS(ready_result.debug_reason, std::string("delayed_dialogue_ready"));
 	}
 

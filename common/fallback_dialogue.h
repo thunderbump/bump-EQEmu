@@ -62,6 +62,7 @@ struct TargetedSayResult {
 	std::string debug_reason;
 	uint32_t    speaker_id = 0;
 	uint32_t    target_id = 0;
+	uint32_t    visible_speaker_id = 0;
 	TargetType  target_type = TargetType::Unknown;
 };
 

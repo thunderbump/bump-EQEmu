@@ -312,6 +312,7 @@ bool DelayedDialogueQueue::PopReadyResult(
 		.debug_reason = completion.succeeded ? "delayed_dialogue_ready" : "delayed_dialogue_unavailable",
 		.speaker_id = request.speaker_id,
 		.target_id = request.target_id,
+		.visible_speaker_id = request.target_id,
 		.target_type = request.target_type
 	};
 	return true;
