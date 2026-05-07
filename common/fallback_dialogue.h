@@ -135,6 +135,16 @@ struct DelayedDialogueCompletion {
 	std::string dialogue_line;
 };
 
+struct CurrentInteraction {
+	uint32_t   speaker_id = 0;
+	uint32_t   target_id = 0;
+	uint32_t   speaker_target_id = 0;
+	bool       speaker_present = false;
+	bool       target_present = false;
+	LiveEntity speaker;
+	LiveEntity target;
+};
+
 class DelayedDialogueProvider {
 public:
 	virtual ~DelayedDialogueProvider() = default;
@@ -151,7 +161,7 @@ public:
 		const TargetedSayRequest &request,
 		const LiveContext &context
 	);
-	bool PopReadyResult(TargetedSayResult &result);
+	bool PopReadyResult(const CurrentInteraction &interaction, TargetedSayResult &result);
 
 private:
 	DelayedDialogueProvider                         &provider_;

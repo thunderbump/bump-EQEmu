@@ -49,6 +49,10 @@ public:
 		TEST_ADD(FallbackDialogueTest::EligibleNpcTargetedSayQueuesDelayedRequestWithPublicContext);
 		TEST_ADD(FallbackDialogueTest::CompletedDelayedDialogueReturnsTargetSpeech);
 		TEST_ADD(FallbackDialogueTest::FailedDelayedDialogueReturnsUnavailableReplyEmote);
+		TEST_ADD(FallbackDialogueTest::CompletedDelayedDialogueReturnsTargetSpeechForCurrentInteraction);
+		TEST_ADD(FallbackDialogueTest::CompletedDelayedDialogueDropsWhenSpeakerTargetsSomethingElse);
+		TEST_ADD(FallbackDialogueTest::FailedDelayedDialogueDropsWhenSpeakerLeavesSayRange);
+		TEST_ADD(FallbackDialogueTest::CompletedDelayedDialogueDropsWhenTargetIsMissing);
 	}
 
 private:
@@ -496,7 +500,7 @@ private:
 		);
 
 		FallbackDialogue::TargetedSayResult ready_result;
-		TEST_ASSERT(!queue.PopReadyResult(ready_result));
+		TEST_ASSERT(!queue.PopReadyResult(CurrentInteractionFor(101, 202, 202), ready_result));
 	}
 
 	void CompletedDelayedDialogueReturnsTargetSpeech()
@@ -525,7 +529,13 @@ private:
 		TEST_ASSERT(provider.CompleteNextSuccess("Good day to you."));
 
 		FallbackDialogue::TargetedSayResult ready_result;
-		TEST_ASSERT(queue.PopReadyResult(ready_result));
+		TEST_ASSERT(queue.PopReadyResult(CurrentInteractionFor(
+			101,
+			202,
+			202,
+			PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
+			PublicEntity("Atenbot", FallbackDialogue::EntityKind::Bot, 12, 5.0f, 0.0f, 0.0f)
+		), ready_result));
 		TEST_ASSERT(ready_result.output_type == FallbackDialogue::OutputType::Say);
 		TEST_ASSERT_EQUALS(ready_result.message, std::string("Good day to you."));
 		TEST_ASSERT_EQUALS(ready_result.speaker_id, static_cast<uint32_t>(101));
@@ -561,12 +571,184 @@ private:
 		TEST_ASSERT(provider.CompleteNextFailure());
 
 		FallbackDialogue::TargetedSayResult ready_result;
-		TEST_ASSERT(queue.PopReadyResult(ready_result));
+		TEST_ASSERT(queue.PopReadyResult(CurrentInteractionFor(
+			101,
+			202,
+			202,
+			PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
+			PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f)
+		), ready_result));
 		TEST_ASSERT(ready_result.output_type == FallbackDialogue::OutputType::Emote);
 		TEST_ASSERT_EQUALS(ready_result.message, std::string("seems lost in thought."));
 		TEST_ASSERT_EQUALS(ready_result.speaker_id, static_cast<uint32_t>(101));
 		TEST_ASSERT_EQUALS(ready_result.target_id, static_cast<uint32_t>(202));
 		TEST_ASSERT_EQUALS(ready_result.debug_reason, std::string("delayed_dialogue_unavailable"));
+	}
+
+	void CompletedDelayedDialogueReturnsTargetSpeechForCurrentInteraction()
+	{
+		ResetRules();
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
+		RuleManager::Instance()->SetRule("Range:Say", "15");
+
+		FallbackDialogue::TestDelayedDialogueProvider provider;
+		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		const FallbackDialogue::TargetedSayRequest request{
+			.speaker_id = 101,
+			.target_id = 202,
+			.message = "hail",
+			.target_type = FallbackDialogue::TargetType::NPC,
+			.authored_dialogue_handled = false
+		};
+		const FallbackDialogue::LiveContext live_context{
+			.current_message = "hail",
+			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
+			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 10.0f, 0.0f, 5.0f),
+			.zone = PublicZone("qeynos", "South Qeynos")
+		};
+
+		const auto queued_result = queue.HandleTargetedSay(request, live_context);
+		TEST_ASSERT(queued_result.handled);
+		TEST_ASSERT(provider.CompleteNextSuccess("Well met."));
+
+		FallbackDialogue::TargetedSayResult ready_result;
+		TEST_ASSERT(queue.PopReadyResult({
+			.speaker_id = 101,
+			.target_id = 202,
+			.speaker_target_id = 202,
+			.speaker_present = true,
+			.target_present = true,
+			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
+			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 10.0f, 0.0f, 80.0f)
+		}, ready_result));
+		TEST_ASSERT(ready_result.output_type == FallbackDialogue::OutputType::Say);
+		TEST_ASSERT_EQUALS(ready_result.message, std::string("Well met."));
+		TEST_ASSERT_EQUALS(ready_result.debug_reason, std::string("delayed_dialogue_ready"));
+	}
+
+	void CompletedDelayedDialogueDropsWhenSpeakerTargetsSomethingElse()
+	{
+		ResetRules();
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
+		RuleManager::Instance()->SetRule("Range:Say", "15");
+
+		FallbackDialogue::TestDelayedDialogueProvider provider;
+		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		const FallbackDialogue::TargetedSayRequest request{
+			.speaker_id = 101,
+			.target_id = 202,
+			.message = "hail",
+			.target_type = FallbackDialogue::TargetType::NPC,
+			.authored_dialogue_handled = false
+		};
+		const FallbackDialogue::LiveContext live_context{
+			.current_message = "hail",
+			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
+			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
+			.zone = PublicZone("qeynos", "South Qeynos")
+		};
+
+		const auto queued_result = queue.HandleTargetedSay(request, live_context);
+		TEST_ASSERT(queued_result.handled);
+		TEST_ASSERT(provider.CompleteNextSuccess("Well met."));
+
+		FallbackDialogue::TargetedSayResult ready_result;
+		TEST_ASSERT(!queue.PopReadyResult({
+			.speaker_id = 101,
+			.target_id = 202,
+			.speaker_target_id = 303,
+			.speaker_present = true,
+			.target_present = true,
+			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
+			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f)
+		}, ready_result));
+		TEST_ASSERT(!ready_result.handled);
+		TEST_ASSERT(ready_result.output_type == FallbackDialogue::OutputType::None);
+		TEST_ASSERT(ready_result.message.empty());
+		TEST_ASSERT_EQUALS(ready_result.debug_reason, std::string("delayed_dialogue_dropped_target_changed"));
+	}
+
+	void FailedDelayedDialogueDropsWhenSpeakerLeavesSayRange()
+	{
+		ResetRules();
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueUnavailableReply", "seems lost in thought.");
+		RuleManager::Instance()->SetRule("Range:Say", "15");
+
+		FallbackDialogue::TestDelayedDialogueProvider provider;
+		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		const FallbackDialogue::TargetedSayRequest request{
+			.speaker_id = 101,
+			.target_id = 202,
+			.message = "hail",
+			.target_type = FallbackDialogue::TargetType::NPC,
+			.authored_dialogue_handled = false
+		};
+		const FallbackDialogue::LiveContext live_context{
+			.current_message = "hail",
+			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
+			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
+			.zone = PublicZone("qeynos", "South Qeynos")
+		};
+
+		const auto queued_result = queue.HandleTargetedSay(request, live_context);
+		TEST_ASSERT(queued_result.handled);
+		TEST_ASSERT(provider.CompleteNextFailure());
+
+		FallbackDialogue::TargetedSayResult ready_result;
+		TEST_ASSERT(!queue.PopReadyResult({
+			.speaker_id = 101,
+			.target_id = 202,
+			.speaker_target_id = 202,
+			.speaker_present = true,
+			.target_present = true,
+			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 90.0f),
+			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 16.0f, 0.0f, 0.0f)
+		}, ready_result));
+		TEST_ASSERT(!ready_result.handled);
+		TEST_ASSERT(ready_result.output_type == FallbackDialogue::OutputType::None);
+		TEST_ASSERT(ready_result.message.empty());
+		TEST_ASSERT_EQUALS(ready_result.debug_reason, std::string("delayed_dialogue_dropped_out_of_say_range"));
+	}
+
+	void CompletedDelayedDialogueDropsWhenTargetIsMissing()
+	{
+		ResetRules();
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
+
+		FallbackDialogue::TestDelayedDialogueProvider provider;
+		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		const FallbackDialogue::TargetedSayRequest request{
+			.speaker_id = 101,
+			.target_id = 202,
+			.message = "hail",
+			.target_type = FallbackDialogue::TargetType::NPC,
+			.authored_dialogue_handled = false
+		};
+		const FallbackDialogue::LiveContext live_context{
+			.current_message = "hail",
+			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
+			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
+			.zone = PublicZone("qeynos", "South Qeynos")
+		};
+
+		const auto queued_result = queue.HandleTargetedSay(request, live_context);
+		TEST_ASSERT(queued_result.handled);
+		TEST_ASSERT(provider.CompleteNextSuccess("Well met."));
+
+		FallbackDialogue::TargetedSayResult ready_result;
+		TEST_ASSERT(!queue.PopReadyResult({
+			.speaker_id = 101,
+			.target_id = 0,
+			.speaker_target_id = 202,
+			.speaker_present = true,
+			.target_present = false,
+			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f)
+		}, ready_result));
+		TEST_ASSERT(!ready_result.handled);
+		TEST_ASSERT(ready_result.output_type == FallbackDialogue::OutputType::None);
+		TEST_ASSERT(ready_result.message.empty());
+		TEST_ASSERT_EQUALS(ready_result.debug_reason, std::string("delayed_dialogue_dropped_missing_target"));
 	}
 
 	void ResetRules()
@@ -599,6 +781,40 @@ private:
 		return {
 			.short_name = short_name,
 			.long_name = long_name
+		};
+	}
+
+	FallbackDialogue::CurrentInteraction CurrentInteractionFor(
+		uint32_t speaker_id,
+		uint32_t target_id,
+		uint32_t speaker_target_id
+	)
+	{
+		return CurrentInteractionFor(
+			speaker_id,
+			target_id,
+			speaker_target_id,
+			PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
+			PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f)
+		);
+	}
+
+	FallbackDialogue::CurrentInteraction CurrentInteractionFor(
+		uint32_t speaker_id,
+		uint32_t target_id,
+		uint32_t speaker_target_id,
+		const FallbackDialogue::LiveEntity &speaker,
+		const FallbackDialogue::LiveEntity &target
+	)
+	{
+		return {
+			.speaker_id = speaker_id,
+			.target_id = target_id,
+			.speaker_target_id = speaker_target_id,
+			.speaker_present = true,
+			.target_present = true,
+			.speaker = speaker,
+			.target = target
 		};
 	}
 

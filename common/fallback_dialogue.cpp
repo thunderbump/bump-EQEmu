@@ -17,6 +17,7 @@
 */
 #include "fallback_dialogue.h"
 
+#include "common/eqemu_logsys_log_aliases.h"
 #include "common/rulesys.h"
 #include "common/timer.h"
 
@@ -89,6 +90,14 @@ float DistanceBetween(const LiveEntity &first, const LiveEntity &second)
 	return std::sqrt((x * x) + (y * y) + (z * z));
 }
 
+float DistanceNoZBetween(const LiveEntity &first, const LiveEntity &second)
+{
+	const auto x = first.x - second.x;
+	const auto y = first.y - second.y;
+
+	return std::sqrt((x * x) + (y * y));
+}
+
 PublicEntitySummary BuildPublicEntitySummary(const LiveEntity &entity, float distance = 0.0f)
 {
 	return {
@@ -136,6 +145,30 @@ TargetedSayResult EligibleTargetedSayResult(const TargetedSayRequest &request)
 		.target_id = request.target_id,
 		.target_type = request.target_type
 	};
+}
+
+std::string ValidateCurrentInteraction(
+	const DelayedDialogueRequest &request,
+	const CurrentInteraction &interaction
+)
+{
+	if (!interaction.speaker_present || interaction.speaker_id != request.speaker_id) {
+		return "delayed_dialogue_dropped_missing_speaker";
+	}
+
+	if (!interaction.target_present || interaction.target_id != request.target_id) {
+		return "delayed_dialogue_dropped_missing_target";
+	}
+
+	if (interaction.speaker_target_id != request.target_id) {
+		return "delayed_dialogue_dropped_target_changed";
+	}
+
+	if (DistanceNoZBetween(interaction.speaker, interaction.target) > RuleI(Range, Say)) {
+		return "delayed_dialogue_dropped_out_of_say_range";
+	}
+
+	return {};
 }
 
 }
@@ -236,7 +269,10 @@ TargetedSayResult DelayedDialogueQueue::HandleTargetedSay(
 	return result;
 }
 
-bool DelayedDialogueQueue::PopReadyResult(TargetedSayResult &result)
+bool DelayedDialogueQueue::PopReadyResult(
+	const CurrentInteraction &interaction,
+	TargetedSayResult &result
+)
 {
 	DelayedDialogueCompletion completion;
 	if (!provider_.PopCompletion(completion)) {
@@ -250,6 +286,24 @@ bool DelayedDialogueQueue::PopReadyResult(TargetedSayResult &result)
 
 	const auto request = std::move(pending_request->second);
 	pending_requests_.erase(pending_request);
+
+	const auto stale_reason = ValidateCurrentInteraction(request, interaction);
+	if (!stale_reason.empty()) {
+		LogDebug(
+			"Fallback Dialogue dropped delayed result for speaker [{}] target [{}]: {}",
+			request.speaker_id,
+			request.target_id,
+			stale_reason
+		);
+
+		result = {
+			.debug_reason = stale_reason,
+			.speaker_id = request.speaker_id,
+			.target_id = request.target_id,
+			.target_type = request.target_type
+		};
+		return false;
+	}
 
 	result = {
 		.handled = true,
