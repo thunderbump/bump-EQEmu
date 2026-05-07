@@ -22,6 +22,7 @@
 #include "common/timer.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <utility>
 #include <unordered_map>
@@ -109,6 +110,54 @@ PublicEntitySummary BuildPublicEntitySummary(const LiveEntity &entity, float dis
 	};
 }
 
+std::string TrimCopy(const std::string &value)
+{
+	const auto first = std::find_if(
+		value.begin(),
+		value.end(),
+		[](unsigned char character) {
+			return !std::isspace(character);
+		}
+	);
+
+	if (first == value.end()) {
+		return {};
+	}
+
+	const auto last = std::find_if(
+		value.rbegin(),
+		value.rend(),
+		[](unsigned char character) {
+			return !std::isspace(character);
+		}
+	).base();
+
+	return std::string(first, last);
+}
+
+std::string ToLowerCopy(std::string value)
+{
+	std::transform(
+		value.begin(),
+		value.end(),
+		value.begin(),
+		[](unsigned char character) {
+			return static_cast<char>(std::tolower(character));
+		}
+	);
+
+	return value;
+}
+
+bool StartsWithInsensitive(const std::string &value, const std::string &prefix)
+{
+	if (value.size() < prefix.size()) {
+		return false;
+	}
+
+	return ToLowerCopy(value.substr(0, prefix.size())) == prefix;
+}
+
 TargetedSayResult EligibleTargetedSayResult(const TargetedSayRequest &request)
 {
 	if (!RuleB(Chat, FallbackDialogueEnabled)) {
@@ -169,6 +218,70 @@ std::string ValidateCurrentInteraction(
 	}
 
 	return {};
+}
+
+std::string NormalizeDialogueLine(const std::string &dialogue_line)
+{
+	std::string normalized;
+	normalized.reserve(dialogue_line.size());
+
+	bool pending_space = false;
+	for (const auto character : dialogue_line) {
+		if (std::isspace(static_cast<unsigned char>(character))) {
+			pending_space = !normalized.empty();
+			continue;
+		}
+
+		if (pending_space) {
+			normalized.push_back(' ');
+			pending_space = false;
+		}
+
+		normalized.push_back(character);
+	}
+
+	normalized = TrimCopy(normalized);
+	for (const auto *prefix : {"assistant:", "response:", "dialogue:", "dialogue line:"}) {
+		if (StartsWithInsensitive(normalized, prefix)) {
+			normalized = TrimCopy(normalized.substr(std::string(prefix).size()));
+			break;
+		}
+	}
+
+	if (normalized.size() >= 2 && normalized.front() == '"' && normalized.back() == '"') {
+		normalized = TrimCopy(normalized.substr(1, normalized.size() - 2));
+	}
+
+	const auto max_line_length = RuleI(Chat, FallbackDialogueMaxLineLength);
+	if (max_line_length > 0 && normalized.size() > static_cast<size_t>(max_line_length)) {
+		normalized.resize(static_cast<size_t>(max_line_length));
+	}
+
+	return normalized;
+}
+
+bool IsRejectedDialogueLine(const std::string &dialogue_line)
+{
+	if (dialogue_line.empty()) {
+		return true;
+	}
+
+	if (dialogue_line.front() == '/' || dialogue_line.front() == '#' || dialogue_line.front() == '!') {
+		return true;
+	}
+
+	const auto lower_dialogue_line = ToLowerCopy(dialogue_line);
+	return StartsWithInsensitive(lower_dialogue_line, "metadata:") ||
+		StartsWithInsensitive(lower_dialogue_line, "[metadata:") ||
+		StartsWithInsensitive(lower_dialogue_line, "json:") ||
+		StartsWithInsensitive(lower_dialogue_line, "{") ||
+		StartsWithInsensitive(lower_dialogue_line, "http ") ||
+		StartsWithInsensitive(lower_dialogue_line, "error:") ||
+		StartsWithInsensitive(lower_dialogue_line, "exception:") ||
+		StartsWithInsensitive(lower_dialogue_line, "as an ai") ||
+		lower_dialogue_line.find("i cannot roleplay") != std::string::npos ||
+		lower_dialogue_line.find("i can't roleplay") != std::string::npos ||
+		lower_dialogue_line.find("provider timeout") != std::string::npos;
 }
 
 }
@@ -305,11 +418,17 @@ bool DelayedDialogueQueue::PopReadyResult(
 		return false;
 	}
 
+	const auto normalized_dialogue_line = completion.succeeded ?
+		NormalizeDialogueLine(completion.dialogue_line) :
+		std::string();
+	const auto rejected = completion.succeeded && IsRejectedDialogueLine(normalized_dialogue_line);
+	const auto available = completion.succeeded && !rejected;
+
 	result = {
 		.handled = true,
-		.output_type = completion.succeeded ? OutputType::Say : OutputType::Emote,
-		.message = completion.succeeded ? completion.dialogue_line : request.unavailable_reply,
-		.debug_reason = completion.succeeded ? "delayed_dialogue_ready" : "delayed_dialogue_unavailable",
+		.output_type = available ? OutputType::Say : OutputType::Emote,
+		.message = available ? normalized_dialogue_line : request.unavailable_reply,
+		.debug_reason = available ? "delayed_dialogue_ready" : (rejected ? "delayed_dialogue_rejected" : "delayed_dialogue_unavailable"),
 		.speaker_id = request.speaker_id,
 		.target_id = request.target_id,
 		.visible_speaker_id = request.target_id,
