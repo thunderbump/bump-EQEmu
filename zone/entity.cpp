@@ -80,6 +80,7 @@ FallbackDialogue::LiveEntity FallbackDialogueLiveEntity(Mob *mob)
 	}
 
 	return {
+		.entity_id = mob->GetID(),
 		.name = mob->GetCleanName(),
 		.kind = FallbackDialogueEntityKind(mob),
 		.level = mob->GetLevel(),
@@ -88,6 +89,20 @@ FallbackDialogue::LiveEntity FallbackDialogueLiveEntity(Mob *mob)
 		.z = mob->GetZ(),
 		.engaged = mob->IsEngaged()
 	};
+}
+
+std::vector<FallbackDialogue::LiveEntity> FallbackDialogueNearbyEntities(Mob *speaker, Mob *target)
+{
+	std::vector<FallbackDialogue::LiveEntity> nearby_entities;
+	for (const auto &[entity_id, mob] : entity_list.GetMobList()) {
+		if (!mob || mob == speaker || mob == target) {
+			continue;
+		}
+
+		nearby_entities.push_back(FallbackDialogueLiveEntity(mob));
+	}
+
+	return nearby_entities;
 }
 
 FallbackDialogue::CurrentInteraction CurrentFallbackDialogueInteraction(
@@ -129,7 +144,8 @@ FallbackDialogue::LiveContext BuildZoneFallbackDialogueContext(
 		.zone = {
 			.short_name = zone ? zone->GetShortName() : "",
 			.long_name = zone ? zone->GetLongName() : ""
-		}
+		},
+		.nearby_entities = FallbackDialogueNearbyEntities(speaker, target)
 	};
 }
 

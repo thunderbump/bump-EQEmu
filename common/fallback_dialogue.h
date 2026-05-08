@@ -71,6 +71,7 @@ struct TargetedSayResult {
 };
 
 struct LiveEntity {
+	uint32_t    entity_id = 0;
 	std::string name;
 	EntityKind  kind = EntityKind::Unknown;
 	int         level = 0;

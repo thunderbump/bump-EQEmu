@@ -50,6 +50,7 @@ public:
 		TEST_ADD(FallbackDialogueTest::PublicGameplayContextExcludesPrivateFields);
 		TEST_ADD(FallbackDialogueTest::PublicGameplayContextFiltersNearbyEntitiesByRuleRadius);
 		TEST_ADD(FallbackDialogueTest::PublicGameplayContextLimitsNearbyEntitiesByRuleCount);
+		TEST_ADD(FallbackDialogueTest::PublicGameplayContextExcludesSpeakerAndTargetFromNearbyEntities);
 		TEST_ADD(FallbackDialogueTest::EligibleNpcTargetedSayQueuesDelayedRequestWithPublicContext);
 		TEST_ADD(FallbackDialogueTest::CompletedDelayedDialogueReturnsTargetSpeech);
 		TEST_ADD(FallbackDialogueTest::CompletedDelayedDialogueStripsNewlines);
@@ -524,6 +525,33 @@ private:
 		TEST_ASSERT_EQUALS(context.nearby_entities.size(), static_cast<size_t>(2));
 		TEST_ASSERT_EQUALS(context.nearby_entities[0].name, std::string("Closest"));
 		TEST_ASSERT_EQUALS(context.nearby_entities[1].name, std::string("Second Closest"));
+	}
+
+	void PublicGameplayContextExcludesSpeakerAndTargetFromNearbyEntities()
+	{
+		ResetRules();
+
+		auto speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f);
+		speaker.entity_id = 101;
+		auto target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f);
+		target.entity_id = 202;
+		auto nearby_speaker = speaker;
+		auto nearby_target = target;
+
+		const auto context = FallbackDialogue::BuildPublicGameplayContext({
+			.current_message = "hail",
+			.speaker = speaker,
+			.target = target,
+			.zone = PublicZone("qeynos", "South Qeynos"),
+			.nearby_entities = {
+				nearby_speaker,
+				PublicEntity("Dockhand", FallbackDialogue::EntityKind::NPC, 8, 10.0f, 0.0f, 0.0f),
+				nearby_target
+			}
+		});
+
+		TEST_ASSERT_EQUALS(context.nearby_entities.size(), static_cast<size_t>(1));
+		TEST_ASSERT_EQUALS(context.nearby_entities[0].name, std::string("Dockhand"));
 	}
 
 	void EligibleNpcTargetedSayQueuesDelayedRequestWithPublicContext()

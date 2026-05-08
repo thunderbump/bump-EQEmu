@@ -658,6 +658,11 @@ PublicGameplayContext BuildPublicGameplayContext(const LiveContext &context)
 	}
 
 	for (const auto &entity : context.nearby_entities) {
+		if (entity.entity_id != 0 &&
+			(entity.entity_id == context.speaker.entity_id || entity.entity_id == context.target.entity_id)) {
+			continue;
+		}
+
 		const auto distance = DistanceBetween(context.speaker, entity);
 		if (distance > nearby_radius) {
 			continue;
