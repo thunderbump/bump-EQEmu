@@ -56,8 +56,12 @@ public:
 		TEST_ADD(FallbackDialogueTest::CompletedDelayedDialogueStripsNewlines);
 		TEST_ADD(FallbackDialogueTest::CompletedDelayedDialogueTrimsModelArtifacts);
 		TEST_ADD(FallbackDialogueTest::CompletedDelayedDialogueReturnsPureAsteriskActionAsTargetEmote);
+		TEST_ADD(FallbackDialogueTest::CompletedNpcDelayedDialogueStripsTargetNameFromEmote);
 		TEST_ADD(FallbackDialogueTest::CompletedDelayedDialoguePreservesMixedSpeechAndEmoteOrder);
+		TEST_ADD(FallbackDialogueTest::CompletedMixedDelayedDialogueStripsTargetNameFromEmoteOnly);
 		TEST_ADD(FallbackDialogueTest::CompletedBotDelayedDialogueReturnsParenthesizedActionAsTargetEmote);
+		TEST_ADD(FallbackDialogueTest::CompletedBotDelayedDialogueStripsTargetNameFromEmote);
+		TEST_ADD(FallbackDialogueTest::CompletedDelayedDialogueDoesNotStripTargetNameFromSpeech);
 		TEST_ADD(FallbackDialogueTest::MalformedEmoteMarkerRemainsTargetSpeech);
 		TEST_ADD(FallbackDialogueTest::CompletedDelayedDialogueSplitsLongLineAtSentenceBoundary);
 		TEST_ADD(FallbackDialogueTest::CompletedDelayedDialogueSplitsLongWordAtLineLimit);
@@ -758,6 +762,42 @@ private:
 		TEST_ASSERT_EQUALS(ready_result.debug_reason, std::string("delayed_dialogue_ready"));
 	}
 
+	void CompletedNpcDelayedDialogueStripsTargetNameFromEmote()
+	{
+		ResetRules();
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
+
+		FallbackDialogue::TestDelayedDialogueProvider provider;
+		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		const FallbackDialogue::TargetedSayRequest request{
+			.speaker_id = 101,
+			.target_id = 202,
+			.message = "hail",
+			.target_type = FallbackDialogue::TargetType::NPC,
+			.authored_dialogue_handled = false
+		};
+		const FallbackDialogue::LiveContext live_context{
+			.current_message = "hail",
+			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
+			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
+			.zone = PublicZone("qeynos", "South Qeynos")
+		};
+
+		TEST_ASSERT(queue.HandleTargetedSay(request, live_context).handled);
+		TEST_ASSERT(provider.CompleteNextSuccess("*Guard Teren looks around warily*"));
+
+		FallbackDialogue::TargetedSayResult ready_result;
+		TEST_ASSERT(queue.PopReadyResult(CurrentInteractionFor(
+			101,
+			202,
+			202,
+			PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
+			PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f)
+		), ready_result));
+		TEST_ASSERT(ready_result.output_type == FallbackDialogue::OutputType::Emote);
+		TEST_ASSERT_EQUALS(std::string("looks around warily"), ready_result.message);
+	}
+
 	void CompletedDelayedDialoguePreservesMixedSpeechAndEmoteOrder()
 	{
 		ResetRules();
@@ -801,6 +841,46 @@ private:
 		TEST_ASSERT(!queue.PopReadyResult(CurrentInteractionFor(101, 202, 202), no_result));
 	}
 
+	void CompletedMixedDelayedDialogueStripsTargetNameFromEmoteOnly()
+	{
+		ResetRules();
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
+
+		FallbackDialogue::TestDelayedDialogueProvider provider;
+		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		const FallbackDialogue::TargetedSayRequest request{
+			.speaker_id = 101,
+			.target_id = 202,
+			.message = "hail",
+			.target_type = FallbackDialogue::TargetType::NPC,
+			.authored_dialogue_handled = false
+		};
+		const FallbackDialogue::LiveContext live_context{
+			.current_message = "hail",
+			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
+			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
+			.zone = PublicZone("qeynos", "South Qeynos")
+		};
+
+		TEST_ASSERT(queue.HandleTargetedSay(request, live_context).handled);
+		TEST_ASSERT(provider.CompleteNextSuccess("Stand near. *Guard Teren checks the road* Keep watch."));
+
+		FallbackDialogue::TargetedSayResult first_result;
+		TEST_ASSERT(queue.PopReadyResult(CurrentInteractionFor(101, 202, 202), first_result));
+		TEST_ASSERT(first_result.output_type == FallbackDialogue::OutputType::Say);
+		TEST_ASSERT_EQUALS(first_result.message, std::string("Stand near."));
+
+		FallbackDialogue::TargetedSayResult second_result;
+		TEST_ASSERT(queue.PopReadyResult(CurrentInteractionFor(101, 202, 202), second_result));
+		TEST_ASSERT(second_result.output_type == FallbackDialogue::OutputType::Emote);
+		TEST_ASSERT_EQUALS(std::string("checks the road"), second_result.message);
+
+		FallbackDialogue::TargetedSayResult third_result;
+		TEST_ASSERT(queue.PopReadyResult(CurrentInteractionFor(101, 202, 202), third_result));
+		TEST_ASSERT(third_result.output_type == FallbackDialogue::OutputType::Say);
+		TEST_ASSERT_EQUALS(third_result.message, std::string("Keep watch."));
+	}
+
 	void CompletedBotDelayedDialogueReturnsParenthesizedActionAsTargetEmote()
 	{
 		ResetRules();
@@ -837,6 +917,55 @@ private:
 		TEST_ASSERT_EQUALS(ready_result.message, std::string("checks bowstring"));
 		TEST_ASSERT_EQUALS(ready_result.visible_speaker_id, static_cast<uint32_t>(202));
 		TEST_ASSERT(ready_result.target_type == FallbackDialogue::TargetType::Bot);
+	}
+
+	void CompletedBotDelayedDialogueStripsTargetNameFromEmote()
+	{
+		ResetRules();
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
+
+		FallbackDialogue::TestDelayedDialogueProvider provider;
+		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		const FallbackDialogue::TargetedSayRequest request{
+			.speaker_id = 101,
+			.target_id = 202,
+			.message = "hail",
+			.target_type = FallbackDialogue::TargetType::Bot,
+			.authored_dialogue_handled = false
+		};
+		const FallbackDialogue::LiveContext live_context{
+			.current_message = "hail",
+			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
+			.target = PublicEntity("Atenbot", FallbackDialogue::EntityKind::Bot, 12, 5.0f, 0.0f, 0.0f),
+			.zone = PublicZone("qeynos", "South Qeynos")
+		};
+
+		TEST_ASSERT(queue.HandleTargetedSay(request, live_context).handled);
+		TEST_ASSERT(provider.CompleteNextSuccess("(Atenbot checks bowstring)"));
+
+		FallbackDialogue::TargetedSayResult ready_result;
+		TEST_ASSERT(queue.PopReadyResult(CurrentInteractionFor(
+			101,
+			202,
+			202,
+			PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
+			PublicEntity("Atenbot", FallbackDialogue::EntityKind::Bot, 12, 5.0f, 0.0f, 0.0f)
+		), ready_result));
+		TEST_ASSERT(ready_result.output_type == FallbackDialogue::OutputType::Emote);
+		TEST_ASSERT_EQUALS(std::string("checks bowstring"), ready_result.message);
+		TEST_ASSERT(ready_result.target_type == FallbackDialogue::TargetType::Bot);
+	}
+
+	void CompletedDelayedDialogueDoesNotStripTargetNameFromSpeech()
+	{
+		const auto ready_result = DelayedSuccessResultFor(
+			"Guard Teren says the west gate is watched.",
+			"appears distracted."
+		);
+
+		TEST_ASSERT(ready_result.handled);
+		TEST_ASSERT(ready_result.output_type == FallbackDialogue::OutputType::Say);
+		TEST_ASSERT_EQUALS(ready_result.message, std::string("Guard Teren says the west gate is watched."));
 	}
 
 	void MalformedEmoteMarkerRemainsTargetSpeech()

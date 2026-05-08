@@ -402,6 +402,29 @@ std::vector<DialogueOutputFragment> BuildDialogueOutputFragments(const std::stri
 	return fragments;
 }
 
+std::string StripLeadingTargetNameFromEmote(
+	const std::string &emote_message,
+	const std::string &target_name
+)
+{
+	const auto trimmed_message = TrimCopy(emote_message);
+	const auto trimmed_target_name = TrimCopy(target_name);
+	if (trimmed_message.size() <= trimmed_target_name.size() || trimmed_target_name.empty()) {
+		return trimmed_message;
+	}
+
+	if (!StartsWithInsensitive(trimmed_message, ToLowerCopy(trimmed_target_name))) {
+		return trimmed_message;
+	}
+
+	const auto boundary = trimmed_message[trimmed_target_name.size()];
+	if (!std::isspace(static_cast<unsigned char>(boundary))) {
+		return trimmed_message;
+	}
+
+	return TrimCopy(trimmed_message.substr(trimmed_target_name.size()));
+}
+
 const char *EntityKindName(EntityKind kind)
 {
 	switch (kind) {
@@ -826,7 +849,7 @@ bool DelayedDialogueQueue::PopReadyResult(
 			ready_fragments.push_back({
 				.handled = true,
 				.output_type = OutputType::Emote,
-				.message = output_fragment.message,
+				.message = StripLeadingTargetNameFromEmote(output_fragment.message, request.context.target.name),
 				.debug_reason = "delayed_dialogue_ready",
 				.speaker_id = request.speaker_id,
 				.target_id = request.target_id,
