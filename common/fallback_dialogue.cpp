@@ -256,12 +256,58 @@ std::string NormalizeDialogueLine(const std::string &dialogue_line)
 		normalized = TrimCopy(normalized.substr(1, normalized.size() - 2));
 	}
 
+	return normalized;
+}
+
+std::vector<std::string> SplitDialogueLine(const std::string &dialogue_line)
+{
 	const auto max_line_length = RuleI(Chat, FallbackDialogueMaxLineLength);
-	if (max_line_length > 0 && normalized.size() > static_cast<size_t>(max_line_length)) {
-		normalized.resize(static_cast<size_t>(max_line_length));
+	if (max_line_length <= 0 || dialogue_line.size() <= static_cast<size_t>(max_line_length)) {
+		return dialogue_line.empty() ? std::vector<std::string>{} : std::vector<std::string>{dialogue_line};
 	}
 
-	return normalized;
+	const auto limit = static_cast<size_t>(max_line_length);
+	std::vector<std::string> fragments;
+	std::string remaining = dialogue_line;
+
+	while (remaining.size() > limit) {
+		auto split_at = std::string::npos;
+
+		for (auto index = limit; index > 0; --index) {
+			const auto character = remaining[index - 1];
+			if ((character == '.' || character == '!' || character == '?') &&
+				(index == remaining.size() || std::isspace(static_cast<unsigned char>(remaining[index])))) {
+				split_at = index;
+				break;
+			}
+		}
+
+		if (split_at == std::string::npos) {
+			for (auto index = limit; index > 0; --index) {
+				if (std::isspace(static_cast<unsigned char>(remaining[index - 1]))) {
+					split_at = index - 1;
+					break;
+				}
+			}
+		}
+
+		if (split_at == std::string::npos || split_at == 0) {
+			split_at = limit;
+		}
+
+		const auto fragment = TrimCopy(remaining.substr(0, split_at));
+		if (!fragment.empty()) {
+			fragments.push_back(fragment);
+		}
+
+		remaining = TrimCopy(remaining.substr(split_at));
+	}
+
+	if (!remaining.empty()) {
+		fragments.push_back(remaining);
+	}
+
+	return fragments;
 }
 
 bool IsRejectedDialogueLine(const std::string &dialogue_line)
@@ -622,6 +668,12 @@ bool DelayedDialogueQueue::PopReadyResult(
 	TargetedSayResult &result
 )
 {
+	if (!ready_results_.empty()) {
+		result = std::move(ready_results_.front());
+		ready_results_.pop_front();
+		return true;
+	}
+
 	DelayedDialogueCompletion completion;
 	if (!provider_.PopCompletion(completion)) {
 		return false;
@@ -663,6 +715,31 @@ bool DelayedDialogueQueue::PopReadyResult(
 		.visible_speaker_id = request.target_id,
 		.target_type = request.target_type
 	};
+
+	if (available) {
+		const auto fragments = SplitDialogueLine(normalized_dialogue_line);
+		if (fragments.empty()) {
+			result.output_type = OutputType::Emote;
+			result.message = request.unavailable_reply;
+			result.debug_reason = "delayed_dialogue_rejected";
+			return true;
+		}
+
+		result.message = fragments.front();
+		for (auto fragment = fragments.begin() + 1; fragment != fragments.end(); ++fragment) {
+			ready_results_.push_back({
+				.handled = true,
+				.output_type = OutputType::Say,
+				.message = *fragment,
+				.debug_reason = "delayed_dialogue_ready",
+				.speaker_id = request.speaker_id,
+				.target_id = request.target_id,
+				.visible_speaker_id = request.target_id,
+				.target_type = request.target_type
+			});
+		}
+	}
+
 	return true;
 }
 

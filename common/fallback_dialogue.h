@@ -210,6 +210,7 @@ public:
 private:
 	DelayedDialogueProvider                         &provider_;
 	std::unordered_map<uint64_t, DelayedDialogueRequest> pending_requests_;
+	std::deque<TargetedSayResult>                   ready_results_;
 	uint64_t                                         next_request_id_ = 1;
 };
 

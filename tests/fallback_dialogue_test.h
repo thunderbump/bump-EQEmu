@@ -54,7 +54,9 @@ public:
 		TEST_ADD(FallbackDialogueTest::CompletedDelayedDialogueReturnsTargetSpeech);
 		TEST_ADD(FallbackDialogueTest::CompletedDelayedDialogueStripsNewlines);
 		TEST_ADD(FallbackDialogueTest::CompletedDelayedDialogueTrimsModelArtifacts);
-		TEST_ADD(FallbackDialogueTest::CompletedDelayedDialogueCapsLineLength);
+		TEST_ADD(FallbackDialogueTest::CompletedDelayedDialogueSplitsLongLineAtSentenceBoundary);
+		TEST_ADD(FallbackDialogueTest::CompletedDelayedDialogueSplitsLongWordAtLineLimit);
+		TEST_ADD(FallbackDialogueTest::CompletedBotDelayedDialogueSplitsLongLineInOrder);
 		TEST_ADD(FallbackDialogueTest::CommandLookingDelayedDialogueFallsBackToUnavailableReply);
 		TEST_ADD(FallbackDialogueTest::MetadataLookingDelayedDialogueFallsBackToUnavailableReply);
 		TEST_ADD(FallbackDialogueTest::TechnicalLookingDelayedDialogueFallsBackToUnavailableReply);
@@ -685,11 +687,11 @@ private:
 		TEST_ASSERT_EQUALS(ready_result.message, std::string("Mind the road, friend."));
 	}
 
-	void CompletedDelayedDialogueCapsLineLength()
+	void CompletedDelayedDialogueSplitsLongLineAtSentenceBoundary()
 	{
 		ResetRules();
 		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueMaxLineLength", "12");
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueMaxLineLength", "24");
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
 		FallbackDialogue::DelayedDialogueQueue queue(provider);
@@ -709,7 +711,7 @@ private:
 
 		const auto queued_result = queue.HandleTargetedSay(request, live_context);
 		TEST_ASSERT(queued_result.handled);
-		TEST_ASSERT(provider.CompleteNextSuccess("12345678901234567890"));
+		TEST_ASSERT(provider.CompleteNextSuccess("First sentence. Second sentence keeps going."));
 
 		FallbackDialogue::TargetedSayResult ready_result;
 		TEST_ASSERT(queue.PopReadyResult(CurrentInteractionFor(
@@ -720,7 +722,144 @@ private:
 			PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f)
 		), ready_result));
 		TEST_ASSERT(ready_result.output_type == FallbackDialogue::OutputType::Say);
-		TEST_ASSERT_EQUALS(ready_result.message, std::string("123456789012"));
+		TEST_ASSERT_EQUALS(ready_result.message, std::string("First sentence."));
+		TEST_ASSERT(ready_result.message.size() <= 24);
+
+		FallbackDialogue::TargetedSayResult second_result;
+		TEST_ASSERT(queue.PopReadyResult(CurrentInteractionFor(
+			101,
+			202,
+			202,
+			PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
+			PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f)
+		), second_result));
+		TEST_ASSERT(second_result.output_type == FallbackDialogue::OutputType::Say);
+		TEST_ASSERT_EQUALS(second_result.message, std::string("Second sentence keeps"));
+		TEST_ASSERT(second_result.message.size() <= 24);
+
+		FallbackDialogue::TargetedSayResult third_result;
+		TEST_ASSERT(queue.PopReadyResult(CurrentInteractionFor(
+			101,
+			202,
+			202,
+			PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
+			PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f)
+		), third_result));
+		TEST_ASSERT(third_result.output_type == FallbackDialogue::OutputType::Say);
+		TEST_ASSERT_EQUALS(third_result.message, std::string("going."));
+		TEST_ASSERT(third_result.message.size() <= 24);
+
+		FallbackDialogue::TargetedSayResult no_result;
+		TEST_ASSERT(!queue.PopReadyResult(CurrentInteractionFor(101, 202, 202), no_result));
+	}
+
+	void CompletedDelayedDialogueSplitsLongWordAtLineLimit()
+	{
+		ResetRules();
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueMaxLineLength", "8");
+
+		FallbackDialogue::TestDelayedDialogueProvider provider;
+		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		const FallbackDialogue::TargetedSayRequest request{
+			.speaker_id = 101,
+			.target_id = 202,
+			.message = "hail",
+			.target_type = FallbackDialogue::TargetType::NPC,
+			.authored_dialogue_handled = false
+		};
+		const FallbackDialogue::LiveContext live_context{
+			.current_message = "hail",
+			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
+			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
+			.zone = PublicZone("qeynos", "South Qeynos")
+		};
+
+		TEST_ASSERT(queue.HandleTargetedSay(request, live_context).handled);
+		TEST_ASSERT(provider.CompleteNextSuccess("supercalifragilistic"));
+
+		FallbackDialogue::TargetedSayResult first_result;
+		TEST_ASSERT(queue.PopReadyResult(CurrentInteractionFor(
+			101,
+			202,
+			202,
+			PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
+			PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f)
+		), first_result));
+		TEST_ASSERT_EQUALS(first_result.message, std::string("supercal"));
+		TEST_ASSERT(first_result.message.size() <= 8);
+
+		FallbackDialogue::TargetedSayResult second_result;
+		TEST_ASSERT(queue.PopReadyResult(CurrentInteractionFor(
+			101,
+			202,
+			202,
+			PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
+			PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f)
+		), second_result));
+		TEST_ASSERT_EQUALS(second_result.message, std::string("ifragili"));
+		TEST_ASSERT(second_result.message.size() <= 8);
+
+		FallbackDialogue::TargetedSayResult third_result;
+		TEST_ASSERT(queue.PopReadyResult(CurrentInteractionFor(
+			101,
+			202,
+			202,
+			PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
+			PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f)
+		), third_result));
+		TEST_ASSERT_EQUALS(third_result.message, std::string("stic"));
+		TEST_ASSERT(third_result.message.size() <= 8);
+	}
+
+	void CompletedBotDelayedDialogueSplitsLongLineInOrder()
+	{
+		ResetRules();
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueMaxLineLength", "16");
+
+		FallbackDialogue::TestDelayedDialogueProvider provider;
+		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		const FallbackDialogue::TargetedSayRequest request{
+			.speaker_id = 101,
+			.target_id = 202,
+			.message = "hail",
+			.target_type = FallbackDialogue::TargetType::Bot,
+			.authored_dialogue_handled = false
+		};
+		const FallbackDialogue::LiveContext live_context{
+			.current_message = "hail",
+			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
+			.target = PublicEntity("Atenbot", FallbackDialogue::EntityKind::Bot, 12, 5.0f, 0.0f, 0.0f),
+			.zone = PublicZone("qeynos", "South Qeynos")
+		};
+
+		TEST_ASSERT(queue.HandleTargetedSay(request, live_context).handled);
+		TEST_ASSERT(provider.CompleteNextSuccess("Alpha beta gamma delta."));
+
+		FallbackDialogue::TargetedSayResult first_result;
+		TEST_ASSERT(queue.PopReadyResult(CurrentInteractionFor(
+			101,
+			202,
+			202,
+			PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
+			PublicEntity("Atenbot", FallbackDialogue::EntityKind::Bot, 12, 5.0f, 0.0f, 0.0f)
+		), first_result));
+		TEST_ASSERT(first_result.output_type == FallbackDialogue::OutputType::Say);
+		TEST_ASSERT_EQUALS(first_result.message, std::string("Alpha beta"));
+		TEST_ASSERT(first_result.target_type == FallbackDialogue::TargetType::Bot);
+
+		FallbackDialogue::TargetedSayResult second_result;
+		TEST_ASSERT(queue.PopReadyResult(CurrentInteractionFor(
+			101,
+			202,
+			202,
+			PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
+			PublicEntity("Atenbot", FallbackDialogue::EntityKind::Bot, 12, 5.0f, 0.0f, 0.0f)
+		), second_result));
+		TEST_ASSERT(second_result.output_type == FallbackDialogue::OutputType::Say);
+		TEST_ASSERT_EQUALS(second_result.message, std::string("gamma delta."));
+		TEST_ASSERT(second_result.target_type == FallbackDialogue::TargetType::Bot);
 	}
 
 	void CommandLookingDelayedDialogueFallsBackToUnavailableReply()
