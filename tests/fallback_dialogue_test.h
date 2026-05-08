@@ -57,6 +57,9 @@ public:
 		TEST_ADD(FallbackDialogueTest::DialogueResponseProcessingStripsTargetNameFromEmotesOnly);
 		TEST_ADD(FallbackDialogueTest::DialogueResponseProcessingRejectsUnsafeFragment);
 		TEST_ADD(FallbackDialogueTest::DialogueResponseProcessingKeepsMalformedMarkerAsSpeech);
+		TEST_ADD(FallbackDialogueTest::DialogueDeliveryPlanningReturnsOrderedDeliveredMessages);
+		TEST_ADD(FallbackDialogueTest::DialogueDeliveryPlanningSplitsLongSpeech);
+		TEST_ADD(FallbackDialogueTest::DialogueDeliveryPlanningRejectsLongEmote);
 		TEST_ADD(FallbackDialogueTest::EligibleNpcTargetedSayQueuesDelayedRequestWithPublicContext);
 		TEST_ADD(FallbackDialogueTest::CompletedDelayedDialogueReturnsTargetSpeech);
 		TEST_ADD(FallbackDialogueTest::CompletedDelayedDialogueStripsNewlines);
@@ -656,6 +659,61 @@ private:
 		TEST_ASSERT_EQUALS(result.fragments.size(), static_cast<size_t>(1));
 		TEST_ASSERT(result.fragments[0].output_type == FallbackDialogue::OutputType::Say);
 		TEST_ASSERT_EQUALS(result.fragments[0].message, std::string("Well met. *looks around warily"));
+	}
+
+	void DialogueDeliveryPlanningReturnsOrderedDeliveredMessages()
+	{
+		ResetRules();
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueMaxLineLength", "200");
+
+		const auto result = FallbackDialogue::PlanDialogueDelivery({
+			{.output_type = FallbackDialogue::OutputType::Say, .message = "Well met."},
+			{.output_type = FallbackDialogue::OutputType::Emote, .message = "looks around warily"},
+			{.output_type = FallbackDialogue::OutputType::Say, .message = "Keep your voice low."}
+		});
+
+		TEST_ASSERT(result.accepted);
+		TEST_ASSERT(result.rejection_reason.empty());
+		TEST_ASSERT_EQUALS(result.messages.size(), static_cast<size_t>(3));
+		TEST_ASSERT(result.messages[0].output_type == FallbackDialogue::OutputType::Say);
+		TEST_ASSERT_EQUALS(result.messages[0].message, std::string("Well met."));
+		TEST_ASSERT(result.messages[1].output_type == FallbackDialogue::OutputType::Emote);
+		TEST_ASSERT_EQUALS(result.messages[1].message, std::string("looks around warily"));
+		TEST_ASSERT(result.messages[2].output_type == FallbackDialogue::OutputType::Say);
+		TEST_ASSERT_EQUALS(result.messages[2].message, std::string("Keep your voice low."));
+	}
+
+	void DialogueDeliveryPlanningSplitsLongSpeech()
+	{
+		ResetRules();
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueMaxLineLength", "24");
+
+		const auto result = FallbackDialogue::PlanDialogueDelivery({
+			{.output_type = FallbackDialogue::OutputType::Say, .message = "First sentence. Second sentence keeps going."}
+		});
+
+		TEST_ASSERT(result.accepted);
+		TEST_ASSERT_EQUALS(result.messages.size(), static_cast<size_t>(3));
+		TEST_ASSERT(result.messages[0].output_type == FallbackDialogue::OutputType::Say);
+		TEST_ASSERT_EQUALS(result.messages[0].message, std::string("First sentence."));
+		TEST_ASSERT(result.messages[1].output_type == FallbackDialogue::OutputType::Say);
+		TEST_ASSERT_EQUALS(result.messages[1].message, std::string("Second sentence keeps"));
+		TEST_ASSERT(result.messages[2].output_type == FallbackDialogue::OutputType::Say);
+		TEST_ASSERT_EQUALS(result.messages[2].message, std::string("going."));
+	}
+
+	void DialogueDeliveryPlanningRejectsLongEmote()
+	{
+		ResetRules();
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueMaxLineLength", "16");
+
+		const auto result = FallbackDialogue::PlanDialogueDelivery({
+			{.output_type = FallbackDialogue::OutputType::Emote, .message = "looks around warily"}
+		});
+
+		TEST_ASSERT(!result.accepted);
+		TEST_ASSERT_EQUALS(result.rejection_reason, std::string("long_emote_dialogue_fragment"));
+		TEST_ASSERT(result.messages.empty());
 	}
 
 	void EligibleNpcTargetedSayQueuesDelayedRequestWithPublicContext()

@@ -743,6 +743,46 @@ DialogueResponseProcessingResult ProcessDialogueResponse(
 	};
 }
 
+DialogueDeliveryPlan PlanDialogueDelivery(const std::vector<DialogueFragment> &fragments)
+{
+	DialogueDeliveryPlan plan;
+
+	for (const auto &fragment : fragments) {
+		if (fragment.output_type == OutputType::Say) {
+			for (const auto &message : SplitDialogueLine(fragment.message)) {
+				plan.messages.push_back({
+					.output_type = OutputType::Say,
+					.message = message
+				});
+			}
+			continue;
+		}
+
+		if (fragment.output_type == OutputType::Emote) {
+			const auto max_line_length = RuleI(Chat, FallbackDialogueMaxLineLength);
+			if (max_line_length > 0 && fragment.message.size() > static_cast<size_t>(max_line_length)) {
+				return {
+					.rejection_reason = "long_emote_dialogue_fragment"
+				};
+			}
+
+			plan.messages.push_back({
+				.output_type = OutputType::Emote,
+				.message = fragment.message
+			});
+		}
+	}
+
+	if (plan.messages.empty()) {
+		return {
+			.rejection_reason = "empty_dialogue_delivery"
+		};
+	}
+
+	plan.accepted = true;
+	return plan;
+}
+
 DelayedDialogueQueue::DelayedDialogueQueue(DelayedDialogueProvider &provider)
 	: provider_(provider)
 {
@@ -830,8 +870,11 @@ bool DelayedDialogueQueue::PopReadyResult(
 	const auto processed_response = completion.succeeded ?
 		ProcessDialogueResponse(completion.dialogue_line, request.context.target.name) :
 		DialogueResponseProcessingResult{};
-	const auto available = completion.succeeded && processed_response.accepted;
-	const auto rejected = completion.succeeded && !processed_response.accepted;
+	const auto delivery_plan = processed_response.accepted ?
+		PlanDialogueDelivery(processed_response.fragments) :
+		DialogueDeliveryPlan{};
+	const auto available = completion.succeeded && processed_response.accepted && delivery_plan.accepted;
+	const auto rejected = completion.succeeded && !available;
 
 	result = {
 		.handled = true,
@@ -846,27 +889,11 @@ bool DelayedDialogueQueue::PopReadyResult(
 
 	if (available) {
 		std::vector<TargetedSayResult> ready_fragments;
-		for (const auto &output_fragment : processed_response.fragments) {
-			if (output_fragment.output_type == OutputType::Say) {
-				for (const auto &speech_fragment : SplitDialogueLine(output_fragment.message)) {
-					ready_fragments.push_back({
-						.handled = true,
-						.output_type = OutputType::Say,
-						.message = speech_fragment,
-						.debug_reason = "delayed_dialogue_ready",
-						.speaker_id = request.speaker_id,
-						.target_id = request.target_id,
-						.visible_speaker_id = request.target_id,
-						.target_type = request.target_type
-					});
-				}
-				continue;
-			}
-
+		for (const auto &message : delivery_plan.messages) {
 			ready_fragments.push_back({
 				.handled = true,
-				.output_type = OutputType::Emote,
-				.message = output_fragment.message,
+				.output_type = message.output_type,
+				.message = message.message,
 				.debug_reason = "delayed_dialogue_ready",
 				.speaker_id = request.speaker_id,
 				.target_id = request.target_id,

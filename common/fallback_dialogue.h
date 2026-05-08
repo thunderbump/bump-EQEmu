@@ -61,6 +61,17 @@ struct DialogueResponseProcessingResult {
 	std::vector<DialogueFragment> fragments;
 };
 
+struct DeliveredDialogueMessage {
+	OutputType  output_type = OutputType::None;
+	std::string message;
+};
+
+struct DialogueDeliveryPlan {
+	bool                                  accepted = false;
+	std::string                           rejection_reason;
+	std::vector<DeliveredDialogueMessage> messages;
+};
+
 struct TargetedSayRequest {
 	uint32_t    speaker_id = 0;
 	uint32_t    target_id = 0;
@@ -246,6 +257,7 @@ DialogueResponseProcessingResult ProcessDialogueResponse(
 	const std::string &natural_dialogue_response,
 	const std::string &target_name
 );
+DialogueDeliveryPlan PlanDialogueDelivery(const std::vector<DialogueFragment> &fragments);
 std::string BuildDiagnosticLogLine(const TargetedSayResult &result);
 void LogDiagnostic(const TargetedSayResult &result);
 void ResetDialogueCooldowns();
