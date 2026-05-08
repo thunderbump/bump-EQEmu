@@ -81,6 +81,7 @@ public:
 		TEST_ADD(FallbackDialogueTest::TechnicalLookingDelayedDialogueFallsBackToUnavailableReply);
 		TEST_ADD(FallbackDialogueTest::OutOfCharacterDelayedDialogueFallsBackToUnavailableReply);
 		TEST_ADD(FallbackDialogueTest::EmptyDelayedDialogueFallsBackToUnavailableReply);
+		TEST_ADD(FallbackDialogueTest::LongEmoteDelayedDialogueFallsBackToUnavailableReply);
 		TEST_ADD(FallbackDialogueTest::FailedDelayedDialogueReturnsUnavailableReplyEmote);
 		TEST_ADD(FallbackDialogueTest::CompletedDelayedDialogueReturnsTargetSpeechForCurrentInteraction);
 		TEST_ADD(FallbackDialogueTest::CompletedDelayedDialogueDropsWhenSpeakerTargetsSomethingElse);
@@ -1375,6 +1376,34 @@ private:
 		const auto ready_result = DelayedSuccessResultFor(" \n\t ", "appears distracted.");
 
 		TEST_ASSERT(ready_result.handled);
+		TEST_ASSERT(ready_result.output_type == FallbackDialogue::OutputType::Emote);
+		TEST_ASSERT_EQUALS(ready_result.message, std::string("appears distracted."));
+		TEST_ASSERT_EQUALS(ready_result.debug_reason, std::string("delayed_dialogue_rejected"));
+	}
+
+	void LongEmoteDelayedDialogueFallsBackToUnavailableReply()
+	{
+		ResetRules();
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueUnavailableReply", "appears distracted.");
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueMaxLineLength", "16");
+
+		FallbackDialogue::TestDelayedDialogueProvider provider;
+		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		const FallbackDialogue::TargetedSayRequest request{
+			.speaker_id = 101,
+			.target_id = 202,
+			.message = "hail",
+			.target_type = FallbackDialogue::TargetType::NPC,
+			.authored_dialogue_handled = false
+		};
+
+		const auto queued_result = queue.HandleTargetedSay(request, DefaultLiveContext());
+		TEST_ASSERT(queued_result.handled);
+		TEST_ASSERT(provider.CompleteNextSuccess("*looks around warily*"));
+
+		FallbackDialogue::TargetedSayResult ready_result;
+		TEST_ASSERT(queue.PopReadyResult(CurrentInteractionFor(101, 202, 202), ready_result));
 		TEST_ASSERT(ready_result.output_type == FallbackDialogue::OutputType::Emote);
 		TEST_ASSERT_EQUALS(ready_result.message, std::string("appears distracted."));
 		TEST_ASSERT_EQUALS(ready_result.debug_reason, std::string("delayed_dialogue_rejected"));

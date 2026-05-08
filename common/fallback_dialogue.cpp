@@ -783,6 +783,83 @@ DialogueDeliveryPlan PlanDialogueDelivery(const std::vector<DialogueFragment> &f
 	return plan;
 }
 
+TargetedSayResult BuildDelayedDialogueUnavailableResult(
+	const DelayedDialogueRequest &request,
+	const std::string &debug_reason
+)
+{
+	return {
+		.handled = true,
+		.output_type = OutputType::Emote,
+		.message = request.unavailable_reply,
+		.debug_reason = debug_reason,
+		.speaker_id = request.speaker_id,
+		.target_id = request.target_id,
+		.visible_speaker_id = request.target_id,
+		.target_type = request.target_type
+	};
+}
+
+TargetedSayResult BuildDelayedDialogueReadyResult(
+	const DelayedDialogueRequest &request,
+	const DeliveredDialogueMessage &message
+)
+{
+	return {
+		.handled = true,
+		.output_type = message.output_type,
+		.message = message.message,
+		.debug_reason = "delayed_dialogue_ready",
+		.speaker_id = request.speaker_id,
+		.target_id = request.target_id,
+		.visible_speaker_id = request.target_id,
+		.target_type = request.target_type
+	};
+}
+
+std::vector<TargetedSayResult> BuildDelayedDialogueResults(
+	const DelayedDialogueRequest &request,
+	const DelayedDialogueCompletion &completion
+)
+{
+	if (!completion.succeeded) {
+		return {
+			BuildDelayedDialogueUnavailableResult(request, "delayed_dialogue_unavailable")
+		};
+	}
+
+	const auto processed_response = ProcessDialogueResponse(
+		completion.dialogue_line,
+		request.context.target.name
+	);
+	if (!processed_response.accepted) {
+		return {
+			BuildDelayedDialogueUnavailableResult(request, "delayed_dialogue_rejected")
+		};
+	}
+
+	const auto delivery_plan = PlanDialogueDelivery(processed_response.fragments);
+	if (!delivery_plan.accepted) {
+		return {
+			BuildDelayedDialogueUnavailableResult(request, "delayed_dialogue_rejected")
+		};
+	}
+
+	std::vector<TargetedSayResult> results;
+	results.reserve(delivery_plan.messages.size());
+	for (const auto &message : delivery_plan.messages) {
+		results.push_back(BuildDelayedDialogueReadyResult(request, message));
+	}
+
+	if (results.empty()) {
+		return {
+			BuildDelayedDialogueUnavailableResult(request, "delayed_dialogue_rejected")
+		};
+	}
+
+	return results;
+}
+
 DelayedDialogueQueue::DelayedDialogueQueue(DelayedDialogueProvider &provider)
 	: provider_(provider)
 {
@@ -867,52 +944,10 @@ bool DelayedDialogueQueue::PopReadyResult(
 		return false;
 	}
 
-	const auto processed_response = completion.succeeded ?
-		ProcessDialogueResponse(completion.dialogue_line, request.context.target.name) :
-		DialogueResponseProcessingResult{};
-	const auto delivery_plan = processed_response.accepted ?
-		PlanDialogueDelivery(processed_response.fragments) :
-		DialogueDeliveryPlan{};
-	const auto available = completion.succeeded && processed_response.accepted && delivery_plan.accepted;
-	const auto rejected = completion.succeeded && !available;
-
-	result = {
-		.handled = true,
-		.output_type = available ? OutputType::Say : OutputType::Emote,
-		.message = available ? std::string() : request.unavailable_reply,
-		.debug_reason = available ? "delayed_dialogue_ready" : (rejected ? "delayed_dialogue_rejected" : "delayed_dialogue_unavailable"),
-		.speaker_id = request.speaker_id,
-		.target_id = request.target_id,
-		.visible_speaker_id = request.target_id,
-		.target_type = request.target_type
-	};
-
-	if (available) {
-		std::vector<TargetedSayResult> ready_fragments;
-		for (const auto &message : delivery_plan.messages) {
-			ready_fragments.push_back({
-				.handled = true,
-				.output_type = message.output_type,
-				.message = message.message,
-				.debug_reason = "delayed_dialogue_ready",
-				.speaker_id = request.speaker_id,
-				.target_id = request.target_id,
-				.visible_speaker_id = request.target_id,
-				.target_type = request.target_type
-			});
-		}
-
-		if (ready_fragments.empty()) {
-			result.output_type = OutputType::Emote;
-			result.message = request.unavailable_reply;
-			result.debug_reason = "delayed_dialogue_rejected";
-			return true;
-		}
-
-		result = std::move(ready_fragments.front());
-		for (auto fragment = ready_fragments.begin() + 1; fragment != ready_fragments.end(); ++fragment) {
-			ready_results_.push_back(std::move(*fragment));
-		}
+	auto ready_results = BuildDelayedDialogueResults(request, completion);
+	result = std::move(ready_results.front());
+	for (auto ready_result = ready_results.begin() + 1; ready_result != ready_results.end(); ++ready_result) {
+		ready_results_.push_back(std::move(*ready_result));
 	}
 
 	return true;
