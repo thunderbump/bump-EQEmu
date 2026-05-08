@@ -51,6 +51,12 @@ public:
 		TEST_ADD(FallbackDialogueTest::PublicGameplayContextFiltersNearbyEntitiesByRuleRadius);
 		TEST_ADD(FallbackDialogueTest::PublicGameplayContextLimitsNearbyEntitiesByRuleCount);
 		TEST_ADD(FallbackDialogueTest::PublicGameplayContextExcludesSpeakerAndTargetFromNearbyEntities);
+		TEST_ADD(FallbackDialogueTest::DialogueResponseProcessingReturnsSpeechFragment);
+		TEST_ADD(FallbackDialogueTest::DialogueResponseProcessingReturnsStageDirectionFragments);
+		TEST_ADD(FallbackDialogueTest::DialogueResponseProcessingKeepsMixedParentheticalSpeech);
+		TEST_ADD(FallbackDialogueTest::DialogueResponseProcessingStripsTargetNameFromEmotesOnly);
+		TEST_ADD(FallbackDialogueTest::DialogueResponseProcessingRejectsUnsafeFragment);
+		TEST_ADD(FallbackDialogueTest::DialogueResponseProcessingKeepsMalformedMarkerAsSpeech);
 		TEST_ADD(FallbackDialogueTest::EligibleNpcTargetedSayQueuesDelayedRequestWithPublicContext);
 		TEST_ADD(FallbackDialogueTest::CompletedDelayedDialogueReturnsTargetSpeech);
 		TEST_ADD(FallbackDialogueTest::CompletedDelayedDialogueStripsNewlines);
@@ -556,6 +562,100 @@ private:
 
 		TEST_ASSERT_EQUALS(context.nearby_entities.size(), static_cast<size_t>(1));
 		TEST_ASSERT_EQUALS(context.nearby_entities[0].name, std::string("Dockhand"));
+	}
+
+	void DialogueResponseProcessingReturnsSpeechFragment()
+	{
+		const auto result = FallbackDialogue::ProcessDialogueResponse(
+			" Assistant: \"Mind the road, friend.\" ",
+			"Guard Teren"
+		);
+
+		TEST_ASSERT(result.accepted);
+		TEST_ASSERT(result.rejection_reason.empty());
+		TEST_ASSERT_EQUALS(result.fragments.size(), static_cast<size_t>(1));
+		TEST_ASSERT(result.fragments[0].output_type == FallbackDialogue::OutputType::Say);
+		TEST_ASSERT_EQUALS(result.fragments[0].message, std::string("Mind the road, friend."));
+	}
+
+	void DialogueResponseProcessingReturnsStageDirectionFragments()
+	{
+		const auto pure_result = FallbackDialogue::ProcessDialogueResponse(
+			"(checks bowstring)",
+			"Atenbot"
+		);
+
+		TEST_ASSERT(pure_result.accepted);
+		TEST_ASSERT_EQUALS(pure_result.fragments.size(), static_cast<size_t>(1));
+		TEST_ASSERT(pure_result.fragments[0].output_type == FallbackDialogue::OutputType::Emote);
+		TEST_ASSERT_EQUALS(pure_result.fragments[0].message, std::string("checks bowstring"));
+
+		const auto mixed_result = FallbackDialogue::ProcessDialogueResponse(
+			"Well met. *looks around warily* Keep your voice low.",
+			"Guard Teren"
+		);
+
+		TEST_ASSERT(mixed_result.accepted);
+		TEST_ASSERT_EQUALS(mixed_result.fragments.size(), static_cast<size_t>(3));
+		TEST_ASSERT(mixed_result.fragments[0].output_type == FallbackDialogue::OutputType::Say);
+		TEST_ASSERT_EQUALS(mixed_result.fragments[0].message, std::string("Well met."));
+		TEST_ASSERT(mixed_result.fragments[1].output_type == FallbackDialogue::OutputType::Emote);
+		TEST_ASSERT_EQUALS(mixed_result.fragments[1].message, std::string("looks around warily"));
+		TEST_ASSERT(mixed_result.fragments[2].output_type == FallbackDialogue::OutputType::Say);
+		TEST_ASSERT_EQUALS(mixed_result.fragments[2].message, std::string("Keep your voice low."));
+	}
+
+	void DialogueResponseProcessingKeepsMixedParentheticalSpeech()
+	{
+		const auto result = FallbackDialogue::ProcessDialogueResponse(
+			"Well met (if you can call it that).",
+			"Guard Teren"
+		);
+
+		TEST_ASSERT(result.accepted);
+		TEST_ASSERT_EQUALS(result.fragments.size(), static_cast<size_t>(1));
+		TEST_ASSERT(result.fragments[0].output_type == FallbackDialogue::OutputType::Say);
+		TEST_ASSERT_EQUALS(result.fragments[0].message, std::string("Well met (if you can call it that)."));
+	}
+
+	void DialogueResponseProcessingStripsTargetNameFromEmotesOnly()
+	{
+		const auto result = FallbackDialogue::ProcessDialogueResponse(
+			"Guard Teren speaks softly. *Guard Teren checks the road*",
+			"Guard Teren"
+		);
+
+		TEST_ASSERT(result.accepted);
+		TEST_ASSERT_EQUALS(result.fragments.size(), static_cast<size_t>(2));
+		TEST_ASSERT(result.fragments[0].output_type == FallbackDialogue::OutputType::Say);
+		TEST_ASSERT_EQUALS(result.fragments[0].message, std::string("Guard Teren speaks softly."));
+		TEST_ASSERT(result.fragments[1].output_type == FallbackDialogue::OutputType::Emote);
+		TEST_ASSERT_EQUALS(result.fragments[1].message, std::string("checks the road"));
+	}
+
+	void DialogueResponseProcessingRejectsUnsafeFragment()
+	{
+		const auto result = FallbackDialogue::ProcessDialogueResponse(
+			"Well met. */say follow me* Keep watch.",
+			"Guard Teren"
+		);
+
+		TEST_ASSERT(!result.accepted);
+		TEST_ASSERT_EQUALS(result.rejection_reason, std::string("unsafe_dialogue_fragment"));
+		TEST_ASSERT(result.fragments.empty());
+	}
+
+	void DialogueResponseProcessingKeepsMalformedMarkerAsSpeech()
+	{
+		const auto result = FallbackDialogue::ProcessDialogueResponse(
+			"Well met. *looks around warily",
+			"Guard Teren"
+		);
+
+		TEST_ASSERT(result.accepted);
+		TEST_ASSERT_EQUALS(result.fragments.size(), static_cast<size_t>(1));
+		TEST_ASSERT(result.fragments[0].output_type == FallbackDialogue::OutputType::Say);
+		TEST_ASSERT_EQUALS(result.fragments[0].message, std::string("Well met. *looks around warily"));
 	}
 
 	void EligibleNpcTargetedSayQueuesDelayedRequestWithPublicContext()

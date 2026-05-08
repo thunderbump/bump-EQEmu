@@ -334,13 +334,8 @@ bool IsRejectedDialogueLine(const std::string &dialogue_line)
 		lower_dialogue_line.find("provider timeout") != std::string::npos;
 }
 
-struct DialogueOutputFragment {
-	OutputType  output_type = OutputType::None;
-	std::string message;
-};
-
-void PushDialogueOutputFragment(
-	std::vector<DialogueOutputFragment> &fragments,
+void PushDialogueFragment(
+	std::vector<DialogueFragment> &fragments,
 	OutputType output_type,
 	const std::string &message
 )
@@ -356,13 +351,13 @@ void PushDialogueOutputFragment(
 	});
 }
 
-std::vector<DialogueOutputFragment> BuildDialogueOutputFragments(const std::string &dialogue_line)
+std::vector<DialogueFragment> BuildDialogueFragments(const std::string &dialogue_response)
 {
-	std::vector<DialogueOutputFragment> fragments;
+	std::vector<DialogueFragment> fragments;
 	std::string speech;
 
-	for (size_t index = 0; index < dialogue_line.size(); ++index) {
-		const auto character = dialogue_line[index];
+	for (size_t index = 0; index < dialogue_response.size(); ++index) {
+		const auto character = dialogue_response[index];
 		if (character != '*' && character != '(') {
 			speech.push_back(character);
 			continue;
@@ -374,31 +369,31 @@ std::vector<DialogueOutputFragment> BuildDialogueOutputFragments(const std::stri
 		}
 
 		const auto closing_character = character == '*' ? '*' : ')';
-		const auto closing_index = dialogue_line.find(closing_character, index + 1);
+		const auto closing_index = dialogue_response.find(closing_character, index + 1);
 		if (closing_index == std::string::npos) {
-			speech.append(dialogue_line.substr(index));
+			speech.append(dialogue_response.substr(index));
 			break;
 		}
 
-		if (character == '(' && !TrimCopy(dialogue_line.substr(closing_index + 1)).empty()) {
+		if (character == '(' && !TrimCopy(dialogue_response.substr(closing_index + 1)).empty()) {
 			speech.push_back(character);
 			continue;
 		}
 
-		const auto emote_text = TrimCopy(dialogue_line.substr(index + 1, closing_index - index - 1));
+		const auto emote_text = TrimCopy(dialogue_response.substr(index + 1, closing_index - index - 1));
 		if (emote_text.empty()) {
-			speech.append(dialogue_line.substr(index, closing_index - index + 1));
+			speech.append(dialogue_response.substr(index, closing_index - index + 1));
 			index = closing_index;
 			continue;
 		}
 
-		PushDialogueOutputFragment(fragments, OutputType::Say, speech);
+		PushDialogueFragment(fragments, OutputType::Say, speech);
 		speech.clear();
-		PushDialogueOutputFragment(fragments, OutputType::Emote, emote_text);
+		PushDialogueFragment(fragments, OutputType::Emote, emote_text);
 		index = closing_index;
 	}
 
-	PushDialogueOutputFragment(fragments, OutputType::Say, speech);
+	PushDialogueFragment(fragments, OutputType::Say, speech);
 	return fragments;
 }
 
@@ -711,6 +706,43 @@ PublicGameplayContext BuildPublicGameplayContext(const LiveContext &context)
 	return public_context;
 }
 
+DialogueResponseProcessingResult ProcessDialogueResponse(
+	const std::string &natural_dialogue_response,
+	const std::string &target_name
+)
+{
+	const auto normalized_response = NormalizeDialogueLine(natural_dialogue_response);
+	if (IsRejectedDialogueLine(normalized_response)) {
+		return {
+			.rejection_reason = "unsafe_dialogue_response"
+		};
+	}
+
+	auto fragments = BuildDialogueFragments(normalized_response);
+	if (fragments.empty()) {
+		return {
+			.rejection_reason = "empty_dialogue_response"
+		};
+	}
+
+	for (auto &fragment : fragments) {
+		if (fragment.output_type == OutputType::Emote) {
+			fragment.message = StripLeadingTargetNameFromEmote(fragment.message, target_name);
+		}
+
+		if (IsRejectedDialogueLine(fragment.message)) {
+			return {
+				.rejection_reason = "unsafe_dialogue_fragment"
+			};
+		}
+	}
+
+	return {
+		.accepted = true,
+		.fragments = std::move(fragments)
+	};
+}
+
 DelayedDialogueQueue::DelayedDialogueQueue(DelayedDialogueProvider &provider)
 	: provider_(provider)
 {
@@ -795,16 +827,16 @@ bool DelayedDialogueQueue::PopReadyResult(
 		return false;
 	}
 
-	const auto normalized_dialogue_line = completion.succeeded ?
-		NormalizeDialogueLine(completion.dialogue_line) :
-		std::string();
-	const auto rejected = completion.succeeded && IsRejectedDialogueLine(normalized_dialogue_line);
-	const auto available = completion.succeeded && !rejected;
+	const auto processed_response = completion.succeeded ?
+		ProcessDialogueResponse(completion.dialogue_line, request.context.target.name) :
+		DialogueResponseProcessingResult{};
+	const auto available = completion.succeeded && processed_response.accepted;
+	const auto rejected = completion.succeeded && !processed_response.accepted;
 
 	result = {
 		.handled = true,
 		.output_type = available ? OutputType::Say : OutputType::Emote,
-		.message = available ? normalized_dialogue_line : request.unavailable_reply,
+		.message = available ? std::string() : request.unavailable_reply,
 		.debug_reason = available ? "delayed_dialogue_ready" : (rejected ? "delayed_dialogue_rejected" : "delayed_dialogue_unavailable"),
 		.speaker_id = request.speaker_id,
 		.target_id = request.target_id,
@@ -813,23 +845,8 @@ bool DelayedDialogueQueue::PopReadyResult(
 	};
 
 	if (available) {
-		const auto output_fragments = BuildDialogueOutputFragments(normalized_dialogue_line);
-		if (output_fragments.empty() ||
-			std::any_of(
-				output_fragments.begin(),
-				output_fragments.end(),
-				[](const DialogueOutputFragment &fragment) {
-					return IsRejectedDialogueLine(fragment.message);
-				}
-			)) {
-			result.output_type = OutputType::Emote;
-			result.message = request.unavailable_reply;
-			result.debug_reason = "delayed_dialogue_rejected";
-			return true;
-		}
-
 		std::vector<TargetedSayResult> ready_fragments;
-		for (const auto &output_fragment : output_fragments) {
+		for (const auto &output_fragment : processed_response.fragments) {
 			if (output_fragment.output_type == OutputType::Say) {
 				for (const auto &speech_fragment : SplitDialogueLine(output_fragment.message)) {
 					ready_fragments.push_back({
@@ -849,7 +866,7 @@ bool DelayedDialogueQueue::PopReadyResult(
 			ready_fragments.push_back({
 				.handled = true,
 				.output_type = OutputType::Emote,
-				.message = StripLeadingTargetNameFromEmote(output_fragment.message, request.context.target.name),
+				.message = output_fragment.message,
 				.debug_reason = "delayed_dialogue_ready",
 				.speaker_id = request.speaker_id,
 				.target_id = request.target_id,

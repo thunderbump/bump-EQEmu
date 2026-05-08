@@ -50,6 +50,17 @@ enum class OutputType {
 	Emote
 };
 
+struct DialogueFragment {
+	OutputType  output_type = OutputType::None;
+	std::string message;
+};
+
+struct DialogueResponseProcessingResult {
+	bool                          accepted = false;
+	std::string                   rejection_reason;
+	std::vector<DialogueFragment> fragments;
+};
+
 struct TargetedSayRequest {
 	uint32_t    speaker_id = 0;
 	uint32_t    target_id = 0;
@@ -231,6 +242,10 @@ private:
 
 TargetedSayResult HandleTargetedSay(const TargetedSayRequest &request);
 PublicGameplayContext BuildPublicGameplayContext(const LiveContext &context);
+DialogueResponseProcessingResult ProcessDialogueResponse(
+	const std::string &natural_dialogue_response,
+	const std::string &target_name
+);
 std::string BuildDiagnosticLogLine(const TargetedSayResult &result);
 void LogDiagnostic(const TargetedSayResult &result);
 void ResetDialogueCooldowns();
