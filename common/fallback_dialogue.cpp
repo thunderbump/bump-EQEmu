@@ -334,6 +334,74 @@ bool IsRejectedDialogueLine(const std::string &dialogue_line)
 		lower_dialogue_line.find("provider timeout") != std::string::npos;
 }
 
+struct DialogueOutputFragment {
+	OutputType  output_type = OutputType::None;
+	std::string message;
+};
+
+void PushDialogueOutputFragment(
+	std::vector<DialogueOutputFragment> &fragments,
+	OutputType output_type,
+	const std::string &message
+)
+{
+	const auto trimmed_message = TrimCopy(message);
+	if (trimmed_message.empty()) {
+		return;
+	}
+
+	fragments.push_back({
+		.output_type = output_type,
+		.message = trimmed_message
+	});
+}
+
+std::vector<DialogueOutputFragment> BuildDialogueOutputFragments(const std::string &dialogue_line)
+{
+	std::vector<DialogueOutputFragment> fragments;
+	std::string speech;
+
+	for (size_t index = 0; index < dialogue_line.size(); ++index) {
+		const auto character = dialogue_line[index];
+		if (character != '*' && character != '(') {
+			speech.push_back(character);
+			continue;
+		}
+
+		if (character == '(' && !TrimCopy(speech).empty()) {
+			speech.push_back(character);
+			continue;
+		}
+
+		const auto closing_character = character == '*' ? '*' : ')';
+		const auto closing_index = dialogue_line.find(closing_character, index + 1);
+		if (closing_index == std::string::npos) {
+			speech.append(dialogue_line.substr(index));
+			break;
+		}
+
+		if (character == '(' && !TrimCopy(dialogue_line.substr(closing_index + 1)).empty()) {
+			speech.push_back(character);
+			continue;
+		}
+
+		const auto emote_text = TrimCopy(dialogue_line.substr(index + 1, closing_index - index - 1));
+		if (emote_text.empty()) {
+			speech.append(dialogue_line.substr(index, closing_index - index + 1));
+			index = closing_index;
+			continue;
+		}
+
+		PushDialogueOutputFragment(fragments, OutputType::Say, speech);
+		speech.clear();
+		PushDialogueOutputFragment(fragments, OutputType::Emote, emote_text);
+		index = closing_index;
+	}
+
+	PushDialogueOutputFragment(fragments, OutputType::Say, speech);
+	return fragments;
+}
+
 const char *EntityKindName(EntityKind kind)
 {
 	switch (kind) {
@@ -717,26 +785,61 @@ bool DelayedDialogueQueue::PopReadyResult(
 	};
 
 	if (available) {
-		const auto fragments = SplitDialogueLine(normalized_dialogue_line);
-		if (fragments.empty()) {
+		const auto output_fragments = BuildDialogueOutputFragments(normalized_dialogue_line);
+		if (output_fragments.empty() ||
+			std::any_of(
+				output_fragments.begin(),
+				output_fragments.end(),
+				[](const DialogueOutputFragment &fragment) {
+					return IsRejectedDialogueLine(fragment.message);
+				}
+			)) {
 			result.output_type = OutputType::Emote;
 			result.message = request.unavailable_reply;
 			result.debug_reason = "delayed_dialogue_rejected";
 			return true;
 		}
 
-		result.message = fragments.front();
-		for (auto fragment = fragments.begin() + 1; fragment != fragments.end(); ++fragment) {
-			ready_results_.push_back({
+		std::vector<TargetedSayResult> ready_fragments;
+		for (const auto &output_fragment : output_fragments) {
+			if (output_fragment.output_type == OutputType::Say) {
+				for (const auto &speech_fragment : SplitDialogueLine(output_fragment.message)) {
+					ready_fragments.push_back({
+						.handled = true,
+						.output_type = OutputType::Say,
+						.message = speech_fragment,
+						.debug_reason = "delayed_dialogue_ready",
+						.speaker_id = request.speaker_id,
+						.target_id = request.target_id,
+						.visible_speaker_id = request.target_id,
+						.target_type = request.target_type
+					});
+				}
+				continue;
+			}
+
+			ready_fragments.push_back({
 				.handled = true,
-				.output_type = OutputType::Say,
-				.message = *fragment,
+				.output_type = OutputType::Emote,
+				.message = output_fragment.message,
 				.debug_reason = "delayed_dialogue_ready",
 				.speaker_id = request.speaker_id,
 				.target_id = request.target_id,
 				.visible_speaker_id = request.target_id,
 				.target_type = request.target_type
 			});
+		}
+
+		if (ready_fragments.empty()) {
+			result.output_type = OutputType::Emote;
+			result.message = request.unavailable_reply;
+			result.debug_reason = "delayed_dialogue_rejected";
+			return true;
+		}
+
+		result = std::move(ready_fragments.front());
+		for (auto fragment = ready_fragments.begin() + 1; fragment != ready_fragments.end(); ++fragment) {
+			ready_results_.push_back(std::move(*fragment));
 		}
 	}
 
