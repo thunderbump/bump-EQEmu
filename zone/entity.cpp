@@ -147,6 +147,8 @@ void ProcessZoneFallbackDialogue()
 		} else if (result.output_type == FallbackDialogue::OutputType::Emote) {
 			target->Emote("%s", result.message.c_str());
 		}
+
+		FallbackDialogue::LogDiagnostic(result);
 	}
 }
 

@@ -72,6 +72,7 @@ public:
 		TEST_ADD(FallbackDialogueTest::OllamaProviderRequestFailureFallsBackToUnavailableReply);
 		TEST_ADD(FallbackDialogueTest::OllamaProviderDisabledModelFallsBackToUnavailableReply);
 		TEST_ADD(FallbackDialogueTest::OllamaProviderInvalidOutputFallsBackToUnavailableReply);
+		TEST_ADD(FallbackDialogueTest::DiagnosticLogLineClassifiesRepresentativeResultsWithoutPrivateContent);
 	}
 
 private:
@@ -1140,6 +1141,103 @@ private:
 		TEST_ASSERT(ready_result.output_type == FallbackDialogue::OutputType::Emote);
 		TEST_ASSERT_EQUALS(ready_result.message, std::string("seems lost in thought."));
 		TEST_ASSERT_EQUALS(ready_result.debug_reason, std::string("delayed_dialogue_rejected"));
+	}
+
+	void DiagnosticLogLineClassifiesRepresentativeResultsWithoutPrivateContent()
+	{
+		const std::vector<FallbackDialogue::TargetedSayResult> results = {
+			{
+				.handled = true,
+				.debug_reason = "delayed_dialogue_queued",
+				.speaker_id = 101,
+				.target_id = 202,
+				.target_type = FallbackDialogue::TargetType::NPC
+			},
+			{
+				.debug_reason = "authored_dialogue_handled",
+				.speaker_id = 101,
+				.target_id = 202,
+				.target_type = FallbackDialogue::TargetType::NPC
+			},
+			{
+				.debug_reason = "dialogue_cooldown",
+				.speaker_id = 101,
+				.target_id = 202,
+				.target_type = FallbackDialogue::TargetType::Bot
+			},
+			{
+				.debug_reason = "delayed_dialogue_dropped_target_changed",
+				.speaker_id = 101,
+				.target_id = 202,
+				.target_type = FallbackDialogue::TargetType::NPC
+			},
+			{
+				.handled = true,
+				.output_type = FallbackDialogue::OutputType::Emote,
+				.message = "private unavailable text",
+				.debug_reason = "delayed_dialogue_unavailable",
+				.speaker_id = 101,
+				.target_id = 202,
+				.target_type = FallbackDialogue::TargetType::NPC
+			},
+			{
+				.handled = true,
+				.output_type = FallbackDialogue::OutputType::Emote,
+				.message = "private rejected fallback text",
+				.debug_reason = "delayed_dialogue_rejected",
+				.speaker_id = 101,
+				.target_id = 202,
+				.target_type = FallbackDialogue::TargetType::NPC
+			},
+			{
+				.handled = true,
+				.output_type = FallbackDialogue::OutputType::Say,
+				.message = "generated private dialogue line",
+				.debug_reason = "delayed_dialogue_ready",
+				.speaker_id = 101,
+				.target_id = 202,
+				.visible_speaker_id = 202,
+				.target_type = FallbackDialogue::TargetType::NPC
+			},
+			{
+				.handled = true,
+				.output_type = FallbackDialogue::OutputType::Emote,
+				.message = "legacy private fallback text",
+				.speaker_id = 101,
+				.target_id = 202,
+				.visible_speaker_id = 202,
+				.target_type = FallbackDialogue::TargetType::NPC
+			}
+		};
+
+		const std::vector<std::string> expected_events = {
+			"event=queued_generation",
+			"event=authored_dialogue_suppression",
+			"event=cooldown_skip",
+			"event=stale_drop",
+			"event=unavailable_reply",
+			"event=rejected_output",
+			"event=delivered_say",
+			"event=delivered_emote"
+		};
+
+		for (size_t index = 0; index < results.size(); ++index) {
+			const auto line = FallbackDialogue::BuildDiagnosticLogLine(results[index]);
+
+			TEST_ASSERT(line.find("Fallback Dialogue diagnostic") != std::string::npos);
+			TEST_ASSERT(line.find(expected_events[index]) != std::string::npos);
+			TEST_ASSERT(line.find("speaker_id=101") != std::string::npos);
+			TEST_ASSERT(line.find("target_id=202") != std::string::npos);
+			if (results[index].output_type == FallbackDialogue::OutputType::Say) {
+				TEST_ASSERT(line.find("delivery=delivered_say") != std::string::npos);
+			} else if (results[index].output_type == FallbackDialogue::OutputType::Emote) {
+				TEST_ASSERT(line.find("delivery=delivered_emote") != std::string::npos);
+			}
+			TEST_ASSERT(line.find("message=") == std::string::npos);
+			TEST_ASSERT(line.find("prompt=") == std::string::npos);
+			TEST_ASSERT(line.find("private") == std::string::npos);
+			TEST_ASSERT(line.find("generated private dialogue line") == std::string::npos);
+		}
 	}
 
 	void ResetRules()

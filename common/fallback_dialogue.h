@@ -229,6 +229,8 @@ private:
 
 TargetedSayResult HandleTargetedSay(const TargetedSayRequest &request);
 PublicGameplayContext BuildPublicGameplayContext(const LiveContext &context);
+std::string BuildDiagnosticLogLine(const TargetedSayResult &result);
+void LogDiagnostic(const TargetedSayResult &result);
 void ResetDialogueCooldowns();
 
 }

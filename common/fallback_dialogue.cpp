@@ -305,6 +305,89 @@ const char *EntityKindName(EntityKind kind)
 	}
 }
 
+const char *TargetTypeName(TargetType target_type)
+{
+	switch (target_type) {
+	case TargetType::NPC:
+		return "npc";
+	case TargetType::Bot:
+		return "bot";
+	case TargetType::Mercenary:
+		return "mercenary";
+	case TargetType::Unknown:
+	default:
+		return "unknown";
+	}
+}
+
+const char *OutputTypeName(OutputType output_type)
+{
+	switch (output_type) {
+	case OutputType::Say:
+		return "say";
+	case OutputType::Emote:
+		return "emote";
+	case OutputType::None:
+	default:
+		return "none";
+	}
+}
+
+const char *DeliveryName(OutputType output_type)
+{
+	switch (output_type) {
+	case OutputType::Say:
+		return "delivered_say";
+	case OutputType::Emote:
+		return "delivered_emote";
+	case OutputType::None:
+	default:
+		return "none";
+	}
+}
+
+bool IsStaleDropReason(const std::string &debug_reason)
+{
+	return StartsWithInsensitive(debug_reason, "delayed_dialogue_dropped_");
+}
+
+const char *DiagnosticEventName(const TargetedSayResult &result)
+{
+	if (result.debug_reason == "delayed_dialogue_queued") {
+		return "queued_generation";
+	}
+
+	if (result.debug_reason == "authored_dialogue_handled") {
+		return "authored_dialogue_suppression";
+	}
+
+	if (result.debug_reason == "dialogue_cooldown") {
+		return "cooldown_skip";
+	}
+
+	if (IsStaleDropReason(result.debug_reason)) {
+		return "stale_drop";
+	}
+
+	if (result.debug_reason == "delayed_dialogue_unavailable") {
+		return "unavailable_reply";
+	}
+
+	if (result.debug_reason == "delayed_dialogue_rejected") {
+		return "rejected_output";
+	}
+
+	if (result.output_type == OutputType::Say) {
+		return "delivered_say";
+	}
+
+	if (result.output_type == OutputType::Emote) {
+		return "delivered_emote";
+	}
+
+	return "skip";
+}
+
 std::string BuildOllamaPrompt(const PublicGameplayContext &context)
 {
 	std::ostringstream prompt;
@@ -554,19 +637,13 @@ bool DelayedDialogueQueue::PopReadyResult(
 
 	const auto stale_reason = ValidateCurrentInteraction(request, resolver(request));
 	if (!stale_reason.empty()) {
-		LogDebug(
-			"Fallback Dialogue dropped delayed result for speaker [{}] target [{}]: {}",
-			request.speaker_id,
-			request.target_id,
-			stale_reason
-		);
-
 		result = {
 			.debug_reason = stale_reason,
 			.speaker_id = request.speaker_id,
 			.target_id = request.target_id,
 			.target_type = request.target_type
 		};
+		LogDiagnostic(result);
 		return false;
 	}
 
@@ -587,6 +664,36 @@ bool DelayedDialogueQueue::PopReadyResult(
 		.target_type = request.target_type
 	};
 	return true;
+}
+
+std::string BuildDiagnosticLogLine(const TargetedSayResult &result)
+{
+	std::ostringstream diagnostic;
+	diagnostic
+		<< "Fallback Dialogue diagnostic"
+		<< " event=" << DiagnosticEventName(result)
+		<< " speaker_id=" << result.speaker_id
+		<< " target_id=" << result.target_id
+		<< " visible_speaker_id=" << result.visible_speaker_id
+		<< " target_type=" << TargetTypeName(result.target_type)
+		<< " output_type=" << OutputTypeName(result.output_type)
+		<< " delivery=" << DeliveryName(result.output_type)
+		<< " handled=" << (result.handled ? "true" : "false");
+
+	if (!result.debug_reason.empty()) {
+		diagnostic << " reason=" << result.debug_reason;
+	}
+
+	return diagnostic.str();
+}
+
+void LogDiagnostic(const TargetedSayResult &result)
+{
+	if (!result.handled && result.debug_reason.empty()) {
+		return;
+	}
+
+	LogDebug("{}", BuildDiagnosticLogLine(result));
 }
 
 OllamaDelayedDialogueProvider::OllamaDelayedDialogueProvider()

@@ -1668,14 +1668,9 @@ void Client::ChannelMessageReceived(uint8 chan_num, uint8 language, uint8 lang_s
 
 				if (fallback_result.handled && fallback_result.output_type == FallbackDialogue::OutputType::Emote) {
 					t->Emote("%s", fallback_result.message.c_str());
-				} else if (!fallback_result.debug_reason.empty()) {
-					LogDebug(
-						"Fallback Dialogue skipped targeted say from [{}] to [{}]: {}",
-						GetID(),
-						t->GetID(),
-						fallback_result.debug_reason
-					);
 				}
+
+				FallbackDialogue::LogDiagnostic(fallback_result);
 			}
 			break;
 		}
