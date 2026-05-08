@@ -44,9 +44,37 @@ _Avoid_: Private account context, operator context
 A separate rate limit for starting remote **Fallback Dialogue** generation.
 _Avoid_: Chat anti-spam, global chat limit
 
-**Dialogue Line**:
-A single short in-character speech response emitted as **Fallback Dialogue**.
-_Avoid_: Monologue, command, out-of-character explanation
+**Dialogue Response**:
+One generated in-character response to a **Targeted Say**. A **Dialogue Response** may contain one or more ordered **Dialogue Fragments**.
+_Avoid_: AI answer, generated blob
+
+**Dialogue Fragment**:
+One ordered part of a **Dialogue Response**, delivered as target speech or target emote.
+_Avoid_: Raw model chunk, unstructured text
+
+**Delivered Dialogue Message**:
+One client-visible say or emote message emitted from a **Dialogue Fragment**. A long speech **Dialogue Fragment** may be split into multiple **Delivered Dialogue Messages**.
+_Avoid_: Dialogue Fragment, player chat message
+
+**Dialogue Response Processing**:
+Turning raw **Natural Dialogue Format** text into safe ordered **Dialogue Fragments**.
+_Avoid_: Delivery formatting, queue polling
+
+**Dialogue Delivery Planning**:
+Turning safe ordered **Dialogue Fragments** into **Delivered Dialogue Messages**.
+_Avoid_: Model parsing, prompt handling
+
+**Unsafe Dialogue Fragment**:
+A **Dialogue Fragment** that looks like a command, metadata, JSON, technical error, provider failure, or out-of-character model refusal instead of ordinary in-character dialogue.
+_Avoid_: Bad vibes, disliked answer
+
+**Natural Dialogue Format**:
+Plain generated response text that can include speech and simple stage-direction markers such as `*looks around*`.
+_Avoid_: Required JSON dialogue, rigid response schema
+
+**Stage Direction Marker**:
+A simple **Natural Dialogue Format** marker that identifies an emote **Dialogue Fragment**. Asterisk markers can appear inside mixed speech; parenthesized markers are only treated as emotes when the whole **Dialogue Response** is parenthesized.
+_Avoid_: Free-form parser magic, markdown command
 
 ## Relationships
 
@@ -65,7 +93,16 @@ _Avoid_: Monologue, command, out-of-character explanation
 - **Delayed Dialogue** is emitted only when the **Current Interaction** still holds.
 - The first **Fallback Dialogue** prompt sends **Public Gameplay Context** only.
 - A **Dialogue Cooldown** limits how often one speaker can trigger **Fallback Dialogue** for the same target.
-- The first **Fallback Dialogue** output is a single **Dialogue Line**.
+- The first **Fallback Dialogue** implementation accepts a single generated **Dialogue Response**.
+- A **Dialogue Response** can produce multiple ordered **Dialogue Fragments**.
+- Long speech splitting is a **Delivered Dialogue Message** concern, not a change to the **Dialogue Response** structure.
+- **Dialogue Response Processing** and **Dialogue Delivery Planning** are separate concerns even when implemented near each other.
+- Long emote **Dialogue Fragments** are rejected rather than split unless runtime evidence shows long generated emotes need a different policy.
+- **Dialogue Responses** use **Natural Dialogue Format** because the first remote response service target is a smaller local model optimized for speed, not strict structured output reliability.
+- Mixed speech uses asterisk **Stage Direction Markers** for emote **Dialogue Fragments**; parenthesized **Stage Direction Markers** are reserved for whole-response emotes to avoid treating ordinary parenthetical speech as emotes.
+- **Fallback Dialogue** prompts should allow multiple ordered **Dialogue Fragments** without explicitly encouraging verbose or multi-message responses.
+- New or refactored **Fallback Dialogue** implementation surfaces should use **Dialogue Response**, **Dialogue Fragment**, and **Delivered Dialogue Message** language; older internal `Dialogue Line` names can be retired incrementally when touched.
+- If any part of a **Dialogue Response** is an **Unsafe Dialogue Fragment**, reject the whole **Dialogue Response** and show an **Unavailable Reply**.
 
 ## Example dialogue
 
@@ -105,8 +142,8 @@ _Avoid_: Monologue, command, out-of-character explanation
 > **Dev:** "Are normal chat anti-spam rules enough to protect remote generation?"
 > **Domain expert:** "No. Add a **Dialogue Cooldown** for each speaker and target so normal speech can continue without flooding the remote response queue."
 >
-> **Dev:** "Can generated responses include multiple lines, commands, mechanics, or out-of-character explanations?"
-> **Domain expert:** "No. The first version should emit one short in-character **Dialogue Line**."
+> **Dev:** "Can generated responses include multiple commands, mechanics, or out-of-character explanations?"
+> **Domain expert:** "No. A **Dialogue Response** can contain multiple ordered **Dialogue Fragments**, but every fragment must stay in-character and safe to deliver."
 
 ## Flagged ambiguities
 
