@@ -31,6 +31,6 @@ void HandleTargetedSay(
 	bool authored_dialogue_handled,
 	bool target_engaged
 );
-void Process();
+void ProcessReadyDelayedDialogue();
 
 }

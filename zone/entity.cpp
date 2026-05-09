@@ -3129,7 +3129,7 @@ void EntityList::RemoveEntity(uint16 id)
 void EntityList::Process()
 {
 	CheckSpawnQueue();
-	ZoneFallbackDialogueRuntime::Process();
+	ZoneFallbackDialogueRuntime::ProcessReadyDelayedDialogue();
 }
 
 void EntityList::Depop(bool StartSpawnTimer)

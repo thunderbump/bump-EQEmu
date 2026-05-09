@@ -23,6 +23,8 @@
 #include "mob.h"
 #include "zone.h"
 
+#include <vector>
+
 extern Zone *zone;
 
 namespace {
@@ -30,7 +32,7 @@ namespace {
 FallbackDialogue::OllamaDelayedDialogueProvider fallback_dialogue_provider;
 FallbackDialogue::DelayedDialogueQueue fallback_dialogue_queue(fallback_dialogue_provider);
 
-FallbackDialogue::EntityKind FallbackDialogueEntityKind(Mob *mob)
+FallbackDialogue::EntityKind PublicGameplayContextEntityKind(Mob *mob)
 {
 	if (!mob) {
 		return FallbackDialogue::EntityKind::Unknown;
@@ -76,7 +78,7 @@ FallbackDialogue::TargetType FallbackDialogueTargetType(Mob *mob)
 	return FallbackDialogue::TargetType::Unknown;
 }
 
-FallbackDialogue::LiveEntity FallbackDialogueLiveEntity(Mob *mob)
+FallbackDialogue::LiveEntity PublicGameplayContextEntity(Mob *mob)
 {
 	if (!mob) {
 		return {};
@@ -85,7 +87,7 @@ FallbackDialogue::LiveEntity FallbackDialogueLiveEntity(Mob *mob)
 	return {
 		.entity_id = mob->GetID(),
 		.name = mob->GetCleanName(),
-		.kind = FallbackDialogueEntityKind(mob),
+		.kind = PublicGameplayContextEntityKind(mob),
 		.level = mob->GetLevel(),
 		.x = mob->GetX(),
 		.y = mob->GetY(),
@@ -102,7 +104,7 @@ std::vector<FallbackDialogue::LiveEntity> FallbackDialogueNearbyEntities(Mob *sp
 			continue;
 		}
 
-		nearby_entities.push_back(FallbackDialogueLiveEntity(mob));
+		nearby_entities.push_back(PublicGameplayContextEntity(mob));
 	}
 
 	return nearby_entities;
@@ -122,8 +124,8 @@ FallbackDialogue::CurrentInteraction CurrentFallbackDialogueInteraction(
 		.speaker_target_id = speaker_target ? static_cast<uint32_t>(speaker_target->GetID()) : 0,
 		.speaker_present = speaker != nullptr,
 		.target_present = target != nullptr,
-		.speaker = FallbackDialogueLiveEntity(speaker),
-		.target = FallbackDialogueLiveEntity(target)
+		.speaker = PublicGameplayContextEntity(speaker),
+		.target = PublicGameplayContextEntity(target)
 	};
 }
 
@@ -140,8 +142,8 @@ FallbackDialogue::LiveContext BuildZoneFallbackDialogueContext(
 {
 	return {
 		.current_message = message,
-		.speaker = FallbackDialogueLiveEntity(speaker),
-		.target = FallbackDialogueLiveEntity(target),
+		.speaker = PublicGameplayContextEntity(speaker),
+		.target = PublicGameplayContextEntity(target),
 		.zone = {
 			.short_name = zone ? zone->GetShortName() : "",
 			.long_name = zone ? zone->GetLongName() : ""
@@ -192,7 +194,7 @@ void HandleTargetedSay(
 	FallbackDialogue::LogDiagnostic(result);
 }
 
-void Process()
+void ProcessReadyDelayedDialogue()
 {
 	FallbackDialogue::TargetedSayResult result;
 	while (ZoneFallbackDialogueQueue().PopReadyResult(CurrentFallbackDialogueInteraction, result)) {
