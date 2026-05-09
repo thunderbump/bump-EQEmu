@@ -524,7 +524,8 @@ std::string BuildOllamaPrompt(const PublicGameplayContext &context)
 {
 	std::ostringstream prompt;
 	prompt
-		<< "Write one short in-character Dialogue Line for this EverQuest interaction. "
+		<< "Write one short in-character Dialogue Response for this EverQuest interaction. "
+		<< "Use ordinary speech, with simple stage directions in *...* when appropriate. "
 		<< "Use only the public gameplay context below. Do not include metadata, commands, JSON, or explanations.\n"
 		<< "Message: " << context.current_message << "\n"
 		<< "Speaker: " << context.speaker.name

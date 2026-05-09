@@ -1678,6 +1678,11 @@ private:
 		TEST_ASSERT_EQUALS(transport.Calls()[0].endpoint, std::string("http://ollama.test:11434/api/generate"));
 		TEST_ASSERT_EQUALS(transport.Calls()[0].timeout_ms, 1234);
 		TEST_ASSERT(transport.Calls()[0].body.find("\"model\":\"test-model\"") != std::string::npos);
+		TEST_ASSERT(transport.Calls()[0].body.find("Write one short in-character Dialogue Response") != std::string::npos);
+		TEST_ASSERT(transport.Calls()[0].body.find("simple stage directions in *...*") != std::string::npos);
+		TEST_ASSERT(transport.Calls()[0].body.find("Do not include metadata, commands, JSON, or explanations") != std::string::npos);
+		TEST_ASSERT(transport.Calls()[0].body.find("Dialogue Line") == std::string::npos);
+		TEST_ASSERT(transport.Calls()[0].body.find("multiple messages") == std::string::npos);
 		TEST_ASSERT(transport.Calls()[0].body.find("hail friend") != std::string::npos);
 		TEST_ASSERT(transport.Calls()[0].body.find("Aten") != std::string::npos);
 		TEST_ASSERT(transport.Calls()[0].body.find("Guard Teren") != std::string::npos);
