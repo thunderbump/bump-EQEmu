@@ -103,6 +103,14 @@ float DistanceNoZBetween(const PublicEntityInput &first, const PublicEntityInput
 	return std::sqrt((x * x) + (y * y));
 }
 
+float DistanceNoZBetween(const CurrentInteractionEntityState &first, const CurrentInteractionEntityState &second)
+{
+	const auto x = first.x - second.x;
+	const auto y = first.y - second.y;
+
+	return std::sqrt((x * x) + (y * y));
+}
+
 PublicEntitySummary BuildPublicEntitySummary(const PublicEntityInput &entity, float distance = 0.0f)
 {
 	return {

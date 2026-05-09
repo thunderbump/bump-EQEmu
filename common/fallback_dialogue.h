@@ -154,14 +154,20 @@ struct DelayedDialogueCompletion {
 	std::string dialogue_response;
 };
 
+struct CurrentInteractionEntityState {
+	float x = 0.0f;
+	float y = 0.0f;
+	float z = 0.0f;
+};
+
 struct CurrentInteraction {
 	uint32_t          speaker_id = 0;
 	uint32_t          target_id = 0;
 	uint32_t          speaker_target_id = 0;
 	bool              speaker_present = false;
 	bool              target_present = false;
-	PublicEntityInput speaker;
-	PublicEntityInput target;
+	CurrentInteractionEntityState speaker;
+	CurrentInteractionEntityState target;
 };
 
 class DelayedDialogueProvider {

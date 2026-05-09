@@ -96,6 +96,19 @@ FallbackDialogue::PublicEntityInput PublicGameplayContextEntityInput(Mob *mob)
 	};
 }
 
+FallbackDialogue::CurrentInteractionEntityState BuildCurrentInteractionEntityState(Mob *mob)
+{
+	if (!mob) {
+		return {};
+	}
+
+	return {
+		.x = mob->GetX(),
+		.y = mob->GetY(),
+		.z = mob->GetZ()
+	};
+}
+
 std::vector<FallbackDialogue::PublicEntityInput> FallbackDialogueNearbyEntityInputs(Mob *speaker, Mob *target)
 {
 	std::vector<FallbackDialogue::PublicEntityInput> nearby_entities;
@@ -124,8 +137,8 @@ FallbackDialogue::CurrentInteraction CurrentFallbackDialogueInteraction(
 		.speaker_target_id = speaker_target ? static_cast<uint32_t>(speaker_target->GetID()) : 0,
 		.speaker_present = speaker != nullptr,
 		.target_present = target != nullptr,
-		.speaker = PublicGameplayContextEntityInput(speaker),
-		.target = PublicGameplayContextEntityInput(target)
+		.speaker = BuildCurrentInteractionEntityState(speaker),
+		.target = BuildCurrentInteractionEntityState(target)
 	};
 }
 

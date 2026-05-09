@@ -1501,8 +1501,8 @@ private:
 			.speaker_target_id = 202,
 			.speaker_present = true,
 			.target_present = true,
-			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
-			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 10.0f, 0.0f, 80.0f)
+			.speaker = BuildCurrentInteractionEntityState(0.0f, 0.0f, 0.0f),
+			.target = BuildCurrentInteractionEntityState(10.0f, 0.0f, 80.0f)
 		}, ready_result));
 		TEST_ASSERT(ready_result.output_type == FallbackDialogue::OutputType::Say);
 		TEST_ASSERT_EQUALS(ready_result.message, std::string("Well met."));
@@ -1545,8 +1545,8 @@ private:
 			.speaker_target_id = 303,
 			.speaker_present = true,
 			.target_present = true,
-			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
-			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f)
+			.speaker = BuildCurrentInteractionEntityState(0.0f, 0.0f, 0.0f),
+			.target = BuildCurrentInteractionEntityState(5.0f, 0.0f, 0.0f)
 		}, ready_result));
 		TEST_ASSERT(!ready_result.handled);
 		TEST_ASSERT(ready_result.output_type == FallbackDialogue::OutputType::None);
@@ -1588,8 +1588,8 @@ private:
 			.speaker_target_id = 202,
 			.speaker_present = true,
 			.target_present = true,
-			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 90.0f),
-			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 16.0f, 0.0f, 0.0f)
+			.speaker = BuildCurrentInteractionEntityState(0.0f, 0.0f, 90.0f),
+			.target = BuildCurrentInteractionEntityState(16.0f, 0.0f, 0.0f)
 		}, ready_result));
 		TEST_ASSERT(!ready_result.handled);
 		TEST_ASSERT(ready_result.output_type == FallbackDialogue::OutputType::None);
@@ -1629,7 +1629,7 @@ private:
 			.speaker_target_id = 202,
 			.speaker_present = true,
 			.target_present = false,
-			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f)
+			.speaker = BuildCurrentInteractionEntityState(0.0f, 0.0f, 0.0f)
 		}, ready_result));
 		TEST_ASSERT(!ready_result.handled);
 		TEST_ASSERT(ready_result.output_type == FallbackDialogue::OutputType::None);
@@ -1968,8 +1968,28 @@ private:
 			.speaker_target_id = speaker_target_id,
 			.speaker_present = true,
 			.target_present = true,
-			.speaker = speaker,
-			.target = target
+			.speaker = BuildCurrentInteractionEntityState(speaker),
+			.target = BuildCurrentInteractionEntityState(target)
+		};
+	}
+
+	FallbackDialogue::CurrentInteractionEntityState BuildCurrentInteractionEntityState(
+		const FallbackDialogue::PublicEntityInput &entity
+	)
+	{
+		return BuildCurrentInteractionEntityState(entity.x, entity.y, entity.z);
+	}
+
+	FallbackDialogue::CurrentInteractionEntityState BuildCurrentInteractionEntityState(
+		float x,
+		float y,
+		float z
+	)
+	{
+		return {
+			.x = x,
+			.y = y,
+			.z = z
 		};
 	}
 
