@@ -47,7 +47,7 @@ public:
 		TEST_ADD(FallbackDialogueTest::MercenaryTargetedSayReportsSkipWithoutReply);
 		TEST_ADD(FallbackDialogueTest::UnknownTargetedSayReportsSkipWithoutReply);
 		TEST_ADD(FallbackDialogueTest::PublicGameplayContextIncludesAllowedFields);
-		TEST_ADD(FallbackDialogueTest::PublicGameplayContextExcludesPrivateFields);
+		TEST_ADD(FallbackDialogueTest::PublicGameplayContextExcludesLocalOnlyDerivationFields);
 		TEST_ADD(FallbackDialogueTest::PublicGameplayContextFiltersNearbyEntitiesByRuleRadius);
 		TEST_ADD(FallbackDialogueTest::PublicGameplayContextLimitsNearbyEntitiesByRuleCount);
 		TEST_ADD(FallbackDialogueTest::PublicGameplayContextExcludesSpeakerAndTargetFromNearbyEntities);
@@ -431,10 +431,13 @@ private:
 	{
 		ResetRules();
 
+		auto target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f);
+		target.engaged = true;
+
 		const auto context = FallbackDialogue::BuildPublicGameplayContext({
 			.current_message = "hail friend",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
-			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
+			.target = target,
 			.zone = PublicZone("qeynos", "South Qeynos"),
 			.nearby_entities = {
 				PublicEntity("Merchant Bren", FallbackDialogue::EntityKind::NPC, 18, 10.0f, 0.0f, 0.0f),
@@ -448,36 +451,54 @@ private:
 		TEST_ASSERT_EQUALS(context.speaker.level, 12);
 		TEST_ASSERT_EQUALS(context.target.name, std::string("Guard Teren"));
 		TEST_ASSERT(context.target.kind == FallbackDialogue::EntityKind::NPC);
+		TEST_ASSERT_EQUALS(context.target.level, 22);
+		TEST_ASSERT(context.target.engaged);
+		TEST_ASSERT_EQUALS(context.target.distance, 5.0f);
 		TEST_ASSERT_EQUALS(context.zone.short_name, std::string("qeynos"));
 		TEST_ASSERT_EQUALS(context.zone.long_name, std::string("South Qeynos"));
 		TEST_ASSERT_EQUALS(context.nearby_entities.size(), static_cast<size_t>(2));
 		TEST_ASSERT_EQUALS(context.nearby_entities[0].name, std::string("Merchant Bren"));
+		TEST_ASSERT(context.nearby_entities[0].kind == FallbackDialogue::EntityKind::NPC);
+		TEST_ASSERT_EQUALS(context.nearby_entities[0].level, 18);
+		TEST_ASSERT_EQUALS(context.nearby_entities[0].distance, 10.0f);
 		TEST_ASSERT_EQUALS(context.nearby_entities[1].name, std::string("Atenbot"));
+		TEST_ASSERT(context.nearby_entities[1].kind == FallbackDialogue::EntityKind::Bot);
+		TEST_ASSERT_EQUALS(context.nearby_entities[1].level, 12);
+		TEST_ASSERT_EQUALS(context.nearby_entities[1].distance, 15.0f);
 	}
 
-	void PublicGameplayContextExcludesPrivateFields()
+	void PublicGameplayContextExcludesLocalOnlyDerivationFields()
 	{
 		ResetRules();
 
+		auto speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 1111.0f, 2222.0f, 3333.0f);
+		speaker.entity_id = 91001;
+		auto target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 1114.0f, 2226.0f, 3333.0f);
+		target.entity_id = 92002;
+		auto nearby = PublicEntity("Dockhand", FallbackDialogue::EntityKind::NPC, 8, 1111.0f, 2228.0f, 3333.0f);
+		nearby.entity_id = 93003;
+
 		const auto context = FallbackDialogue::BuildPublicGameplayContext({
 			.current_message = "hail friend",
-			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
-			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
-			.zone = PublicZone("qeynos", "South Qeynos")
+			.speaker = speaker,
+			.target = target,
+			.zone = PublicZone("qeynos", "South Qeynos"),
+			.nearby_entities = {nearby}
 		});
 
 		const auto serialized = SerializePublicContext(context);
 		TEST_ASSERT(serialized.find("Aten") != std::string::npos);
 		TEST_ASSERT(serialized.find("Guard Teren") != std::string::npos);
-		TEST_ASSERT(serialized.find("private_account_name") == std::string::npos);
-		TEST_ASSERT(serialized.find("192.0.2.55") == std::string::npos);
-		TEST_ASSERT(serialized.find("private_tell_payload") == std::string::npos);
-		TEST_ASSERT(serialized.find("bag_of_private_items") == std::string::npos);
-		TEST_ASSERT(serialized.find("raw_global_state") == std::string::npos);
-		TEST_ASSERT(serialized.find("target_raw_globals") == std::string::npos);
-		TEST_ASSERT(serialized.find("db_password_secret") == std::string::npos);
-		TEST_ASSERT(serialized.find("9001") == std::string::npos);
-		TEST_ASSERT(serialized.find("8001") == std::string::npos);
+		TEST_ASSERT(serialized.find("Dockhand") != std::string::npos);
+		TEST_ASSERT(serialized.find("91001") == std::string::npos);
+		TEST_ASSERT(serialized.find("92002") == std::string::npos);
+		TEST_ASSERT(serialized.find("93003") == std::string::npos);
+		TEST_ASSERT(serialized.find("1111") == std::string::npos);
+		TEST_ASSERT(serialized.find("1114") == std::string::npos);
+		TEST_ASSERT(serialized.find("2222") == std::string::npos);
+		TEST_ASSERT(serialized.find("2226") == std::string::npos);
+		TEST_ASSERT(serialized.find("2228") == std::string::npos);
+		TEST_ASSERT(serialized.find("3333") == std::string::npos);
 	}
 
 	void PublicGameplayContextFiltersNearbyEntitiesByRuleRadius()
@@ -715,6 +736,9 @@ private:
 				PublicEntity("Dockhand", FallbackDialogue::EntityKind::NPC, 8, 12.0f, 0.0f, 0.0f)
 			}
 		};
+		public_context_input.speaker.entity_id = 91001;
+		public_context_input.target.entity_id = 92002;
+		public_context_input.nearby_entities[0].entity_id = 93003;
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 101,
 			.target_id = 202,
@@ -741,6 +765,18 @@ private:
 			provider.PendingRequests()[0].context.target.name,
 			std::string("Captain Rohand")
 		);
+		TEST_ASSERT_EQUALS(
+			provider.PendingRequests()[0].context.nearby_entities.size(),
+			static_cast<size_t>(1)
+		);
+		TEST_ASSERT_EQUALS(
+			provider.PendingRequests()[0].context.nearby_entities[0].name,
+			std::string("Dockhand")
+		);
+		const auto serialized = SerializePublicContext(provider.PendingRequests()[0].context);
+		TEST_ASSERT(serialized.find("91001") == std::string::npos);
+		TEST_ASSERT(serialized.find("92002") == std::string::npos);
+		TEST_ASSERT(serialized.find("93003") == std::string::npos);
 
 		FallbackDialogue::TargetedSayResult ready_result;
 		TEST_ASSERT(!queue.PopReadyResult(CurrentInteractionFor(101, 202, 202), ready_result));
@@ -1629,11 +1665,11 @@ private:
 
 		const auto ready_result = OllamaResultFor(transport, {
 			.current_message = "hail friend",
-			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
-			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
+			.speaker = PublicEntityWithId(91001, "Aten", FallbackDialogue::EntityKind::Player, 12, 1111.0f, 2222.0f, 3333.0f),
+			.target = PublicEntityWithId(92002, "Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 1114.0f, 2226.0f, 3333.0f),
 			.zone = PublicZone("qeynos", "South Qeynos"),
 			.nearby_entities = {
-				PublicEntity("Dockhand", FallbackDialogue::EntityKind::NPC, 8, 10.0f, 0.0f, 0.0f)
+				PublicEntityWithId(93003, "Dockhand", FallbackDialogue::EntityKind::NPC, 8, 1111.0f, 2228.0f, 3333.0f)
 			}
 		});
 
@@ -1651,15 +1687,18 @@ private:
 		TEST_ASSERT(transport.Calls()[0].body.find("Aten") != std::string::npos);
 		TEST_ASSERT(transport.Calls()[0].body.find("Guard Teren") != std::string::npos);
 		TEST_ASSERT(transport.Calls()[0].body.find("Dockhand") != std::string::npos);
-		TEST_ASSERT(transport.Calls()[0].body.find("private_account_name") == std::string::npos);
-		TEST_ASSERT(transport.Calls()[0].body.find("192.0.2.55") == std::string::npos);
-		TEST_ASSERT(transport.Calls()[0].body.find("private_tell_payload") == std::string::npos);
-		TEST_ASSERT(transport.Calls()[0].body.find("bag_of_private_items") == std::string::npos);
-		TEST_ASSERT(transport.Calls()[0].body.find("raw_global_state") == std::string::npos);
-		TEST_ASSERT(transport.Calls()[0].body.find("target_raw_globals") == std::string::npos);
-		TEST_ASSERT(transport.Calls()[0].body.find("db_password_secret") == std::string::npos);
-		TEST_ASSERT(transport.Calls()[0].body.find("9001") == std::string::npos);
-		TEST_ASSERT(transport.Calls()[0].body.find("8001") == std::string::npos);
+		TEST_ASSERT(transport.Calls()[0].body.find("level 12") != std::string::npos);
+		TEST_ASSERT(transport.Calls()[0].body.find("level 22") != std::string::npos);
+		TEST_ASSERT(transport.Calls()[0].body.find("South Qeynos") != std::string::npos);
+		TEST_ASSERT(transport.Calls()[0].body.find("91001") == std::string::npos);
+		TEST_ASSERT(transport.Calls()[0].body.find("92002") == std::string::npos);
+		TEST_ASSERT(transport.Calls()[0].body.find("93003") == std::string::npos);
+		TEST_ASSERT(transport.Calls()[0].body.find("1111") == std::string::npos);
+		TEST_ASSERT(transport.Calls()[0].body.find("1114") == std::string::npos);
+		TEST_ASSERT(transport.Calls()[0].body.find("2222") == std::string::npos);
+		TEST_ASSERT(transport.Calls()[0].body.find("2226") == std::string::npos);
+		TEST_ASSERT(transport.Calls()[0].body.find("2228") == std::string::npos);
+		TEST_ASSERT(transport.Calls()[0].body.find("3333") == std::string::npos);
 	}
 
 	void OllamaProviderTimeoutFallsBackToUnavailableReply()
@@ -1867,6 +1906,21 @@ private:
 		};
 	}
 
+	FallbackDialogue::PublicEntityInput PublicEntityWithId(
+		uint32_t entity_id,
+		const std::string &name,
+		FallbackDialogue::EntityKind kind,
+		int level,
+		float x,
+		float y,
+		float z
+	)
+	{
+		auto entity = PublicEntity(name, kind, level, x, y, z);
+		entity.entity_id = entity_id;
+		return entity;
+	}
+
 	FallbackDialogue::PublicZoneInput PublicZone(const std::string &short_name, const std::string &long_name)
 	{
 		return {
@@ -2017,8 +2071,12 @@ private:
 			<< context.current_message << ' '
 			<< context.speaker.name << ' '
 			<< context.speaker.level << ' '
+			<< context.speaker.engaged << ' '
+			<< context.speaker.distance << ' '
 			<< context.target.name << ' '
 			<< context.target.level << ' '
+			<< context.target.engaged << ' '
+			<< context.target.distance << ' '
 			<< context.zone.short_name << ' '
 			<< context.zone.long_name;
 
@@ -2027,7 +2085,11 @@ private:
 				<< ' '
 				<< entity.name
 				<< ' '
-				<< entity.level;
+				<< entity.level
+				<< ' '
+				<< entity.engaged
+				<< ' '
+				<< entity.distance;
 		}
 
 		return serialized.str();
