@@ -18,8 +18,8 @@
 #include "entity.h"
 
 #include "common/data_verification.h"
-#include "common/fallback_dialogue.h"
 #include "common/features.h"
+#include "zone/fallback_dialogue_runtime.h"
 #include "common/guilds.h"
 #include "zone/bot.h"
 #include "zone/dialogue_window.h"
@@ -42,131 +42,6 @@ extern Zone *zone;
 extern volatile bool is_zone_loaded;
 extern WorldServer worldserver;
 extern uint32 numclients;
-
-namespace {
-
-FallbackDialogue::OllamaDelayedDialogueProvider fallback_dialogue_provider;
-FallbackDialogue::DelayedDialogueQueue fallback_dialogue_queue(fallback_dialogue_provider);
-
-FallbackDialogue::EntityKind FallbackDialogueEntityKind(Mob *mob)
-{
-	if (!mob) {
-		return FallbackDialogue::EntityKind::Unknown;
-	}
-
-	if (mob->IsClient()) {
-		return FallbackDialogue::EntityKind::Player;
-	}
-
-	if (mob->IsBot()) {
-		return FallbackDialogue::EntityKind::Bot;
-	}
-
-	if (mob->IsMerc()) {
-		return FallbackDialogue::EntityKind::Mercenary;
-	}
-
-	if (mob->IsNPC()) {
-		return FallbackDialogue::EntityKind::NPC;
-	}
-
-	return FallbackDialogue::EntityKind::Unknown;
-}
-
-FallbackDialogue::LiveEntity FallbackDialogueLiveEntity(Mob *mob)
-{
-	if (!mob) {
-		return {};
-	}
-
-	return {
-		.entity_id = mob->GetID(),
-		.name = mob->GetCleanName(),
-		.kind = FallbackDialogueEntityKind(mob),
-		.level = mob->GetLevel(),
-		.x = mob->GetX(),
-		.y = mob->GetY(),
-		.z = mob->GetZ(),
-		.engaged = mob->IsEngaged()
-	};
-}
-
-std::vector<FallbackDialogue::LiveEntity> FallbackDialogueNearbyEntities(Mob *speaker, Mob *target)
-{
-	std::vector<FallbackDialogue::LiveEntity> nearby_entities;
-	for (const auto &[entity_id, mob] : entity_list.GetMobList()) {
-		if (!mob || mob == speaker || mob == target) {
-			continue;
-		}
-
-		nearby_entities.push_back(FallbackDialogueLiveEntity(mob));
-	}
-
-	return nearby_entities;
-}
-
-FallbackDialogue::CurrentInteraction CurrentFallbackDialogueInteraction(
-	const FallbackDialogue::DelayedDialogueRequest &request
-)
-{
-	auto *speaker = entity_list.GetMob(static_cast<uint16>(request.speaker_id));
-	auto *target = entity_list.GetMob(static_cast<uint16>(request.target_id));
-	auto *speaker_target = speaker ? speaker->GetTarget() : nullptr;
-
-	return {
-		.speaker_id = request.speaker_id,
-		.target_id = request.target_id,
-		.speaker_target_id = speaker_target ? static_cast<uint32_t>(speaker_target->GetID()) : 0,
-		.speaker_present = speaker != nullptr,
-		.target_present = target != nullptr,
-		.speaker = FallbackDialogueLiveEntity(speaker),
-		.target = FallbackDialogueLiveEntity(target)
-	};
-}
-
-}
-
-FallbackDialogue::DelayedDialogueQueue &ZoneFallbackDialogueQueue()
-{
-	return fallback_dialogue_queue;
-}
-
-FallbackDialogue::LiveContext BuildZoneFallbackDialogueContext(
-	Mob *speaker,
-	Mob *target,
-	const std::string &message
-)
-{
-	return {
-		.current_message = message,
-		.speaker = FallbackDialogueLiveEntity(speaker),
-		.target = FallbackDialogueLiveEntity(target),
-		.zone = {
-			.short_name = zone ? zone->GetShortName() : "",
-			.long_name = zone ? zone->GetLongName() : ""
-		},
-		.nearby_entities = FallbackDialogueNearbyEntities(speaker, target)
-	};
-}
-
-void ProcessZoneFallbackDialogue()
-{
-	FallbackDialogue::TargetedSayResult result;
-	while (ZoneFallbackDialogueQueue().PopReadyResult(CurrentFallbackDialogueInteraction, result)) {
-		auto *target = entity_list.GetMob(static_cast<uint16>(result.target_id));
-		if (!target) {
-			continue;
-		}
-
-		if (result.output_type == FallbackDialogue::OutputType::Say) {
-			target->Say("%s", result.message.c_str());
-		} else if (result.output_type == FallbackDialogue::OutputType::Emote) {
-			target->Emote("%s", result.message.c_str());
-		}
-
-		FallbackDialogue::LogDiagnostic(result);
-	}
-}
 
 Entity::Entity()
 {
@@ -3254,7 +3129,7 @@ void EntityList::RemoveEntity(uint16 id)
 void EntityList::Process()
 {
 	CheckSpawnQueue();
-	ProcessZoneFallbackDialogue();
+	ZoneFallbackDialogueRuntime::Process();
 }
 
 void EntityList::Depop(bool StartSpawnTimer)

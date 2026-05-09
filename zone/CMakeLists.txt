@@ -41,6 +41,7 @@ set(zone_sources
     entity.cpp
     exp.cpp
     expedition_request.cpp
+    fallback_dialogue_runtime.cpp
     fastmath.cpp
     fearpath.cpp
     forage.cpp
@@ -143,6 +144,7 @@ set(zone_headers
     entity.h
     event_codes.h
     expedition_request.h
+    fallback_dialogue_runtime.h
     fastmath.h
     forage.h
     global_loot_manager.h

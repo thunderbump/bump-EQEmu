@@ -24,6 +24,7 @@
 #include "common/events/player_events.h"
 #include "common/fallback_dialogue.h"
 #include "common/features.h"
+#include "zone/fallback_dialogue_runtime.h"
 #include "common/guilds.h"
 #include "common/profanity_manager.h"
 #include "common/repositories/account_flags_repository.h"
@@ -76,12 +77,6 @@ extern uint32 numclients;
 extern volatile bool RunLoops;
 
 void UpdateWindowTitle(char* iNewTitle);
-FallbackDialogue::DelayedDialogueQueue &ZoneFallbackDialogueQueue();
-FallbackDialogue::LiveContext BuildZoneFallbackDialogueContext(
-	Mob *speaker,
-	Mob *target,
-	const std::string &message
-);
 
 // client constructor purely for testing / mocking
 Client::Client() : Mob(
