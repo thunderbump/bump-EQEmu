@@ -558,4 +558,12 @@ void ZoneCLI::TestNpcHandins(int argc, char **argv, argh::parser &cmd, std::stri
 	std::cout << "\n===========================================\n";
 	std::cout << "✅ All NPC Hand-in Tests Completed!\n";
 	std::cout << "===========================================\n";
+
+	safe_delete(c);
+	entity_list.Clear();
+	if (zone) {
+		zone->SetSaveZoneState(false);
+		zone->Shutdown(true);
+		zone = nullptr;
+	}
 }
