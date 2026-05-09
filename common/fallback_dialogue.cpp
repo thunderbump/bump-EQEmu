@@ -224,13 +224,13 @@ std::string ValidateCurrentInteraction(
 	return {};
 }
 
-std::string NormalizeDialogueLine(const std::string &dialogue_line)
+std::string NormalizeDialogueResponse(const std::string &dialogue_response)
 {
 	std::string normalized;
-	normalized.reserve(dialogue_line.size());
+	normalized.reserve(dialogue_response.size());
 
 	bool pending_space = false;
-	for (const auto character : dialogue_line) {
+	for (const auto character : dialogue_response) {
 		if (std::isspace(static_cast<unsigned char>(character))) {
 			pending_space = !normalized.empty();
 			continue;
@@ -259,16 +259,16 @@ std::string NormalizeDialogueLine(const std::string &dialogue_line)
 	return normalized;
 }
 
-std::vector<std::string> SplitDialogueLine(const std::string &dialogue_line)
+std::vector<std::string> SplitSpeechFragmentForDelivery(const std::string &speech_fragment)
 {
 	const auto max_line_length = RuleI(Chat, FallbackDialogueMaxLineLength);
-	if (max_line_length <= 0 || dialogue_line.size() <= static_cast<size_t>(max_line_length)) {
-		return dialogue_line.empty() ? std::vector<std::string>{} : std::vector<std::string>{dialogue_line};
+	if (max_line_length <= 0 || speech_fragment.size() <= static_cast<size_t>(max_line_length)) {
+		return speech_fragment.empty() ? std::vector<std::string>{} : std::vector<std::string>{speech_fragment};
 	}
 
 	const auto limit = static_cast<size_t>(max_line_length);
 	std::vector<std::string> fragments;
-	std::string remaining = dialogue_line;
+	std::string remaining = speech_fragment;
 
 	while (remaining.size() > limit) {
 		auto split_at = std::string::npos;
@@ -310,28 +310,28 @@ std::vector<std::string> SplitDialogueLine(const std::string &dialogue_line)
 	return fragments;
 }
 
-bool IsRejectedDialogueLine(const std::string &dialogue_line)
+bool IsUnsafeDialogueText(const std::string &dialogue_text)
 {
-	if (dialogue_line.empty()) {
+	if (dialogue_text.empty()) {
 		return true;
 	}
 
-	if (dialogue_line.front() == '/' || dialogue_line.front() == '#' || dialogue_line.front() == '!') {
+	if (dialogue_text.front() == '/' || dialogue_text.front() == '#' || dialogue_text.front() == '!') {
 		return true;
 	}
 
-	const auto lower_dialogue_line = ToLowerCopy(dialogue_line);
-	return StartsWithInsensitive(lower_dialogue_line, "metadata:") ||
-		StartsWithInsensitive(lower_dialogue_line, "[metadata:") ||
-		StartsWithInsensitive(lower_dialogue_line, "json:") ||
-		StartsWithInsensitive(lower_dialogue_line, "{") ||
-		StartsWithInsensitive(lower_dialogue_line, "http ") ||
-		StartsWithInsensitive(lower_dialogue_line, "error:") ||
-		StartsWithInsensitive(lower_dialogue_line, "exception:") ||
-		StartsWithInsensitive(lower_dialogue_line, "as an ai") ||
-		lower_dialogue_line.find("i cannot roleplay") != std::string::npos ||
-		lower_dialogue_line.find("i can't roleplay") != std::string::npos ||
-		lower_dialogue_line.find("provider timeout") != std::string::npos;
+	const auto lower_dialogue_text = ToLowerCopy(dialogue_text);
+	return StartsWithInsensitive(lower_dialogue_text, "metadata:") ||
+		StartsWithInsensitive(lower_dialogue_text, "[metadata:") ||
+		StartsWithInsensitive(lower_dialogue_text, "json:") ||
+		StartsWithInsensitive(lower_dialogue_text, "{") ||
+		StartsWithInsensitive(lower_dialogue_text, "http ") ||
+		StartsWithInsensitive(lower_dialogue_text, "error:") ||
+		StartsWithInsensitive(lower_dialogue_text, "exception:") ||
+		StartsWithInsensitive(lower_dialogue_text, "as an ai") ||
+		lower_dialogue_text.find("i cannot roleplay") != std::string::npos ||
+		lower_dialogue_text.find("i can't roleplay") != std::string::npos ||
+		lower_dialogue_text.find("provider timeout") != std::string::npos;
 }
 
 void PushDialogueFragment(
@@ -565,7 +565,7 @@ std::string BuildOllamaRequestBody(const std::string &model, const PublicGamepla
 	return Json::writeString(builder, request);
 }
 
-bool ParseOllamaDialogueLine(const std::string &body, std::string &dialogue_line)
+bool ParseOllamaDialogueResponse(const std::string &body, std::string &dialogue_response)
 {
 	Json::Value root;
 	Json::CharReaderBuilder builder;
@@ -579,7 +579,7 @@ bool ParseOllamaDialogueLine(const std::string &body, std::string &dialogue_line
 		return false;
 	}
 
-	dialogue_line = root["response"].asString();
+	dialogue_response = root["response"].asString();
 	return true;
 }
 
@@ -712,8 +712,8 @@ DialogueResponseProcessingResult ProcessDialogueResponse(
 	const std::string &target_name
 )
 {
-	const auto normalized_response = NormalizeDialogueLine(natural_dialogue_response);
-	if (IsRejectedDialogueLine(normalized_response)) {
+	const auto normalized_response = NormalizeDialogueResponse(natural_dialogue_response);
+	if (IsUnsafeDialogueText(normalized_response)) {
 		return {
 			.rejection_reason = "unsafe_dialogue_response"
 		};
@@ -731,7 +731,7 @@ DialogueResponseProcessingResult ProcessDialogueResponse(
 			fragment.message = StripLeadingTargetNameFromEmote(fragment.message, target_name);
 		}
 
-		if (IsRejectedDialogueLine(fragment.message)) {
+		if (IsUnsafeDialogueText(fragment.message)) {
 			return {
 				.rejection_reason = "unsafe_dialogue_fragment"
 			};
@@ -750,7 +750,7 @@ DialogueDeliveryPlan PlanDialogueDelivery(const std::vector<DialogueFragment> &f
 
 	for (const auto &fragment : fragments) {
 		if (fragment.output_type == OutputType::Say) {
-			for (const auto &message : SplitDialogueLine(fragment.message)) {
+			for (const auto &message : SplitSpeechFragmentForDelivery(fragment.message)) {
 				plan.messages.push_back({
 					.output_type = OutputType::Say,
 					.message = message
@@ -830,7 +830,7 @@ std::vector<TargetedSayResult> BuildDelayedDialogueResults(
 	}
 
 	const auto processed_response = ProcessDialogueResponse(
-		completion.dialogue_line,
+		completion.dialogue_response,
 		request.context.target.name
 	);
 	if (!processed_response.accepted) {
@@ -1033,8 +1033,8 @@ void OllamaDelayedDialogueProvider::Enqueue(const DelayedDialogueRequest &reques
 			return;
 		}
 
-		std::string dialogue_line;
-		if (!ParseOllamaDialogueLine(response.body, dialogue_line)) {
+		std::string dialogue_response;
+		if (!ParseOllamaDialogueResponse(response.body, dialogue_response)) {
 			PushCompletion({
 				.request_id = request.request_id,
 				.succeeded = false
@@ -1045,7 +1045,7 @@ void OllamaDelayedDialogueProvider::Enqueue(const DelayedDialogueRequest &reques
 		PushCompletion({
 			.request_id = request.request_id,
 			.succeeded = true,
-			.dialogue_line = dialogue_line
+			.dialogue_response = dialogue_response
 		});
 	});
 }
@@ -1089,7 +1089,7 @@ const std::vector<DelayedDialogueRequest> &TestDelayedDialogueProvider::PendingR
 	return pending_requests_;
 }
 
-bool TestDelayedDialogueProvider::CompleteNextSuccess(const std::string &dialogue_line)
+bool TestDelayedDialogueProvider::CompleteNextSuccess(const std::string &dialogue_response)
 {
 	if (pending_requests_.empty()) {
 		return false;
@@ -1098,7 +1098,7 @@ bool TestDelayedDialogueProvider::CompleteNextSuccess(const std::string &dialogu
 	completions_.push_back({
 		.request_id = pending_requests_.front().request_id,
 		.succeeded = true,
-		.dialogue_line = dialogue_line
+		.dialogue_response = dialogue_response
 	});
 	pending_requests_.erase(pending_requests_.begin());
 	return true;

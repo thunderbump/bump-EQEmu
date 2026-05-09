@@ -1956,7 +1956,7 @@ private:
 	}
 
 	FallbackDialogue::TargetedSayResult DelayedSuccessResultFor(
-		const std::string &dialogue_line,
+		const std::string &dialogue_response,
 		const std::string &unavailable_reply
 	)
 	{
@@ -1981,7 +1981,7 @@ private:
 		};
 
 		const auto queued_result = queue.HandleTargetedSay(request, live_context);
-		if (!queued_result.handled || !provider.CompleteNextSuccess(dialogue_line)) {
+		if (!queued_result.handled || !provider.CompleteNextSuccess(dialogue_response)) {
 			return {};
 		}
 

@@ -160,7 +160,7 @@ struct DelayedDialogueRequest {
 struct DelayedDialogueCompletion {
 	uint64_t    request_id = 0;
 	bool        succeeded = false;
-	std::string dialogue_line;
+	std::string dialogue_response;
 };
 
 struct CurrentInteraction {
@@ -243,7 +243,7 @@ public:
 	bool PopCompletion(DelayedDialogueCompletion &completion) override;
 
 	const std::vector<DelayedDialogueRequest> &PendingRequests() const;
-	bool CompleteNextSuccess(const std::string &dialogue_line);
+	bool CompleteNextSuccess(const std::string &dialogue_response);
 	bool CompleteNextFailure();
 
 private:
