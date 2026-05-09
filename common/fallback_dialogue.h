@@ -92,39 +92,30 @@ struct TargetedSayResult {
 	TargetType  target_type = TargetType::Unknown;
 };
 
-struct LiveEntity {
+struct PublicEntityInput {
+	// Local-only derivation input for exclusion and interaction checks; never prompt output.
 	uint32_t    entity_id = 0;
 	std::string name;
 	EntityKind  kind = EntityKind::Unknown;
 	int         level = 0;
+	// Local-only derivation inputs for distance, sorting, and radius filtering; never prompt output.
 	float       x = 0.0f;
 	float       y = 0.0f;
 	float       z = 0.0f;
-	std::string account_name;
-	std::string ip_address;
-	std::string private_chat;
-	std::string inventory_summary;
-	std::string raw_quest_globals;
-	uint32_t    account_id = 0;
-	uint32_t    character_id = 0;
-	bool        gm_status = false;
 	bool        engaged = false;
 };
 
-struct LiveZone {
+struct PublicZoneInput {
 	std::string short_name;
 	std::string long_name;
-	uint32_t    zone_id = 0;
-	uint32_t    instance_id = 0;
-	std::string database_credentials;
 };
 
-struct LiveContext {
-	std::string             current_message;
-	LiveEntity             speaker;
-	LiveEntity             target;
-	LiveZone               zone;
-	std::vector<LiveEntity> nearby_entities;
+struct PublicContextInput {
+	std::string                    current_message;
+	PublicEntityInput              speaker;
+	PublicEntityInput              target;
+	PublicZoneInput                zone;
+	std::vector<PublicEntityInput> nearby_entities;
 };
 
 struct PublicEntitySummary {
@@ -164,13 +155,13 @@ struct DelayedDialogueCompletion {
 };
 
 struct CurrentInteraction {
-	uint32_t   speaker_id = 0;
-	uint32_t   target_id = 0;
-	uint32_t   speaker_target_id = 0;
-	bool       speaker_present = false;
-	bool       target_present = false;
-	LiveEntity speaker;
-	LiveEntity target;
+	uint32_t          speaker_id = 0;
+	uint32_t          target_id = 0;
+	uint32_t          speaker_target_id = 0;
+	bool              speaker_present = false;
+	bool              target_present = false;
+	PublicEntityInput speaker;
+	PublicEntityInput target;
 };
 
 class DelayedDialogueProvider {
@@ -225,7 +216,7 @@ public:
 
 	TargetedSayResult HandleTargetedSay(
 		const TargetedSayRequest &request,
-		const LiveContext &context
+		const PublicContextInput &public_context_input
 	);
 	bool PopReadyResult(const CurrentInteraction &interaction, TargetedSayResult &result);
 	bool PopReadyResult(const CurrentInteractionResolver &resolver, TargetedSayResult &result);
@@ -252,7 +243,7 @@ private:
 };
 
 TargetedSayResult HandleTargetedSay(const TargetedSayRequest &request);
-PublicGameplayContext BuildPublicGameplayContext(const LiveContext &context);
+PublicGameplayContext BuildPublicGameplayContext(const PublicContextInput &public_context_input);
 DialogueResponseProcessingResult ProcessDialogueResponse(
 	const std::string &natural_dialogue_response,
 	const std::string &target_name

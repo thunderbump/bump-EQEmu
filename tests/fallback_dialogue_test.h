@@ -459,29 +459,11 @@ private:
 	{
 		ResetRules();
 
-		auto speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f);
-		speaker.account_name = "private_account_name";
-		speaker.ip_address = "192.0.2.55";
-		speaker.private_chat = "private_tell_payload";
-		speaker.inventory_summary = "bag_of_private_items";
-		speaker.raw_quest_globals = "raw_global_state";
-		speaker.account_id = 9001;
-		speaker.character_id = 8001;
-		speaker.gm_status = true;
-
-		auto target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f);
-		target.raw_quest_globals = "target_raw_globals";
-
-		auto zone = PublicZone("qeynos", "South Qeynos");
-		zone.zone_id = 1;
-		zone.instance_id = 2;
-		zone.database_credentials = "db_password_secret";
-
 		const auto context = FallbackDialogue::BuildPublicGameplayContext({
 			.current_message = "hail friend",
-			.speaker = speaker,
-			.target = target,
-			.zone = zone
+			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
+			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
+			.zone = PublicZone("qeynos", "South Qeynos")
 		});
 
 		const auto serialized = SerializePublicContext(context);
@@ -724,7 +706,7 @@ private:
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
 		FallbackDialogue::DelayedDialogueQueue queue(provider);
-		FallbackDialogue::LiveContext live_context{
+		FallbackDialogue::PublicContextInput public_context_input{
 			.current_message = "hail captain",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Captain Rohand", FallbackDialogue::EntityKind::NPC, 35, 8.0f, 0.0f, 0.0f),
@@ -741,8 +723,8 @@ private:
 			.authored_dialogue_handled = false
 		};
 
-		const auto result = queue.HandleTargetedSay(request, live_context);
-		live_context.target.name = "Changed Target";
+		const auto result = queue.HandleTargetedSay(request, public_context_input);
+		public_context_input.target.name = "Changed Target";
 
 		TEST_ASSERT(result.handled);
 		TEST_ASSERT(result.output_type == FallbackDialogue::OutputType::None);
@@ -778,14 +760,14 @@ private:
 			.target_type = FallbackDialogue::TargetType::Bot,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::LiveContext live_context{
+		const FallbackDialogue::PublicContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Atenbot", FallbackDialogue::EntityKind::Bot, 12, 5.0f, 0.0f, 0.0f),
 			.zone = PublicZone("qeynos", "South Qeynos")
 		};
 
-		const auto queued_result = queue.HandleTargetedSay(request, live_context);
+		const auto queued_result = queue.HandleTargetedSay(request, public_context_input);
 		TEST_ASSERT(queued_result.handled);
 		TEST_ASSERT(provider.CompleteNextSuccess("Good day to you."));
 
@@ -820,14 +802,14 @@ private:
 			.target_type = FallbackDialogue::TargetType::NPC,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::LiveContext live_context{
+		const FallbackDialogue::PublicContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
 			.zone = PublicZone("qeynos", "South Qeynos")
 		};
 
-		const auto queued_result = queue.HandleTargetedSay(request, live_context);
+		const auto queued_result = queue.HandleTargetedSay(request, public_context_input);
 		TEST_ASSERT(queued_result.handled);
 		TEST_ASSERT(provider.CompleteNextSuccess("Well met.\nStay awhile.\r\nTell me of Qeynos."));
 
@@ -860,14 +842,14 @@ private:
 			.target_type = FallbackDialogue::TargetType::NPC,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::LiveContext live_context{
+		const FallbackDialogue::PublicContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
 			.zone = PublicZone("qeynos", "South Qeynos")
 		};
 
-		const auto queued_result = queue.HandleTargetedSay(request, live_context);
+		const auto queued_result = queue.HandleTargetedSay(request, public_context_input);
 		TEST_ASSERT(queued_result.handled);
 		TEST_ASSERT(provider.CompleteNextSuccess(" Assistant: \"Mind the road, friend.\" "));
 
@@ -897,14 +879,14 @@ private:
 			.target_type = FallbackDialogue::TargetType::NPC,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::LiveContext live_context{
+		const FallbackDialogue::PublicContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
 			.zone = PublicZone("qeynos", "South Qeynos")
 		};
 
-		TEST_ASSERT(queue.HandleTargetedSay(request, live_context).handled);
+		TEST_ASSERT(queue.HandleTargetedSay(request, public_context_input).handled);
 		TEST_ASSERT(provider.CompleteNextSuccess("*looks around warily*"));
 
 		FallbackDialogue::TargetedSayResult ready_result;
@@ -935,14 +917,14 @@ private:
 			.target_type = FallbackDialogue::TargetType::NPC,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::LiveContext live_context{
+		const FallbackDialogue::PublicContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
 			.zone = PublicZone("qeynos", "South Qeynos")
 		};
 
-		TEST_ASSERT(queue.HandleTargetedSay(request, live_context).handled);
+		TEST_ASSERT(queue.HandleTargetedSay(request, public_context_input).handled);
 		TEST_ASSERT(provider.CompleteNextSuccess("*Guard Teren looks around warily*"));
 
 		FallbackDialogue::TargetedSayResult ready_result;
@@ -971,14 +953,14 @@ private:
 			.target_type = FallbackDialogue::TargetType::NPC,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::LiveContext live_context{
+		const FallbackDialogue::PublicContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
 			.zone = PublicZone("qeynos", "South Qeynos")
 		};
 
-		TEST_ASSERT(queue.HandleTargetedSay(request, live_context).handled);
+		TEST_ASSERT(queue.HandleTargetedSay(request, public_context_input).handled);
 		TEST_ASSERT(provider.CompleteNextSuccess("Well met. *looks around warily* Keep your voice low."));
 
 		FallbackDialogue::TargetedSayResult first_result;
@@ -1014,14 +996,14 @@ private:
 			.target_type = FallbackDialogue::TargetType::NPC,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::LiveContext live_context{
+		const FallbackDialogue::PublicContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
 			.zone = PublicZone("qeynos", "South Qeynos")
 		};
 
-		TEST_ASSERT(queue.HandleTargetedSay(request, live_context).handled);
+		TEST_ASSERT(queue.HandleTargetedSay(request, public_context_input).handled);
 		TEST_ASSERT(provider.CompleteNextSuccess("Stand near. *Guard Teren checks the road* Keep watch."));
 
 		FallbackDialogue::TargetedSayResult first_result;
@@ -1054,14 +1036,14 @@ private:
 			.target_type = FallbackDialogue::TargetType::Bot,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::LiveContext live_context{
+		const FallbackDialogue::PublicContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Atenbot", FallbackDialogue::EntityKind::Bot, 12, 5.0f, 0.0f, 0.0f),
 			.zone = PublicZone("qeynos", "South Qeynos")
 		};
 
-		TEST_ASSERT(queue.HandleTargetedSay(request, live_context).handled);
+		TEST_ASSERT(queue.HandleTargetedSay(request, public_context_input).handled);
 		TEST_ASSERT(provider.CompleteNextSuccess("(checks bowstring)"));
 
 		FallbackDialogue::TargetedSayResult ready_result;
@@ -1092,14 +1074,14 @@ private:
 			.target_type = FallbackDialogue::TargetType::Bot,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::LiveContext live_context{
+		const FallbackDialogue::PublicContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Atenbot", FallbackDialogue::EntityKind::Bot, 12, 5.0f, 0.0f, 0.0f),
 			.zone = PublicZone("qeynos", "South Qeynos")
 		};
 
-		TEST_ASSERT(queue.HandleTargetedSay(request, live_context).handled);
+		TEST_ASSERT(queue.HandleTargetedSay(request, public_context_input).handled);
 		TEST_ASSERT(provider.CompleteNextSuccess("(Atenbot checks bowstring)"));
 
 		FallbackDialogue::TargetedSayResult ready_result;
@@ -1155,14 +1137,14 @@ private:
 			.target_type = FallbackDialogue::TargetType::NPC,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::LiveContext live_context{
+		const FallbackDialogue::PublicContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
 			.zone = PublicZone("qeynos", "South Qeynos")
 		};
 
-		const auto queued_result = queue.HandleTargetedSay(request, live_context);
+		const auto queued_result = queue.HandleTargetedSay(request, public_context_input);
 		TEST_ASSERT(queued_result.handled);
 		TEST_ASSERT(provider.CompleteNextSuccess("First sentence. Second sentence keeps going."));
 
@@ -1221,14 +1203,14 @@ private:
 			.target_type = FallbackDialogue::TargetType::NPC,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::LiveContext live_context{
+		const FallbackDialogue::PublicContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
 			.zone = PublicZone("qeynos", "South Qeynos")
 		};
 
-		TEST_ASSERT(queue.HandleTargetedSay(request, live_context).handled);
+		TEST_ASSERT(queue.HandleTargetedSay(request, public_context_input).handled);
 		TEST_ASSERT(provider.CompleteNextSuccess("supercalifragilistic"));
 
 		FallbackDialogue::TargetedSayResult first_result;
@@ -1280,14 +1262,14 @@ private:
 			.target_type = FallbackDialogue::TargetType::Bot,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::LiveContext live_context{
+		const FallbackDialogue::PublicContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Atenbot", FallbackDialogue::EntityKind::Bot, 12, 5.0f, 0.0f, 0.0f),
 			.zone = PublicZone("qeynos", "South Qeynos")
 		};
 
-		TEST_ASSERT(queue.HandleTargetedSay(request, live_context).handled);
+		TEST_ASSERT(queue.HandleTargetedSay(request, public_context_input).handled);
 		TEST_ASSERT(provider.CompleteNextSuccess("Alpha beta gamma delta."));
 
 		FallbackDialogue::TargetedSayResult first_result;
@@ -1398,7 +1380,7 @@ private:
 			.authored_dialogue_handled = false
 		};
 
-		const auto queued_result = queue.HandleTargetedSay(request, DefaultLiveContext());
+		const auto queued_result = queue.HandleTargetedSay(request, DefaultPublicContextInput());
 		TEST_ASSERT(queued_result.handled);
 		TEST_ASSERT(provider.CompleteNextSuccess("*looks around warily*"));
 
@@ -1424,14 +1406,14 @@ private:
 			.target_type = FallbackDialogue::TargetType::NPC,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::LiveContext live_context{
+		const FallbackDialogue::PublicContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
 			.zone = PublicZone("qeynos", "South Qeynos")
 		};
 
-		const auto queued_result = queue.HandleTargetedSay(request, live_context);
+		const auto queued_result = queue.HandleTargetedSay(request, public_context_input);
 		TEST_ASSERT(queued_result.handled);
 		TEST_ASSERT(provider.CompleteNextFailure());
 
@@ -1465,14 +1447,14 @@ private:
 			.target_type = FallbackDialogue::TargetType::NPC,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::LiveContext live_context{
+		const FallbackDialogue::PublicContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 10.0f, 0.0f, 5.0f),
 			.zone = PublicZone("qeynos", "South Qeynos")
 		};
 
-		const auto queued_result = queue.HandleTargetedSay(request, live_context);
+		const auto queued_result = queue.HandleTargetedSay(request, public_context_input);
 		TEST_ASSERT(queued_result.handled);
 		TEST_ASSERT(provider.CompleteNextSuccess("Well met."));
 
@@ -1509,14 +1491,14 @@ private:
 			.target_type = FallbackDialogue::TargetType::NPC,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::LiveContext live_context{
+		const FallbackDialogue::PublicContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
 			.zone = PublicZone("qeynos", "South Qeynos")
 		};
 
-		const auto queued_result = queue.HandleTargetedSay(request, live_context);
+		const auto queued_result = queue.HandleTargetedSay(request, public_context_input);
 		TEST_ASSERT(queued_result.handled);
 		TEST_ASSERT(provider.CompleteNextSuccess("Well met."));
 
@@ -1552,14 +1534,14 @@ private:
 			.target_type = FallbackDialogue::TargetType::NPC,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::LiveContext live_context{
+		const FallbackDialogue::PublicContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
 			.zone = PublicZone("qeynos", "South Qeynos")
 		};
 
-		const auto queued_result = queue.HandleTargetedSay(request, live_context);
+		const auto queued_result = queue.HandleTargetedSay(request, public_context_input);
 		TEST_ASSERT(queued_result.handled);
 		TEST_ASSERT(provider.CompleteNextFailure());
 
@@ -1593,14 +1575,14 @@ private:
 			.target_type = FallbackDialogue::TargetType::NPC,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::LiveContext live_context{
+		const FallbackDialogue::PublicContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
 			.zone = PublicZone("qeynos", "South Qeynos")
 		};
 
-		const auto queued_result = queue.HandleTargetedSay(request, live_context);
+		const auto queued_result = queue.HandleTargetedSay(request, public_context_input);
 		TEST_ASSERT(queued_result.handled);
 		TEST_ASSERT(provider.CompleteNextSuccess("Well met."));
 
@@ -1645,29 +1627,11 @@ private:
 			.body = "{\"response\":\"Well met.\"}"
 		};
 
-		auto speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f);
-		speaker.account_name = "private_account_name";
-		speaker.ip_address = "192.0.2.55";
-		speaker.private_chat = "private_tell_payload";
-		speaker.inventory_summary = "bag_of_private_items";
-		speaker.raw_quest_globals = "raw_global_state";
-		speaker.account_id = 9001;
-		speaker.character_id = 8001;
-		speaker.gm_status = true;
-
-		auto target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f);
-		target.raw_quest_globals = "target_raw_globals";
-
-		auto zone = PublicZone("qeynos", "South Qeynos");
-		zone.zone_id = 1;
-		zone.instance_id = 2;
-		zone.database_credentials = "db_password_secret";
-
 		const auto ready_result = OllamaResultFor(transport, {
 			.current_message = "hail friend",
-			.speaker = speaker,
-			.target = target,
-			.zone = zone,
+			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
+			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
+			.zone = PublicZone("qeynos", "South Qeynos"),
 			.nearby_entities = {
 				PublicEntity("Dockhand", FallbackDialogue::EntityKind::NPC, 8, 10.0f, 0.0f, 0.0f)
 			}
@@ -1753,7 +1717,7 @@ private:
 
 		const auto ready_result = OllamaResultFor(
 			transport,
-			DefaultLiveContext(),
+			DefaultPublicContextInput(),
 			"   "
 		);
 
@@ -1884,7 +1848,7 @@ private:
 		FallbackDialogue::ResetDialogueCooldowns();
 	}
 
-	FallbackDialogue::LiveEntity PublicEntity(
+	FallbackDialogue::PublicEntityInput PublicEntity(
 		const std::string &name,
 		FallbackDialogue::EntityKind kind,
 		int level,
@@ -1903,7 +1867,7 @@ private:
 		};
 	}
 
-	FallbackDialogue::LiveZone PublicZone(const std::string &short_name, const std::string &long_name)
+	FallbackDialogue::PublicZoneInput PublicZone(const std::string &short_name, const std::string &long_name)
 	{
 		return {
 			.short_name = short_name,
@@ -1911,7 +1875,7 @@ private:
 		};
 	}
 
-	FallbackDialogue::LiveContext DefaultLiveContext()
+	FallbackDialogue::PublicContextInput DefaultPublicContextInput()
 	{
 		return {
 			.current_message = "hail",
@@ -1940,8 +1904,8 @@ private:
 		uint32_t speaker_id,
 		uint32_t target_id,
 		uint32_t speaker_target_id,
-		const FallbackDialogue::LiveEntity &speaker,
-		const FallbackDialogue::LiveEntity &target
+		const FallbackDialogue::PublicEntityInput &speaker,
+		const FallbackDialogue::PublicEntityInput &target
 	)
 	{
 		return {
@@ -1973,14 +1937,14 @@ private:
 			.target_type = FallbackDialogue::TargetType::NPC,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::LiveContext live_context{
+		const FallbackDialogue::PublicContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
 			.zone = PublicZone("qeynos", "South Qeynos")
 		};
 
-		const auto queued_result = queue.HandleTargetedSay(request, live_context);
+		const auto queued_result = queue.HandleTargetedSay(request, public_context_input);
 		if (!queued_result.handled || !provider.CompleteNextSuccess(dialogue_response)) {
 			return {};
 		}
@@ -2001,7 +1965,7 @@ private:
 
 	FallbackDialogue::TargetedSayResult OllamaResultFor(
 		FakeOllamaHttpTransport &transport,
-		const FallbackDialogue::LiveContext &live_context = FallbackDialogue::LiveContext{},
+		const FallbackDialogue::PublicContextInput &public_context_input = FallbackDialogue::PublicContextInput{},
 		const std::string &model = "test-model"
 	)
 	{
@@ -2022,7 +1986,7 @@ private:
 			.authored_dialogue_handled = false
 		};
 
-		const auto context = live_context.current_message.empty() ? DefaultLiveContext() : live_context;
+		const auto context = public_context_input.current_message.empty() ? DefaultPublicContextInput() : public_context_input;
 		const auto queued_result = queue.HandleTargetedSay(request, context);
 		if (!queued_result.handled) {
 			return {};

@@ -78,7 +78,7 @@ FallbackDialogue::TargetType FallbackDialogueTargetType(Mob *mob)
 	return FallbackDialogue::TargetType::Unknown;
 }
 
-FallbackDialogue::LiveEntity PublicGameplayContextEntity(Mob *mob)
+FallbackDialogue::PublicEntityInput PublicGameplayContextEntityInput(Mob *mob)
 {
 	if (!mob) {
 		return {};
@@ -96,15 +96,15 @@ FallbackDialogue::LiveEntity PublicGameplayContextEntity(Mob *mob)
 	};
 }
 
-std::vector<FallbackDialogue::LiveEntity> FallbackDialogueNearbyEntities(Mob *speaker, Mob *target)
+std::vector<FallbackDialogue::PublicEntityInput> FallbackDialogueNearbyEntityInputs(Mob *speaker, Mob *target)
 {
-	std::vector<FallbackDialogue::LiveEntity> nearby_entities;
+	std::vector<FallbackDialogue::PublicEntityInput> nearby_entities;
 	for (const auto &[entity_id, mob] : entity_list.GetMobList()) {
 		if (!mob || mob == speaker || mob == target) {
 			continue;
 		}
 
-		nearby_entities.push_back(PublicGameplayContextEntity(mob));
+		nearby_entities.push_back(PublicGameplayContextEntityInput(mob));
 	}
 
 	return nearby_entities;
@@ -124,8 +124,8 @@ FallbackDialogue::CurrentInteraction CurrentFallbackDialogueInteraction(
 		.speaker_target_id = speaker_target ? static_cast<uint32_t>(speaker_target->GetID()) : 0,
 		.speaker_present = speaker != nullptr,
 		.target_present = target != nullptr,
-		.speaker = PublicGameplayContextEntity(speaker),
-		.target = PublicGameplayContextEntity(target)
+		.speaker = PublicGameplayContextEntityInput(speaker),
+		.target = PublicGameplayContextEntityInput(target)
 	};
 }
 
@@ -134,7 +134,7 @@ FallbackDialogue::DelayedDialogueQueue &ZoneFallbackDialogueQueue()
 	return fallback_dialogue_queue;
 }
 
-FallbackDialogue::LiveContext BuildZoneFallbackDialogueContext(
+FallbackDialogue::PublicContextInput BuildZoneFallbackDialogueContextInput(
 	Mob *speaker,
 	Mob *target,
 	const std::string &message
@@ -142,13 +142,13 @@ FallbackDialogue::LiveContext BuildZoneFallbackDialogueContext(
 {
 	return {
 		.current_message = message,
-		.speaker = PublicGameplayContextEntity(speaker),
-		.target = PublicGameplayContextEntity(target),
+		.speaker = PublicGameplayContextEntityInput(speaker),
+		.target = PublicGameplayContextEntityInput(target),
 		.zone = {
 			.short_name = zone ? zone->GetShortName() : "",
 			.long_name = zone ? zone->GetLongName() : ""
 		},
-		.nearby_entities = FallbackDialogueNearbyEntities(speaker, target)
+		.nearby_entities = FallbackDialogueNearbyEntityInputs(speaker, target)
 	};
 }
 
@@ -188,7 +188,7 @@ void HandleTargetedSay(
 		.target_type = FallbackDialogueTargetType(target),
 		.authored_dialogue_handled = authored_dialogue_handled,
 		.target_engaged = target_engaged
-	}, BuildZoneFallbackDialogueContext(speaker, target, message));
+	}, BuildZoneFallbackDialogueContextInput(speaker, target, message));
 
 	DeliverFallbackDialogueResult(target, result);
 	FallbackDialogue::LogDiagnostic(result);

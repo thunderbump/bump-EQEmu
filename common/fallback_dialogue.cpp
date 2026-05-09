@@ -86,7 +86,7 @@ void StartDialogueCooldown(const TargetedSayRequest &request)
 	dialogue_cooldowns[CooldownKey(request.speaker_id, request.target_id)] = current_time;
 }
 
-float DistanceBetween(const LiveEntity &first, const LiveEntity &second)
+float DistanceBetween(const PublicEntityInput &first, const PublicEntityInput &second)
 {
 	const auto x = first.x - second.x;
 	const auto y = first.y - second.y;
@@ -95,7 +95,7 @@ float DistanceBetween(const LiveEntity &first, const LiveEntity &second)
 	return std::sqrt((x * x) + (y * y) + (z * z));
 }
 
-float DistanceNoZBetween(const LiveEntity &first, const LiveEntity &second)
+float DistanceNoZBetween(const PublicEntityInput &first, const PublicEntityInput &second)
 {
 	const auto x = first.x - second.x;
 	const auto y = first.y - second.y;
@@ -103,7 +103,7 @@ float DistanceNoZBetween(const LiveEntity &first, const LiveEntity &second)
 	return std::sqrt((x * x) + (y * y));
 }
 
-PublicEntitySummary BuildPublicEntitySummary(const LiveEntity &entity, float distance = 0.0f)
+PublicEntitySummary BuildPublicEntitySummary(const PublicEntityInput &entity, float distance = 0.0f)
 {
 	return {
 		.name = entity.name,
@@ -655,20 +655,20 @@ TargetedSayResult HandleTargetedSay(const TargetedSayRequest &request)
 	return result;
 }
 
-PublicGameplayContext BuildPublicGameplayContext(const LiveContext &context)
+PublicGameplayContext BuildPublicGameplayContext(const PublicContextInput &public_context_input)
 {
 	const auto nearby_radius = RuleI(Chat, FallbackDialogueNearbyContextRadius);
 	const auto nearby_limit = RuleI(Chat, FallbackDialogueNearbyEntityLimit);
 	PublicGameplayContext public_context{
-		.current_message = context.current_message,
-		.speaker = BuildPublicEntitySummary(context.speaker),
+		.current_message = public_context_input.current_message,
+		.speaker = BuildPublicEntitySummary(public_context_input.speaker),
 		.target = BuildPublicEntitySummary(
-			context.target,
-			DistanceBetween(context.speaker, context.target)
+			public_context_input.target,
+			DistanceBetween(public_context_input.speaker, public_context_input.target)
 		),
 		.zone = {
-			.short_name = context.zone.short_name,
-			.long_name = context.zone.long_name
+			.short_name = public_context_input.zone.short_name,
+			.long_name = public_context_input.zone.long_name
 		}
 	};
 
@@ -676,13 +676,14 @@ PublicGameplayContext BuildPublicGameplayContext(const LiveContext &context)
 		return public_context;
 	}
 
-	for (const auto &entity : context.nearby_entities) {
+	for (const auto &entity : public_context_input.nearby_entities) {
 		if (entity.entity_id != 0 &&
-			(entity.entity_id == context.speaker.entity_id || entity.entity_id == context.target.entity_id)) {
+			(entity.entity_id == public_context_input.speaker.entity_id ||
+				entity.entity_id == public_context_input.target.entity_id)) {
 			continue;
 		}
 
-		const auto distance = DistanceBetween(context.speaker, entity);
+		const auto distance = DistanceBetween(public_context_input.speaker, entity);
 		if (distance > nearby_radius) {
 			continue;
 		}
@@ -868,7 +869,7 @@ DelayedDialogueQueue::DelayedDialogueQueue(DelayedDialogueProvider &provider)
 
 TargetedSayResult DelayedDialogueQueue::HandleTargetedSay(
 	const TargetedSayRequest &request,
-	const LiveContext &context
+	const PublicContextInput &public_context_input
 )
 {
 	auto result = EligibleTargetedSayResult(request);
@@ -883,7 +884,7 @@ TargetedSayResult DelayedDialogueQueue::HandleTargetedSay(
 		.speaker_id = request.speaker_id,
 		.target_id = request.target_id,
 		.target_type = request.target_type,
-		.context = BuildPublicGameplayContext(context),
+		.context = BuildPublicGameplayContext(public_context_input),
 		.unavailable_reply = RuleS(Chat, FallbackDialogueUnavailableReply)
 	};
 
