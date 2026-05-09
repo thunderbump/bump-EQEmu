@@ -147,7 +147,7 @@ FallbackDialogue::DelayedDialogueQueue &ZoneFallbackDialogueQueue()
 	return fallback_dialogue_queue;
 }
 
-FallbackDialogue::PublicContextInput BuildZoneFallbackDialogueContextInput(
+FallbackDialogue::PublicGameplayContextInput BuildZoneFallbackDialoguePublicGameplayContextInput(
 	Mob *speaker,
 	Mob *target,
 	const std::string &message
@@ -201,7 +201,7 @@ void HandleTargetedSay(
 		.target_type = FallbackDialogueTargetType(target),
 		.authored_dialogue_handled = authored_dialogue_handled,
 		.target_engaged = target_engaged
-	}, BuildZoneFallbackDialogueContextInput(speaker, target, message));
+	}, BuildZoneFallbackDialoguePublicGameplayContextInput(speaker, target, message));
 
 	DeliverFallbackDialogueResult(target, result);
 	FallbackDialogue::LogDiagnostic(result);

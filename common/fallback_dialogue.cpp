@@ -663,7 +663,7 @@ TargetedSayResult HandleTargetedSay(const TargetedSayRequest &request)
 	return result;
 }
 
-PublicGameplayContext BuildPublicGameplayContext(const PublicContextInput &public_context_input)
+PublicGameplayContext BuildPublicGameplayContext(const PublicGameplayContextInput &public_context_input)
 {
 	const auto nearby_radius = RuleI(Chat, FallbackDialogueNearbyContextRadius);
 	const auto nearby_limit = RuleI(Chat, FallbackDialogueNearbyEntityLimit);
@@ -877,7 +877,7 @@ DelayedDialogueQueue::DelayedDialogueQueue(DelayedDialogueProvider &provider)
 
 TargetedSayResult DelayedDialogueQueue::HandleTargetedSay(
 	const TargetedSayRequest &request,
-	const PublicContextInput &public_context_input
+	const PublicGameplayContextInput &public_context_input
 )
 {
 	auto result = EligibleTargetedSayResult(request);

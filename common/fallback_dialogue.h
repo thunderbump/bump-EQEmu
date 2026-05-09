@@ -110,7 +110,7 @@ struct PublicZoneInput {
 	std::string long_name;
 };
 
-struct PublicContextInput {
+struct PublicGameplayContextInput {
 	std::string                    current_message;
 	PublicEntityInput              speaker;
 	PublicEntityInput              target;
@@ -222,7 +222,7 @@ public:
 
 	TargetedSayResult HandleTargetedSay(
 		const TargetedSayRequest &request,
-		const PublicContextInput &public_context_input
+		const PublicGameplayContextInput &public_context_input
 	);
 	bool PopReadyResult(const CurrentInteraction &interaction, TargetedSayResult &result);
 	bool PopReadyResult(const CurrentInteractionResolver &resolver, TargetedSayResult &result);
@@ -249,7 +249,7 @@ private:
 };
 
 TargetedSayResult HandleTargetedSay(const TargetedSayRequest &request);
-PublicGameplayContext BuildPublicGameplayContext(const PublicContextInput &public_context_input);
+PublicGameplayContext BuildPublicGameplayContext(const PublicGameplayContextInput &public_context_input);
 DialogueResponseProcessingResult ProcessDialogueResponse(
 	const std::string &natural_dialogue_response,
 	const std::string &target_name

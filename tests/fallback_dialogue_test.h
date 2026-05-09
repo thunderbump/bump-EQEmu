@@ -727,7 +727,7 @@ private:
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
 		FallbackDialogue::DelayedDialogueQueue queue(provider);
-		FallbackDialogue::PublicContextInput public_context_input{
+		FallbackDialogue::PublicGameplayContextInput public_context_input{
 			.current_message = "hail captain",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Captain Rohand", FallbackDialogue::EntityKind::NPC, 35, 8.0f, 0.0f, 0.0f),
@@ -796,7 +796,7 @@ private:
 			.target_type = FallbackDialogue::TargetType::Bot,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::PublicContextInput public_context_input{
+		const FallbackDialogue::PublicGameplayContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Atenbot", FallbackDialogue::EntityKind::Bot, 12, 5.0f, 0.0f, 0.0f),
@@ -838,7 +838,7 @@ private:
 			.target_type = FallbackDialogue::TargetType::NPC,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::PublicContextInput public_context_input{
+		const FallbackDialogue::PublicGameplayContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
@@ -878,7 +878,7 @@ private:
 			.target_type = FallbackDialogue::TargetType::NPC,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::PublicContextInput public_context_input{
+		const FallbackDialogue::PublicGameplayContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
@@ -915,7 +915,7 @@ private:
 			.target_type = FallbackDialogue::TargetType::NPC,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::PublicContextInput public_context_input{
+		const FallbackDialogue::PublicGameplayContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
@@ -953,7 +953,7 @@ private:
 			.target_type = FallbackDialogue::TargetType::NPC,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::PublicContextInput public_context_input{
+		const FallbackDialogue::PublicGameplayContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
@@ -989,7 +989,7 @@ private:
 			.target_type = FallbackDialogue::TargetType::NPC,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::PublicContextInput public_context_input{
+		const FallbackDialogue::PublicGameplayContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
@@ -1032,7 +1032,7 @@ private:
 			.target_type = FallbackDialogue::TargetType::NPC,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::PublicContextInput public_context_input{
+		const FallbackDialogue::PublicGameplayContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
@@ -1072,7 +1072,7 @@ private:
 			.target_type = FallbackDialogue::TargetType::Bot,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::PublicContextInput public_context_input{
+		const FallbackDialogue::PublicGameplayContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Atenbot", FallbackDialogue::EntityKind::Bot, 12, 5.0f, 0.0f, 0.0f),
@@ -1110,7 +1110,7 @@ private:
 			.target_type = FallbackDialogue::TargetType::Bot,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::PublicContextInput public_context_input{
+		const FallbackDialogue::PublicGameplayContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Atenbot", FallbackDialogue::EntityKind::Bot, 12, 5.0f, 0.0f, 0.0f),
@@ -1173,7 +1173,7 @@ private:
 			.target_type = FallbackDialogue::TargetType::NPC,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::PublicContextInput public_context_input{
+		const FallbackDialogue::PublicGameplayContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
@@ -1239,7 +1239,7 @@ private:
 			.target_type = FallbackDialogue::TargetType::NPC,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::PublicContextInput public_context_input{
+		const FallbackDialogue::PublicGameplayContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
@@ -1298,7 +1298,7 @@ private:
 			.target_type = FallbackDialogue::TargetType::Bot,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::PublicContextInput public_context_input{
+		const FallbackDialogue::PublicGameplayContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Atenbot", FallbackDialogue::EntityKind::Bot, 12, 5.0f, 0.0f, 0.0f),
@@ -1416,7 +1416,7 @@ private:
 			.authored_dialogue_handled = false
 		};
 
-		const auto queued_result = queue.HandleTargetedSay(request, DefaultPublicContextInput());
+		const auto queued_result = queue.HandleTargetedSay(request, DefaultPublicGameplayContextInput());
 		TEST_ASSERT(queued_result.handled);
 		TEST_ASSERT(provider.CompleteNextSuccess("*looks around warily*"));
 
@@ -1442,7 +1442,7 @@ private:
 			.target_type = FallbackDialogue::TargetType::NPC,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::PublicContextInput public_context_input{
+		const FallbackDialogue::PublicGameplayContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
@@ -1483,7 +1483,7 @@ private:
 			.target_type = FallbackDialogue::TargetType::NPC,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::PublicContextInput public_context_input{
+		const FallbackDialogue::PublicGameplayContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 10.0f, 0.0f, 5.0f),
@@ -1527,7 +1527,7 @@ private:
 			.target_type = FallbackDialogue::TargetType::NPC,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::PublicContextInput public_context_input{
+		const FallbackDialogue::PublicGameplayContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
@@ -1570,7 +1570,7 @@ private:
 			.target_type = FallbackDialogue::TargetType::NPC,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::PublicContextInput public_context_input{
+		const FallbackDialogue::PublicGameplayContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
@@ -1611,7 +1611,7 @@ private:
 			.target_type = FallbackDialogue::TargetType::NPC,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::PublicContextInput public_context_input{
+		const FallbackDialogue::PublicGameplayContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
@@ -1756,7 +1756,7 @@ private:
 
 		const auto ready_result = OllamaResultFor(
 			transport,
-			DefaultPublicContextInput(),
+			DefaultPublicGameplayContextInput(),
 			"   "
 		);
 
@@ -1929,7 +1929,7 @@ private:
 		};
 	}
 
-	FallbackDialogue::PublicContextInput DefaultPublicContextInput()
+	FallbackDialogue::PublicGameplayContextInput DefaultPublicGameplayContextInput()
 	{
 		return {
 			.current_message = "hail",
@@ -2011,7 +2011,7 @@ private:
 			.target_type = FallbackDialogue::TargetType::NPC,
 			.authored_dialogue_handled = false
 		};
-		const FallbackDialogue::PublicContextInput public_context_input{
+		const FallbackDialogue::PublicGameplayContextInput public_context_input{
 			.current_message = "hail",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
 			.target = PublicEntity("Guard Teren", FallbackDialogue::EntityKind::NPC, 22, 5.0f, 0.0f, 0.0f),
@@ -2039,7 +2039,7 @@ private:
 
 	FallbackDialogue::TargetedSayResult OllamaResultFor(
 		FakeOllamaHttpTransport &transport,
-		const FallbackDialogue::PublicContextInput &public_context_input = FallbackDialogue::PublicContextInput{},
+		const FallbackDialogue::PublicGameplayContextInput &public_context_input = FallbackDialogue::PublicGameplayContextInput{},
 		const std::string &model = "test-model"
 	)
 	{
@@ -2060,7 +2060,7 @@ private:
 			.authored_dialogue_handled = false
 		};
 
-		const auto context = public_context_input.current_message.empty() ? DefaultPublicContextInput() : public_context_input;
+		const auto context = public_context_input.current_message.empty() ? DefaultPublicGameplayContextInput() : public_context_input;
 		const auto queued_result = queue.HandleTargetedSay(request, context);
 		if (!queued_result.handled) {
 			return {};
