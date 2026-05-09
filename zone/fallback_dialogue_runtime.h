@@ -17,21 +17,20 @@
 */
 #pragma once
 
-#include "common/fallback_dialogue.h"
-
 #include <string>
 
+class Client;
 class Mob;
 
 namespace ZoneFallbackDialogueRuntime {
 
+void HandleTargetedSay(
+	Client *speaker,
+	Mob *target,
+	const std::string &message,
+	bool authored_dialogue_handled,
+	bool target_engaged
+);
 void Process();
 
 }
-
-FallbackDialogue::DelayedDialogueQueue &ZoneFallbackDialogueQueue();
-FallbackDialogue::LiveContext BuildZoneFallbackDialogueContext(
-	Mob *speaker,
-	Mob *target,
-	const std::string &message
-);

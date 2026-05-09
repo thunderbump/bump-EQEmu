@@ -17,6 +17,8 @@
 */
 #include "fallback_dialogue_runtime.h"
 
+#include "client.h"
+#include "common/fallback_dialogue.h"
 #include "entity.h"
 #include "mob.h"
 #include "zone.h"
@@ -51,6 +53,27 @@ FallbackDialogue::EntityKind FallbackDialogueEntityKind(Mob *mob)
 	}
 
 	return FallbackDialogue::EntityKind::Unknown;
+}
+
+FallbackDialogue::TargetType FallbackDialogueTargetType(Mob *mob)
+{
+	if (!mob) {
+		return FallbackDialogue::TargetType::Unknown;
+	}
+
+	if (mob->IsMerc()) {
+		return FallbackDialogue::TargetType::Mercenary;
+	}
+
+	if (mob->IsNPC()) {
+		return FallbackDialogue::TargetType::NPC;
+	}
+
+	if (mob->IsBot()) {
+		return FallbackDialogue::TargetType::Bot;
+	}
+
+	return FallbackDialogue::TargetType::Unknown;
 }
 
 FallbackDialogue::LiveEntity FallbackDialogueLiveEntity(Mob *mob)
@@ -104,8 +127,6 @@ FallbackDialogue::CurrentInteraction CurrentFallbackDialogueInteraction(
 	};
 }
 
-}
-
 FallbackDialogue::DelayedDialogueQueue &ZoneFallbackDialogueQueue()
 {
 	return fallback_dialogue_queue;
@@ -129,7 +150,47 @@ FallbackDialogue::LiveContext BuildZoneFallbackDialogueContext(
 	};
 }
 
+void DeliverFallbackDialogueResult(Mob *target, const FallbackDialogue::TargetedSayResult &result)
+{
+	if (!target || !result.handled) {
+		return;
+	}
+
+	if (result.output_type == FallbackDialogue::OutputType::Say) {
+		target->Say("%s", result.message.c_str());
+	} else if (result.output_type == FallbackDialogue::OutputType::Emote) {
+		target->Emote("%s", result.message.c_str());
+	}
+}
+
+}
+
 namespace ZoneFallbackDialogueRuntime {
+
+void HandleTargetedSay(
+	Client *speaker,
+	Mob *target,
+	const std::string &message,
+	bool authored_dialogue_handled,
+	bool target_engaged
+)
+{
+	if (!speaker || !target) {
+		return;
+	}
+
+	const auto result = ZoneFallbackDialogueQueue().HandleTargetedSay({
+		.speaker_id = speaker->GetID(),
+		.target_id = target->GetID(),
+		.message = message,
+		.target_type = FallbackDialogueTargetType(target),
+		.authored_dialogue_handled = authored_dialogue_handled,
+		.target_engaged = target_engaged
+	}, BuildZoneFallbackDialogueContext(speaker, target, message));
+
+	DeliverFallbackDialogueResult(target, result);
+	FallbackDialogue::LogDiagnostic(result);
+}
 
 void Process()
 {
@@ -140,12 +201,7 @@ void Process()
 			continue;
 		}
 
-		if (result.output_type == FallbackDialogue::OutputType::Say) {
-			target->Say("%s", result.message.c_str());
-		} else if (result.output_type == FallbackDialogue::OutputType::Emote) {
-			target->Emote("%s", result.message.c_str());
-		}
-
+		DeliverFallbackDialogueResult(target, result);
 		FallbackDialogue::LogDiagnostic(result);
 	}
 }

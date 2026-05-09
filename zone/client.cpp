@@ -22,7 +22,6 @@
 #include "common/eqemu_logsys.h"
 #include "common/events/player_event_logs.h"
 #include "common/events/player_events.h"
-#include "common/fallback_dialogue.h"
 #include "common/features.h"
 #include "zone/fallback_dialogue_runtime.h"
 #include "common/guilds.h"
@@ -1644,31 +1643,16 @@ void Client::ChannelMessageReceived(uint8 chan_num, uint8 language, uint8 lang_s
 				}
 			}
 
-				const auto fallback_target_type = t->IsMerc() ?
-					FallbackDialogue::TargetType::Mercenary :
-					t->IsNPC() ?
-						FallbackDialogue::TargetType::NPC :
-						t->IsBot() ?
-							FallbackDialogue::TargetType::Bot :
-							FallbackDialogue::TargetType::Unknown;
-
-				const auto fallback_result = ZoneFallbackDialogueQueue().HandleTargetedSay({
-					.speaker_id = GetID(),
-					.target_id = t->GetID(),
-					.message = message,
-					.target_type = fallback_target_type,
-					.authored_dialogue_handled = authored_dialogue_handled,
-					.target_engaged = is_engaged
-				}, BuildZoneFallbackDialogueContext(this, t, message));
-
-				if (fallback_result.handled && fallback_result.output_type == FallbackDialogue::OutputType::Emote) {
-					t->Emote("%s", fallback_result.message.c_str());
-				}
-
-				FallbackDialogue::LogDiagnostic(fallback_result);
-			}
-			break;
+			ZoneFallbackDialogueRuntime::HandleTargetedSay(
+				this,
+				t,
+				message,
+				authored_dialogue_handled,
+				is_engaged
+			);
 		}
+		break;
+	}
 	case ChatChannel_UCSRelay:
 	{
 		// UCS Relay for Underfoot and later.
