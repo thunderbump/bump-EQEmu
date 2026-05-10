@@ -92,6 +92,7 @@ _Avoid_: Free-form parser magic, markdown command
 - Remote **Fallback Dialogue** generation produces **Delayed Dialogue** and must not block normal zone chat handling.
 - **Delayed Dialogue** is emitted only when the **Current Interaction** still holds.
 - The first **Fallback Dialogue** prompt sends **Public Gameplay Context** only.
+- **Public Gameplay Context** excludes operator-only status such as GM status; generated interactions should not change based on operator privileges.
 - A **Dialogue Cooldown** limits how often one speaker can trigger **Fallback Dialogue** for the same target.
 - The first **Fallback Dialogue** implementation accepts a single generated **Dialogue Response**.
 - A **Dialogue Response** can produce multiple ordered **Dialogue Fragments**.
