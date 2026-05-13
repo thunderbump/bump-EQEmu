@@ -39,6 +39,10 @@ FallbackDialogue::FallbackDialogueSettings LoadFallbackDialogueSettings()
 			.enabled = RuleB(Chat, FallbackDialogueEnabled),
 			.cooldown_seconds = RuleI(Chat, FallbackDialogueCooldownSeconds),
 			.unavailable_reply = RuleS(Chat, FallbackDialogueUnavailableReply)
+		},
+		.public_context = {
+			.nearby_context_radius = RuleI(Chat, FallbackDialogueNearbyContextRadius),
+			.nearby_entity_limit = RuleI(Chat, FallbackDialogueNearbyEntityLimit)
 		}
 	};
 }

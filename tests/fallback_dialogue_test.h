@@ -48,8 +48,8 @@ public:
 		TEST_ADD(FallbackDialogueTest::UnknownTargetedSayReportsSkipWithoutReply);
 		TEST_ADD(FallbackDialogueTest::PublicGameplayContextIncludesAllowedFields);
 		TEST_ADD(FallbackDialogueTest::PublicGameplayContextExcludesLocalOnlyDerivationFields);
-		TEST_ADD(FallbackDialogueTest::PublicGameplayContextFiltersNearbyEntitiesByRuleRadius);
-		TEST_ADD(FallbackDialogueTest::PublicGameplayContextLimitsNearbyEntitiesByRuleCount);
+		TEST_ADD(FallbackDialogueTest::PublicGameplayContextFiltersNearbyEntitiesBySettingsRadius);
+		TEST_ADD(FallbackDialogueTest::PublicGameplayContextLimitsNearbyEntitiesBySettingsCount);
 		TEST_ADD(FallbackDialogueTest::PublicGameplayContextExcludesSpeakerAndTargetFromNearbyEntities);
 		TEST_ADD(FallbackDialogueTest::DialogueResponseProcessingReturnsSpeechFragment);
 		TEST_ADD(FallbackDialogueTest::DialogueResponseProcessingReturnsStageDirectionFragments);
@@ -151,6 +151,11 @@ private:
 				.unavailable_reply = unavailable_reply
 			}
 		};
+	}
+
+	FallbackDialogue::PublicGameplayContextSettings DefaultPublicGameplayContextSettings()
+	{
+		return {};
 	}
 
 	void DefaultRulesDisableTargetedSayFallback()
@@ -455,7 +460,7 @@ private:
 				PublicEntity("Merchant Bren", FallbackDialogue::EntityKind::NPC, 18, 10.0f, 0.0f, 0.0f),
 				PublicEntity("Atenbot", FallbackDialogue::EntityKind::Bot, 12, 15.0f, 0.0f, 0.0f)
 			}
-		});
+		}, DefaultPublicGameplayContextSettings());
 
 		TEST_ASSERT_EQUALS(context.current_message, std::string("hail friend"));
 		TEST_ASSERT_EQUALS(context.speaker.name, std::string("Aten"));
@@ -496,7 +501,7 @@ private:
 			.target = target,
 			.zone = PublicZone("qeynos", "South Qeynos"),
 			.nearby_entities = {nearby}
-		});
+		}, DefaultPublicGameplayContextSettings());
 
 		const auto serialized = SerializePublicContext(context);
 		TEST_ASSERT(serialized.find("Aten") != std::string::npos);
@@ -513,10 +518,10 @@ private:
 		TEST_ASSERT(serialized.find("3333") == std::string::npos);
 	}
 
-	void PublicGameplayContextFiltersNearbyEntitiesByRuleRadius()
+	void PublicGameplayContextFiltersNearbyEntitiesBySettingsRadius()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueNearbyContextRadius", "20");
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueNearbyContextRadius", "100");
 
 		const auto context = FallbackDialogue::BuildPublicGameplayContext({
 			.current_message = "hail",
@@ -527,17 +532,20 @@ private:
 				PublicEntity("Nearby Merchant", FallbackDialogue::EntityKind::NPC, 18, 10.0f, 0.0f, 0.0f),
 				PublicEntity("Distant Guard", FallbackDialogue::EntityKind::NPC, 30, 25.0f, 0.0f, 0.0f)
 			}
+		}, {
+			.nearby_context_radius = 20,
+			.nearby_entity_limit = 8
 		});
 
 		TEST_ASSERT_EQUALS(context.nearby_entities.size(), static_cast<size_t>(1));
 		TEST_ASSERT_EQUALS(context.nearby_entities[0].name, std::string("Nearby Merchant"));
 	}
 
-	void PublicGameplayContextLimitsNearbyEntitiesByRuleCount()
+	void PublicGameplayContextLimitsNearbyEntitiesBySettingsCount()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueNearbyContextRadius", "100");
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueNearbyEntityLimit", "2");
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueNearbyContextRadius", "5");
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueNearbyEntityLimit", "8");
 
 		const auto context = FallbackDialogue::BuildPublicGameplayContext({
 			.current_message = "hail",
@@ -549,6 +557,9 @@ private:
 				PublicEntity("Closest", FallbackDialogue::EntityKind::NPC, 18, 10.0f, 0.0f, 0.0f),
 				PublicEntity("Second Closest", FallbackDialogue::EntityKind::Bot, 12, 20.0f, 0.0f, 0.0f)
 			}
+		}, {
+			.nearby_context_radius = 100,
+			.nearby_entity_limit = 2
 		});
 
 		TEST_ASSERT_EQUALS(context.nearby_entities.size(), static_cast<size_t>(2));
@@ -577,7 +588,7 @@ private:
 				PublicEntity("Dockhand", FallbackDialogue::EntityKind::NPC, 8, 10.0f, 0.0f, 0.0f),
 				nearby_target
 			}
-		});
+		}, DefaultPublicGameplayContextSettings());
 
 		TEST_ASSERT_EQUALS(context.nearby_entities.size(), static_cast<size_t>(1));
 		TEST_ASSERT_EQUALS(context.nearby_entities[0].name, std::string("Dockhand"));

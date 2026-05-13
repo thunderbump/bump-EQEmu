@@ -673,10 +673,11 @@ TargetedSayResult HandleTargetedSay(
 	return result;
 }
 
-PublicGameplayContext BuildPublicGameplayContext(const PublicGameplayContextInput &public_context_input)
+PublicGameplayContext BuildPublicGameplayContext(
+	const PublicGameplayContextInput &public_context_input,
+	const PublicGameplayContextSettings &settings
+)
 {
-	const auto nearby_radius = RuleI(Chat, FallbackDialogueNearbyContextRadius);
-	const auto nearby_limit = RuleI(Chat, FallbackDialogueNearbyEntityLimit);
 	PublicGameplayContext public_context{
 		.current_message = public_context_input.current_message,
 		.speaker = BuildPublicEntitySummary(public_context_input.speaker),
@@ -690,7 +691,7 @@ PublicGameplayContext BuildPublicGameplayContext(const PublicGameplayContextInpu
 		}
 	};
 
-	if (nearby_radius <= 0 || nearby_limit <= 0) {
+	if (settings.nearby_context_radius <= 0 || settings.nearby_entity_limit <= 0) {
 		return public_context;
 	}
 
@@ -702,7 +703,7 @@ PublicGameplayContext BuildPublicGameplayContext(const PublicGameplayContextInpu
 		}
 
 		const auto distance = DistanceBetween(public_context_input.speaker, entity);
-		if (distance > nearby_radius) {
+		if (distance > settings.nearby_context_radius) {
 			continue;
 		}
 
@@ -719,8 +720,8 @@ PublicGameplayContext BuildPublicGameplayContext(const PublicGameplayContextInpu
 		}
 	);
 
-	if (public_context.nearby_entities.size() > static_cast<size_t>(nearby_limit)) {
-		public_context.nearby_entities.resize(static_cast<size_t>(nearby_limit));
+	if (public_context.nearby_entities.size() > static_cast<size_t>(settings.nearby_entity_limit)) {
+		public_context.nearby_entities.resize(static_cast<size_t>(settings.nearby_entity_limit));
 	}
 
 	return public_context;
@@ -903,7 +904,7 @@ TargetedSayResult DelayedDialogueQueue::HandleTargetedSay(
 		.speaker_id = request.speaker_id,
 		.target_id = request.target_id,
 		.target_type = request.target_type,
-		.context = BuildPublicGameplayContext(public_context_input),
+		.context = BuildPublicGameplayContext(public_context_input, settings_.public_context),
 		.unavailable_reply = settings_.immediate.unavailable_reply
 	};
 

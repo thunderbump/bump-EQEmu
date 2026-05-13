@@ -98,8 +98,14 @@ struct ImmediateFallbackDialogueSettings {
 	std::string unavailable_reply = "appears distracted.";
 };
 
+struct PublicGameplayContextSettings {
+	int nearby_context_radius = 100;
+	int nearby_entity_limit = 8;
+};
+
 struct FallbackDialogueSettings {
 	ImmediateFallbackDialogueSettings immediate;
+	PublicGameplayContextSettings     public_context;
 };
 
 struct PublicEntityInput {
@@ -263,7 +269,10 @@ TargetedSayResult HandleTargetedSay(
 	const TargetedSayRequest &request,
 	const FallbackDialogueSettings &settings
 );
-PublicGameplayContext BuildPublicGameplayContext(const PublicGameplayContextInput &public_context_input);
+PublicGameplayContext BuildPublicGameplayContext(
+	const PublicGameplayContextInput &public_context_input,
+	const PublicGameplayContextSettings &settings
+);
 DialogueResponseProcessingResult ProcessDialogueResponse(
 	const std::string &natural_dialogue_response,
 	const std::string &target_name
