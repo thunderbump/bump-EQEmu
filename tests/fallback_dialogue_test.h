@@ -142,7 +142,8 @@ private:
 	FallbackDialogue::FallbackDialogueSettings EnabledFallbackDialogueSettings(
 		const std::string &unavailable_reply = "appears distracted.",
 		int cooldown_seconds = 30,
-		int max_delivered_line_length = 200
+		int max_delivered_line_length = 200,
+		int imported_game_rule_say_range = 15
 	)
 	{
 		return {
@@ -153,6 +154,9 @@ private:
 			},
 			.delivery = {
 				.max_delivered_line_length = max_delivered_line_length
+			},
+			.current_interaction = {
+				.imported_game_rule_say_range = imported_game_rule_say_range
 			}
 		};
 	}
@@ -1583,12 +1587,12 @@ private:
 	void FailedDelayedDialogueDropsWhenSpeakerLeavesSayRange()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Range:Say", "15");
+		RuleManager::Instance()->SetRule("Range:Say", "250");
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
 		FallbackDialogue::DelayedDialogueQueue queue(
 			provider,
-			EnabledFallbackDialogueSettings("seems lost in thought.")
+			EnabledFallbackDialogueSettings("seems lost in thought.", 30, 200, 15)
 		);
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 101,

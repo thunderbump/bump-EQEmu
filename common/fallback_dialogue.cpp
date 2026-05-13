@@ -217,7 +217,8 @@ TargetedSayResult EligibleTargetedSayResult(
 
 std::string ValidateCurrentInteraction(
 	const DelayedDialogueRequest &request,
-	const CurrentInteraction &interaction
+	const CurrentInteraction &interaction,
+	const CurrentInteractionValidationSettings &settings
 )
 {
 	if (!interaction.speaker_present || interaction.speaker_id != request.speaker_id) {
@@ -232,7 +233,7 @@ std::string ValidateCurrentInteraction(
 		return "delayed_dialogue_dropped_target_changed";
 	}
 
-	if (DistanceNoZBetween(interaction.speaker, interaction.target) > RuleI(Range, Say)) {
+	if (DistanceNoZBetween(interaction.speaker, interaction.target) > settings.imported_game_rule_say_range) {
 		return "delayed_dialogue_dropped_out_of_say_range";
 	}
 
@@ -961,7 +962,7 @@ bool DelayedDialogueQueue::PopReadyResult(
 	const auto request = std::move(pending_request->second);
 	pending_requests_.erase(pending_request);
 
-	const auto stale_reason = ValidateCurrentInteraction(request, resolver(request));
+	const auto stale_reason = ValidateCurrentInteraction(request, resolver(request), settings_.current_interaction);
 	if (!stale_reason.empty()) {
 		result = {
 			.debug_reason = stale_reason,

@@ -107,10 +107,15 @@ struct DialogueDeliverySettings {
 	int max_delivered_line_length = 200;
 };
 
+struct CurrentInteractionValidationSettings {
+	int imported_game_rule_say_range = 15;
+};
+
 struct FallbackDialogueSettings {
 	ImmediateFallbackDialogueSettings immediate;
 	PublicGameplayContextSettings     public_context;
 	DialogueDeliverySettings          delivery;
+	CurrentInteractionValidationSettings current_interaction;
 };
 
 struct PublicEntityInput {

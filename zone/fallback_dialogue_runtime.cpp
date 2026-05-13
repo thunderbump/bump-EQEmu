@@ -46,6 +46,9 @@ FallbackDialogue::FallbackDialogueSettings LoadFallbackDialogueSettings()
 		},
 		.delivery = {
 			.max_delivered_line_length = RuleI(Chat, FallbackDialogueMaxLineLength)
+		},
+		.current_interaction = {
+			.imported_game_rule_say_range = RuleI(Range, Say)
 		}
 	};
 }
