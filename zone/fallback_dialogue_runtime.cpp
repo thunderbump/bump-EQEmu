@@ -43,6 +43,9 @@ FallbackDialogue::FallbackDialogueSettings LoadFallbackDialogueSettings()
 		.public_context = {
 			.nearby_context_radius = RuleI(Chat, FallbackDialogueNearbyContextRadius),
 			.nearby_entity_limit = RuleI(Chat, FallbackDialogueNearbyEntityLimit)
+		},
+		.delivery = {
+			.max_delivered_line_length = RuleI(Chat, FallbackDialogueMaxLineLength)
 		}
 	};
 }

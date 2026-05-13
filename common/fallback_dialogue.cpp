@@ -274,9 +274,12 @@ std::string NormalizeDialogueResponse(const std::string &dialogue_response)
 	return normalized;
 }
 
-std::vector<std::string> SplitSpeechFragmentForDelivery(const std::string &speech_fragment)
+std::vector<std::string> SplitSpeechFragmentForDelivery(
+	const std::string &speech_fragment,
+	const DialogueDeliverySettings &settings
+)
 {
-	const auto max_line_length = RuleI(Chat, FallbackDialogueMaxLineLength);
+	const auto max_line_length = settings.max_delivered_line_length;
 	if (max_line_length <= 0 || speech_fragment.size() <= static_cast<size_t>(max_line_length)) {
 		return speech_fragment.empty() ? std::vector<std::string>{} : std::vector<std::string>{speech_fragment};
 	}
@@ -764,13 +767,16 @@ DialogueResponseProcessingResult ProcessDialogueResponse(
 	};
 }
 
-DialogueDeliveryPlan PlanDialogueDelivery(const std::vector<DialogueFragment> &fragments)
+DialogueDeliveryPlan PlanDialogueDelivery(
+	const std::vector<DialogueFragment> &fragments,
+	const DialogueDeliverySettings &settings
+)
 {
 	DialogueDeliveryPlan plan;
 
 	for (const auto &fragment : fragments) {
 		if (fragment.output_type == OutputType::Say) {
-			for (const auto &message : SplitSpeechFragmentForDelivery(fragment.message)) {
+			for (const auto &message : SplitSpeechFragmentForDelivery(fragment.message, settings)) {
 				plan.messages.push_back({
 					.output_type = OutputType::Say,
 					.message = message
@@ -780,7 +786,7 @@ DialogueDeliveryPlan PlanDialogueDelivery(const std::vector<DialogueFragment> &f
 		}
 
 		if (fragment.output_type == OutputType::Emote) {
-			const auto max_line_length = RuleI(Chat, FallbackDialogueMaxLineLength);
+			const auto max_line_length = settings.max_delivered_line_length;
 			if (max_line_length > 0 && fragment.message.size() > static_cast<size_t>(max_line_length)) {
 				return {
 					.rejection_reason = "long_emote_dialogue_fragment"
@@ -840,7 +846,8 @@ TargetedSayResult BuildDelayedDialogueReadyResult(
 
 std::vector<TargetedSayResult> BuildDelayedDialogueResults(
 	const DelayedDialogueRequest &request,
-	const DelayedDialogueCompletion &completion
+	const DelayedDialogueCompletion &completion,
+	const DialogueDeliverySettings &delivery_settings
 )
 {
 	if (!completion.succeeded) {
@@ -859,7 +866,7 @@ std::vector<TargetedSayResult> BuildDelayedDialogueResults(
 		};
 	}
 
-	const auto delivery_plan = PlanDialogueDelivery(processed_response.fragments);
+	const auto delivery_plan = PlanDialogueDelivery(processed_response.fragments, delivery_settings);
 	if (!delivery_plan.accepted) {
 		return {
 			BuildDelayedDialogueUnavailableResult(request, "delayed_dialogue_rejected")
@@ -966,7 +973,7 @@ bool DelayedDialogueQueue::PopReadyResult(
 		return false;
 	}
 
-	auto ready_results = BuildDelayedDialogueResults(request, completion);
+	auto ready_results = BuildDelayedDialogueResults(request, completion, settings_.delivery);
 	result = std::move(ready_results.front());
 	for (auto ready_result = ready_results.begin() + 1; ready_result != ready_results.end(); ++ready_result) {
 		ready_results_.push_back(std::move(*ready_result));

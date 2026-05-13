@@ -141,7 +141,8 @@ private:
 
 	FallbackDialogue::FallbackDialogueSettings EnabledFallbackDialogueSettings(
 		const std::string &unavailable_reply = "appears distracted.",
-		int cooldown_seconds = 30
+		int cooldown_seconds = 30,
+		int max_delivered_line_length = 200
 	)
 	{
 		return {
@@ -149,6 +150,9 @@ private:
 				.enabled = true,
 				.cooldown_seconds = cooldown_seconds,
 				.unavailable_reply = unavailable_reply
+			},
+			.delivery = {
+				.max_delivered_line_length = max_delivered_line_length
 			}
 		};
 	}
@@ -156,6 +160,13 @@ private:
 	FallbackDialogue::PublicGameplayContextSettings DefaultPublicGameplayContextSettings()
 	{
 		return {};
+	}
+
+	FallbackDialogue::DialogueDeliverySettings DeliverySettings(int max_delivered_line_length)
+	{
+		return {
+			.max_delivered_line_length = max_delivered_line_length
+		};
 	}
 
 	void DefaultRulesDisableTargetedSayFallback()
@@ -691,13 +702,12 @@ private:
 	void DialogueDeliveryPlanningReturnsOrderedDeliveredMessages()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueMaxLineLength", "200");
 
 		const auto result = FallbackDialogue::PlanDialogueDelivery({
 			{.output_type = FallbackDialogue::OutputType::Say, .message = "Well met."},
 			{.output_type = FallbackDialogue::OutputType::Emote, .message = "looks around warily"},
 			{.output_type = FallbackDialogue::OutputType::Say, .message = "Keep your voice low."}
-		});
+		}, DeliverySettings(200));
 
 		TEST_ASSERT(result.accepted);
 		TEST_ASSERT(result.rejection_reason.empty());
@@ -713,11 +723,10 @@ private:
 	void DialogueDeliveryPlanningSplitsLongSpeech()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueMaxLineLength", "24");
 
 		const auto result = FallbackDialogue::PlanDialogueDelivery({
 			{.output_type = FallbackDialogue::OutputType::Say, .message = "First sentence. Second sentence keeps going."}
-		});
+		}, DeliverySettings(24));
 
 		TEST_ASSERT(result.accepted);
 		TEST_ASSERT_EQUALS(result.messages.size(), static_cast<size_t>(3));
@@ -732,11 +741,10 @@ private:
 	void DialogueDeliveryPlanningRejectsLongEmote()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueMaxLineLength", "16");
 
 		const auto result = FallbackDialogue::PlanDialogueDelivery({
 			{.output_type = FallbackDialogue::OutputType::Emote, .message = "looks around warily"}
-		});
+		}, DeliverySettings(16));
 
 		TEST_ASSERT(!result.accepted);
 		TEST_ASSERT_EQUALS(result.rejection_reason, std::string("long_emote_dialogue_fragment"));
@@ -1174,10 +1182,13 @@ private:
 	void CompletedDelayedDialogueSplitsLongLineAtSentenceBoundary()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueMaxLineLength", "24");
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
-		FallbackDialogue::DelayedDialogueQueue queue(provider, EnabledFallbackDialogueSettings());
+		FallbackDialogue::DelayedDialogueQueue queue(provider, EnabledFallbackDialogueSettings(
+			"appears distracted.",
+			30,
+			24
+		));
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 101,
 			.target_id = 202,
@@ -1239,10 +1250,13 @@ private:
 	void CompletedDelayedDialogueSplitsLongWordAtLineLimit()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueMaxLineLength", "8");
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
-		FallbackDialogue::DelayedDialogueQueue queue(provider, EnabledFallbackDialogueSettings());
+		FallbackDialogue::DelayedDialogueQueue queue(provider, EnabledFallbackDialogueSettings(
+			"appears distracted.",
+			30,
+			8
+		));
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 101,
 			.target_id = 202,
@@ -1297,10 +1311,13 @@ private:
 	void CompletedBotDelayedDialogueSplitsLongLineInOrder()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueMaxLineLength", "16");
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
-		FallbackDialogue::DelayedDialogueQueue queue(provider, EnabledFallbackDialogueSettings());
+		FallbackDialogue::DelayedDialogueQueue queue(provider, EnabledFallbackDialogueSettings(
+			"appears distracted.",
+			30,
+			16
+		));
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 101,
 			.target_id = 202,
@@ -1412,12 +1429,11 @@ private:
 	void LongEmoteDelayedDialogueFallsBackToUnavailableReply()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueMaxLineLength", "16");
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
 		FallbackDialogue::DelayedDialogueQueue queue(
 			provider,
-			EnabledFallbackDialogueSettings("appears distracted.")
+			EnabledFallbackDialogueSettings("appears distracted.", 30, 16)
 		);
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 101,

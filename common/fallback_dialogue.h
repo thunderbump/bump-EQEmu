@@ -103,9 +103,14 @@ struct PublicGameplayContextSettings {
 	int nearby_entity_limit = 8;
 };
 
+struct DialogueDeliverySettings {
+	int max_delivered_line_length = 200;
+};
+
 struct FallbackDialogueSettings {
 	ImmediateFallbackDialogueSettings immediate;
 	PublicGameplayContextSettings     public_context;
+	DialogueDeliverySettings          delivery;
 };
 
 struct PublicEntityInput {
@@ -277,7 +282,10 @@ DialogueResponseProcessingResult ProcessDialogueResponse(
 	const std::string &natural_dialogue_response,
 	const std::string &target_name
 );
-DialogueDeliveryPlan PlanDialogueDelivery(const std::vector<DialogueFragment> &fragments);
+DialogueDeliveryPlan PlanDialogueDelivery(
+	const std::vector<DialogueFragment> &fragments,
+	const DialogueDeliverySettings &settings
+);
 std::string BuildDiagnosticLogLine(const TargetedSayResult &result);
 void LogDiagnostic(const TargetedSayResult &result);
 void ResetDialogueCooldowns();
