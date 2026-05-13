@@ -53,14 +53,16 @@ void RemoveExpiredDialogueCooldowns(uint32_t current_time, uint32_t cooldown_ms)
 	}
 }
 
-bool IsDialogueCooldownActive(const TargetedSayRequest &request)
+bool IsDialogueCooldownActive(
+	const TargetedSayRequest &request,
+	const ImmediateFallbackDialogueSettings &settings
+)
 {
-	const int cooldown_seconds = RuleI(Chat, FallbackDialogueCooldownSeconds);
-	if (cooldown_seconds <= 0) {
+	if (settings.cooldown_seconds <= 0) {
 		return false;
 	}
 
-	const auto cooldown_ms = static_cast<uint32_t>(cooldown_seconds) * 1000;
+	const auto cooldown_ms = static_cast<uint32_t>(settings.cooldown_seconds) * 1000;
 	const auto current_time = Timer::GetCurrentTime();
 	const auto key = CooldownKey(request.speaker_id, request.target_id);
 	const auto cooldown = dialogue_cooldowns.find(key);
@@ -72,14 +74,16 @@ bool IsDialogueCooldownActive(const TargetedSayRequest &request)
 	return current_time - cooldown->second < cooldown_ms;
 }
 
-void StartDialogueCooldown(const TargetedSayRequest &request)
+void StartDialogueCooldown(
+	const TargetedSayRequest &request,
+	const ImmediateFallbackDialogueSettings &settings
+)
 {
-	const int cooldown_seconds = RuleI(Chat, FallbackDialogueCooldownSeconds);
-	if (cooldown_seconds <= 0) {
+	if (settings.cooldown_seconds <= 0) {
 		return;
 	}
 
-	const auto cooldown_ms = static_cast<uint32_t>(cooldown_seconds) * 1000;
+	const auto cooldown_ms = static_cast<uint32_t>(settings.cooldown_seconds) * 1000;
 	const auto current_time = Timer::GetCurrentTime();
 
 	RemoveExpiredDialogueCooldowns(current_time, cooldown_ms);
@@ -170,9 +174,12 @@ bool StartsWithInsensitive(const std::string &value, const std::string &prefix)
 	return ToLowerCopy(value.substr(0, prefix.size())) == prefix;
 }
 
-TargetedSayResult EligibleTargetedSayResult(const TargetedSayRequest &request)
+TargetedSayResult EligibleTargetedSayResult(
+	const TargetedSayRequest &request,
+	const ImmediateFallbackDialogueSettings &settings
+)
 {
-	if (!RuleB(Chat, FallbackDialogueEnabled)) {
+	if (!settings.enabled) {
 		return {};
 	}
 
@@ -194,7 +201,7 @@ TargetedSayResult EligibleTargetedSayResult(const TargetedSayRequest &request)
 		};
 	}
 
-	if (IsDialogueCooldownActive(request)) {
+	if (IsDialogueCooldownActive(request, settings)) {
 		return {
 			.debug_reason = "dialogue_cooldown"
 		};
@@ -649,17 +656,20 @@ public:
 
 }
 
-TargetedSayResult HandleTargetedSay(const TargetedSayRequest &request)
+TargetedSayResult HandleTargetedSay(
+	const TargetedSayRequest &request,
+	const FallbackDialogueSettings &settings
+)
 {
-	auto result = EligibleTargetedSayResult(request);
+	auto result = EligibleTargetedSayResult(request, settings.immediate);
 	if (!result.handled) {
 		return result;
 	}
 
-	StartDialogueCooldown(request);
+	StartDialogueCooldown(request, settings.immediate);
 
 	result.output_type = OutputType::Emote;
-	result.message = RuleS(Chat, FallbackDialogueUnavailableReply);
+	result.message = settings.immediate.unavailable_reply;
 	return result;
 }
 
@@ -870,8 +880,9 @@ std::vector<TargetedSayResult> BuildDelayedDialogueResults(
 	return results;
 }
 
-DelayedDialogueQueue::DelayedDialogueQueue(DelayedDialogueProvider &provider)
-	: provider_(provider)
+DelayedDialogueQueue::DelayedDialogueQueue(DelayedDialogueProvider &provider, FallbackDialogueSettings settings)
+	: provider_(provider),
+	settings_(std::move(settings))
 {
 }
 
@@ -880,12 +891,12 @@ TargetedSayResult DelayedDialogueQueue::HandleTargetedSay(
 	const PublicGameplayContextInput &public_context_input
 )
 {
-	auto result = EligibleTargetedSayResult(request);
+	auto result = EligibleTargetedSayResult(request, settings_.immediate);
 	if (!result.handled) {
 		return result;
 	}
 
-	StartDialogueCooldown(request);
+	StartDialogueCooldown(request, settings_.immediate);
 
 	DelayedDialogueRequest delayed_request{
 		.request_id = next_request_id_++,
@@ -893,7 +904,7 @@ TargetedSayResult DelayedDialogueQueue::HandleTargetedSay(
 		.target_id = request.target_id,
 		.target_type = request.target_type,
 		.context = BuildPublicGameplayContext(public_context_input),
-		.unavailable_reply = RuleS(Chat, FallbackDialogueUnavailableReply)
+		.unavailable_reply = settings_.immediate.unavailable_reply
 	};
 
 	pending_requests_[delayed_request.request_id] = delayed_request;

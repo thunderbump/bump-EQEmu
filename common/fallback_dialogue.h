@@ -92,6 +92,16 @@ struct TargetedSayResult {
 	TargetType  target_type = TargetType::Unknown;
 };
 
+struct ImmediateFallbackDialogueSettings {
+	bool        enabled = false;
+	int         cooldown_seconds = 30;
+	std::string unavailable_reply = "appears distracted.";
+};
+
+struct FallbackDialogueSettings {
+	ImmediateFallbackDialogueSettings immediate;
+};
+
 struct PublicEntityInput {
 	// Local-only derivation input for exclusion and interaction checks; never prompt output.
 	uint32_t    entity_id = 0;
@@ -218,7 +228,7 @@ class DelayedDialogueQueue {
 public:
 	using CurrentInteractionResolver = std::function<CurrentInteraction(const DelayedDialogueRequest &request)>;
 
-	explicit DelayedDialogueQueue(DelayedDialogueProvider &provider);
+	DelayedDialogueQueue(DelayedDialogueProvider &provider, FallbackDialogueSettings settings);
 
 	TargetedSayResult HandleTargetedSay(
 		const TargetedSayRequest &request,
@@ -229,6 +239,7 @@ public:
 
 private:
 	DelayedDialogueProvider                         &provider_;
+	FallbackDialogueSettings                         settings_;
 	std::unordered_map<uint64_t, DelayedDialogueRequest> pending_requests_;
 	std::deque<TargetedSayResult>                   ready_results_;
 	uint64_t                                         next_request_id_ = 1;
@@ -248,7 +259,10 @@ private:
 	std::deque<DelayedDialogueCompletion> completions_;
 };
 
-TargetedSayResult HandleTargetedSay(const TargetedSayRequest &request);
+TargetedSayResult HandleTargetedSay(
+	const TargetedSayRequest &request,
+	const FallbackDialogueSettings &settings
+);
 PublicGameplayContext BuildPublicGameplayContext(const PublicGameplayContextInput &public_context_input);
 DialogueResponseProcessingResult ProcessDialogueResponse(
 	const std::string &natural_dialogue_response,

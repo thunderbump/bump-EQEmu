@@ -19,6 +19,7 @@
 
 #include "client.h"
 #include "common/fallback_dialogue.h"
+#include "common/rulesys.h"
 #include "entity.h"
 #include "mob.h"
 #include "zone.h"
@@ -30,7 +31,17 @@ extern Zone *zone;
 namespace {
 
 FallbackDialogue::OllamaDelayedDialogueProvider fallback_dialogue_provider;
-FallbackDialogue::DelayedDialogueQueue fallback_dialogue_queue(fallback_dialogue_provider);
+
+FallbackDialogue::FallbackDialogueSettings LoadFallbackDialogueSettings()
+{
+	return {
+		.immediate = {
+			.enabled = RuleB(Chat, FallbackDialogueEnabled),
+			.cooldown_seconds = RuleI(Chat, FallbackDialogueCooldownSeconds),
+			.unavailable_reply = RuleS(Chat, FallbackDialogueUnavailableReply)
+		}
+	};
+}
 
 FallbackDialogue::EntityKind PublicGameplayContextEntityKind(Mob *mob)
 {
@@ -144,6 +155,11 @@ FallbackDialogue::CurrentInteraction CurrentFallbackDialogueInteraction(
 
 FallbackDialogue::DelayedDialogueQueue &ZoneFallbackDialogueQueue()
 {
+	static FallbackDialogue::DelayedDialogueQueue fallback_dialogue_queue(
+		fallback_dialogue_provider,
+		LoadFallbackDialogueSettings()
+	);
+
 	return fallback_dialogue_queue;
 }
 

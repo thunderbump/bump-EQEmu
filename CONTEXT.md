@@ -28,6 +28,10 @@ _Avoid_: Error message, outage notice
 Server rule values that control whether **Fallback Dialogue** is enabled and how it reaches the remote response service.
 _Avoid_: Hardcoded AI settings, process-only configuration
 
+**Fallback Dialogue Settings**:
+A runtime snapshot of **Dialogue Rules** used by **Fallback Dialogue** code so processing, planning, and provider behavior can be tested without reading server rules directly.
+_Avoid_: New rule source, cached configuration authority
+
 **Delayed Dialogue**:
 A response emitted after the original player interaction has already completed.
 _Avoid_: Blocking dialogue, inline generation
@@ -89,6 +93,13 @@ _Avoid_: Free-form parser magic, markdown command
 - Successful **Fallback Dialogue** is presented as ordinary target speech.
 - An **Unavailable Reply** is presented as a runtime emote from the target.
 - **Dialogue Rules** configure the first **Fallback Dialogue** implementation.
+- **Fallback Dialogue Settings** capture **Dialogue Rules** for code paths that should not read server rules directly.
+- **Fallback Dialogue Settings** may include ordinary game rules such as say range when **Current Interaction** validation needs a testable runtime snapshot; those values do not become **Dialogue Rules**.
+- **Fallback Dialogue Settings** are stable for the lifetime of the zone process unless an explicit reload path is added later.
+- Zone runtime owns loading **Fallback Dialogue Settings** from server rules; common **Fallback Dialogue** logic receives settings rather than reading rules directly.
+- **Fallback Dialogue Settings** should keep responsibility boundaries visible so eligibility, public context construction, delivery planning, current-interaction validation, and provider calls do not all depend on every setting.
+- Common **Fallback Dialogue** APIs should prefer explicit **Fallback Dialogue Settings** over convenience wrappers that read server rules directly.
+- **Fallback Dialogue** feature eligibility is separate from remote provider availability; invalid provider settings should lead to an **Unavailable Reply** path, not redefine whether **Fallback Dialogue** is enabled.
 - Remote **Fallback Dialogue** generation produces **Delayed Dialogue** and must not block normal zone chat handling.
 - **Delayed Dialogue** is emitted only when the **Current Interaction** still holds.
 - The first **Fallback Dialogue** prompt sends **Public Gameplay Context** only.

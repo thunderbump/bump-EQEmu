@@ -134,6 +134,25 @@ private:
 		std::vector<FakeOllamaHttpCall> calls_;
 	};
 
+	FallbackDialogue::FallbackDialogueSettings DisabledFallbackDialogueSettings()
+	{
+		return {};
+	}
+
+	FallbackDialogue::FallbackDialogueSettings EnabledFallbackDialogueSettings(
+		const std::string &unavailable_reply = "appears distracted.",
+		int cooldown_seconds = 30
+	)
+	{
+		return {
+			.immediate = {
+				.enabled = true,
+				.cooldown_seconds = cooldown_seconds,
+				.unavailable_reply = unavailable_reply
+			}
+		};
+	}
+
 	void DefaultRulesDisableTargetedSayFallback()
 	{
 		ResetRules();
@@ -160,15 +179,14 @@ private:
 			.message = "hello"
 		};
 
-		const auto result = FallbackDialogue::HandleTargetedSay(request);
+		const auto result = FallbackDialogue::HandleTargetedSay(request, DisabledFallbackDialogueSettings());
 		TEST_ASSERT(!result.handled);
 	}
 
 	void EligibleNpcTargetedSayReturnsUnavailableReplyEmote()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueUnavailableReply", "seems lost in thought.");
+		const auto settings = EnabledFallbackDialogueSettings("seems lost in thought.");
 
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 1,
@@ -178,7 +196,7 @@ private:
 			.authored_dialogue_handled = false
 		};
 
-		const auto result = FallbackDialogue::HandleTargetedSay(request);
+		const auto result = FallbackDialogue::HandleTargetedSay(request, settings);
 		TEST_ASSERT(result.handled);
 		TEST_ASSERT(result.output_type == FallbackDialogue::OutputType::Emote);
 		TEST_ASSERT_EQUALS(result.message, std::string("seems lost in thought."));
@@ -187,8 +205,7 @@ private:
 	void EligibleBotTargetedSayReturnsUnavailableReplyEmote()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueUnavailableReply", "looks momentarily distracted.");
+		const auto settings = EnabledFallbackDialogueSettings("looks momentarily distracted.");
 
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 1,
@@ -198,7 +215,7 @@ private:
 			.authored_dialogue_handled = false
 		};
 
-		const auto result = FallbackDialogue::HandleTargetedSay(request);
+		const auto result = FallbackDialogue::HandleTargetedSay(request, settings);
 		TEST_ASSERT(result.handled);
 		TEST_ASSERT(result.output_type == FallbackDialogue::OutputType::Emote);
 		TEST_ASSERT_EQUALS(result.message, std::string("looks momentarily distracted."));
@@ -207,8 +224,7 @@ private:
 	void EngagedBotTargetedSayReturnsUnavailableReplyEmote()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueUnavailableReply", "seems distracted by the fight.");
+		const auto settings = EnabledFallbackDialogueSettings("seems distracted by the fight.");
 
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 1,
@@ -219,7 +235,7 @@ private:
 			.target_engaged = true
 		};
 
-		const auto result = FallbackDialogue::HandleTargetedSay(request);
+		const auto result = FallbackDialogue::HandleTargetedSay(request, settings);
 		TEST_ASSERT(result.handled);
 		TEST_ASSERT(result.output_type == FallbackDialogue::OutputType::Emote);
 		TEST_ASSERT_EQUALS(result.message, std::string("seems distracted by the fight."));
@@ -228,8 +244,7 @@ private:
 	void RepeatedNpcTargetedSayDuringCooldownShowsNoReply()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueCooldownSeconds", "30");
+		const auto settings = EnabledFallbackDialogueSettings("appears distracted.", 30);
 
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 1,
@@ -239,10 +254,10 @@ private:
 			.authored_dialogue_handled = false
 		};
 
-		const auto first_result = FallbackDialogue::HandleTargetedSay(request);
+		const auto first_result = FallbackDialogue::HandleTargetedSay(request, settings);
 		TEST_ASSERT(first_result.handled);
 
-		const auto repeat_result = FallbackDialogue::HandleTargetedSay(request);
+		const auto repeat_result = FallbackDialogue::HandleTargetedSay(request, settings);
 		TEST_ASSERT(!repeat_result.handled);
 		TEST_ASSERT(repeat_result.output_type == FallbackDialogue::OutputType::None);
 		TEST_ASSERT(repeat_result.message.empty());
@@ -252,8 +267,7 @@ private:
 	void RepeatedBotTargetedSayDuringCooldownShowsNoReply()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueCooldownSeconds", "30");
+		const auto settings = EnabledFallbackDialogueSettings("appears distracted.", 30);
 
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 1,
@@ -263,10 +277,10 @@ private:
 			.authored_dialogue_handled = false
 		};
 
-		const auto first_result = FallbackDialogue::HandleTargetedSay(request);
+		const auto first_result = FallbackDialogue::HandleTargetedSay(request, settings);
 		TEST_ASSERT(first_result.handled);
 
-		const auto repeat_result = FallbackDialogue::HandleTargetedSay(request);
+		const auto repeat_result = FallbackDialogue::HandleTargetedSay(request, settings);
 		TEST_ASSERT(!repeat_result.handled);
 		TEST_ASSERT(repeat_result.output_type == FallbackDialogue::OutputType::None);
 		TEST_ASSERT(repeat_result.message.empty());
@@ -276,8 +290,7 @@ private:
 	void DifferentTargetedSayBySameSpeakerBypassesCooldown()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueCooldownSeconds", "30");
+		const auto settings = EnabledFallbackDialogueSettings("appears distracted.", 30);
 
 		const FallbackDialogue::TargetedSayRequest first_target{
 			.speaker_id = 1,
@@ -294,10 +307,10 @@ private:
 			.authored_dialogue_handled = false
 		};
 
-		const auto first_result = FallbackDialogue::HandleTargetedSay(first_target);
+		const auto first_result = FallbackDialogue::HandleTargetedSay(first_target, settings);
 		TEST_ASSERT(first_result.handled);
 
-		const auto second_result = FallbackDialogue::HandleTargetedSay(second_target);
+		const auto second_result = FallbackDialogue::HandleTargetedSay(second_target, settings);
 		TEST_ASSERT(second_result.handled);
 		TEST_ASSERT(second_result.output_type == FallbackDialogue::OutputType::Emote);
 	}
@@ -305,8 +318,7 @@ private:
 	void TargetedSayAfterCooldownExpiresReturnsUnavailableReply()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueCooldownSeconds", "30");
+		const auto settings = EnabledFallbackDialogueSettings("appears distracted.", 30);
 
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 1,
@@ -316,12 +328,12 @@ private:
 			.authored_dialogue_handled = false
 		};
 
-		const auto first_result = FallbackDialogue::HandleTargetedSay(request);
+		const auto first_result = FallbackDialogue::HandleTargetedSay(request, settings);
 		TEST_ASSERT(first_result.handled);
 
 		Timer::RollForward(31);
 
-		const auto expired_result = FallbackDialogue::HandleTargetedSay(request);
+		const auto expired_result = FallbackDialogue::HandleTargetedSay(request, settings);
 		TEST_ASSERT(expired_result.handled);
 		TEST_ASSERT(expired_result.output_type == FallbackDialogue::OutputType::Emote);
 	}
@@ -329,7 +341,7 @@ private:
 	void AuthoredNpcDialogueSuppressesUnavailableReply()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
+		const auto settings = EnabledFallbackDialogueSettings();
 
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 1,
@@ -339,7 +351,7 @@ private:
 			.authored_dialogue_handled = true
 		};
 
-		const auto result = FallbackDialogue::HandleTargetedSay(request);
+		const auto result = FallbackDialogue::HandleTargetedSay(request, settings);
 		TEST_ASSERT(!result.handled);
 		TEST_ASSERT(result.output_type == FallbackDialogue::OutputType::None);
 		TEST_ASSERT(result.message.empty());
@@ -349,7 +361,7 @@ private:
 	void AuthoredBotDialogueSuppressesUnavailableReply()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
+		const auto settings = EnabledFallbackDialogueSettings();
 
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 1,
@@ -359,7 +371,7 @@ private:
 			.authored_dialogue_handled = true
 		};
 
-		const auto result = FallbackDialogue::HandleTargetedSay(request);
+		const auto result = FallbackDialogue::HandleTargetedSay(request, settings);
 		TEST_ASSERT(!result.handled);
 		TEST_ASSERT(result.output_type == FallbackDialogue::OutputType::None);
 		TEST_ASSERT(result.message.empty());
@@ -369,7 +381,7 @@ private:
 	void EngagedNpcDialogueSuppressesUnavailableReply()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
+		const auto settings = EnabledFallbackDialogueSettings();
 
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 1,
@@ -380,7 +392,7 @@ private:
 			.target_engaged = true
 		};
 
-		const auto result = FallbackDialogue::HandleTargetedSay(request);
+		const auto result = FallbackDialogue::HandleTargetedSay(request, settings);
 		TEST_ASSERT(!result.handled);
 		TEST_ASSERT(result.output_type == FallbackDialogue::OutputType::None);
 		TEST_ASSERT(result.message.empty());
@@ -390,7 +402,7 @@ private:
 	void MercenaryTargetedSayReportsSkipWithoutReply()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
+		const auto settings = EnabledFallbackDialogueSettings();
 
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 1,
@@ -400,7 +412,7 @@ private:
 			.authored_dialogue_handled = false
 		};
 
-		const auto result = FallbackDialogue::HandleTargetedSay(request);
+		const auto result = FallbackDialogue::HandleTargetedSay(request, settings);
 		TEST_ASSERT(!result.handled);
 		TEST_ASSERT(result.output_type == FallbackDialogue::OutputType::None);
 		TEST_ASSERT(result.message.empty());
@@ -410,7 +422,7 @@ private:
 	void UnknownTargetedSayReportsSkipWithoutReply()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
+		const auto settings = EnabledFallbackDialogueSettings();
 
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 1,
@@ -420,7 +432,7 @@ private:
 			.authored_dialogue_handled = false
 		};
 
-		const auto result = FallbackDialogue::HandleTargetedSay(request);
+		const auto result = FallbackDialogue::HandleTargetedSay(request, settings);
 		TEST_ASSERT(!result.handled);
 		TEST_ASSERT(result.output_type == FallbackDialogue::OutputType::None);
 		TEST_ASSERT(result.message.empty());
@@ -723,10 +735,9 @@ private:
 	void EligibleNpcTargetedSayQueuesDelayedRequestWithPublicContext()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
-		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		FallbackDialogue::DelayedDialogueQueue queue(provider, EnabledFallbackDialogueSettings());
 		FallbackDialogue::PublicGameplayContextInput public_context_input{
 			.current_message = "hail captain",
 			.speaker = PublicEntity("Aten", FallbackDialogue::EntityKind::Player, 12, 0.0f, 0.0f, 0.0f),
@@ -785,10 +796,9 @@ private:
 	void CompletedDelayedDialogueReturnsTargetSpeech()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
-		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		FallbackDialogue::DelayedDialogueQueue queue(provider, EnabledFallbackDialogueSettings());
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 101,
 			.target_id = 202,
@@ -827,10 +837,9 @@ private:
 	void CompletedDelayedDialogueStripsNewlines()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
-		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		FallbackDialogue::DelayedDialogueQueue queue(provider, EnabledFallbackDialogueSettings());
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 101,
 			.target_id = 202,
@@ -867,10 +876,9 @@ private:
 	void CompletedDelayedDialogueTrimsModelArtifacts()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
-		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		FallbackDialogue::DelayedDialogueQueue queue(provider, EnabledFallbackDialogueSettings());
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 101,
 			.target_id = 202,
@@ -904,10 +912,9 @@ private:
 	void CompletedDelayedDialogueReturnsPureAsteriskActionAsTargetEmote()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
-		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		FallbackDialogue::DelayedDialogueQueue queue(provider, EnabledFallbackDialogueSettings());
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 101,
 			.target_id = 202,
@@ -942,10 +949,9 @@ private:
 	void CompletedNpcDelayedDialogueStripsTargetNameFromEmote()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
-		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		FallbackDialogue::DelayedDialogueQueue queue(provider, EnabledFallbackDialogueSettings());
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 101,
 			.target_id = 202,
@@ -978,10 +984,9 @@ private:
 	void CompletedDelayedDialoguePreservesMixedSpeechAndEmoteOrder()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
-		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		FallbackDialogue::DelayedDialogueQueue queue(provider, EnabledFallbackDialogueSettings());
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 101,
 			.target_id = 202,
@@ -1021,10 +1026,9 @@ private:
 	void CompletedMixedDelayedDialogueStripsTargetNameFromEmoteOnly()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
-		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		FallbackDialogue::DelayedDialogueQueue queue(provider, EnabledFallbackDialogueSettings());
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 101,
 			.target_id = 202,
@@ -1061,10 +1065,9 @@ private:
 	void CompletedBotDelayedDialogueReturnsParenthesizedActionAsTargetEmote()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
-		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		FallbackDialogue::DelayedDialogueQueue queue(provider, EnabledFallbackDialogueSettings());
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 101,
 			.target_id = 202,
@@ -1099,10 +1102,9 @@ private:
 	void CompletedBotDelayedDialogueStripsTargetNameFromEmote()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
-		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		FallbackDialogue::DelayedDialogueQueue queue(provider, EnabledFallbackDialogueSettings());
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 101,
 			.target_id = 202,
@@ -1161,11 +1163,10 @@ private:
 	void CompletedDelayedDialogueSplitsLongLineAtSentenceBoundary()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
 		RuleManager::Instance()->SetRule("Chat:FallbackDialogueMaxLineLength", "24");
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
-		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		FallbackDialogue::DelayedDialogueQueue queue(provider, EnabledFallbackDialogueSettings());
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 101,
 			.target_id = 202,
@@ -1227,11 +1228,10 @@ private:
 	void CompletedDelayedDialogueSplitsLongWordAtLineLimit()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
 		RuleManager::Instance()->SetRule("Chat:FallbackDialogueMaxLineLength", "8");
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
-		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		FallbackDialogue::DelayedDialogueQueue queue(provider, EnabledFallbackDialogueSettings());
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 101,
 			.target_id = 202,
@@ -1286,11 +1286,10 @@ private:
 	void CompletedBotDelayedDialogueSplitsLongLineInOrder()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
 		RuleManager::Instance()->SetRule("Chat:FallbackDialogueMaxLineLength", "16");
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
-		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		FallbackDialogue::DelayedDialogueQueue queue(provider, EnabledFallbackDialogueSettings());
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 101,
 			.target_id = 202,
@@ -1402,12 +1401,13 @@ private:
 	void LongEmoteDelayedDialogueFallsBackToUnavailableReply()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueUnavailableReply", "appears distracted.");
 		RuleManager::Instance()->SetRule("Chat:FallbackDialogueMaxLineLength", "16");
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
-		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		FallbackDialogue::DelayedDialogueQueue queue(
+			provider,
+			EnabledFallbackDialogueSettings("appears distracted.")
+		);
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 101,
 			.target_id = 202,
@@ -1430,11 +1430,12 @@ private:
 	void FailedDelayedDialogueReturnsUnavailableReplyEmote()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueUnavailableReply", "seems lost in thought.");
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
-		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		FallbackDialogue::DelayedDialogueQueue queue(
+			provider,
+			EnabledFallbackDialogueSettings("seems lost in thought.")
+		);
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 101,
 			.target_id = 202,
@@ -1471,11 +1472,10 @@ private:
 	void CompletedDelayedDialogueReturnsTargetSpeechForCurrentInteraction()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
 		RuleManager::Instance()->SetRule("Range:Say", "15");
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
-		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		FallbackDialogue::DelayedDialogueQueue queue(provider, EnabledFallbackDialogueSettings());
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 101,
 			.target_id = 202,
@@ -1515,11 +1515,10 @@ private:
 	void CompletedDelayedDialogueDropsWhenSpeakerTargetsSomethingElse()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
 		RuleManager::Instance()->SetRule("Range:Say", "15");
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
-		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		FallbackDialogue::DelayedDialogueQueue queue(provider, EnabledFallbackDialogueSettings());
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 101,
 			.target_id = 202,
@@ -1557,12 +1556,13 @@ private:
 	void FailedDelayedDialogueDropsWhenSpeakerLeavesSayRange()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueUnavailableReply", "seems lost in thought.");
 		RuleManager::Instance()->SetRule("Range:Say", "15");
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
-		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		FallbackDialogue::DelayedDialogueQueue queue(
+			provider,
+			EnabledFallbackDialogueSettings("seems lost in thought.")
+		);
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 101,
 			.target_id = 202,
@@ -1600,10 +1600,9 @@ private:
 	void CompletedDelayedDialogueDropsWhenTargetIsMissing()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
-		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		FallbackDialogue::DelayedDialogueQueue queue(provider, EnabledFallbackDialogueSettings());
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 101,
 			.target_id = 202,
@@ -1999,11 +1998,12 @@ private:
 	)
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueUnavailableReply", unavailable_reply);
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
-		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		FallbackDialogue::DelayedDialogueQueue queue(
+			provider,
+			EnabledFallbackDialogueSettings(unavailable_reply)
+		);
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 101,
 			.target_id = 202,
@@ -2044,14 +2044,15 @@ private:
 	)
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueEnabled", "true");
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueUnavailableReply", "seems lost in thought.");
 		RuleManager::Instance()->SetRule("Chat:FallbackDialogueOllamaEndpoint", "http://ollama.test:11434/api/generate");
 		RuleManager::Instance()->SetRule("Chat:FallbackDialogueOllamaModel", model);
 		RuleManager::Instance()->SetRule("Chat:FallbackDialogueOllamaTimeoutMs", "1234");
 
 		FallbackDialogue::OllamaDelayedDialogueProvider provider(transport);
-		FallbackDialogue::DelayedDialogueQueue queue(provider);
+		FallbackDialogue::DelayedDialogueQueue queue(
+			provider,
+			EnabledFallbackDialogueSettings("seems lost in thought.")
+		);
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 101,
 			.target_id = 202,
