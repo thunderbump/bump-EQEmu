@@ -93,6 +93,8 @@ public:
 		TEST_ADD(FallbackDialogueTest::OllamaProviderUnavailableServiceFallsBackToUnavailableReply);
 		TEST_ADD(FallbackDialogueTest::OllamaProviderRequestFailureFallsBackToUnavailableReply);
 		TEST_ADD(FallbackDialogueTest::OllamaProviderDisabledModelFallsBackToUnavailableReply);
+		TEST_ADD(FallbackDialogueTest::OllamaProviderInvalidEndpointFallsBackToUnavailableReply);
+		TEST_ADD(FallbackDialogueTest::OllamaProviderInvalidTimeoutFallsBackToUnavailableReply);
 		TEST_ADD(FallbackDialogueTest::OllamaProviderInvalidOutputFallsBackToUnavailableReply);
 		TEST_ADD(FallbackDialogueTest::DiagnosticLogLineClassifiesRepresentativeResultsWithoutPrivateContent);
 	}
@@ -143,7 +145,8 @@ private:
 		const std::string &unavailable_reply = "appears distracted.",
 		int cooldown_seconds = 30,
 		int max_delivered_line_length = 200,
-		int imported_game_rule_say_range = 15
+		int imported_game_rule_say_range = 15,
+		FallbackDialogue::OllamaProviderSettings ollama_provider = {}
 	)
 	{
 		return {
@@ -157,7 +160,25 @@ private:
 			},
 			.current_interaction = {
 				.imported_game_rule_say_range = imported_game_rule_say_range
+			},
+			.ollama_provider = {
+				.endpoint = ollama_provider.endpoint,
+				.model = ollama_provider.model,
+				.timeout_ms = ollama_provider.timeout_ms
 			}
+		};
+	}
+
+	FallbackDialogue::OllamaProviderSettings OllamaProviderSettings(
+		const std::string &endpoint = "http://ollama.test:11434/api/generate",
+		const std::string &model = "test-model",
+		int timeout_ms = 1234
+	)
+	{
+		return {
+			.endpoint = endpoint,
+			.model = model,
+			.timeout_ms = timeout_ms
 		};
 	}
 
@@ -1787,7 +1808,49 @@ private:
 		const auto ready_result = OllamaResultFor(
 			transport,
 			DefaultPublicGameplayContextInput(),
-			"   "
+			OllamaProviderSettings(
+				"http://ollama.test:11434/api/generate",
+				"   ",
+				1234
+			)
+		);
+
+		TEST_ASSERT(ready_result.handled);
+		TEST_ASSERT(ready_result.output_type == FallbackDialogue::OutputType::Emote);
+		TEST_ASSERT_EQUALS(ready_result.message, std::string("seems lost in thought."));
+		TEST_ASSERT_EQUALS(ready_result.debug_reason, std::string("delayed_dialogue_unavailable"));
+		TEST_ASSERT_EQUALS(transport.Calls().size(), static_cast<size_t>(0));
+	}
+
+	void OllamaProviderInvalidEndpointFallsBackToUnavailableReply()
+	{
+		FakeOllamaHttpTransport transport;
+
+		const auto ready_result = OllamaResultFor(
+			transport,
+			DefaultPublicGameplayContextInput(),
+			OllamaProviderSettings("", "test-model", 1234)
+		);
+
+		TEST_ASSERT(ready_result.handled);
+		TEST_ASSERT(ready_result.output_type == FallbackDialogue::OutputType::Emote);
+		TEST_ASSERT_EQUALS(ready_result.message, std::string("seems lost in thought."));
+		TEST_ASSERT_EQUALS(ready_result.debug_reason, std::string("delayed_dialogue_unavailable"));
+		TEST_ASSERT_EQUALS(transport.Calls().size(), static_cast<size_t>(0));
+	}
+
+	void OllamaProviderInvalidTimeoutFallsBackToUnavailableReply()
+	{
+		FakeOllamaHttpTransport transport;
+
+		const auto ready_result = OllamaResultFor(
+			transport,
+			DefaultPublicGameplayContextInput(),
+			OllamaProviderSettings(
+				"http://ollama.test:11434/api/generate",
+				"test-model",
+				0
+			)
 		);
 
 		TEST_ASSERT(ready_result.handled);
@@ -2071,18 +2134,28 @@ private:
 	FallbackDialogue::TargetedSayResult OllamaResultFor(
 		FakeOllamaHttpTransport &transport,
 		const FallbackDialogue::PublicGameplayContextInput &public_context_input = FallbackDialogue::PublicGameplayContextInput{},
-		const std::string &model = "test-model"
+		FallbackDialogue::OllamaProviderSettings provider_settings = FallbackDialogue::OllamaProviderSettings{
+			"http://ollama.test:11434/api/generate",
+			"test-model",
+			1234
+		}
 	)
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueOllamaEndpoint", "http://ollama.test:11434/api/generate");
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueOllamaModel", model);
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueOllamaTimeoutMs", "1234");
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueOllamaEndpoint", "http://rules-should-not-be-read.test/api/generate");
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueOllamaModel", "rules-should-not-be-read");
+		RuleManager::Instance()->SetRule("Chat:FallbackDialogueOllamaTimeoutMs", "9999");
 
 		FallbackDialogue::OllamaDelayedDialogueProvider provider(transport);
 		FallbackDialogue::DelayedDialogueQueue queue(
 			provider,
-			EnabledFallbackDialogueSettings("seems lost in thought.")
+			EnabledFallbackDialogueSettings(
+				"seems lost in thought.",
+				30,
+				200,
+				15,
+				provider_settings
+			)
 		);
 		const FallbackDialogue::TargetedSayRequest request{
 			.speaker_id = 101,

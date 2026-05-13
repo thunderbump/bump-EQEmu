@@ -111,11 +111,18 @@ struct CurrentInteractionValidationSettings {
 	int imported_game_rule_say_range = 15;
 };
 
+struct OllamaProviderSettings {
+	std::string endpoint = "http://127.0.0.1:11434/api/generate";
+	std::string model = "llama3.2";
+	int         timeout_ms = 2000;
+};
+
 struct FallbackDialogueSettings {
 	ImmediateFallbackDialogueSettings immediate;
 	PublicGameplayContextSettings     public_context;
 	DialogueDeliverySettings          delivery;
 	CurrentInteractionValidationSettings current_interaction;
+	OllamaProviderSettings            ollama_provider;
 };
 
 struct PublicEntityInput {
@@ -200,7 +207,10 @@ class DelayedDialogueProvider {
 public:
 	virtual ~DelayedDialogueProvider() = default;
 
-	virtual void Enqueue(const DelayedDialogueRequest &request) = 0;
+	virtual void Enqueue(
+		const DelayedDialogueRequest &request,
+		const OllamaProviderSettings &provider_settings
+	) = 0;
 	virtual bool PopCompletion(DelayedDialogueCompletion &completion) = 0;
 };
 
@@ -227,7 +237,10 @@ public:
 	explicit OllamaDelayedDialogueProvider(OllamaHttpTransport &transport);
 	~OllamaDelayedDialogueProvider() override;
 
-	void Enqueue(const DelayedDialogueRequest &request) override;
+	void Enqueue(
+		const DelayedDialogueRequest &request,
+		const OllamaProviderSettings &provider_settings
+	) override;
 	bool PopCompletion(DelayedDialogueCompletion &completion) override;
 
 private:
@@ -263,7 +276,10 @@ private:
 
 class TestDelayedDialogueProvider : public DelayedDialogueProvider {
 public:
-	void Enqueue(const DelayedDialogueRequest &request) override;
+	void Enqueue(
+		const DelayedDialogueRequest &request,
+		const OllamaProviderSettings &provider_settings
+	) override;
 	bool PopCompletion(DelayedDialogueCompletion &completion) override;
 
 	const std::vector<DelayedDialogueRequest> &PendingRequests() const;

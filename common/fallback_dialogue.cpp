@@ -917,7 +917,7 @@ TargetedSayResult DelayedDialogueQueue::HandleTargetedSay(
 	};
 
 	pending_requests_[delayed_request.request_id] = delayed_request;
-	provider_.Enqueue(delayed_request);
+	provider_.Enqueue(delayed_request, settings_.ollama_provider);
 
 	result.output_type = OutputType::None;
 	result.message.clear();
@@ -1033,11 +1033,14 @@ OllamaDelayedDialogueProvider::~OllamaDelayedDialogueProvider()
 	}
 }
 
-void OllamaDelayedDialogueProvider::Enqueue(const DelayedDialogueRequest &request)
+void OllamaDelayedDialogueProvider::Enqueue(
+	const DelayedDialogueRequest &request,
+	const OllamaProviderSettings &provider_settings
+)
 {
-	const auto endpoint = RuleS(Chat, FallbackDialogueOllamaEndpoint);
-	const auto model = TrimCopy(RuleS(Chat, FallbackDialogueOllamaModel));
-	const auto timeout_ms = RuleI(Chat, FallbackDialogueOllamaTimeoutMs);
+	const auto endpoint = provider_settings.endpoint;
+	const auto model = TrimCopy(provider_settings.model);
+	const auto timeout_ms = provider_settings.timeout_ms;
 
 	workers_.emplace_back([this, request, endpoint, model, timeout_ms]() {
 		if (endpoint.empty() || model.empty() || timeout_ms <= 0) {
@@ -1097,7 +1100,10 @@ void OllamaDelayedDialogueProvider::PushCompletion(DelayedDialogueCompletion com
 	completions_.push_back(std::move(completion));
 }
 
-void TestDelayedDialogueProvider::Enqueue(const DelayedDialogueRequest &request)
+void TestDelayedDialogueProvider::Enqueue(
+	const DelayedDialogueRequest &request,
+	const OllamaProviderSettings&
+)
 {
 	pending_requests_.push_back(request);
 }

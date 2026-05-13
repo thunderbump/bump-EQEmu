@@ -49,6 +49,11 @@ FallbackDialogue::FallbackDialogueSettings LoadFallbackDialogueSettings()
 		},
 		.current_interaction = {
 			.imported_game_rule_say_range = RuleI(Range, Say)
+		},
+		.ollama_provider = {
+			.endpoint = RuleS(Chat, FallbackDialogueOllamaEndpoint),
+			.model = RuleS(Chat, FallbackDialogueOllamaModel),
+			.timeout_ms = RuleI(Chat, FallbackDialogueOllamaTimeoutMs)
 		}
 	};
 }
