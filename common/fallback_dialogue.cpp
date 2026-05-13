@@ -20,7 +20,6 @@
 #include "common/eqemu_logsys_log_aliases.h"
 #include "common/http/httplib.h"
 #include "common/json/json.h"
-#include "common/rulesys.h"
 #include "common/timer.h"
 
 #include <algorithm>

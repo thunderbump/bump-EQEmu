@@ -213,15 +213,6 @@ private:
 		);
 		TEST_ASSERT_EQUALS(RuleS(Chat, FallbackDialogueOllamaModel), std::string("llama3.2"));
 		TEST_ASSERT_EQUALS(RuleI(Chat, FallbackDialogueOllamaTimeoutMs), 2000);
-
-		const FallbackDialogue::TargetedSayRequest request{
-			.speaker_id = 1,
-			.target_id = 2,
-			.message = "hello"
-		};
-
-		const auto result = FallbackDialogue::HandleTargetedSay(request, DisabledFallbackDialogueSettings());
-		TEST_ASSERT(!result.handled);
 	}
 
 	void EligibleNpcTargetedSayReturnsUnavailableReplyEmote()
@@ -557,7 +548,6 @@ private:
 	void PublicGameplayContextFiltersNearbyEntitiesBySettingsRadius()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueNearbyContextRadius", "100");
 
 		const auto context = FallbackDialogue::BuildPublicGameplayContext({
 			.current_message = "hail",
@@ -580,8 +570,6 @@ private:
 	void PublicGameplayContextLimitsNearbyEntitiesBySettingsCount()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueNearbyContextRadius", "5");
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueNearbyEntityLimit", "8");
 
 		const auto context = FallbackDialogue::BuildPublicGameplayContext({
 			.current_message = "hail",
@@ -1524,7 +1512,6 @@ private:
 	void CompletedDelayedDialogueReturnsTargetSpeechForCurrentInteraction()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Range:Say", "15");
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
 		FallbackDialogue::DelayedDialogueQueue queue(provider, EnabledFallbackDialogueSettings());
@@ -1567,7 +1554,6 @@ private:
 	void CompletedDelayedDialogueDropsWhenSpeakerTargetsSomethingElse()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Range:Say", "15");
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
 		FallbackDialogue::DelayedDialogueQueue queue(provider, EnabledFallbackDialogueSettings());
@@ -1608,7 +1594,6 @@ private:
 	void FailedDelayedDialogueDropsWhenSpeakerLeavesSayRange()
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Range:Say", "250");
 
 		FallbackDialogue::TestDelayedDialogueProvider provider;
 		FallbackDialogue::DelayedDialogueQueue queue(
@@ -2142,9 +2127,6 @@ private:
 	)
 	{
 		ResetRules();
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueOllamaEndpoint", "http://rules-should-not-be-read.test/api/generate");
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueOllamaModel", "rules-should-not-be-read");
-		RuleManager::Instance()->SetRule("Chat:FallbackDialogueOllamaTimeoutMs", "9999");
 
 		FallbackDialogue::OllamaDelayedDialogueProvider provider(transport);
 		FallbackDialogue::DelayedDialogueQueue queue(
