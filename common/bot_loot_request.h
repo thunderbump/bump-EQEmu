@@ -31,11 +31,14 @@ struct Settings {
 
 struct ItemSnapshot {
 	const EQ::ItemData *item = nullptr;
+	int slot_id = -1;
 };
 
 struct GroupedBotSnapshot {
 	uint32_t name_stable_id = 0;
 	std::string name;
+	uint16_t race_id = 0;
+	uint8_t class_id = 0;
 	std::vector<ItemSnapshot> equipped_items;
 };
 

@@ -76,12 +76,14 @@ void MaybeSendBotLootRequest(Client *looter, const EQ::ItemInstance *inst, Group
 
 		BotLootRequest::GroupedBotSnapshot bot_snapshot{
 			.name_stable_id = bot->GetBotID(),
-			.name = bot->GetCleanName()
+			.name = bot->GetCleanName(),
+			.race_id = bot->GetBaseRace(),
+			.class_id = bot->GetClass()
 		};
 
 		for (int slot_id = EQ::invslot::EQUIPMENT_BEGIN; slot_id <= EQ::invslot::EQUIPMENT_END; ++slot_id) {
 			if (const auto *bot_item = bot->GetBotItem(slot_id); bot_item && bot_item->GetItem()) {
-				bot_snapshot.equipped_items.push_back({.item = bot_item->GetItem()});
+				bot_snapshot.equipped_items.push_back({.item = bot_item->GetItem(), .slot_id = slot_id});
 			}
 		}
 

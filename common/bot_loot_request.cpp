@@ -32,12 +32,48 @@ bool IsEquipmentSlot(int slot_id)
 
 bool ItemCanEquipInSlot(const EQ::ItemData &item, int slot_id)
 {
-	return IsEquipmentSlot(slot_id) && (item.Slots & (1 << slot_id));
+	return IsEquipmentSlot(slot_id) && (item.Slots & (1u << slot_id));
 }
 
-bool IsGearCandidate(const EQ::ItemData &item)
+bool IsV1GearItemType(const EQ::ItemData &item)
 {
-	if (item.ItemClass != EQ::item::ItemClassCommon || item.BagSlots > 0 || item.Slots == 0) {
+	switch (item.ItemType) {
+	case EQ::item::ItemType1HSlash:
+	case EQ::item::ItemType2HSlash:
+	case EQ::item::ItemType1HPiercing:
+	case EQ::item::ItemType1HBlunt:
+	case EQ::item::ItemType2HBlunt:
+	case EQ::item::ItemTypeBow:
+	case EQ::item::ItemTypeLargeThrowing:
+	case EQ::item::ItemTypeShield:
+	case EQ::item::ItemTypeArmor:
+	case EQ::item::ItemTypeWindInstrument:
+	case EQ::item::ItemTypeStringedInstrument:
+	case EQ::item::ItemTypeBrassInstrument:
+	case EQ::item::ItemTypePercussionInstrument:
+	case EQ::item::ItemTypeSmallThrowing:
+	case EQ::item::ItemTypeJewelry:
+	case EQ::item::ItemType2HPiercing:
+	case EQ::item::ItemTypeMartial:
+	case EQ::item::ItemTypeSinging:
+	case EQ::item::ItemTypeAllInstrumentTypes:
+	case EQ::item::ItemTypeCharm:
+		return true;
+	default:
+		return false;
+	}
+}
+
+bool IsGearCandidateForBot(const EQ::ItemData &item, const GroupedBotSnapshot &bot)
+{
+	if (
+		item.ItemClass != EQ::item::ItemClassCommon ||
+		item.BagSlots > 0 ||
+		item.Slots == 0 ||
+		item.IsQuestItem() ||
+		!IsV1GearItemType(item) ||
+		!item.IsEquipable(bot.race_id, bot.class_id)
+	) {
 		return false;
 	}
 
@@ -63,12 +99,27 @@ int GearScore(const EQ::ItemData *item)
 const EQ::ItemData *EquippedItemForSlot(const GroupedBotSnapshot &bot, int slot_id)
 {
 	for (const auto &equipped_item : bot.equipped_items) {
-		if (equipped_item.item && ItemCanEquipInSlot(*equipped_item.item, slot_id)) {
+		if (equipped_item.item && equipped_item.slot_id == slot_id) {
 			return equipped_item.item;
 		}
 	}
 
 	return nullptr;
+}
+
+bool HasLoreConflict(const GroupedBotSnapshot &bot, const EQ::ItemData &item)
+{
+	if (!item.LoreFlag) {
+		return false;
+	}
+
+	for (const auto &equipped_item : bot.equipped_items) {
+		if (EQ::ItemData::CheckLoreConflict(equipped_item.item, &item)) {
+			return true;
+		}
+	}
+
+	return false;
 }
 
 std::string SlotName(int slot_id)
@@ -139,13 +190,17 @@ std::string ItemDisplayName(const SuccessfulLootEvent &event)
 
 Request BuildRequestForSuccessfulLoot(const SuccessfulLootEvent &event, const Settings &settings)
 {
-	if (!settings.enabled || !event.looted_item || event.grouped_bots.empty() || !IsGearCandidate(*event.looted_item)) {
+	if (!settings.enabled || !event.looted_item || event.grouped_bots.empty()) {
 		return {};
 	}
 
 	Request best_request{};
 
 	for (const auto &bot : event.grouped_bots) {
+		if (!IsGearCandidateForBot(*event.looted_item, bot) || HasLoreConflict(bot, *event.looted_item)) {
+			continue;
+		}
+
 		for (int slot_id = EQ::invslot::EQUIPMENT_BEGIN; slot_id <= EQ::invslot::EQUIPMENT_END; ++slot_id) {
 			if (!ItemCanEquipInSlot(*event.looted_item, slot_id)) {
 				continue;
