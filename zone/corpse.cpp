@@ -17,6 +17,7 @@
 */
 #include "corpse.h"
 
+#include "common/bot_loot_request.h"
 #include "common/data_verification.h"
 #include "common/eqemu_logsys.h"
 #include "common/events/player_event_logs.h"
@@ -38,6 +39,7 @@
 #include "zone/worldserver.h"
 
 #include <iostream>
+#include <list>
 
 using json = nlohmann::json;
 
@@ -46,6 +48,63 @@ extern Zone                *zone;
 extern WorldServer          worldserver;
 extern npcDecayTimes_Struct npcCorpseDecayTimes[100];
 extern QueryServ           *QServ;
+
+namespace {
+
+void MaybeSendBotLootRequest(Client *looter, const EQ::ItemInstance *inst, Group *group, const std::string &item_link)
+{
+	if (!looter || !inst || !inst->GetItem() || !group || !RuleB(Chat, BotLootRequestEnabled)) {
+		return;
+	}
+
+	std::list<Bot *> grouped_bots;
+	group->GetBotList(grouped_bots);
+	if (grouped_bots.empty()) {
+		return;
+	}
+
+	BotLootRequest::SuccessfulLootEvent event{
+		.looter_name = looter->GetCleanName(),
+		.looted_item = inst->GetItem(),
+		.looted_item_link = item_link
+	};
+
+	for (auto *bot : grouped_bots) {
+		if (!bot) {
+			continue;
+		}
+
+		BotLootRequest::GroupedBotSnapshot bot_snapshot{
+			.name_stable_id = bot->GetBotID(),
+			.name = bot->GetCleanName()
+		};
+
+		for (int slot_id = EQ::invslot::EQUIPMENT_BEGIN; slot_id <= EQ::invslot::EQUIPMENT_END; ++slot_id) {
+			if (const auto *bot_item = bot->GetBotItem(slot_id); bot_item && bot_item->GetItem()) {
+				bot_snapshot.equipped_items.push_back({.item = bot_item->GetItem()});
+			}
+		}
+
+		event.grouped_bots.push_back(bot_snapshot);
+	}
+
+	const auto request = BotLootRequest::BuildRequestForSuccessfulLoot(
+		event,
+		{.enabled = RuleB(Chat, BotLootRequestEnabled)}
+	);
+	if (!request.produced) {
+		return;
+	}
+
+	for (auto *bot : grouped_bots) {
+		if (bot && bot->GetBotID() == request.requesting_bot_stable_id) {
+			group->GroupMessage(bot, Language::CommonTongue, Language::MaxValue, request.message.c_str());
+			return;
+		}
+	}
+}
+
+} // namespace
 
 void Corpse::SendEndLootErrorPacket(Client *client)
 {
@@ -1753,6 +1812,7 @@ void Corpse::LootCorpseItem(Client *c, const EQApplicationPacket *app)
 					c->GetName(),
 					linker.Link().c_str()
 				);
+				MaybeSendBotLootRequest(c, inst, g, linker.Link());
 			}
 			else {
 				Raid *r = c->GetRaid();
