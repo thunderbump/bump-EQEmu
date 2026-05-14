@@ -20,7 +20,6 @@
 #include "common/eqemu_logsys_log_aliases.h"
 #include "common/http/httplib.h"
 #include "common/json/json.h"
-#include "common/rulesys.h"
 #include "common/timer.h"
 
 #include <algorithm>
@@ -53,14 +52,16 @@ void RemoveExpiredDialogueCooldowns(uint32_t current_time, uint32_t cooldown_ms)
 	}
 }
 
-bool IsDialogueCooldownActive(const TargetedSayRequest &request)
+bool IsDialogueCooldownActive(
+	const TargetedSayRequest &request,
+	const ImmediateFallbackDialogueSettings &settings
+)
 {
-	const int cooldown_seconds = RuleI(Chat, FallbackDialogueCooldownSeconds);
-	if (cooldown_seconds <= 0) {
+	if (settings.cooldown_seconds <= 0) {
 		return false;
 	}
 
-	const auto cooldown_ms = static_cast<uint32_t>(cooldown_seconds) * 1000;
+	const auto cooldown_ms = static_cast<uint32_t>(settings.cooldown_seconds) * 1000;
 	const auto current_time = Timer::GetCurrentTime();
 	const auto key = CooldownKey(request.speaker_id, request.target_id);
 	const auto cooldown = dialogue_cooldowns.find(key);
@@ -72,14 +73,16 @@ bool IsDialogueCooldownActive(const TargetedSayRequest &request)
 	return current_time - cooldown->second < cooldown_ms;
 }
 
-void StartDialogueCooldown(const TargetedSayRequest &request)
+void StartDialogueCooldown(
+	const TargetedSayRequest &request,
+	const ImmediateFallbackDialogueSettings &settings
+)
 {
-	const int cooldown_seconds = RuleI(Chat, FallbackDialogueCooldownSeconds);
-	if (cooldown_seconds <= 0) {
+	if (settings.cooldown_seconds <= 0) {
 		return;
 	}
 
-	const auto cooldown_ms = static_cast<uint32_t>(cooldown_seconds) * 1000;
+	const auto cooldown_ms = static_cast<uint32_t>(settings.cooldown_seconds) * 1000;
 	const auto current_time = Timer::GetCurrentTime();
 
 	RemoveExpiredDialogueCooldowns(current_time, cooldown_ms);
@@ -170,9 +173,12 @@ bool StartsWithInsensitive(const std::string &value, const std::string &prefix)
 	return ToLowerCopy(value.substr(0, prefix.size())) == prefix;
 }
 
-TargetedSayResult EligibleTargetedSayResult(const TargetedSayRequest &request)
+TargetedSayResult EligibleTargetedSayResult(
+	const TargetedSayRequest &request,
+	const ImmediateFallbackDialogueSettings &settings
+)
 {
-	if (!RuleB(Chat, FallbackDialogueEnabled)) {
+	if (!settings.enabled) {
 		return {};
 	}
 
@@ -194,7 +200,7 @@ TargetedSayResult EligibleTargetedSayResult(const TargetedSayRequest &request)
 		};
 	}
 
-	if (IsDialogueCooldownActive(request)) {
+	if (IsDialogueCooldownActive(request, settings)) {
 		return {
 			.debug_reason = "dialogue_cooldown"
 		};
@@ -210,7 +216,8 @@ TargetedSayResult EligibleTargetedSayResult(const TargetedSayRequest &request)
 
 std::string ValidateCurrentInteraction(
 	const DelayedDialogueRequest &request,
-	const CurrentInteraction &interaction
+	const CurrentInteraction &interaction,
+	const CurrentInteractionValidationSettings &settings
 )
 {
 	if (!interaction.speaker_present || interaction.speaker_id != request.speaker_id) {
@@ -225,7 +232,7 @@ std::string ValidateCurrentInteraction(
 		return "delayed_dialogue_dropped_target_changed";
 	}
 
-	if (DistanceNoZBetween(interaction.speaker, interaction.target) > RuleI(Range, Say)) {
+	if (DistanceNoZBetween(interaction.speaker, interaction.target) > settings.imported_game_rule_say_range) {
 		return "delayed_dialogue_dropped_out_of_say_range";
 	}
 
@@ -267,9 +274,12 @@ std::string NormalizeDialogueResponse(const std::string &dialogue_response)
 	return normalized;
 }
 
-std::vector<std::string> SplitSpeechFragmentForDelivery(const std::string &speech_fragment)
+std::vector<std::string> SplitSpeechFragmentForDelivery(
+	const std::string &speech_fragment,
+	const DialogueDeliverySettings &settings
+)
 {
-	const auto max_line_length = RuleI(Chat, FallbackDialogueMaxLineLength);
+	const auto max_line_length = settings.max_delivered_line_length;
 	if (max_line_length <= 0 || speech_fragment.size() <= static_cast<size_t>(max_line_length)) {
 		return speech_fragment.empty() ? std::vector<std::string>{} : std::vector<std::string>{speech_fragment};
 	}
@@ -649,24 +659,28 @@ public:
 
 }
 
-TargetedSayResult HandleTargetedSay(const TargetedSayRequest &request)
+TargetedSayResult HandleTargetedSay(
+	const TargetedSayRequest &request,
+	const FallbackDialogueSettings &settings
+)
 {
-	auto result = EligibleTargetedSayResult(request);
+	auto result = EligibleTargetedSayResult(request, settings.immediate);
 	if (!result.handled) {
 		return result;
 	}
 
-	StartDialogueCooldown(request);
+	StartDialogueCooldown(request, settings.immediate);
 
 	result.output_type = OutputType::Emote;
-	result.message = RuleS(Chat, FallbackDialogueUnavailableReply);
+	result.message = settings.immediate.unavailable_reply;
 	return result;
 }
 
-PublicGameplayContext BuildPublicGameplayContext(const PublicGameplayContextInput &public_context_input)
+PublicGameplayContext BuildPublicGameplayContext(
+	const PublicGameplayContextInput &public_context_input,
+	const PublicGameplayContextSettings &settings
+)
 {
-	const auto nearby_radius = RuleI(Chat, FallbackDialogueNearbyContextRadius);
-	const auto nearby_limit = RuleI(Chat, FallbackDialogueNearbyEntityLimit);
 	PublicGameplayContext public_context{
 		.current_message = public_context_input.current_message,
 		.speaker = BuildPublicEntitySummary(public_context_input.speaker),
@@ -680,7 +694,7 @@ PublicGameplayContext BuildPublicGameplayContext(const PublicGameplayContextInpu
 		}
 	};
 
-	if (nearby_radius <= 0 || nearby_limit <= 0) {
+	if (settings.nearby_context_radius <= 0 || settings.nearby_entity_limit <= 0) {
 		return public_context;
 	}
 
@@ -692,7 +706,7 @@ PublicGameplayContext BuildPublicGameplayContext(const PublicGameplayContextInpu
 		}
 
 		const auto distance = DistanceBetween(public_context_input.speaker, entity);
-		if (distance > nearby_radius) {
+		if (distance > settings.nearby_context_radius) {
 			continue;
 		}
 
@@ -709,8 +723,8 @@ PublicGameplayContext BuildPublicGameplayContext(const PublicGameplayContextInpu
 		}
 	);
 
-	if (public_context.nearby_entities.size() > static_cast<size_t>(nearby_limit)) {
-		public_context.nearby_entities.resize(static_cast<size_t>(nearby_limit));
+	if (public_context.nearby_entities.size() > static_cast<size_t>(settings.nearby_entity_limit)) {
+		public_context.nearby_entities.resize(static_cast<size_t>(settings.nearby_entity_limit));
 	}
 
 	return public_context;
@@ -753,13 +767,16 @@ DialogueResponseProcessingResult ProcessDialogueResponse(
 	};
 }
 
-DialogueDeliveryPlan PlanDialogueDelivery(const std::vector<DialogueFragment> &fragments)
+DialogueDeliveryPlan PlanDialogueDelivery(
+	const std::vector<DialogueFragment> &fragments,
+	const DialogueDeliverySettings &settings
+)
 {
 	DialogueDeliveryPlan plan;
 
 	for (const auto &fragment : fragments) {
 		if (fragment.output_type == OutputType::Say) {
-			for (const auto &message : SplitSpeechFragmentForDelivery(fragment.message)) {
+			for (const auto &message : SplitSpeechFragmentForDelivery(fragment.message, settings)) {
 				plan.messages.push_back({
 					.output_type = OutputType::Say,
 					.message = message
@@ -769,7 +786,7 @@ DialogueDeliveryPlan PlanDialogueDelivery(const std::vector<DialogueFragment> &f
 		}
 
 		if (fragment.output_type == OutputType::Emote) {
-			const auto max_line_length = RuleI(Chat, FallbackDialogueMaxLineLength);
+			const auto max_line_length = settings.max_delivered_line_length;
 			if (max_line_length > 0 && fragment.message.size() > static_cast<size_t>(max_line_length)) {
 				return {
 					.rejection_reason = "long_emote_dialogue_fragment"
@@ -829,7 +846,8 @@ TargetedSayResult BuildDelayedDialogueReadyResult(
 
 std::vector<TargetedSayResult> BuildDelayedDialogueResults(
 	const DelayedDialogueRequest &request,
-	const DelayedDialogueCompletion &completion
+	const DelayedDialogueCompletion &completion,
+	const DialogueDeliverySettings &delivery_settings
 )
 {
 	if (!completion.succeeded) {
@@ -848,7 +866,7 @@ std::vector<TargetedSayResult> BuildDelayedDialogueResults(
 		};
 	}
 
-	const auto delivery_plan = PlanDialogueDelivery(processed_response.fragments);
+	const auto delivery_plan = PlanDialogueDelivery(processed_response.fragments, delivery_settings);
 	if (!delivery_plan.accepted) {
 		return {
 			BuildDelayedDialogueUnavailableResult(request, "delayed_dialogue_rejected")
@@ -870,8 +888,9 @@ std::vector<TargetedSayResult> BuildDelayedDialogueResults(
 	return results;
 }
 
-DelayedDialogueQueue::DelayedDialogueQueue(DelayedDialogueProvider &provider)
-	: provider_(provider)
+DelayedDialogueQueue::DelayedDialogueQueue(DelayedDialogueProvider &provider, FallbackDialogueSettings settings)
+	: provider_(provider),
+	settings_(std::move(settings))
 {
 }
 
@@ -880,24 +899,24 @@ TargetedSayResult DelayedDialogueQueue::HandleTargetedSay(
 	const PublicGameplayContextInput &public_context_input
 )
 {
-	auto result = EligibleTargetedSayResult(request);
+	auto result = EligibleTargetedSayResult(request, settings_.immediate);
 	if (!result.handled) {
 		return result;
 	}
 
-	StartDialogueCooldown(request);
+	StartDialogueCooldown(request, settings_.immediate);
 
 	DelayedDialogueRequest delayed_request{
 		.request_id = next_request_id_++,
 		.speaker_id = request.speaker_id,
 		.target_id = request.target_id,
 		.target_type = request.target_type,
-		.context = BuildPublicGameplayContext(public_context_input),
-		.unavailable_reply = RuleS(Chat, FallbackDialogueUnavailableReply)
+		.context = BuildPublicGameplayContext(public_context_input, settings_.public_context),
+		.unavailable_reply = settings_.immediate.unavailable_reply
 	};
 
 	pending_requests_[delayed_request.request_id] = delayed_request;
-	provider_.Enqueue(delayed_request);
+	provider_.Enqueue(delayed_request, settings_.ollama_provider);
 
 	result.output_type = OutputType::None;
 	result.message.clear();
@@ -942,7 +961,7 @@ bool DelayedDialogueQueue::PopReadyResult(
 	const auto request = std::move(pending_request->second);
 	pending_requests_.erase(pending_request);
 
-	const auto stale_reason = ValidateCurrentInteraction(request, resolver(request));
+	const auto stale_reason = ValidateCurrentInteraction(request, resolver(request), settings_.current_interaction);
 	if (!stale_reason.empty()) {
 		result = {
 			.debug_reason = stale_reason,
@@ -954,7 +973,7 @@ bool DelayedDialogueQueue::PopReadyResult(
 		return false;
 	}
 
-	auto ready_results = BuildDelayedDialogueResults(request, completion);
+	auto ready_results = BuildDelayedDialogueResults(request, completion, settings_.delivery);
 	result = std::move(ready_results.front());
 	for (auto ready_result = ready_results.begin() + 1; ready_result != ready_results.end(); ++ready_result) {
 		ready_results_.push_back(std::move(*ready_result));
@@ -1013,11 +1032,14 @@ OllamaDelayedDialogueProvider::~OllamaDelayedDialogueProvider()
 	}
 }
 
-void OllamaDelayedDialogueProvider::Enqueue(const DelayedDialogueRequest &request)
+void OllamaDelayedDialogueProvider::Enqueue(
+	const DelayedDialogueRequest &request,
+	const OllamaProviderSettings &provider_settings
+)
 {
-	const auto endpoint = RuleS(Chat, FallbackDialogueOllamaEndpoint);
-	const auto model = TrimCopy(RuleS(Chat, FallbackDialogueOllamaModel));
-	const auto timeout_ms = RuleI(Chat, FallbackDialogueOllamaTimeoutMs);
+	const auto endpoint = provider_settings.endpoint;
+	const auto model = TrimCopy(provider_settings.model);
+	const auto timeout_ms = provider_settings.timeout_ms;
 
 	workers_.emplace_back([this, request, endpoint, model, timeout_ms]() {
 		if (endpoint.empty() || model.empty() || timeout_ms <= 0) {
@@ -1077,7 +1099,10 @@ void OllamaDelayedDialogueProvider::PushCompletion(DelayedDialogueCompletion com
 	completions_.push_back(std::move(completion));
 }
 
-void TestDelayedDialogueProvider::Enqueue(const DelayedDialogueRequest &request)
+void TestDelayedDialogueProvider::Enqueue(
+	const DelayedDialogueRequest &request,
+	const OllamaProviderSettings&
+)
 {
 	pending_requests_.push_back(request);
 }

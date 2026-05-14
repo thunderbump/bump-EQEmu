@@ -28,6 +28,10 @@ _Avoid_: Error message, outage notice
 Server rule values that control whether **Fallback Dialogue** is enabled and how it reaches the remote response service.
 _Avoid_: Hardcoded AI settings, process-only configuration
 
+**Fallback Dialogue Settings**:
+A runtime snapshot of **Dialogue Rules** used by **Fallback Dialogue** code so processing, planning, and provider behavior can be tested without reading server rules directly.
+_Avoid_: New rule source, cached configuration authority
+
 **Delayed Dialogue**:
 A response emitted after the original player interaction has already completed.
 _Avoid_: Blocking dialogue, inline generation
@@ -76,6 +80,14 @@ _Avoid_: Required JSON dialogue, rigid response schema
 A simple **Natural Dialogue Format** marker that identifies an emote **Dialogue Fragment**. Asterisk markers can appear inside mixed speech; parenthesized markers are only treated as emotes when the whole **Dialogue Response** is parenthesized.
 _Avoid_: Free-form parser magic, markdown command
 
+**Bot Loot Request**:
+A deterministic bot interest event where the server decides that a bot should ask for an item looted by a player.
+_Avoid_: AI loot decision, bot loot automation
+
+**Loot Request Dialogue**:
+Generated in-character phrasing for an already-decided **Bot Loot Request**.
+_Avoid_: AI loot request, generated loot decision
+
 ## Relationships
 
 - **Fallback Dialogue** must not replace **Authored Dialogue**.
@@ -89,6 +101,13 @@ _Avoid_: Free-form parser magic, markdown command
 - Successful **Fallback Dialogue** is presented as ordinary target speech.
 - An **Unavailable Reply** is presented as a runtime emote from the target.
 - **Dialogue Rules** configure the first **Fallback Dialogue** implementation.
+- **Fallback Dialogue Settings** capture **Dialogue Rules** for code paths that should not read server rules directly.
+- **Fallback Dialogue Settings** may include ordinary game rules such as say range when **Current Interaction** validation needs a testable runtime snapshot; those values do not become **Dialogue Rules**.
+- **Fallback Dialogue Settings** are stable for the lifetime of the zone process unless an explicit reload path is added later.
+- Zone runtime owns loading **Fallback Dialogue Settings** from server rules; common **Fallback Dialogue** logic receives settings rather than reading rules directly.
+- **Fallback Dialogue Settings** should keep responsibility boundaries visible so eligibility, public context construction, delivery planning, current-interaction validation, and provider calls do not all depend on every setting.
+- Common **Fallback Dialogue** APIs should prefer explicit **Fallback Dialogue Settings** over convenience wrappers that read server rules directly.
+- **Fallback Dialogue** feature eligibility is separate from remote provider availability; invalid provider settings should lead to an **Unavailable Reply** path, not redefine whether **Fallback Dialogue** is enabled.
 - Remote **Fallback Dialogue** generation produces **Delayed Dialogue** and must not block normal zone chat handling.
 - **Delayed Dialogue** is emitted only when the **Current Interaction** still holds.
 - The first **Fallback Dialogue** prompt sends **Public Gameplay Context** only.
@@ -104,6 +123,33 @@ _Avoid_: Free-form parser magic, markdown command
 - **Fallback Dialogue** prompts should allow multiple ordered **Dialogue Fragments** without explicitly encouraging verbose or multi-message responses.
 - New or refactored **Fallback Dialogue** implementation surfaces should use **Dialogue Response**, **Dialogue Fragment**, and **Delivered Dialogue Message** language; older internal `Dialogue Line` names can be retired incrementally when touched.
 - If any part of a **Dialogue Response** is an **Unsafe Dialogue Fragment**, reject the whole **Dialogue Response** and show an **Unavailable Reply**.
+- **Bot Loot Request** is separate from **Fallback Dialogue** because it is triggered by loot events rather than missing **Authored Dialogue**.
+- **Loot Request Dialogue** may use remote generation to phrase a **Bot Loot Request**, but remote generation must not decide whether a bot wants the item.
+- The first **Bot Loot Request** implementation triggers only after a player successfully loots an item.
+- A **Bot Loot Request** is advisory in the first implementation; it does not reserve, prevent, redirect, or automatically assign loot.
+- The first **Bot Loot Request** implementation considers only spawned bots in the looter's current group.
+- The first **Bot Loot Request** implementation considers only equippable gear, not consumables, tradeskill items, spell scrolls, bag clickies, or quest-like items.
+- **Bot Loot Request** eligibility may include No Drop gear because bot equipment commands can equip bots outside ordinary player trade restrictions.
+- **Bot Loot Request** eligibility rejects items that would create a lore conflict for the requesting bot.
+- The first **Bot Loot Request** upgrade score is a simple deterministic comparison between the looted item and the bot's currently equipped item for an eligible slot.
+- When an item can equip in multiple slots, **Bot Loot Request** scoring uses the best valid replacement slot for each bot.
+- A **Bot Loot Request** requires a minimum positive upgrade score before dialogue generation is allowed.
+- If multiple bots are eligible for the same looted item, the first **Bot Loot Request** implementation selects one requesting bot by highest deterministic upgrade score.
+- Tied **Bot Loot Request** scores are resolved by current group order.
+- The first **Bot Loot Request** implementation emits at most one visible request for a single loot event.
+- **Bot Loot Request** spam control is keyed by looter and requesting bot rather than by the whole group.
+- The first **Loot Request Dialogue** implementation is delivered to group chat rather than local say.
+- Remote **Loot Request Dialogue** generation produces delayed phrasing and must not block normal looting.
+- Delayed **Loot Request Dialogue** is emitted only if the looter and requesting bot still exist and are still in the same group.
+- **Loot Request Dialogue** prompts include only compact request intent, not raw item stat dumps, full inventories, account data, corpse details, or scoring weights.
+- **Loot Request Dialogue** prompts may include the requesting bot, looter, item name, target equipment slot, and a deterministic reason summary.
+- The first **Loot Request Dialogue** implementation accepts only one short speech line, not multiple fragments or emotes.
+- **Loot Request Dialogue** delivery uses server-built item links; remote generation must not create or alter item link markup.
+- If **Loot Request Dialogue** cannot be generated, the bot still sends a deterministic template request for the already-decided **Bot Loot Request**.
+- **Loot Request Dialogue** generation failure does not use **Unavailable Reply** because the gameplay request itself is still valid.
+- The first **Bot Loot Request** implementation should be disabled by default behind server settings.
+- The first **Bot Loot Request** implementation does not transfer items or mutate bot inventory.
+- **Bot Loot Request** decision behavior should be testable without remote **Loot Request Dialogue** generation.
 
 ## Example dialogue
 

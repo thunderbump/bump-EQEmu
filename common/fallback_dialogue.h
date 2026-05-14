@@ -92,6 +92,39 @@ struct TargetedSayResult {
 	TargetType  target_type = TargetType::Unknown;
 };
 
+struct ImmediateFallbackDialogueSettings {
+	bool        enabled = false;
+	int         cooldown_seconds = 30;
+	std::string unavailable_reply = "appears distracted.";
+};
+
+struct PublicGameplayContextSettings {
+	int nearby_context_radius = 100;
+	int nearby_entity_limit = 8;
+};
+
+struct DialogueDeliverySettings {
+	int max_delivered_line_length = 200;
+};
+
+struct CurrentInteractionValidationSettings {
+	int imported_game_rule_say_range = 15;
+};
+
+struct OllamaProviderSettings {
+	std::string endpoint = "http://127.0.0.1:11434/api/generate";
+	std::string model = "llama3.2";
+	int         timeout_ms = 2000;
+};
+
+struct FallbackDialogueSettings {
+	ImmediateFallbackDialogueSettings immediate;
+	PublicGameplayContextSettings     public_context;
+	DialogueDeliverySettings          delivery;
+	CurrentInteractionValidationSettings current_interaction;
+	OllamaProviderSettings            ollama_provider;
+};
+
 struct PublicEntityInput {
 	// Local-only derivation input for exclusion and interaction checks; never prompt output.
 	uint32_t    entity_id = 0;
@@ -174,7 +207,10 @@ class DelayedDialogueProvider {
 public:
 	virtual ~DelayedDialogueProvider() = default;
 
-	virtual void Enqueue(const DelayedDialogueRequest &request) = 0;
+	virtual void Enqueue(
+		const DelayedDialogueRequest &request,
+		const OllamaProviderSettings &provider_settings
+	) = 0;
 	virtual bool PopCompletion(DelayedDialogueCompletion &completion) = 0;
 };
 
@@ -201,7 +237,10 @@ public:
 	explicit OllamaDelayedDialogueProvider(OllamaHttpTransport &transport);
 	~OllamaDelayedDialogueProvider() override;
 
-	void Enqueue(const DelayedDialogueRequest &request) override;
+	void Enqueue(
+		const DelayedDialogueRequest &request,
+		const OllamaProviderSettings &provider_settings
+	) override;
 	bool PopCompletion(DelayedDialogueCompletion &completion) override;
 
 private:
@@ -218,7 +257,7 @@ class DelayedDialogueQueue {
 public:
 	using CurrentInteractionResolver = std::function<CurrentInteraction(const DelayedDialogueRequest &request)>;
 
-	explicit DelayedDialogueQueue(DelayedDialogueProvider &provider);
+	DelayedDialogueQueue(DelayedDialogueProvider &provider, FallbackDialogueSettings settings);
 
 	TargetedSayResult HandleTargetedSay(
 		const TargetedSayRequest &request,
@@ -229,6 +268,7 @@ public:
 
 private:
 	DelayedDialogueProvider                         &provider_;
+	FallbackDialogueSettings                         settings_;
 	std::unordered_map<uint64_t, DelayedDialogueRequest> pending_requests_;
 	std::deque<TargetedSayResult>                   ready_results_;
 	uint64_t                                         next_request_id_ = 1;
@@ -236,7 +276,10 @@ private:
 
 class TestDelayedDialogueProvider : public DelayedDialogueProvider {
 public:
-	void Enqueue(const DelayedDialogueRequest &request) override;
+	void Enqueue(
+		const DelayedDialogueRequest &request,
+		const OllamaProviderSettings &provider_settings
+	) override;
 	bool PopCompletion(DelayedDialogueCompletion &completion) override;
 
 	const std::vector<DelayedDialogueRequest> &PendingRequests() const;
@@ -248,13 +291,22 @@ private:
 	std::deque<DelayedDialogueCompletion> completions_;
 };
 
-TargetedSayResult HandleTargetedSay(const TargetedSayRequest &request);
-PublicGameplayContext BuildPublicGameplayContext(const PublicGameplayContextInput &public_context_input);
+TargetedSayResult HandleTargetedSay(
+	const TargetedSayRequest &request,
+	const FallbackDialogueSettings &settings
+);
+PublicGameplayContext BuildPublicGameplayContext(
+	const PublicGameplayContextInput &public_context_input,
+	const PublicGameplayContextSettings &settings
+);
 DialogueResponseProcessingResult ProcessDialogueResponse(
 	const std::string &natural_dialogue_response,
 	const std::string &target_name
 );
-DialogueDeliveryPlan PlanDialogueDelivery(const std::vector<DialogueFragment> &fragments);
+DialogueDeliveryPlan PlanDialogueDelivery(
+	const std::vector<DialogueFragment> &fragments,
+	const DialogueDeliverySettings &settings
+);
 std::string BuildDiagnosticLogLine(const TargetedSayResult &result);
 void LogDiagnostic(const TargetedSayResult &result);
 void ResetDialogueCooldowns();
