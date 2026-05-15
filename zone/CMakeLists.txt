@@ -12,6 +12,7 @@ set(zone_sources
     bonuses.cpp
     bot.cpp
     bot_database.cpp
+    bot_loot_request_runtime.cpp
     bot_raid.cpp
     botspellsai.cpp
     cheat_manager.cpp
@@ -128,6 +129,7 @@ set(zone_headers
     bot_command.h
     bot_database.h
     bot_structs.h
+    bot_loot_request_runtime.h
     cheat_manager.h
     client.h
     client_packet.h

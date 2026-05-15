@@ -51,6 +51,12 @@ public:
 		TEST_ADD(BotLootRequestTest::CooldownDoesNotSuppressDifferentLooter);
 		TEST_ADD(BotLootRequestTest::SingleLootEventEmitsOneVisibleRequest);
 		TEST_ADD(BotLootRequestTest::VisibleRequestIsGroupChatTemplateWithServerItemLink);
+		TEST_ADD(BotLootRequestTest::AsyncDialogueQueuesWithoutVisibleMessage);
+		TEST_ADD(BotLootRequestTest::LootRequestDialoguePromptUsesOnlyCompactIntent);
+		TEST_ADD(BotLootRequestTest::StaleGroupSuppressesDelayedLootRequestDialogue);
+		TEST_ADD(BotLootRequestTest::AcceptedGeneratedLootRequestDialogueUsesServerItemLink);
+		TEST_ADD(BotLootRequestTest::FailedGeneratedLootRequestDialogueFallsBackToTemplate);
+		TEST_ADD(BotLootRequestTest::UnsafeGeneratedLootRequestDialogueFallsBackToTemplate);
 	}
 
 private:
@@ -638,5 +644,190 @@ private:
 			result.message,
 			std::string("Aten, could I use SERVER_ITEM_LINK::Bronze Breastplate? It looks like an upgrade for my chest.")
 		);
+	}
+
+	void AsyncDialogueQueuesWithoutVisibleMessage()
+	{
+		const auto old_chest = Gear(8501, "Cloth Shirt", EQ::invslot::slotChest, 1);
+		const auto looted = Gear(8502, "Bronze Breastplate", EQ::invslot::slotChest, 30);
+		BotLootRequest::DeliveryState delivery_state;
+		BotLootRequest::TestDelayedDialogueProvider provider;
+		BotLootRequest::DelayedDialogueQueue queue(provider, {});
+		const BotLootRequest::SuccessfulLootEvent event{
+			.looter_stable_id = 42,
+			.loot_event_id = 9101,
+			.looter_name = "Aten",
+			.looted_item = &looted,
+			.looted_item_link = "SERVER_ITEM_LINK::Bronze Breastplate",
+			.grouped_bots = {{
+				.name_stable_id = 7,
+				.name = "Atenbot",
+				.race_id = Race::Human,
+				.class_id = Class::Warrior,
+				.equipped_items = {{.item = &old_chest, .slot_id = EQ::invslot::slotChest}}
+			}}
+		};
+
+		const auto request = BotLootRequest::PlanVisibleRequestForSuccessfulLoot(
+			event,
+			{.enabled = true, .cooldown_seconds = 0, .current_time_ms = 1000},
+			delivery_state
+		);
+		const auto queued = queue.Enqueue(request, event, {.endpoint = "http://127.0.0.1:11434/api/generate", .model = "test", .timeout_ms = 1});
+
+		TEST_ASSERT(request.produced);
+		TEST_ASSERT(queued.queued);
+		TEST_ASSERT_EQUALS(provider.PendingRequests().size(), 1u);
+		TEST_ASSERT_EQUALS(queued.message, std::string(""));
+	}
+
+	void LootRequestDialoguePromptUsesOnlyCompactIntent()
+	{
+		BotLootRequest::RequestDialogueIntent intent{
+			.looter_name = "Aten",
+			.requesting_bot_name = "Atenbot",
+			.plain_item_name = "Bronze Breastplate",
+			.item_link = "SERVER_ITEM_LINK::Bronze Breastplate",
+			.target_slot_name = "chest",
+			.reason_summary = "upgrade for chest",
+			.deterministic_template = "Aten, could I use SERVER_ITEM_LINK::Bronze Breastplate? It looks like an upgrade for my chest."
+		};
+
+		const auto prompt = BotLootRequest::BuildLootRequestDialoguePrompt(intent);
+
+		TEST_ASSERT(prompt.find("Bot: Atenbot") != std::string::npos);
+		TEST_ASSERT(prompt.find("Looter: Aten") != std::string::npos);
+		TEST_ASSERT(prompt.find("Plain item: Bronze Breastplate") != std::string::npos);
+		TEST_ASSERT(prompt.find("Target slot: chest") != std::string::npos);
+		TEST_ASSERT(prompt.find("Reason: upgrade for chest") != std::string::npos);
+		TEST_ASSERT(prompt.find("SERVER_ITEM_LINK") == std::string::npos);
+		TEST_ASSERT(prompt.find("AC") == std::string::npos);
+		TEST_ASSERT(prompt.find("inventory") == std::string::npos);
+		TEST_ASSERT(prompt.find("corpse") == std::string::npos);
+		TEST_ASSERT(prompt.find("score") == std::string::npos);
+	}
+
+	void StaleGroupSuppressesDelayedLootRequestDialogue()
+	{
+		BotLootRequest::TestDelayedDialogueProvider provider;
+		BotLootRequest::DelayedDialogueQueue queue(provider, {});
+		auto request = ReadyAsyncRequest(queue);
+
+		TEST_ASSERT(provider.CompleteNextSuccess("That breastplate would suit me."));
+
+		BotLootRequest::DialogueResult result;
+		const bool ready = queue.PopReadyResult(
+			[](const BotLootRequest::DelayedDialogueRequest &) {
+				return BotLootRequest::CurrentGroupState{
+					.looter_present = true,
+					.requesting_bot_present = true,
+					.still_grouped = false
+				};
+			},
+			result
+		);
+
+		TEST_ASSERT(request.produced);
+		TEST_ASSERT(!ready);
+	}
+
+	void AcceptedGeneratedLootRequestDialogueUsesServerItemLink()
+	{
+		BotLootRequest::TestDelayedDialogueProvider provider;
+		BotLootRequest::DelayedDialogueQueue queue(provider, {});
+		ReadyAsyncRequest(queue);
+
+		TEST_ASSERT(provider.CompleteNextSuccess("That breastplate would suit me."));
+
+		BotLootRequest::DialogueResult result;
+		const bool ready = queue.PopReadyResult(CurrentGroupStillValid, result);
+
+		TEST_ASSERT(ready);
+		TEST_ASSERT(result.produced);
+		TEST_ASSERT_EQUALS(result.requesting_bot_stable_id, 7u);
+		TEST_ASSERT_EQUALS(result.message, std::string("That breastplate would suit me. SERVER_ITEM_LINK::Bronze Breastplate"));
+		TEST_ASSERT(result.delivery_channel == BotLootRequest::DeliveryChannel::GroupChat);
+	}
+
+	void FailedGeneratedLootRequestDialogueFallsBackToTemplate()
+	{
+		BotLootRequest::TestDelayedDialogueProvider provider;
+		BotLootRequest::DelayedDialogueQueue queue(provider, {});
+		ReadyAsyncRequest(queue);
+
+		TEST_ASSERT(provider.CompleteNextFailure());
+
+		BotLootRequest::DialogueResult result;
+		const bool ready = queue.PopReadyResult(CurrentGroupStillValid, result);
+
+		TEST_ASSERT(ready);
+		TEST_ASSERT(result.produced);
+		TEST_ASSERT_EQUALS(
+			result.message,
+			std::string("Aten, could I use SERVER_ITEM_LINK::Bronze Breastplate? It looks like an upgrade for my chest.")
+		);
+	}
+
+	void UnsafeGeneratedLootRequestDialogueFallsBackToTemplate()
+	{
+		for (const auto &dialogue_response : {
+			"metadata: use this item",
+			"*grabs the breastplate*",
+			"That would suit me.\nI need it.",
+			"That would suit me. [Bronze Breastplate]"
+		}) {
+			BotLootRequest::TestDelayedDialogueProvider provider;
+			BotLootRequest::DelayedDialogueQueue queue(provider, {});
+			ReadyAsyncRequest(queue);
+
+			TEST_ASSERT(provider.CompleteNextSuccess(dialogue_response));
+
+			BotLootRequest::DialogueResult result;
+			const bool ready = queue.PopReadyResult(CurrentGroupStillValid, result);
+
+			TEST_ASSERT(ready);
+			TEST_ASSERT_EQUALS(
+				result.message,
+				std::string("Aten, could I use SERVER_ITEM_LINK::Bronze Breastplate? It looks like an upgrade for my chest.")
+			);
+		}
+	}
+
+	static BotLootRequest::CurrentGroupState CurrentGroupStillValid(const BotLootRequest::DelayedDialogueRequest &)
+	{
+		return {
+			.looter_present = true,
+			.requesting_bot_present = true,
+			.still_grouped = true
+		};
+	}
+
+	BotLootRequest::Request ReadyAsyncRequest(BotLootRequest::DelayedDialogueQueue &queue)
+	{
+		const auto old_chest = Gear(8601, "Cloth Shirt", EQ::invslot::slotChest, 1);
+		const auto looted = Gear(8602, "Bronze Breastplate", EQ::invslot::slotChest, 30);
+		BotLootRequest::DeliveryState delivery_state;
+		const BotLootRequest::SuccessfulLootEvent event{
+			.looter_stable_id = 42,
+			.loot_event_id = 9201,
+			.looter_name = "Aten",
+			.looted_item = &looted,
+			.looted_item_link = "SERVER_ITEM_LINK::Bronze Breastplate",
+			.grouped_bots = {{
+				.name_stable_id = 7,
+				.name = "Atenbot",
+				.race_id = Race::Human,
+				.class_id = Class::Warrior,
+				.equipped_items = {{.item = &old_chest, .slot_id = EQ::invslot::slotChest}}
+			}}
+		};
+
+		auto request = BotLootRequest::PlanVisibleRequestForSuccessfulLoot(
+			event,
+			{.enabled = true, .cooldown_seconds = 0, .current_time_ms = 1000},
+			delivery_state
+		);
+		queue.Enqueue(request, event, {.endpoint = "http://127.0.0.1:11434/api/generate", .model = "test", .timeout_ms = 1});
+		return request;
 	}
 };

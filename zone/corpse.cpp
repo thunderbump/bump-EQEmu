@@ -29,6 +29,7 @@
 #include "common/strings.h"
 #include "common/timer.h"
 #include "zone/bot.h"
+#include "zone/bot_loot_request_runtime.h"
 #include "zone/dynamic_zone.h"
 #include "zone/entity.h"
 #include "zone/groups.h"
@@ -114,12 +115,7 @@ void MaybeSendBotLootRequest(
 		return;
 	}
 
-	for (auto *bot : grouped_bots) {
-		if (bot && bot->GetBotID() == request.requesting_bot_stable_id) {
-			group->GroupMessage(bot, Language::CommonTongue, Language::MaxValue, request.message.c_str());
-			return;
-		}
-	}
+	ZoneBotLootRequestRuntime::EnqueueLootRequestDialogue(request, event);
 }
 
 } // namespace
