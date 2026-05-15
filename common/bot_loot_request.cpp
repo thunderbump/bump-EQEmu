@@ -25,6 +25,11 @@ namespace BotLootRequest {
 
 namespace {
 
+uint64_t LooterBotKey(uint32_t looter_stable_id, uint32_t bot_stable_id)
+{
+	return (static_cast<uint64_t>(looter_stable_id) << 32) | bot_stable_id;
+}
+
 bool IsEquipmentSlot(int slot_id)
 {
 	return slot_id >= EQ::invslot::EQUIPMENT_BEGIN && slot_id <= EQ::invslot::EQUIPMENT_END;
@@ -188,6 +193,44 @@ std::string ItemDisplayName(const SuccessfulLootEvent &event)
 
 } // namespace
 
+Request PlanVisibleRequestForSuccessfulLoot(
+	const SuccessfulLootEvent &event,
+	const Settings &settings,
+	DeliveryState &delivery_state
+)
+{
+	if (event.loot_event_id != 0 && delivery_state.delivered_loot_events.count(event.loot_event_id) != 0) {
+		return {};
+	}
+
+	auto request = BuildRequestForSuccessfulLoot(event, settings);
+	if (!request.produced) {
+		return {};
+	}
+
+	const auto cooldown_key = LooterBotKey(event.looter_stable_id, request.requesting_bot_stable_id);
+	if (settings.cooldown_seconds > 0) {
+		const auto cooldown_ms = static_cast<uint32_t>(settings.cooldown_seconds) * 1000;
+		const auto cooldown = delivery_state.cooldown_start_ms_by_looter_bot.find(cooldown_key);
+		if (
+			cooldown != delivery_state.cooldown_start_ms_by_looter_bot.end() &&
+			settings.current_time_ms - cooldown->second < cooldown_ms
+		) {
+			return {};
+		}
+	}
+
+	if (event.loot_event_id != 0) {
+		delivery_state.delivered_loot_events.insert(event.loot_event_id);
+	}
+
+	if (settings.cooldown_seconds > 0) {
+		delivery_state.cooldown_start_ms_by_looter_bot[cooldown_key] = settings.current_time_ms;
+	}
+
+	return request;
+}
+
 Request BuildRequestForSuccessfulLoot(const SuccessfulLootEvent &event, const Settings &settings)
 {
 	if (!settings.enabled || !event.looted_item || event.grouped_bots.empty()) {
@@ -231,6 +274,7 @@ Request BuildRequestForSuccessfulLoot(const SuccessfulLootEvent &event, const Se
 		ItemDisplayName(event),
 		SlotName(best_request.target_slot)
 	);
+	best_request.delivery_channel = DeliveryChannel::GroupChat;
 
 	return best_request;
 }

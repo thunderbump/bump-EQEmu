@@ -21,12 +21,21 @@
 
 #include <cstdint>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace BotLootRequest {
 
+enum class DeliveryChannel {
+	None = 0,
+	GroupChat
+};
+
 struct Settings {
 	bool enabled = false;
+	int cooldown_seconds = 0;
+	uint32_t current_time_ms = 0;
 };
 
 struct ItemSnapshot {
@@ -43,6 +52,8 @@ struct GroupedBotSnapshot {
 };
 
 struct SuccessfulLootEvent {
+	uint32_t looter_stable_id = 0;
+	uint64_t loot_event_id = 0;
 	std::string looter_name;
 	const EQ::ItemData *looted_item = nullptr;
 	std::string looted_item_link;
@@ -54,10 +65,21 @@ struct Request {
 	uint32_t requesting_bot_stable_id = 0;
 	std::string requesting_bot_name;
 	std::string message;
+	DeliveryChannel delivery_channel = DeliveryChannel::None;
 	int target_slot = -1;
 	int upgrade_score = 0;
 };
 
+struct DeliveryState {
+	std::unordered_set<uint64_t> delivered_loot_events;
+	std::unordered_map<uint64_t, uint32_t> cooldown_start_ms_by_looter_bot;
+};
+
 Request BuildRequestForSuccessfulLoot(const SuccessfulLootEvent &event, const Settings &settings);
+Request PlanVisibleRequestForSuccessfulLoot(
+	const SuccessfulLootEvent &event,
+	const Settings &settings,
+	DeliveryState &delivery_state
+);
 
 } // namespace BotLootRequest

@@ -46,6 +46,11 @@ public:
 		TEST_ADD(BotLootRequestTest::NonUpgradeDoesNotProduceRequest);
 		TEST_ADD(BotLootRequestTest::HighestUpgradeScoreWinsAcrossEligibleBots);
 		TEST_ADD(BotLootRequestTest::GroupOrderBreaksTiedUpgradeScores);
+		TEST_ADD(BotLootRequestTest::CooldownSuppressesSameLooterAndRequestingBot);
+		TEST_ADD(BotLootRequestTest::CooldownDoesNotSuppressDifferentRequestingBot);
+		TEST_ADD(BotLootRequestTest::CooldownDoesNotSuppressDifferentLooter);
+		TEST_ADD(BotLootRequestTest::SingleLootEventEmitsOneVisibleRequest);
+		TEST_ADD(BotLootRequestTest::VisibleRequestIsGroupChatTemplateWithServerItemLink);
 	}
 
 private:
@@ -135,6 +140,7 @@ private:
 			result.message,
 			std::string("Aten, could I use [Bronze Breastplate]? It looks like an upgrade for my chest.")
 		);
+		TEST_ASSERT(result.delivery_channel == BotLootRequest::DeliveryChannel::GroupChat);
 	}
 
 	void EnabledSuccessfulLootWithNoGroupedBotsProducesNoRequest()
@@ -446,5 +452,191 @@ private:
 		TEST_ASSERT(result.produced);
 		TEST_ASSERT_EQUALS(result.requesting_bot_stable_id, 7u);
 		TEST_ASSERT_EQUALS(result.upgrade_score, 20);
+	}
+
+	void CooldownSuppressesSameLooterAndRequestingBot()
+	{
+		const auto old_chest = Gear(8001, "Cloth Shirt", EQ::invslot::slotChest, 1);
+		const auto looted = Gear(8002, "Bronze Breastplate", EQ::invslot::slotChest, 30);
+		BotLootRequest::DeliveryState delivery_state;
+		const BotLootRequest::SuccessfulLootEvent event{
+			.looter_stable_id = 42,
+			.looter_name = "Aten",
+			.looted_item = &looted,
+			.looted_item_link = "[Bronze Breastplate]",
+			.grouped_bots = {{
+				.name_stable_id = 7,
+				.name = "Atenbot",
+				.race_id = Race::Human,
+				.class_id = Class::Warrior,
+				.equipped_items = {{.item = &old_chest, .slot_id = EQ::invslot::slotChest}}
+			}}
+		};
+
+		const auto first = BotLootRequest::PlanVisibleRequestForSuccessfulLoot(
+			event,
+			{.enabled = true, .cooldown_seconds = 30, .current_time_ms = 1000},
+			delivery_state
+		);
+		const auto second = BotLootRequest::PlanVisibleRequestForSuccessfulLoot(
+			event,
+			{.enabled = true, .cooldown_seconds = 30, .current_time_ms = 2000},
+			delivery_state
+		);
+
+		TEST_ASSERT(first.produced);
+		TEST_ASSERT(!second.produced);
+	}
+
+	void CooldownDoesNotSuppressDifferentRequestingBot()
+	{
+		const auto first_old_chest = Gear(8101, "Cloth Shirt", EQ::invslot::slotChest, 1);
+		const auto second_old_chest = Gear(8102, "Tattered Tunic", EQ::invslot::slotChest, 1);
+		const auto first_looted = Gear(8103, "Bronze Breastplate", EQ::invslot::slotChest, 30);
+		const auto second_looted = Gear(8104, "Fine Breastplate", EQ::invslot::slotChest, 40);
+		BotLootRequest::DeliveryState delivery_state;
+
+		const auto first = BotLootRequest::PlanVisibleRequestForSuccessfulLoot(
+			{
+				.looter_stable_id = 42,
+				.looter_name = "Aten",
+				.looted_item = &first_looted,
+				.looted_item_link = "[Bronze Breastplate]",
+				.grouped_bots = {{
+					.name_stable_id = 7,
+					.name = "Firstbot",
+					.race_id = Race::Human,
+					.class_id = Class::Warrior,
+					.equipped_items = {{.item = &first_old_chest, .slot_id = EQ::invslot::slotChest}}
+				}}
+			},
+			{.enabled = true, .cooldown_seconds = 30, .current_time_ms = 1000},
+			delivery_state
+		);
+		const auto second = BotLootRequest::PlanVisibleRequestForSuccessfulLoot(
+			{
+				.looter_stable_id = 42,
+				.looter_name = "Aten",
+				.looted_item = &second_looted,
+				.looted_item_link = "[Fine Breastplate]",
+				.grouped_bots = {{
+					.name_stable_id = 8,
+					.name = "Secondbot",
+					.race_id = Race::Human,
+					.class_id = Class::Warrior,
+					.equipped_items = {{.item = &second_old_chest, .slot_id = EQ::invslot::slotChest}}
+				}}
+			},
+			{.enabled = true, .cooldown_seconds = 30, .current_time_ms = 2000},
+			delivery_state
+		);
+
+		TEST_ASSERT(first.produced);
+		TEST_ASSERT(second.produced);
+		TEST_ASSERT_EQUALS(second.requesting_bot_stable_id, 8u);
+	}
+
+	void CooldownDoesNotSuppressDifferentLooter()
+	{
+		const auto old_chest = Gear(8201, "Cloth Shirt", EQ::invslot::slotChest, 1);
+		const auto looted = Gear(8202, "Bronze Breastplate", EQ::invslot::slotChest, 30);
+		BotLootRequest::DeliveryState delivery_state;
+		const BotLootRequest::GroupedBotSnapshot bot{
+			.name_stable_id = 7,
+			.name = "Atenbot",
+			.race_id = Race::Human,
+			.class_id = Class::Warrior,
+			.equipped_items = {{.item = &old_chest, .slot_id = EQ::invslot::slotChest}}
+		};
+
+		const auto first = BotLootRequest::PlanVisibleRequestForSuccessfulLoot(
+			{
+				.looter_stable_id = 42,
+				.looter_name = "Aten",
+				.looted_item = &looted,
+				.looted_item_link = "[Bronze Breastplate]",
+				.grouped_bots = {bot}
+			},
+			{.enabled = true, .cooldown_seconds = 30, .current_time_ms = 1000},
+			delivery_state
+		);
+		const auto second = BotLootRequest::PlanVisibleRequestForSuccessfulLoot(
+			{
+				.looter_stable_id = 43,
+				.looter_name = "Bump",
+				.looted_item = &looted,
+				.looted_item_link = "[Bronze Breastplate]",
+				.grouped_bots = {bot}
+			},
+			{.enabled = true, .cooldown_seconds = 30, .current_time_ms = 2000},
+			delivery_state
+		);
+
+		TEST_ASSERT(first.produced);
+		TEST_ASSERT(second.produced);
+	}
+
+	void SingleLootEventEmitsOneVisibleRequest()
+	{
+		const auto old_chest = Gear(8301, "Cloth Shirt", EQ::invslot::slotChest, 1);
+		const auto looted = Gear(8302, "Bronze Breastplate", EQ::invslot::slotChest, 30);
+		BotLootRequest::DeliveryState delivery_state;
+		const BotLootRequest::SuccessfulLootEvent event{
+			.looter_stable_id = 42,
+			.loot_event_id = 9001,
+			.looter_name = "Aten",
+			.looted_item = &looted,
+			.looted_item_link = "[Bronze Breastplate]",
+			.grouped_bots = {{
+				.name_stable_id = 7,
+				.name = "Atenbot",
+				.race_id = Race::Human,
+				.class_id = Class::Warrior,
+				.equipped_items = {{.item = &old_chest, .slot_id = EQ::invslot::slotChest}}
+			}}
+		};
+
+		const auto first = BotLootRequest::PlanVisibleRequestForSuccessfulLoot(
+			event,
+			{.enabled = true, .cooldown_seconds = 0, .current_time_ms = 1000},
+			delivery_state
+		);
+		const auto second = BotLootRequest::PlanVisibleRequestForSuccessfulLoot(
+			event,
+			{.enabled = true, .cooldown_seconds = 0, .current_time_ms = 2000},
+			delivery_state
+		);
+
+		TEST_ASSERT(first.produced);
+		TEST_ASSERT(!second.produced);
+	}
+
+	void VisibleRequestIsGroupChatTemplateWithServerItemLink()
+	{
+		const auto old_chest = Gear(8401, "Cloth Shirt", EQ::invslot::slotChest, 1);
+		const auto looted = Gear(8402, "Bronze Breastplate", EQ::invslot::slotChest, 30);
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &looted,
+				.looted_item_link = "SERVER_ITEM_LINK::Bronze Breastplate",
+				.grouped_bots = {{
+					.name_stable_id = 7,
+					.name = "Atenbot",
+					.race_id = Race::Human,
+					.class_id = Class::Warrior,
+					.equipped_items = {{.item = &old_chest, .slot_id = EQ::invslot::slotChest}}
+				}}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(result.produced);
+		TEST_ASSERT(result.delivery_channel == BotLootRequest::DeliveryChannel::GroupChat);
+		TEST_ASSERT_EQUALS(
+			result.message,
+			std::string("Aten, could I use SERVER_ITEM_LINK::Bronze Breastplate? It looks like an upgrade for my chest.")
+		);
 	}
 };

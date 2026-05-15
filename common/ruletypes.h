@@ -935,6 +935,7 @@ RULE_BOOL(Chat, AlwaysCaptureCommandText, false, "Consume command text (# and ^ 
 RULE_BOOL(Chat, FallbackDialogueEnabled, false, "Enable rule-gated Fallback Dialogue for targeted say interactions")
 RULE_BOOL(Chat, BotLootRequestEnabled, false, "Enable deterministic Bot Loot Requests after successful player loot")
 RULE_STRING(Chat, FallbackDialogueUnavailableReply, "appears distracted.", "Runtime emote text used when Fallback Dialogue cannot produce a Dialogue Line")
+RULE_INT(Chat, BotLootRequestCooldownSeconds, 30, "Cooldown in seconds between Bot Loot Requests for the same looter and requesting bot")
 RULE_INT(Chat, FallbackDialogueCooldownSeconds, 30, "Cooldown in seconds between Fallback Dialogue attempts for the same speaker and target")
 RULE_INT(Chat, FallbackDialogueNearbyContextRadius, 100, "Maximum distance for nearby entities included in Public Gameplay Context")
 RULE_INT(Chat, FallbackDialogueNearbyEntityLimit, 8, "Maximum number of nearby entities included in Public Gameplay Context")
