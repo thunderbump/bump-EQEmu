@@ -47,6 +47,18 @@ struct Settings {
 	uint32_t current_time_ms = 0;
 };
 
+struct GearValueBreakdown {
+	int survivability = 0;
+	int resources = 0;
+	int melee_offense = 0;
+	int spell_offense = 0;
+	int healing_support = 0;
+	int ranged = 0;
+	int effects = 0;
+
+	int Total() const;
+};
+
 struct ItemSnapshot {
 	const EQ::ItemData *item = nullptr;
 	const EQ::ItemInstance *item_instance = nullptr;
@@ -84,6 +96,7 @@ struct Request {
 	std::string plain_item_name;
 	std::string reason_summary;
 	int upgrade_score = 0;
+	GearValueBreakdown score_breakdown;
 };
 
 struct DeliveryState {

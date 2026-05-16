@@ -78,6 +78,8 @@ public:
 		TEST_ADD(BotLootRequestTest::WhitelistedWornAndFocusEffectsCanProduceUpgrade);
 		TEST_ADD(BotLootRequestTest::NonWhitelistedWornEffectsDoNotProduceUpgrade);
 		TEST_ADD(BotLootRequestTest::ClickEffectsDoNotProduceBotGearValue);
+		TEST_ADD(BotLootRequestTest::BotGearValueReturnsStableCategoryBreakdown);
+		TEST_ADD(BotLootRequestTest::LootRequestReasonSummaryUsesTopMeaningfulCategory);
 		TEST_ADD(BotLootRequestTest::HighestUpgradeScoreWinsAcrossEligibleBots);
 		TEST_ADD(BotLootRequestTest::GroupOrderBreaksTiedUpgradeScores);
 		TEST_ADD(BotLootRequestTest::CooldownSuppressesSameLooterAndRequestingBot);
@@ -1685,6 +1687,64 @@ private:
 		);
 
 		TEST_ASSERT(!result.produced);
+	}
+
+	void BotGearValueReturnsStableCategoryBreakdown()
+	{
+		const auto old_chest = Gear(5901, "Cloth Shirt", EQ::invslot::slotChest, 3, 5);
+		auto looted = Gear(5902, "Commander's Breastplate", EQ::invslot::slotChest, 15, 25);
+		looted.Attack = 10;
+		looted.Haste = 5;
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &looted,
+				.looted_item_link = "[Commander's Breastplate]",
+				.grouped_bots = {{
+					.name_stable_id = 7,
+					.name = "Atenbot",
+					.race_id = Race::Human,
+					.class_id = Class::Warrior,
+					.equipped_items = {{.item = &old_chest, .slot_id = EQ::invslot::slotChest}}
+				}}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(result.produced);
+		TEST_ASSERT_EQUALS(result.upgrade_score, result.score_breakdown.Total());
+		TEST_ASSERT(result.score_breakdown.survivability > 0);
+		TEST_ASSERT(result.score_breakdown.melee_offense > 0);
+		TEST_ASSERT_EQUALS(result.score_breakdown.spell_offense, 0);
+		TEST_ASSERT_EQUALS(result.score_breakdown.ranged, 0);
+	}
+
+	void LootRequestReasonSummaryUsesTopMeaningfulCategory()
+	{
+		const auto old_ring = AllClassGear(5903, "Copper Ring", EQ::invslot::slotFinger1);
+		auto looted = AllClassGear(5904, "Evoker's Ring", EQ::invslot::slotFinger1);
+		looted.SpellDmg = 12;
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &looted,
+				.looted_item_link = "[Evoker's Ring]",
+				.grouped_bots = {{
+					.name_stable_id = 7,
+					.name = "Atenbot",
+					.race_id = Race::Human,
+					.class_id = Class::Wizard,
+					.equipped_items = {{.item = &old_ring, .slot_id = EQ::invslot::slotFinger1}}
+				}}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(result.produced);
+		TEST_ASSERT_EQUALS(result.reason_summary, std::string("spell offense upgrade for finger"));
+		TEST_ASSERT(result.score_breakdown.spell_offense > result.score_breakdown.survivability);
 	}
 
 	void HighestUpgradeScoreWinsAcrossEligibleBots()

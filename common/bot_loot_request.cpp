@@ -34,6 +34,11 @@
 
 namespace BotLootRequest {
 
+int GearValueBreakdown::Total() const
+{
+	return survivability + resources + melee_offense + spell_offense + healing_support + ranged + effects;
+}
+
 namespace {
 
 uint64_t LooterBotKey(uint32_t looter_stable_id, uint32_t bot_stable_id)
@@ -150,11 +155,6 @@ bool IsGearCandidateForBot(const EQ::ItemData &item, const GroupedBotSnapshot &b
 	return false;
 }
 
-struct BotGearValueResult {
-	int effective_value = 0;
-	int required_level = 0;
-};
-
 struct BotGearEffectiveStats {
 	int ac = 0;
 	int hp = 0;
@@ -190,18 +190,35 @@ struct BotGearEffectiveStats {
 	int recommended_level = 0;
 };
 
-struct BotGearValueBreakdown {
-	int survivability = 0;
-	int resources = 0;
-	int melee_offense = 0;
-	int spell_offense = 0;
-	int healing_support = 0;
-
-	int Total() const
-	{
-		return survivability + resources + melee_offense + spell_offense + healing_support;
-	}
+struct BotGearValueResult {
+	int effective_value = 0;
+	int required_level = 0;
+	GearValueBreakdown breakdown;
 };
+
+GearValueBreakdown operator+(GearValueBreakdown left, const GearValueBreakdown &right)
+{
+	left.survivability += right.survivability;
+	left.resources += right.resources;
+	left.melee_offense += right.melee_offense;
+	left.spell_offense += right.spell_offense;
+	left.healing_support += right.healing_support;
+	left.ranged += right.ranged;
+	left.effects += right.effects;
+	return left;
+}
+
+GearValueBreakdown operator-(GearValueBreakdown left, const GearValueBreakdown &right)
+{
+	left.survivability -= right.survivability;
+	left.resources -= right.resources;
+	left.melee_offense -= right.melee_offense;
+	left.spell_offense -= right.spell_offense;
+	left.healing_support -= right.healing_support;
+	left.ranged -= right.ranged;
+	left.effects -= right.effects;
+	return left;
+}
 
 int RecommendedLevelScaledValue(uint8_t current_level, int recommended_level, int base_value)
 {
@@ -364,9 +381,9 @@ void AddEffectiveStats(BotGearEffectiveStats &stats, const BotGearEffectiveStats
 	stats.worn_resources += added_stats.worn_resources;
 }
 
-BotGearValueBreakdown ScoreEffectiveStats(const BotGearEffectiveStats &stats, uint8_t class_id)
+GearValueBreakdown ScoreEffectiveStats(const BotGearEffectiveStats &stats, uint8_t class_id)
 {
-	BotGearValueBreakdown value;
+	GearValueBreakdown value;
 
 	const int survivability =
 		stats.ac +
@@ -381,7 +398,8 @@ BotGearValueBreakdown ScoreEffectiveStats(const BotGearEffectiveStats &stats, ui
 	value.survivability = survivability * SurvivabilityWeightPercent(class_id) / 100;
 
 	if (UsesMana(class_id)) {
-		value.resources += stats.mana + stats.mana_regen * 8 + stats.clairvoyance * 4 + stats.worn_resources * 3;
+		value.resources += stats.mana + stats.mana_regen * 8 + stats.clairvoyance * 4;
+		value.effects += stats.worn_resources * 3;
 	}
 
 	if (UsesEndurance(class_id)) {
@@ -408,11 +426,13 @@ BotGearValueBreakdown ScoreEffectiveStats(const BotGearEffectiveStats &stats, ui
 	}
 
 	if (UsesSpellOffense(class_id)) {
-		value.spell_offense += stats.spell_damage * 8 + stats.worn_spell_offense * 4;
+		value.spell_offense += stats.spell_damage * 8;
+		value.effects += stats.worn_spell_offense * 4;
 	}
 
 	if (UsesHealingSupport(class_id)) {
-		value.healing_support += stats.heal_amount * 8 + stats.worn_healing_support * 4;
+		value.healing_support += stats.heal_amount * 8;
+		value.effects += stats.worn_healing_support * 4;
 		if (class_id == Class::Bard) {
 			value.healing_support += stats.charisma * 2 + stats.bard_instrument * 3;
 		}
@@ -553,15 +573,18 @@ BotGearEffectiveStats ItemInstanceEffectiveStats(const EQ::ItemInstance *item_in
 
 BotGearValueResult EffectiveStatsGearValue(const BotGearEffectiveStats &stats, uint8_t class_id, uint8_t bot_level)
 {
-	const auto value = ScoreEffectiveStats(stats, class_id);
+	auto value = ScoreEffectiveStats(stats, class_id);
+	value.survivability = RecommendedLevelScaledValue(bot_level, stats.recommended_level, value.survivability);
+	value.resources = RecommendedLevelScaledValue(bot_level, stats.recommended_level, value.resources);
+	value.melee_offense = RecommendedLevelScaledValue(bot_level, stats.recommended_level, value.melee_offense);
+	value.spell_offense = RecommendedLevelScaledValue(bot_level, stats.recommended_level, value.spell_offense);
+	value.healing_support = RecommendedLevelScaledValue(bot_level, stats.recommended_level, value.healing_support);
+	value.effects = RecommendedLevelScaledValue(bot_level, stats.recommended_level, value.effects);
 
 	return {
-		.effective_value = RecommendedLevelScaledValue(
-			bot_level,
-			stats.recommended_level,
-			value.Total()
-		),
-		.required_level = stats.required_level
+		.effective_value = value.Total(),
+		.required_level = stats.required_level,
+		.breakdown = value
 	};
 }
 
@@ -704,7 +727,12 @@ BotGearValueResult BotGearValue(
 	const int weapon_value = WeaponGearValue(item, item_instance, bot.class_id, bot.level) +
 		RangedWeaponGearValue(item, item_instance, bot);
 	auto result = EffectiveStatsGearValue(stats, bot.class_id, bot.level);
-	result.effective_value += RecommendedLevelScaledValue(bot.level, stats.recommended_level, weapon_value);
+	if (item && IsRangedWeapon(*item)) {
+		result.breakdown.ranged += RecommendedLevelScaledValue(bot.level, stats.recommended_level, weapon_value);
+	} else {
+		result.breakdown.melee_offense += RecommendedLevelScaledValue(bot.level, stats.recommended_level, weapon_value);
+	}
+	result.effective_value = result.breakdown.Total();
 	return result;
 }
 
@@ -726,6 +754,15 @@ int BotGearEffectiveValue(
 )
 {
 	return BotGearValue(item, item_instance, bot).effective_value;
+}
+
+GearValueBreakdown BotGearValueBreakdownForItem(
+	const EQ::ItemData *item,
+	const EQ::ItemInstance *item_instance,
+	const GroupedBotSnapshot &bot
+)
+{
+	return BotGearValue(item, item_instance, bot).breakdown;
 }
 
 int ReplacementCostForSlot(const GroupedBotSnapshot &bot, const EQ::ItemData &looted_item, int slot_id)
@@ -754,6 +791,42 @@ int ReplacementCostForSlot(const GroupedBotSnapshot &bot, const EQ::ItemData &lo
 		const auto primary_item = EquippedItemForSlot(bot, EQ::invslot::slotPrimary);
 		if (primary_item && primary_item->item && primary_item->item->IsType2HWeapon()) {
 			replacement_cost += BotGearEffectiveValue(
+				primary_item->item,
+				primary_item->item_instance,
+				bot
+			);
+		}
+	}
+
+	return replacement_cost;
+}
+
+GearValueBreakdown ReplacementBreakdownForSlot(const GroupedBotSnapshot &bot, const EQ::ItemData &looted_item, int slot_id)
+{
+	GearValueBreakdown replacement_cost;
+
+	const auto equipped_item = EquippedItemForSlot(bot, slot_id);
+	if (equipped_item) {
+		replacement_cost = replacement_cost + BotGearValueBreakdownForItem(
+			equipped_item->item,
+			equipped_item->item_instance,
+			bot
+		);
+	}
+
+	if (slot_id == EQ::invslot::slotPrimary && looted_item.IsType2HWeapon()) {
+		const auto secondary_item = EquippedItemForSlot(bot, EQ::invslot::slotSecondary);
+		if (secondary_item) {
+			replacement_cost = replacement_cost + BotGearValueBreakdownForItem(
+				secondary_item->item,
+				secondary_item->item_instance,
+				bot
+			);
+		}
+	} else if (slot_id == EQ::invslot::slotSecondary) {
+		const auto primary_item = EquippedItemForSlot(bot, EQ::invslot::slotPrimary);
+		if (primary_item && primary_item->item && primary_item->item->IsType2HWeapon()) {
+			replacement_cost = replacement_cost + BotGearValueBreakdownForItem(
 				primary_item->item,
 				primary_item->item_instance,
 				bot
@@ -828,6 +901,37 @@ std::string SlotName(int slot_id)
 	default:
 		return "gear";
 	}
+}
+
+std::string TopReasonSummary(const GearValueBreakdown &breakdown, const std::string &slot_name)
+{
+	struct ReasonCandidate {
+		int value = 0;
+		const char *summary = "";
+	};
+
+	const ReasonCandidate candidates[] = {
+		{breakdown.survivability, "survivability upgrade"},
+		{breakdown.resources, "resource upgrade"},
+		{breakdown.melee_offense, "melee offense upgrade"},
+		{breakdown.spell_offense, "spell offense upgrade"},
+		{breakdown.healing_support, "healing support upgrade"},
+		{breakdown.ranged, "ranged upgrade"},
+		{breakdown.effects, "useful effect upgrade"}
+	};
+
+	const auto *best = &candidates[0];
+	for (const auto &candidate : candidates) {
+		if (candidate.value > best->value) {
+			best = &candidate;
+		}
+	}
+
+	if (best->value <= 0) {
+		return fmt::format("upgrade for {}", slot_name);
+	}
+
+	return fmt::format("{} for {}", best->summary, slot_name);
 }
 
 std::string ItemDisplayName(const SuccessfulLootEvent &event)
@@ -1129,14 +1233,18 @@ Request BuildRequestForSuccessfulLoot(const SuccessfulLootEvent &event, const Se
 			}
 
 			if (!best_request.produced || upgrade_score > best_request.upgrade_score) {
+				const auto slot_name = SlotName(slot_id);
+				const auto upgrade_breakdown = looted_value.breakdown -
+					ReplacementBreakdownForSlot(bot, *event.looted_item, slot_id);
 				best_request.produced = true;
 				best_request.requesting_bot_stable_id = bot.name_stable_id;
 				best_request.requesting_bot_name = bot.name;
 				best_request.target_slot = slot_id;
-				best_request.target_slot_name = SlotName(slot_id);
+				best_request.target_slot_name = slot_name;
 				best_request.plain_item_name = PlainItemName(event);
-				best_request.reason_summary = fmt::format("upgrade for {}", SlotName(slot_id));
+				best_request.reason_summary = TopReasonSummary(upgrade_breakdown, slot_name);
 				best_request.upgrade_score = upgrade_score;
+				best_request.score_breakdown = upgrade_breakdown;
 			}
 		}
 	}
