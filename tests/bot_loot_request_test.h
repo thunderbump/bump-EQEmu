@@ -58,6 +58,14 @@ public:
 		TEST_ADD(BotLootRequestTest::HealingGearChangesWinnerForPriestBotGearRoles);
 		TEST_ADD(BotLootRequestTest::CharismaGearChangesWinnerForBardBotGearRole);
 		TEST_ADD(BotLootRequestTest::MeleeOffenseGearChangesWinnerForBaselineMeleeBotGearRoles);
+		TEST_ADD(BotLootRequestTest::WeaponDamageDelayRatioChangesWinner);
+		TEST_ADD(BotLootRequestTest::OneHandWeaponCanWinSecondaryWithoutPrimaryUpgrade);
+		TEST_ADD(BotLootRequestTest::SecondaryDamageWeaponRequiresDualWield);
+		TEST_ADD(BotLootRequestTest::SecondaryWeaponPaysShieldReplacementCost);
+		TEST_ADD(BotLootRequestTest::TwoHanderMustBeatCurrentPrimaryAndSecondaryPackage);
+		TEST_ADD(BotLootRequestTest::RogueBackstabValueCanChangeWeaponWinner);
+		TEST_ADD(BotLootRequestTest::MartialWeaponDamageDelayCanProduceMonkUpgrade);
+		TEST_ADD(BotLootRequestTest::ValidWeaponProcSignalCanProduceSmallUpgrade);
 		TEST_ADD(BotLootRequestTest::HighestUpgradeScoreWinsAcrossEligibleBots);
 		TEST_ADD(BotLootRequestTest::GroupOrderBreaksTiedUpgradeScores);
 		TEST_ADD(BotLootRequestTest::CooldownSuppressesSameLooterAndRequestingBot);
@@ -113,6 +121,24 @@ private:
 	{
 		auto item = Gear(id, name, slot, ac, hp, mana, endur);
 		item.Classes = Class::ALL_CLASSES_BITMASK;
+		return item;
+	}
+
+	EQ::ItemData Weapon(
+		uint32_t id,
+		const std::string &name,
+		int slot,
+		uint8 item_type,
+		uint32 damage,
+		uint8 delay,
+		uint32 classes = Class::ALL_CLASSES_BITMASK
+	)
+	{
+		auto item = AllClassGear(id, name, slot);
+		item.ItemType = item_type;
+		item.Damage = damage;
+		item.Delay = delay;
+		item.Classes = classes;
 		return item;
 	}
 
@@ -901,6 +927,354 @@ private:
 
 		TEST_ASSERT(result.produced);
 		TEST_ASSERT_EQUALS(result.requesting_bot_stable_id, 8u);
+	}
+
+	void WeaponDamageDelayRatioChangesWinner()
+	{
+		const auto slow_heavy_sword = Weapon(
+			5951,
+			"Slow Heavy Sword",
+			EQ::invslot::slotPrimary,
+			EQ::item::ItemType1HSlash,
+			24,
+			48
+		);
+		const auto rusty_sword = Weapon(
+			5952,
+			"Rusty Sword",
+			EQ::invslot::slotPrimary,
+			EQ::item::ItemType1HSlash,
+			8,
+			40
+		);
+		const auto quick_sword = Weapon(
+			5953,
+			"Quick Sword",
+			EQ::invslot::slotPrimary,
+			EQ::item::ItemType1HSlash,
+			16,
+			20
+		);
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &quick_sword,
+				.looted_item_link = "[Quick Sword]",
+				.grouped_bots = {
+					{
+						.name_stable_id = 7,
+						.name = "Heavybot",
+						.race_id = Race::Human,
+						.class_id = Class::Warrior,
+						.equipped_items = {{.item = &slow_heavy_sword, .slot_id = EQ::invslot::slotPrimary}}
+					},
+					{
+						.name_stable_id = 8,
+						.name = "Rustybot",
+						.race_id = Race::Human,
+						.class_id = Class::Warrior,
+						.equipped_items = {{.item = &rusty_sword, .slot_id = EQ::invslot::slotPrimary}}
+					}
+				}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(result.produced);
+		TEST_ASSERT_EQUALS(result.requesting_bot_stable_id, 8u);
+		TEST_ASSERT_EQUALS(result.target_slot, EQ::invslot::slotPrimary);
+	}
+
+	void OneHandWeaponCanWinSecondaryWithoutPrimaryUpgrade()
+	{
+		const auto strong_primary = Weapon(
+			5954,
+			"Strong Primary",
+			EQ::invslot::slotPrimary,
+			EQ::item::ItemType1HSlash,
+			30,
+			30
+		);
+		auto sidearm = Weapon(
+			5955,
+			"Sidearm",
+			EQ::invslot::slotPrimary,
+			EQ::item::ItemType1HSlash,
+			18,
+			30
+		);
+		sidearm.Slots = (1u << EQ::invslot::slotPrimary) | (1u << EQ::invslot::slotSecondary);
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &sidearm,
+				.looted_item_link = "[Sidearm]",
+				.grouped_bots = {{
+					.name_stable_id = 7,
+					.name = "Warriorbot",
+					.race_id = Race::Human,
+					.class_id = Class::Warrior,
+					.equipped_items = {{.item = &strong_primary, .slot_id = EQ::invslot::slotPrimary}}
+				}}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(result.produced);
+		TEST_ASSERT_EQUALS(result.target_slot, EQ::invslot::slotSecondary);
+	}
+
+	void SecondaryDamageWeaponRequiresDualWield()
+	{
+		const auto old_symbol = AllClassGear(5961, "Dented Symbol", EQ::invslot::slotSecondary);
+		const auto offhand_sword = Weapon(
+			5962,
+			"Offhand Sword",
+			EQ::invslot::slotSecondary,
+			EQ::item::ItemType1HSlash,
+			18,
+			30
+		);
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &offhand_sword,
+				.looted_item_link = "[Offhand Sword]",
+				.grouped_bots = {{
+					.name_stable_id = 7,
+					.name = "Paladinbot",
+					.race_id = Race::Human,
+					.class_id = Class::Paladin,
+					.equipped_items = {{.item = &old_symbol, .slot_id = EQ::invslot::slotSecondary}}
+				}}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(!result.produced);
+	}
+
+	void SecondaryWeaponPaysShieldReplacementCost()
+	{
+		auto sturdy_shield = AllClassGear(5963, "Sturdy Shield", EQ::invslot::slotSecondary);
+		sturdy_shield.ItemType = EQ::item::ItemTypeShield;
+		sturdy_shield.AC = 90;
+		const auto offhand_sword = Weapon(
+			5964,
+			"Offhand Sword",
+			EQ::invslot::slotSecondary,
+			EQ::item::ItemType1HSlash,
+			18,
+			30
+		);
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &offhand_sword,
+				.looted_item_link = "[Offhand Sword]",
+				.grouped_bots = {{
+					.name_stable_id = 7,
+					.name = "Warriorbot",
+					.race_id = Race::Human,
+					.class_id = Class::Warrior,
+					.equipped_items = {{.item = &sturdy_shield, .slot_id = EQ::invslot::slotSecondary}}
+				}}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(!result.produced);
+	}
+
+	void TwoHanderMustBeatCurrentPrimaryAndSecondaryPackage()
+	{
+		const auto primary_sword = Weapon(
+			5971,
+			"Main Sword",
+			EQ::invslot::slotPrimary,
+			EQ::item::ItemType1HSlash,
+			18,
+			30
+		);
+		const auto offhand_sword = Weapon(
+			5972,
+			"Offhand Sword",
+			EQ::invslot::slotSecondary,
+			EQ::item::ItemType1HSlash,
+			18,
+			30
+		);
+		const auto greatsword = Weapon(
+			5973,
+			"Greatsword",
+			EQ::invslot::slotPrimary,
+			EQ::item::ItemType2HSlash,
+			30,
+			30
+		);
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &greatsword,
+				.looted_item_link = "[Greatsword]",
+				.grouped_bots = {{
+					.name_stable_id = 7,
+					.name = "Warriorbot",
+					.race_id = Race::Human,
+					.class_id = Class::Warrior,
+					.equipped_items = {
+						{.item = &primary_sword, .slot_id = EQ::invslot::slotPrimary},
+						{.item = &offhand_sword, .slot_id = EQ::invslot::slotSecondary}
+					}
+				}}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(!result.produced);
+	}
+
+	void RogueBackstabValueCanChangeWeaponWinner()
+	{
+		const auto warrior_piercer = Weapon(
+			5981,
+			"Warrior Piercer",
+			EQ::invslot::slotPrimary,
+			EQ::item::ItemType1HPiercing,
+			15,
+			30
+		);
+		const auto rogue_piercer = Weapon(
+			5982,
+			"Rogue Piercer",
+			EQ::invslot::slotPrimary,
+			EQ::item::ItemType1HPiercing,
+			15,
+			30
+		);
+		auto backstab_piercer = Weapon(
+			5983,
+			"Backstab Piercer",
+			EQ::invslot::slotPrimary,
+			EQ::item::ItemType1HPiercing,
+			15,
+			30
+		);
+		backstab_piercer.BackstabDmg = 12;
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &backstab_piercer,
+				.looted_item_link = "[Backstab Piercer]",
+				.grouped_bots = {
+					{
+						.name_stable_id = 7,
+						.name = "Warriorbot",
+						.race_id = Race::Human,
+						.class_id = Class::Warrior,
+						.equipped_items = {{.item = &warrior_piercer, .slot_id = EQ::invslot::slotPrimary}}
+					},
+					{
+						.name_stable_id = 8,
+						.name = "Roguebot",
+						.race_id = Race::Human,
+						.class_id = Class::Rogue,
+						.equipped_items = {{.item = &rogue_piercer, .slot_id = EQ::invslot::slotPrimary}}
+					}
+				}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(result.produced);
+		TEST_ASSERT_EQUALS(result.requesting_bot_stable_id, 8u);
+	}
+
+	void MartialWeaponDamageDelayCanProduceMonkUpgrade()
+	{
+		const auto old_knuckles = Weapon(
+			5984,
+			"Old Knuckles",
+			EQ::invslot::slotPrimary,
+			EQ::item::ItemTypeMartial,
+			12,
+			30
+		);
+		const auto new_knuckles = Weapon(
+			5985,
+			"New Knuckles",
+			EQ::invslot::slotPrimary,
+			EQ::item::ItemTypeMartial,
+			18,
+			30
+		);
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &new_knuckles,
+				.looted_item_link = "[New Knuckles]",
+				.grouped_bots = {{
+					.name_stable_id = 7,
+					.name = "Monkbot",
+					.race_id = Race::Human,
+					.class_id = Class::Monk,
+					.equipped_items = {{.item = &old_knuckles, .slot_id = EQ::invslot::slotPrimary}}
+				}}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(result.produced);
+		TEST_ASSERT_EQUALS(result.requesting_bot_stable_id, 7u);
+	}
+
+	void ValidWeaponProcSignalCanProduceSmallUpgrade()
+	{
+		const auto plain_sword = Weapon(
+			5991,
+			"Plain Sword",
+			EQ::invslot::slotPrimary,
+			EQ::item::ItemType1HSlash,
+			15,
+			30
+		);
+		auto proc_sword = Weapon(
+			5992,
+			"Proc Sword",
+			EQ::invslot::slotPrimary,
+			EQ::item::ItemType1HSlash,
+			15,
+			30
+		);
+		proc_sword.Proc.Effect = 1234;
+		proc_sword.Proc.Level2 = 1;
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &proc_sword,
+				.looted_item_link = "[Proc Sword]",
+				.grouped_bots = {{
+					.name_stable_id = 7,
+					.name = "Warriorbot",
+					.race_id = Race::Human,
+					.class_id = Class::Warrior,
+					.level = 50,
+					.equipped_items = {{.item = &plain_sword, .slot_id = EQ::invslot::slotPrimary}}
+				}}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(result.produced);
+		TEST_ASSERT_EQUALS(result.upgrade_score, 4);
 	}
 
 	void HighestUpgradeScoreWinsAcrossEligibleBots()

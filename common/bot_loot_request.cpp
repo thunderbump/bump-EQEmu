@@ -50,6 +50,50 @@ bool ItemCanEquipInSlot(const EQ::ItemData &item, int slot_id)
 	return IsEquipmentSlot(slot_id) && (item.Slots & (1u << slot_id));
 }
 
+bool IsWeapon(const EQ::ItemData &item)
+{
+	if (!item.IsClassCommon()) {
+		return false;
+	}
+
+	if (item.ItemType == EQ::item::ItemTypeArrow && item.Damage != 0) {
+		return true;
+	}
+
+	return item.Damage != 0 && item.Delay != 0;
+}
+
+bool BotClassCanDualWield(uint8_t class_id)
+{
+	switch (class_id) {
+	case Class::Warrior:
+	case Class::Ranger:
+	case Class::Monk:
+	case Class::Bard:
+	case Class::Rogue:
+	case Class::Beastlord:
+	case Class::Berserker:
+		return true;
+	default:
+		return false;
+	}
+}
+
+bool BotCanUseItemInSlot(const GroupedBotSnapshot &bot, const EQ::ItemData &item, int slot_id)
+{
+	if (!ItemCanEquipInSlot(item, slot_id)) {
+		return false;
+	}
+
+	if (slot_id == EQ::invslot::slotSecondary) {
+		return (BotClassCanDualWield(bot.class_id) && item.IsType1HWeapon()) ||
+			item.IsTypeShield() ||
+			!IsWeapon(item);
+	}
+
+	return true;
+}
+
 bool IsV1GearItemType(const EQ::ItemData &item)
 {
 	switch (item.ItemType) {
@@ -93,7 +137,7 @@ bool IsGearCandidateForBot(const EQ::ItemData &item, const GroupedBotSnapshot &b
 	}
 
 	for (int slot_id = EQ::invslot::EQUIPMENT_BEGIN; slot_id <= EQ::invslot::EQUIPMENT_END; ++slot_id) {
-		if (ItemCanEquipInSlot(item, slot_id)) {
+		if (BotCanUseItemInSlot(bot, item, slot_id)) {
 			return true;
 		}
 	}
@@ -167,6 +211,11 @@ bool UsesEndurance(uint8_t class_id)
 bool UsesMeleeOffense(uint8_t class_id)
 {
 	return IsFighterClass(class_id) || class_id == Class::Berserker;
+}
+
+bool UsesWeaponOffense(uint8_t class_id)
+{
+	return UsesMeleeOffense(class_id);
 }
 
 bool UsesSpellOffense(uint8_t class_id)
@@ -374,6 +423,58 @@ BotGearValueResult EffectiveStatsGearValue(const BotGearEffectiveStats &stats, u
 	};
 }
 
+int RawWeaponDamage(const EQ::ItemData *item, const EQ::ItemInstance *item_instance)
+{
+	if (item_instance) {
+		return item_instance->GetItemWeaponDamage(true);
+	}
+
+	return item ? static_cast<int>(item->Damage) : 0;
+}
+
+int RawBackstabDamage(const EQ::ItemData *item, const EQ::ItemInstance *item_instance)
+{
+	if (item_instance) {
+		return item_instance->GetItemBackstabDamage(true);
+	}
+
+	return item ? static_cast<int>(item->BackstabDmg) : 0;
+}
+
+bool HasValidWeaponProc(const EQ::ItemData &item, uint8_t bot_level)
+{
+	return item.Proc.Effect > 0 && (bot_level == 0 || item.Proc.Level2 == 0 || item.Proc.Level2 <= bot_level);
+}
+
+int WeaponProcSignalValue(const EQ::ItemData &item, uint8_t bot_level)
+{
+	if (!HasValidWeaponProc(item, bot_level)) {
+		return 0;
+	}
+
+	return 4 + std::min(std::max(item.ProcRate, 0) / 25, 4);
+}
+
+int WeaponGearValue(const EQ::ItemData *item, const EQ::ItemInstance *item_instance, uint8_t class_id, uint8_t bot_level)
+{
+	if (!item || !UsesWeaponOffense(class_id) || (!item->IsType1HWeapon() && !item->IsType2HWeapon())) {
+		return 0;
+	}
+
+	const int damage = RawWeaponDamage(item, item_instance);
+	const int delay = item->Delay;
+	if (damage <= 0 || delay <= 0) {
+		return 0;
+	}
+
+	int value = damage * 100 / delay;
+	if (class_id == Class::Rogue && item->ItemType == EQ::item::ItemType1HPiercing) {
+		value += RawBackstabDamage(item, item_instance) * 25 / delay;
+	}
+
+	return value + WeaponProcSignalValue(*item, bot_level);
+}
+
 BotGearValueResult BotGearValue(
 	const EQ::ItemData *item,
 	const EQ::ItemInstance *item_instance,
@@ -381,11 +482,11 @@ BotGearValueResult BotGearValue(
 	uint8_t bot_level
 )
 {
-	if (item_instance) {
-		return EffectiveStatsGearValue(ItemInstanceEffectiveStats(item_instance), class_id, bot_level);
-	}
-
-	return EffectiveStatsGearValue(RawItemDataEffectiveStats(item), class_id, bot_level);
+	const auto stats = item_instance ? ItemInstanceEffectiveStats(item_instance) : RawItemDataEffectiveStats(item);
+	const int weapon_value = WeaponGearValue(item, item_instance, class_id, bot_level);
+	auto result = EffectiveStatsGearValue(stats, class_id, bot_level);
+	result.effective_value += RecommendedLevelScaledValue(bot_level, stats.recommended_level, weapon_value);
+	return result;
 }
 
 const ItemSnapshot *EquippedItemForSlot(const GroupedBotSnapshot &bot, int slot_id)
@@ -397,6 +498,55 @@ const ItemSnapshot *EquippedItemForSlot(const GroupedBotSnapshot &bot, int slot_
 	}
 
 	return nullptr;
+}
+
+int BotGearEffectiveValue(
+	const EQ::ItemData *item,
+	const EQ::ItemInstance *item_instance,
+	uint8_t class_id,
+	uint8_t bot_level
+)
+{
+	return BotGearValue(item, item_instance, class_id, bot_level).effective_value;
+}
+
+int ReplacementCostForSlot(const GroupedBotSnapshot &bot, const EQ::ItemData &looted_item, int slot_id)
+{
+	int replacement_cost = 0;
+
+	const auto equipped_item = EquippedItemForSlot(bot, slot_id);
+	if (equipped_item) {
+		replacement_cost += BotGearEffectiveValue(
+			equipped_item->item,
+			equipped_item->item_instance,
+			bot.class_id,
+			bot.level
+		);
+	}
+
+	if (slot_id == EQ::invslot::slotPrimary && looted_item.IsType2HWeapon()) {
+		const auto secondary_item = EquippedItemForSlot(bot, EQ::invslot::slotSecondary);
+		if (secondary_item) {
+			replacement_cost += BotGearEffectiveValue(
+				secondary_item->item,
+				secondary_item->item_instance,
+				bot.class_id,
+				bot.level
+			);
+		}
+	} else if (slot_id == EQ::invslot::slotSecondary) {
+		const auto primary_item = EquippedItemForSlot(bot, EQ::invslot::slotPrimary);
+		if (primary_item && primary_item->item && primary_item->item->IsType2HWeapon()) {
+			replacement_cost += BotGearEffectiveValue(
+				primary_item->item,
+				primary_item->item_instance,
+				bot.class_id,
+				bot.level
+			);
+		}
+	}
+
+	return replacement_cost;
 }
 
 bool HasLoreConflict(const GroupedBotSnapshot &bot, const EQ::ItemData &item)
@@ -741,7 +891,7 @@ Request BuildRequestForSuccessfulLoot(const SuccessfulLootEvent &event, const Se
 		}
 
 		for (int slot_id = EQ::invslot::EQUIPMENT_BEGIN; slot_id <= EQ::invslot::EQUIPMENT_END; ++slot_id) {
-			if (!ItemCanEquipInSlot(*event.looted_item, slot_id)) {
+			if (!BotCanUseItemInSlot(bot, *event.looted_item, slot_id)) {
 				continue;
 			}
 
@@ -750,13 +900,7 @@ Request BuildRequestForSuccessfulLoot(const SuccessfulLootEvent &event, const Se
 				continue;
 			}
 
-			const auto equipped_item = EquippedItemForSlot(bot, slot_id);
-			const auto equipped_value = equipped_item ?
-				BotGearValue(equipped_item->item, equipped_item->item_instance, bot.class_id, bot.level) :
-				BotGearValueResult{};
-			const int equipped_score = equipped_item ?
-				equipped_value.effective_value :
-				0;
+			const int equipped_score = ReplacementCostForSlot(bot, *event.looted_item, slot_id);
 			const int upgrade_score = looted_value.effective_value - equipped_score;
 			if (upgrade_score <= 0) {
 				continue;
