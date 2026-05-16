@@ -22,6 +22,7 @@
 #include "http/httplib.h"
 #include "item_instance.h"
 #include "json/json.h"
+#include "spdat.h"
 
 #include <fmt/format.h>
 
@@ -172,8 +173,19 @@ struct BotGearEffectiveStats {
 	int endurance_regen = 0;
 	int haste = 0;
 	int damage_shield = 0;
+	int shielding = 0;
+	int spell_shield = 0;
+	int dot_shielding = 0;
+	int avoidance = 0;
+	int accuracy = 0;
+	int combat_effects = 0;
 	int heal_amount = 0;
 	int spell_damage = 0;
+	int clairvoyance = 0;
+	int bard_instrument = 0;
+	int worn_spell_offense = 0;
+	int worn_healing_support = 0;
+	int worn_resources = 0;
 	int required_level = 0;
 	int recommended_level = 0;
 };
@@ -291,6 +303,67 @@ int SurvivabilityWeightPercent(uint8_t class_id)
 	return 80;
 }
 
+int SpellEffectBaseValue(uint16 spell_id, int effect_id)
+{
+	const int effect_index = GetSpellEffectIndex(spell_id, effect_id);
+	if (effect_index < 0) {
+		return 0;
+	}
+
+	return std::max(spells[spell_id].base_value[effect_index], 1);
+}
+
+BotGearEffectiveStats LowNoiseEffectValue(uint16 spell_id)
+{
+	BotGearEffectiveStats stats;
+	if (!IsValidSpell(spell_id)) {
+		return stats;
+	}
+
+	if (IsEffectInSpell(spell_id, SpellEffect::ImprovedDamage)) {
+		stats.worn_spell_offense += SpellEffectBaseValue(spell_id, SpellEffect::ImprovedDamage);
+	}
+
+	if (IsEffectInSpell(spell_id, SpellEffect::ImprovedDamage2)) {
+		stats.worn_spell_offense += SpellEffectBaseValue(spell_id, SpellEffect::ImprovedDamage2);
+	}
+
+	if (IsEffectInSpell(spell_id, SpellEffect::FcDamageAmt)) {
+		stats.worn_spell_offense += SpellEffectBaseValue(spell_id, SpellEffect::FcDamageAmt);
+	}
+
+	if (IsEffectInSpell(spell_id, SpellEffect::FcDamageAmt2)) {
+		stats.worn_spell_offense += SpellEffectBaseValue(spell_id, SpellEffect::FcDamageAmt2);
+	}
+
+	if (IsEffectInSpell(spell_id, SpellEffect::ImprovedHeal)) {
+		stats.worn_healing_support += SpellEffectBaseValue(spell_id, SpellEffect::ImprovedHeal);
+	}
+
+	if (IsEffectInSpell(spell_id, SpellEffect::FcHealAmt)) {
+		stats.worn_healing_support += SpellEffectBaseValue(spell_id, SpellEffect::FcHealAmt);
+	}
+
+	if (IsEffectInSpell(spell_id, SpellEffect::ReduceManaCost)) {
+		stats.worn_resources += SpellEffectBaseValue(spell_id, SpellEffect::ReduceManaCost);
+	}
+
+	if (IsEffectInSpell(spell_id, SpellEffect::IncreaseSpellHaste)) {
+		const int value = SpellEffectBaseValue(spell_id, SpellEffect::IncreaseSpellHaste);
+		stats.worn_spell_offense += value;
+		stats.worn_healing_support += value;
+	}
+
+	return stats;
+}
+
+void AddEffectiveStats(BotGearEffectiveStats &stats, const BotGearEffectiveStats &added_stats)
+{
+	stats.worn_spell_offense += added_stats.worn_spell_offense;
+	stats.worn_healing_support += added_stats.worn_healing_support;
+	stats.worn_resources += added_stats.worn_resources;
+}
+
 BotGearValueBreakdown ScoreEffectiveStats(const BotGearEffectiveStats &stats, uint8_t class_id)
 {
 	BotGearValueBreakdown value;
@@ -300,11 +373,15 @@ BotGearValueBreakdown ScoreEffectiveStats(const BotGearEffectiveStats &stats, ui
 		stats.hp +
 		stats.hp_regen * 8 +
 		stats.stamina * 2 +
-		stats.agility;
+		stats.agility +
+		stats.shielding * 3 +
+		stats.spell_shield * 3 +
+		stats.dot_shielding * 3 +
+		stats.avoidance * 2;
 	value.survivability = survivability * SurvivabilityWeightPercent(class_id) / 100;
 
 	if (UsesMana(class_id)) {
-		value.resources += stats.mana + stats.mana_regen * 8;
+		value.resources += stats.mana + stats.mana_regen * 8 + stats.clairvoyance * 4 + stats.worn_resources * 3;
 	}
 
 	if (UsesEndurance(class_id)) {
@@ -316,6 +393,8 @@ BotGearValueBreakdown ScoreEffectiveStats(const BotGearEffectiveStats &stats, ui
 			stats.strength +
 			stats.dexterity +
 			stats.attack +
+			stats.accuracy * 2 +
+			stats.combat_effects * 2 +
 			stats.haste * 4 +
 			stats.damage_shield;
 	}
@@ -329,13 +408,13 @@ BotGearValueBreakdown ScoreEffectiveStats(const BotGearEffectiveStats &stats, ui
 	}
 
 	if (UsesSpellOffense(class_id)) {
-		value.spell_offense += stats.spell_damage * 8;
+		value.spell_offense += stats.spell_damage * 8 + stats.worn_spell_offense * 4;
 	}
 
 	if (UsesHealingSupport(class_id)) {
-		value.healing_support += stats.heal_amount * 8;
+		value.healing_support += stats.heal_amount * 8 + stats.worn_healing_support * 4;
 		if (class_id == Class::Bard) {
-			value.healing_support += stats.charisma * 2;
+			value.healing_support += stats.charisma * 2 + stats.bard_instrument * 3;
 		}
 	}
 
@@ -348,7 +427,7 @@ BotGearEffectiveStats RawItemDataEffectiveStats(const EQ::ItemData *item)
 		return {};
 	}
 
-	return {
+	auto stats = BotGearEffectiveStats{
 		.ac = item->AC,
 		.hp = item->HP,
 		.mana = item->Mana,
@@ -366,11 +445,23 @@ BotGearEffectiveStats RawItemDataEffectiveStats(const EQ::ItemData *item)
 		.endurance_regen = item->EnduranceRegen,
 		.haste = item->Haste,
 		.damage_shield = item->DamageShield,
+		.shielding = item->Shielding,
+		.spell_shield = item->SpellShield,
+		.dot_shielding = item->DotShielding,
+		.avoidance = item->Avoidance,
+		.accuracy = item->Accuracy,
+		.combat_effects = item->CombatEffects,
 		.heal_amount = item->HealAmt,
 		.spell_damage = item->SpellDmg,
+		.clairvoyance = static_cast<int>(item->Clairvoyance),
+		.bard_instrument = item->BardValue,
 		.required_level = item->ReqLevel,
 		.recommended_level = item->RecLevel
 	};
+
+	AddEffectiveStats(stats, LowNoiseEffectValue(item->Worn.Effect));
+	AddEffectiveStats(stats, LowNoiseEffectValue(item->Focus.Effect));
+	return stats;
 }
 
 int ItemInstanceEnduranceRegen(const EQ::ItemInstance *item_instance)
@@ -387,13 +478,44 @@ int ItemInstanceEnduranceRegen(const EQ::ItemInstance *item_instance)
 	return endurance_regen;
 }
 
+template <typename ItemField>
+int ItemInstanceAugmentedSum(const EQ::ItemInstance *item_instance, ItemField item_field)
+{
+	if (!item_instance || !item_instance->GetItem()) {
+		return 0;
+	}
+
+	int value = item_field(*item_instance->GetItem());
+	for (int slot_id = EQ::invaug::SOCKET_BEGIN; slot_id <= EQ::invaug::SOCKET_END; ++slot_id) {
+		value += ItemInstanceAugmentedSum(item_instance->GetAugment(slot_id), item_field);
+	}
+
+	return value;
+}
+
+BotGearEffectiveStats ItemInstanceLowNoiseEffects(const EQ::ItemInstance *item_instance)
+{
+	if (!item_instance || !item_instance->GetItem()) {
+		return {};
+	}
+
+	auto stats = BotGearEffectiveStats{};
+	AddEffectiveStats(stats, LowNoiseEffectValue(item_instance->GetItem()->Worn.Effect));
+	AddEffectiveStats(stats, LowNoiseEffectValue(item_instance->GetItem()->Focus.Effect));
+	for (int slot_id = EQ::invaug::SOCKET_BEGIN; slot_id <= EQ::invaug::SOCKET_END; ++slot_id) {
+		AddEffectiveStats(stats, ItemInstanceLowNoiseEffects(item_instance->GetAugment(slot_id)));
+	}
+
+	return stats;
+}
+
 BotGearEffectiveStats ItemInstanceEffectiveStats(const EQ::ItemInstance *item_instance)
 {
 	if (!item_instance) {
 		return {};
 	}
 
-	return {
+	auto stats = BotGearEffectiveStats{
 		.ac = item_instance->GetItemArmorClass(true),
 		.hp = item_instance->GetItemHP(true),
 		.mana = item_instance->GetItemMana(true),
@@ -411,11 +533,22 @@ BotGearEffectiveStats ItemInstanceEffectiveStats(const EQ::ItemInstance *item_in
 		.endurance_regen = ItemInstanceEnduranceRegen(item_instance),
 		.haste = item_instance->GetItemHaste(true),
 		.damage_shield = item_instance->GetItemDamageShield(true),
+		.shielding = ItemInstanceAugmentedSum(item_instance, [](const EQ::ItemData &item) { return item.Shielding; }),
+		.spell_shield = ItemInstanceAugmentedSum(item_instance, [](const EQ::ItemData &item) { return item.SpellShield; }),
+		.dot_shielding = ItemInstanceAugmentedSum(item_instance, [](const EQ::ItemData &item) { return item.DotShielding; }),
+		.avoidance = ItemInstanceAugmentedSum(item_instance, [](const EQ::ItemData &item) { return item.Avoidance; }),
+		.accuracy = ItemInstanceAugmentedSum(item_instance, [](const EQ::ItemData &item) { return item.Accuracy; }),
+		.combat_effects = ItemInstanceAugmentedSum(item_instance, [](const EQ::ItemData &item) { return item.CombatEffects; }),
 		.heal_amount = item_instance->GetItemHealAmt(true),
 		.spell_damage = item_instance->GetItemSpellDamage(true),
+		.clairvoyance = item_instance->GetItemClairvoyance(true),
+		.bard_instrument = ItemInstanceAugmentedSum(item_instance, [](const EQ::ItemData &item) { return item.BardValue; }),
 		.required_level = item_instance->GetItemRequiredLevel(true),
 		.recommended_level = item_instance->GetItemRecommendedLevel(true)
 	};
+
+	AddEffectiveStats(stats, ItemInstanceLowNoiseEffects(item_instance));
+	return stats;
 }
 
 BotGearValueResult EffectiveStatsGearValue(const BotGearEffectiveStats &stats, uint8_t class_id, uint8_t bot_level)

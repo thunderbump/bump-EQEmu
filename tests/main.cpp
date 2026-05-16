@@ -30,6 +30,7 @@
 
 #include "common/path_manager.h"
 #include "common/platform.h"
+#include "common/spdat.h"
 
 #include <chrono>
 #include <filesystem>
@@ -38,6 +39,8 @@
 #include <memory>
 
 const EQEmuConfig *Config;
+const SPDat_Spell_Struct *spells;
+int32 SPDAT_RECORDS = -1;
 
 int main()
 {

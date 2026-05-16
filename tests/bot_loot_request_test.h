@@ -24,6 +24,7 @@
 #include "common/item_instance.h"
 #include "common/races.h"
 #include "common/rulesys.h"
+#include "common/spdat.h"
 #include "cppunit/cpptest.h"
 
 #include <cstring>
@@ -72,6 +73,11 @@ public:
 		TEST_ADD(BotLootRequestTest::RangedModeBotCanRequestRangedUpgrade);
 		TEST_ADD(BotLootRequestTest::NonRangedBotDoesNotRequestRangedUpgrade);
 		TEST_ADD(BotLootRequestTest::AmmoStatsDoNotProduceWornGearUpgrade);
+		TEST_ADD(BotLootRequestTest::DirectMod2GearCanProduceUpgrade);
+		TEST_ADD(BotLootRequestTest::BardInstrumentValueOnlyAppliesToBards);
+		TEST_ADD(BotLootRequestTest::WhitelistedWornAndFocusEffectsCanProduceUpgrade);
+		TEST_ADD(BotLootRequestTest::NonWhitelistedWornEffectsDoNotProduceUpgrade);
+		TEST_ADD(BotLootRequestTest::ClickEffectsDoNotProduceBotGearValue);
 		TEST_ADD(BotLootRequestTest::HighestUpgradeScoreWinsAcrossEligibleBots);
 		TEST_ADD(BotLootRequestTest::GroupOrderBreaksTiedUpgradeScores);
 		TEST_ADD(BotLootRequestTest::CooldownSuppressesSameLooterAndRequestingBot);
@@ -156,6 +162,36 @@ private:
 		item.Damage = 1;
 		return item;
 	}
+
+	struct TestSpellGlobals {
+		TestSpellGlobals()
+		{
+			previous_spells = spells;
+			previous_records = SPDAT_RECORDS;
+			test_spells.resize(16);
+			for (auto &spell : test_spells) {
+				std::strncpy(spell.player_1, "PLAYER_1", sizeof(spell.player_1) - 1);
+			}
+			spells = test_spells.data();
+			SPDAT_RECORDS = static_cast<int32>(test_spells.size());
+		}
+
+		~TestSpellGlobals()
+		{
+			spells = previous_spells;
+			SPDAT_RECORDS = previous_records;
+		}
+
+		void SetEffect(uint16 spell_id, int effect_id, int base_value = 10)
+		{
+			test_spells[spell_id].effect_id[0] = effect_id;
+			test_spells[spell_id].base_value[0] = base_value;
+		}
+
+		std::vector<SPDat_Spell_Struct> test_spells;
+		const SPDat_Spell_Struct *previous_spells = nullptr;
+		int32 previous_records = 0;
+	};
 
 	void DefaultRulesDisableBotLootRequests()
 	{
@@ -1464,6 +1500,185 @@ private:
 					.race_id = Race::Human,
 					.class_id = Class::Ranger,
 					.level = 50
+				}}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(!result.produced);
+	}
+
+	void DirectMod2GearCanProduceUpgrade()
+	{
+		const auto old_ring = AllClassGear(6161, "Plain Ring", EQ::invslot::slotFinger1);
+		auto looted = AllClassGear(6162, "Veteran Ring", EQ::invslot::slotFinger1);
+		looted.Shielding = 5;
+		looted.SpellShield = 5;
+		looted.DotShielding = 5;
+		looted.Avoidance = 5;
+		looted.Accuracy = 5;
+		looted.CombatEffects = 5;
+		looted.Clairvoyance = 5;
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &looted,
+				.looted_item_link = "[Veteran Ring]",
+				.grouped_bots = {{
+					.name_stable_id = 7,
+					.name = "Warriorbot",
+					.race_id = Race::Human,
+					.class_id = Class::Warrior,
+					.equipped_items = {{.item = &old_ring, .slot_id = EQ::invslot::slotFinger1}}
+				}}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(result.produced);
+		TEST_ASSERT(result.upgrade_score > 0);
+	}
+
+	void BardInstrumentValueOnlyAppliesToBards()
+	{
+		const auto old_bard_lute = AllClassGear(6171, "Old Bard Lute", EQ::invslot::slotPrimary);
+		const auto old_warrior_lute = AllClassGear(6172, "Old Warrior Lute", EQ::invslot::slotPrimary);
+		auto lute = AllClassGear(6173, "Singing Lute", EQ::invslot::slotPrimary);
+		lute.ItemType = EQ::item::ItemTypeStringedInstrument;
+		lute.BardType = 24;
+		lute.BardValue = 18;
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &lute,
+				.looted_item_link = "[Singing Lute]",
+				.grouped_bots = {
+					{
+						.name_stable_id = 7,
+						.name = "Warriorbot",
+						.race_id = Race::Human,
+						.class_id = Class::Warrior,
+						.equipped_items = {{.item = &old_warrior_lute, .slot_id = EQ::invslot::slotPrimary}}
+					},
+					{
+						.name_stable_id = 8,
+						.name = "Bardbot",
+						.race_id = Race::Human,
+						.class_id = Class::Bard,
+						.equipped_items = {{.item = &old_bard_lute, .slot_id = EQ::invslot::slotPrimary}}
+					}
+				}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(result.produced);
+		TEST_ASSERT_EQUALS(result.requesting_bot_stable_id, 8u);
+	}
+
+	void WhitelistedWornAndFocusEffectsCanProduceUpgrade()
+	{
+		TestSpellGlobals spell_globals;
+		spell_globals.SetEffect(2, SpellEffect::ImprovedDamage);
+		spell_globals.SetEffect(3, SpellEffect::ImprovedHeal);
+
+		const auto old_caster_ring = AllClassGear(6181, "Old Caster Ring", EQ::invslot::slotFinger1);
+		auto focus_ring = AllClassGear(6182, "Evoker Focus Ring", EQ::invslot::slotFinger1);
+		focus_ring.Focus.Effect = 2;
+
+		const auto focus_result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &focus_ring,
+				.looted_item_link = "[Evoker Focus Ring]",
+				.grouped_bots = {{
+					.name_stable_id = 7,
+					.name = "Wizardbot",
+					.race_id = Race::Human,
+					.class_id = Class::Wizard,
+					.equipped_items = {{.item = &old_caster_ring, .slot_id = EQ::invslot::slotFinger1}}
+				}}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(focus_result.produced);
+
+		const auto old_healer_ring = AllClassGear(6183, "Old Healer Ring", EQ::invslot::slotFinger1);
+		auto worn_ring = AllClassGear(6184, "Mercy Worn Ring", EQ::invslot::slotFinger1);
+		worn_ring.Worn.Effect = 3;
+
+		const auto worn_result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &worn_ring,
+				.looted_item_link = "[Mercy Worn Ring]",
+				.grouped_bots = {{
+					.name_stable_id = 8,
+					.name = "Clericbot",
+					.race_id = Race::Human,
+					.class_id = Class::Cleric,
+					.equipped_items = {{.item = &old_healer_ring, .slot_id = EQ::invslot::slotFinger1}}
+				}}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(worn_result.produced);
+	}
+
+	void NonWhitelistedWornEffectsDoNotProduceUpgrade()
+	{
+		TestSpellGlobals spell_globals;
+		spell_globals.SetEffect(2, SpellEffect::AddFaction);
+
+		const auto old_ring = AllClassGear(6191, "Old Ring", EQ::invslot::slotFinger1);
+		auto faction_ring = AllClassGear(6192, "Faction Ring", EQ::invslot::slotFinger1);
+		faction_ring.Worn.Effect = 2;
+		faction_ring.FactionMod1 = 1;
+		faction_ring.FactionAmt1 = 100;
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &faction_ring,
+				.looted_item_link = "[Faction Ring]",
+				.grouped_bots = {{
+					.name_stable_id = 7,
+					.name = "Warriorbot",
+					.race_id = Race::Human,
+					.class_id = Class::Warrior,
+					.equipped_items = {{.item = &old_ring, .slot_id = EQ::invslot::slotFinger1}}
+				}}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(!result.produced);
+	}
+
+	void ClickEffectsDoNotProduceBotGearValue()
+	{
+		TestSpellGlobals spell_globals;
+		spell_globals.SetEffect(2, SpellEffect::ImprovedDamage);
+
+		const auto old_ring = AllClassGear(6201, "Old Ring", EQ::invslot::slotFinger1);
+		auto click_ring = AllClassGear(6202, "Click Ring", EQ::invslot::slotFinger1);
+		click_ring.Click.Effect = 2;
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &click_ring,
+				.looted_item_link = "[Click Ring]",
+				.grouped_bots = {{
+					.name_stable_id = 7,
+					.name = "Wizardbot",
+					.race_id = Race::Human,
+					.class_id = Class::Wizard,
+					.equipped_items = {{.item = &old_ring, .slot_id = EQ::invslot::slotFinger1}}
 				}}
 			},
 			{.enabled = true}
