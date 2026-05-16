@@ -92,7 +92,8 @@ void MaybeSendBotLootRequest(
 			.name = bot->GetCleanName(),
 			.race_id = bot->GetBaseRace(),
 			.class_id = bot->GetClass(),
-			.level = bot->GetLevel()
+			.level = bot->GetLevel(),
+			.ranged_mode = bot->IsBotRanged()
 		};
 
 		for (int slot_id = EQ::invslot::EQUIPMENT_BEGIN; slot_id <= EQ::invslot::EQUIPMENT_END; ++slot_id) {

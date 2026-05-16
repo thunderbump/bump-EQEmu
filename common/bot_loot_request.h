@@ -59,6 +59,7 @@ struct GroupedBotSnapshot {
 	uint16_t race_id = 0;
 	uint8_t class_id = 0;
 	uint8_t level = 0;
+	bool ranged_mode = false;
 	std::vector<ItemSnapshot> equipped_items;
 };
 

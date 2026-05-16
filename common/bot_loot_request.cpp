@@ -85,6 +85,10 @@ bool BotCanUseItemInSlot(const GroupedBotSnapshot &bot, const EQ::ItemData &item
 		return false;
 	}
 
+	if (slot_id == EQ::invslot::slotAmmo) {
+		return false;
+	}
+
 	if (slot_id == EQ::invslot::slotSecondary) {
 		return (BotClassCanDualWield(bot.class_id) && item.IsType1HWeapon()) ||
 			item.IsTypeShield() ||
@@ -216,6 +220,11 @@ bool UsesMeleeOffense(uint8_t class_id)
 bool UsesWeaponOffense(uint8_t class_id)
 {
 	return UsesMeleeOffense(class_id);
+}
+
+bool UsesRangedWeaponOffense(const GroupedBotSnapshot &bot)
+{
+	return bot.class_id == Class::Ranger || bot.ranged_mode;
 }
 
 bool UsesSpellOffense(uint8_t class_id)
@@ -441,6 +450,8 @@ int RawBackstabDamage(const EQ::ItemData *item, const EQ::ItemInstance *item_ins
 	return item ? static_cast<int>(item->BackstabDmg) : 0;
 }
 
+const ItemSnapshot *EquippedItemForSlot(const GroupedBotSnapshot &bot, int slot_id);
+
 bool HasValidWeaponProc(const EQ::ItemData &item, uint8_t bot_level)
 {
 	return item.Proc.Effect > 0 && (bot_level == 0 || item.Proc.Level2 == 0 || item.Proc.Level2 <= bot_level);
@@ -475,17 +486,92 @@ int WeaponGearValue(const EQ::ItemData *item, const EQ::ItemInstance *item_insta
 	return value + WeaponProcSignalValue(*item, bot_level);
 }
 
+bool IsBow(const EQ::ItemData &item)
+{
+	return item.ItemType == EQ::item::ItemTypeBow;
+}
+
+bool IsThrowingWeapon(const EQ::ItemData &item)
+{
+	return item.ItemType == EQ::item::ItemTypeSmallThrowing ||
+		item.ItemType == EQ::item::ItemTypeLargeThrowing;
+}
+
+bool IsRangedWeapon(const EQ::ItemData &item)
+{
+	return IsBow(item) || IsThrowingWeapon(item);
+}
+
+bool IsCompatibleRangedAmmo(const EQ::ItemData &range_item, const EQ::ItemData &ammo_item)
+{
+	if (IsBow(range_item)) {
+		return ammo_item.ItemType == EQ::item::ItemTypeArrow;
+	}
+
+	if (IsThrowingWeapon(range_item)) {
+		return ammo_item.ID == range_item.ID;
+	}
+
+	return false;
+}
+
+const EQ::ItemData *CompatibleAmmoForRangeItem(const GroupedBotSnapshot &bot, const EQ::ItemData &range_item)
+{
+	const auto ammo_item = EquippedItemForSlot(bot, EQ::invslot::slotAmmo);
+	if (!ammo_item || !ammo_item->item || !IsCompatibleRangedAmmo(range_item, *ammo_item->item)) {
+		return nullptr;
+	}
+
+	return ammo_item->item;
+}
+
+bool HasUsableRangedWeaponContext(const GroupedBotSnapshot &bot, const EQ::ItemData &range_item)
+{
+	return UsesRangedWeaponOffense(bot) && CompatibleAmmoForRangeItem(bot, range_item);
+}
+
+int RangedWeaponGearValue(
+	const EQ::ItemData *item,
+	const EQ::ItemInstance *item_instance,
+	const GroupedBotSnapshot &bot
+)
+{
+	if (!item || !UsesRangedWeaponOffense(bot) || !IsRangedWeapon(*item)) {
+		return 0;
+	}
+
+	const auto ammo_item = CompatibleAmmoForRangeItem(bot, *item);
+	if (!ammo_item) {
+		return 0;
+	}
+
+	const int damage = RawWeaponDamage(item, item_instance);
+	const int delay = item->Delay;
+	if (damage <= 0 || delay <= 0) {
+		return 0;
+	}
+
+	int value = damage * 100 / delay;
+	value += item->Range / 5;
+
+	if (IsBow(*item)) {
+		value += ammo_item->Range / 5;
+	}
+
+	return value + WeaponProcSignalValue(*item, bot.level);
+}
+
 BotGearValueResult BotGearValue(
 	const EQ::ItemData *item,
 	const EQ::ItemInstance *item_instance,
-	uint8_t class_id,
-	uint8_t bot_level
+	const GroupedBotSnapshot &bot
 )
 {
 	const auto stats = item_instance ? ItemInstanceEffectiveStats(item_instance) : RawItemDataEffectiveStats(item);
-	const int weapon_value = WeaponGearValue(item, item_instance, class_id, bot_level);
-	auto result = EffectiveStatsGearValue(stats, class_id, bot_level);
-	result.effective_value += RecommendedLevelScaledValue(bot_level, stats.recommended_level, weapon_value);
+	const int weapon_value = WeaponGearValue(item, item_instance, bot.class_id, bot.level) +
+		RangedWeaponGearValue(item, item_instance, bot);
+	auto result = EffectiveStatsGearValue(stats, bot.class_id, bot.level);
+	result.effective_value += RecommendedLevelScaledValue(bot.level, stats.recommended_level, weapon_value);
 	return result;
 }
 
@@ -503,11 +589,10 @@ const ItemSnapshot *EquippedItemForSlot(const GroupedBotSnapshot &bot, int slot_
 int BotGearEffectiveValue(
 	const EQ::ItemData *item,
 	const EQ::ItemInstance *item_instance,
-	uint8_t class_id,
-	uint8_t bot_level
+	const GroupedBotSnapshot &bot
 )
 {
-	return BotGearValue(item, item_instance, class_id, bot_level).effective_value;
+	return BotGearValue(item, item_instance, bot).effective_value;
 }
 
 int ReplacementCostForSlot(const GroupedBotSnapshot &bot, const EQ::ItemData &looted_item, int slot_id)
@@ -519,8 +604,7 @@ int ReplacementCostForSlot(const GroupedBotSnapshot &bot, const EQ::ItemData &lo
 		replacement_cost += BotGearEffectiveValue(
 			equipped_item->item,
 			equipped_item->item_instance,
-			bot.class_id,
-			bot.level
+			bot
 		);
 	}
 
@@ -530,8 +614,7 @@ int ReplacementCostForSlot(const GroupedBotSnapshot &bot, const EQ::ItemData &lo
 			replacement_cost += BotGearEffectiveValue(
 				secondary_item->item,
 				secondary_item->item_instance,
-				bot.class_id,
-				bot.level
+				bot
 			);
 		}
 	} else if (slot_id == EQ::invslot::slotSecondary) {
@@ -540,8 +623,7 @@ int ReplacementCostForSlot(const GroupedBotSnapshot &bot, const EQ::ItemData &lo
 			replacement_cost += BotGearEffectiveValue(
 				primary_item->item,
 				primary_item->item_instance,
-				bot.class_id,
-				bot.level
+				bot
 			);
 		}
 	}
@@ -895,7 +977,14 @@ Request BuildRequestForSuccessfulLoot(const SuccessfulLootEvent &event, const Se
 				continue;
 			}
 
-			const auto looted_value = BotGearValue(event.looted_item, event.looted_item_instance, bot.class_id, bot.level);
+			if (
+				IsRangedWeapon(*event.looted_item) &&
+				(slot_id != EQ::invslot::slotRange || !HasUsableRangedWeaponContext(bot, *event.looted_item))
+			) {
+				continue;
+			}
+
+			const auto looted_value = BotGearValue(event.looted_item, event.looted_item_instance, bot);
 			if (bot.level > 0 && looted_value.required_level > bot.level) {
 				continue;
 			}

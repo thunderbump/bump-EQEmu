@@ -66,6 +66,12 @@ public:
 		TEST_ADD(BotLootRequestTest::RogueBackstabValueCanChangeWeaponWinner);
 		TEST_ADD(BotLootRequestTest::MartialWeaponDamageDelayCanProduceMonkUpgrade);
 		TEST_ADD(BotLootRequestTest::ValidWeaponProcSignalCanProduceSmallUpgrade);
+		TEST_ADD(BotLootRequestTest::BowWithoutArrowsDoesNotProduceRangedUpgrade);
+		TEST_ADD(BotLootRequestTest::BowWithArrowsCanProduceRangerRangedUpgrade);
+		TEST_ADD(BotLootRequestTest::ThrowingWeaponWithMismatchedAmmoDoesNotProduceRangedUpgrade);
+		TEST_ADD(BotLootRequestTest::RangedModeBotCanRequestRangedUpgrade);
+		TEST_ADD(BotLootRequestTest::NonRangedBotDoesNotRequestRangedUpgrade);
+		TEST_ADD(BotLootRequestTest::AmmoStatsDoNotProduceWornGearUpgrade);
 		TEST_ADD(BotLootRequestTest::HighestUpgradeScoreWinsAcrossEligibleBots);
 		TEST_ADD(BotLootRequestTest::GroupOrderBreaksTiedUpgradeScores);
 		TEST_ADD(BotLootRequestTest::CooldownSuppressesSameLooterAndRequestingBot);
@@ -139,6 +145,15 @@ private:
 		item.Damage = damage;
 		item.Delay = delay;
 		item.Classes = classes;
+		return item;
+	}
+
+	EQ::ItemData Arrow(uint32_t id, const std::string &name, uint32 range = 0)
+	{
+		auto item = AllClassGear(id, name, EQ::invslot::slotAmmo);
+		item.ItemType = EQ::item::ItemTypeArrow;
+		item.Range = range;
+		item.Damage = 1;
 		return item;
 	}
 
@@ -1275,6 +1290,186 @@ private:
 
 		TEST_ASSERT(result.produced);
 		TEST_ASSERT_EQUALS(result.upgrade_score, 4);
+	}
+
+	void BowWithoutArrowsDoesNotProduceRangedUpgrade()
+	{
+		auto old_bow = Weapon(6101, "Cracked Bow", EQ::invslot::slotRange, EQ::item::ItemTypeBow, 4, 40);
+		old_bow.Range = 75;
+		auto better_bow = Weapon(6102, "Ashwood Bow", EQ::invslot::slotRange, EQ::item::ItemTypeBow, 18, 30);
+		better_bow.Range = 125;
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &better_bow,
+				.looted_item_link = "[Ashwood Bow]",
+				.grouped_bots = {{
+					.name_stable_id = 7,
+					.name = "Rangerbot",
+					.race_id = Race::Human,
+					.class_id = Class::Ranger,
+					.level = 50,
+					.ranged_mode = true,
+					.equipped_items = {{.item = &old_bow, .slot_id = EQ::invslot::slotRange}}
+				}}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(!result.produced);
+	}
+
+	void BowWithArrowsCanProduceRangerRangedUpgrade()
+	{
+		auto old_bow = Weapon(6111, "Cracked Bow", EQ::invslot::slotRange, EQ::item::ItemTypeBow, 4, 40);
+		old_bow.Range = 75;
+		auto better_bow = Weapon(6112, "Ashwood Bow", EQ::invslot::slotRange, EQ::item::ItemTypeBow, 18, 30);
+		better_bow.Range = 125;
+		const auto arrows = Arrow(6113, "Bundled Arrows", 50);
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &better_bow,
+				.looted_item_link = "[Ashwood Bow]",
+				.grouped_bots = {{
+					.name_stable_id = 7,
+					.name = "Rangerbot",
+					.race_id = Race::Human,
+					.class_id = Class::Ranger,
+					.level = 50,
+					.equipped_items = {
+						{.item = &old_bow, .slot_id = EQ::invslot::slotRange},
+						{.item = &arrows, .slot_id = EQ::invslot::slotAmmo}
+					}
+				}}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(result.produced);
+		TEST_ASSERT_EQUALS(result.target_slot, EQ::invslot::slotRange);
+	}
+
+	void ThrowingWeaponWithMismatchedAmmoDoesNotProduceRangedUpgrade()
+	{
+		auto old_throwing = Weapon(6121, "Balanced Throwing Knife", EQ::invslot::slotRange, EQ::item::ItemTypeSmallThrowing, 5, 30);
+		old_throwing.Range = 60;
+		auto better_throwing = Weapon(6122, "Weighted Throwing Axe", EQ::invslot::slotRange, EQ::item::ItemTypeSmallThrowing, 18, 30);
+		better_throwing.Range = 100;
+		const auto mismatched_ammo = Weapon(6123, "Different Throwing Axe", EQ::invslot::slotAmmo, EQ::item::ItemTypeSmallThrowing, 18, 30);
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &better_throwing,
+				.looted_item_link = "[Weighted Throwing Axe]",
+				.grouped_bots = {{
+					.name_stable_id = 7,
+					.name = "Rangedbot",
+					.race_id = Race::Human,
+					.class_id = Class::Rogue,
+					.level = 50,
+					.ranged_mode = true,
+					.equipped_items = {
+						{.item = &old_throwing, .slot_id = EQ::invslot::slotRange},
+						{.item = &mismatched_ammo, .slot_id = EQ::invslot::slotAmmo}
+					}
+				}}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(!result.produced);
+	}
+
+	void RangedModeBotCanRequestRangedUpgrade()
+	{
+		auto old_throwing = Weapon(6131, "Practice Throwing Axe", EQ::invslot::slotRange, EQ::item::ItemTypeSmallThrowing, 5, 50);
+		old_throwing.Range = 50;
+		auto better_throwing = Weapon(6132, "Weighted Throwing Axe", EQ::invslot::slotRange, EQ::item::ItemTypeSmallThrowing, 18, 30);
+		better_throwing.Range = 100;
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &better_throwing,
+				.looted_item_link = "[Weighted Throwing Axe]",
+				.grouped_bots = {{
+					.name_stable_id = 7,
+					.name = "Rangedbot",
+					.race_id = Race::Human,
+					.class_id = Class::Rogue,
+					.level = 50,
+					.ranged_mode = true,
+					.equipped_items = {
+						{.item = &old_throwing, .slot_id = EQ::invslot::slotRange},
+						{.item = &better_throwing, .slot_id = EQ::invslot::slotAmmo}
+					}
+				}}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(result.produced);
+		TEST_ASSERT_EQUALS(result.target_slot, EQ::invslot::slotRange);
+	}
+
+	void NonRangedBotDoesNotRequestRangedUpgrade()
+	{
+		auto old_bow = Weapon(6141, "Cracked Bow", EQ::invslot::slotRange, EQ::item::ItemTypeBow, 4, 40);
+		old_bow.Range = 75;
+		auto better_bow = Weapon(6142, "Ashwood Bow", EQ::invslot::slotRange, EQ::item::ItemTypeBow, 18, 30);
+		better_bow.Range = 125;
+		const auto arrows = Arrow(6143, "Bundled Arrows", 50);
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &better_bow,
+				.looted_item_link = "[Ashwood Bow]",
+				.grouped_bots = {{
+					.name_stable_id = 7,
+					.name = "Warriorbot",
+					.race_id = Race::Human,
+					.class_id = Class::Warrior,
+					.level = 50,
+					.equipped_items = {
+						{.item = &old_bow, .slot_id = EQ::invslot::slotRange},
+						{.item = &arrows, .slot_id = EQ::invslot::slotAmmo}
+					}
+				}}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(!result.produced);
+	}
+
+	void AmmoStatsDoNotProduceWornGearUpgrade()
+	{
+		auto stat_arrow = Arrow(6151, "Stalwart Arrow", 50);
+		stat_arrow.AC = 100;
+		stat_arrow.HP = 100;
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &stat_arrow,
+				.looted_item_link = "[Stalwart Arrow]",
+				.grouped_bots = {{
+					.name_stable_id = 7,
+					.name = "Rangerbot",
+					.race_id = Race::Human,
+					.class_id = Class::Ranger,
+					.level = 50
+				}}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(!result.produced);
 	}
 
 	void HighestUpgradeScoreWinsAcrossEligibleBots()
