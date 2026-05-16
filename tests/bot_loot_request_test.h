@@ -50,6 +50,14 @@ public:
 		TEST_ADD(BotLootRequestTest::RecommendedLevelScalesEquippedItemValue);
 		TEST_ADD(BotLootRequestTest::NonUpgradeDoesNotProduceRequest);
 		TEST_ADD(BotLootRequestTest::AugmentedEquippedNonUpgradeDoesNotProduceRequest);
+		TEST_ADD(BotLootRequestTest::WisdomGearChangesWinnerOnlyForWisdomBotGearRoles);
+		TEST_ADD(BotLootRequestTest::SurvivabilityGearChangesWinnerForDurableBotGearRoles);
+		TEST_ADD(BotLootRequestTest::IntelligenceGearSplitsShadowKnightFromOtherTankBotGearRoles);
+		TEST_ADD(BotLootRequestTest::ResourceGearFollowsManaAndEnduranceBotGearRoles);
+		TEST_ADD(BotLootRequestTest::SpellDamageGearChangesWinnerForCasterBotGearRoles);
+		TEST_ADD(BotLootRequestTest::HealingGearChangesWinnerForPriestBotGearRoles);
+		TEST_ADD(BotLootRequestTest::CharismaGearChangesWinnerForBardBotGearRole);
+		TEST_ADD(BotLootRequestTest::MeleeOffenseGearChangesWinnerForBaselineMeleeBotGearRoles);
 		TEST_ADD(BotLootRequestTest::HighestUpgradeScoreWinsAcrossEligibleBots);
 		TEST_ADD(BotLootRequestTest::GroupOrderBreaksTiedUpgradeScores);
 		TEST_ADD(BotLootRequestTest::CooldownSuppressesSameLooterAndRequestingBot);
@@ -90,6 +98,21 @@ private:
 		item.HP = hp;
 		item.Mana = mana;
 		item.Endur = endur;
+		return item;
+	}
+
+	EQ::ItemData AllClassGear(
+		uint32_t id,
+		const std::string &name,
+		int slot,
+		int ac = 0,
+		int hp = 0,
+		int mana = 0,
+		int endur = 0
+	)
+	{
+		auto item = Gear(id, name, slot, ac, hp, mana, endur);
+		item.Classes = Class::ALL_CLASSES_BITMASK;
 		return item;
 	}
 
@@ -545,6 +568,339 @@ private:
 		);
 
 		TEST_ASSERT(!result.produced);
+	}
+
+	void WisdomGearChangesWinnerOnlyForWisdomBotGearRoles()
+	{
+		const auto old_warrior_ring = AllClassGear(5201, "Warrior Copper Ring", EQ::invslot::slotFinger1);
+		const auto old_cleric_ring = AllClassGear(5202, "Cleric Copper Ring", EQ::invslot::slotFinger1);
+		auto looted = AllClassGear(5203, "Sage Ring", EQ::invslot::slotFinger1);
+		looted.AWis = 12;
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &looted,
+				.looted_item_link = "[Sage Ring]",
+				.grouped_bots = {
+					{
+						.name_stable_id = 7,
+						.name = "Warriorbot",
+						.race_id = Race::Human,
+						.class_id = Class::Warrior,
+						.equipped_items = {{.item = &old_warrior_ring, .slot_id = EQ::invslot::slotFinger1}}
+					},
+					{
+						.name_stable_id = 8,
+						.name = "Clericbot",
+						.race_id = Race::Human,
+						.class_id = Class::Cleric,
+						.equipped_items = {{.item = &old_cleric_ring, .slot_id = EQ::invslot::slotFinger1}}
+					}
+				}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(result.produced);
+		TEST_ASSERT_EQUALS(result.requesting_bot_stable_id, 8u);
+	}
+
+	void SurvivabilityGearChangesWinnerForDurableBotGearRoles()
+	{
+		const auto old_wizard_ring = AllClassGear(5301, "Wizard Copper Ring", EQ::invslot::slotFinger1);
+		const auto old_warrior_ring = AllClassGear(5302, "Warrior Copper Ring", EQ::invslot::slotFinger1);
+		auto looted = AllClassGear(5303, "Bulwark Ring", EQ::invslot::slotFinger1);
+		looted.AC = 20;
+		looted.HP = 40;
+		looted.ASta = 10;
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &looted,
+				.looted_item_link = "[Bulwark Ring]",
+				.grouped_bots = {
+					{
+						.name_stable_id = 7,
+						.name = "Wizardbot",
+						.race_id = Race::Human,
+						.class_id = Class::Wizard,
+						.equipped_items = {{.item = &old_wizard_ring, .slot_id = EQ::invslot::slotFinger1}}
+					},
+					{
+						.name_stable_id = 8,
+						.name = "Warriorbot",
+						.race_id = Race::Human,
+						.class_id = Class::Warrior,
+						.equipped_items = {{.item = &old_warrior_ring, .slot_id = EQ::invslot::slotFinger1}}
+					}
+				}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(result.produced);
+		TEST_ASSERT_EQUALS(result.requesting_bot_stable_id, 8u);
+	}
+
+	void IntelligenceGearSplitsShadowKnightFromOtherTankBotGearRoles()
+	{
+		const auto old_warrior_ring = AllClassGear(5401, "Warrior Copper Ring", EQ::invslot::slotFinger1);
+		const auto old_paladin_ring = AllClassGear(5402, "Paladin Copper Ring", EQ::invslot::slotFinger1);
+		const auto old_shadow_knight_ring = AllClassGear(5403, "Shadow Knight Copper Ring", EQ::invslot::slotFinger1);
+		auto looted = AllClassGear(5404, "Ebon Thought Ring", EQ::invslot::slotFinger1);
+		looted.AInt = 12;
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &looted,
+				.looted_item_link = "[Ebon Thought Ring]",
+				.grouped_bots = {
+					{
+						.name_stable_id = 7,
+						.name = "Warriorbot",
+						.race_id = Race::Human,
+						.class_id = Class::Warrior,
+						.equipped_items = {{.item = &old_warrior_ring, .slot_id = EQ::invslot::slotFinger1}}
+					},
+					{
+						.name_stable_id = 8,
+						.name = "Paladinbot",
+						.race_id = Race::Human,
+						.class_id = Class::Paladin,
+						.equipped_items = {{.item = &old_paladin_ring, .slot_id = EQ::invslot::slotFinger1}}
+					},
+					{
+						.name_stable_id = 9,
+						.name = "Shadowknightbot",
+						.race_id = Race::Human,
+						.class_id = Class::ShadowKnight,
+						.equipped_items = {{.item = &old_shadow_knight_ring, .slot_id = EQ::invslot::slotFinger1}}
+					}
+				}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(result.produced);
+		TEST_ASSERT_EQUALS(result.requesting_bot_stable_id, 9u);
+	}
+
+	void ResourceGearFollowsManaAndEnduranceBotGearRoles()
+	{
+		const auto old_bard_ring = AllClassGear(5501, "Bard Copper Ring", EQ::invslot::slotFinger1);
+		const auto old_wizard_ring = AllClassGear(5502, "Wizard Copper Ring", EQ::invslot::slotFinger1);
+		auto mana_ring = AllClassGear(5503, "Azure Mind Ring", EQ::invslot::slotFinger1);
+		mana_ring.Mana = 20;
+
+		const auto mana_result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &mana_ring,
+				.looted_item_link = "[Azure Mind Ring]",
+				.grouped_bots = {
+					{
+						.name_stable_id = 7,
+						.name = "Bardbot",
+						.race_id = Race::Human,
+						.class_id = Class::Bard,
+						.equipped_items = {{.item = &old_bard_ring, .slot_id = EQ::invslot::slotFinger1}}
+					},
+					{
+						.name_stable_id = 8,
+						.name = "Wizardbot",
+						.race_id = Race::Human,
+						.class_id = Class::Wizard,
+						.equipped_items = {{.item = &old_wizard_ring, .slot_id = EQ::invslot::slotFinger1}}
+					}
+				}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(mana_result.produced);
+		TEST_ASSERT_EQUALS(mana_result.requesting_bot_stable_id, 8u);
+
+		const auto old_second_wizard_ring = AllClassGear(5504, "Second Wizard Copper Ring", EQ::invslot::slotFinger1);
+		const auto old_warrior_ring = AllClassGear(5505, "Warrior Copper Ring", EQ::invslot::slotFinger1);
+		auto endurance_ring = AllClassGear(5506, "Stalwart Ring", EQ::invslot::slotFinger1);
+		endurance_ring.Endur = 20;
+
+		const auto endurance_result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &endurance_ring,
+				.looted_item_link = "[Stalwart Ring]",
+				.grouped_bots = {
+					{
+						.name_stable_id = 9,
+						.name = "Wizardbot",
+						.race_id = Race::Human,
+						.class_id = Class::Wizard,
+						.equipped_items = {{.item = &old_second_wizard_ring, .slot_id = EQ::invslot::slotFinger1}}
+					},
+					{
+						.name_stable_id = 10,
+						.name = "Warriorbot",
+						.race_id = Race::Human,
+						.class_id = Class::Warrior,
+						.equipped_items = {{.item = &old_warrior_ring, .slot_id = EQ::invslot::slotFinger1}}
+					}
+				}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(endurance_result.produced);
+		TEST_ASSERT_EQUALS(endurance_result.requesting_bot_stable_id, 10u);
+	}
+
+	void SpellDamageGearChangesWinnerForCasterBotGearRoles()
+	{
+		const auto old_warrior_ring = AllClassGear(5601, "Warrior Copper Ring", EQ::invslot::slotFinger1);
+		const auto old_wizard_ring = AllClassGear(5602, "Wizard Copper Ring", EQ::invslot::slotFinger1);
+		auto looted = AllClassGear(5603, "Evoker Ring", EQ::invslot::slotFinger1);
+		looted.SpellDmg = 8;
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &looted,
+				.looted_item_link = "[Evoker Ring]",
+				.grouped_bots = {
+					{
+						.name_stable_id = 7,
+						.name = "Warriorbot",
+						.race_id = Race::Human,
+						.class_id = Class::Warrior,
+						.equipped_items = {{.item = &old_warrior_ring, .slot_id = EQ::invslot::slotFinger1}}
+					},
+					{
+						.name_stable_id = 8,
+						.name = "Wizardbot",
+						.race_id = Race::Human,
+						.class_id = Class::Wizard,
+						.equipped_items = {{.item = &old_wizard_ring, .slot_id = EQ::invslot::slotFinger1}}
+					}
+				}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(result.produced);
+		TEST_ASSERT_EQUALS(result.requesting_bot_stable_id, 8u);
+	}
+
+	void HealingGearChangesWinnerForPriestBotGearRoles()
+	{
+		const auto old_wizard_ring = AllClassGear(5701, "Wizard Copper Ring", EQ::invslot::slotFinger1);
+		const auto old_cleric_ring = AllClassGear(5702, "Cleric Copper Ring", EQ::invslot::slotFinger1);
+		auto looted = AllClassGear(5703, "Mercy Ring", EQ::invslot::slotFinger1);
+		looted.HealAmt = 8;
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &looted,
+				.looted_item_link = "[Mercy Ring]",
+				.grouped_bots = {
+					{
+						.name_stable_id = 7,
+						.name = "Wizardbot",
+						.race_id = Race::Human,
+						.class_id = Class::Wizard,
+						.equipped_items = {{.item = &old_wizard_ring, .slot_id = EQ::invslot::slotFinger1}}
+					},
+					{
+						.name_stable_id = 8,
+						.name = "Clericbot",
+						.race_id = Race::Human,
+						.class_id = Class::Cleric,
+						.equipped_items = {{.item = &old_cleric_ring, .slot_id = EQ::invslot::slotFinger1}}
+					}
+				}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(result.produced);
+		TEST_ASSERT_EQUALS(result.requesting_bot_stable_id, 8u);
+	}
+
+	void CharismaGearChangesWinnerForBardBotGearRole()
+	{
+		const auto old_warrior_ring = AllClassGear(5801, "Warrior Copper Ring", EQ::invslot::slotFinger1);
+		const auto old_bard_ring = AllClassGear(5802, "Bard Copper Ring", EQ::invslot::slotFinger1);
+		auto looted = AllClassGear(5803, "Performer Ring", EQ::invslot::slotFinger1);
+		looted.ACha = 12;
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &looted,
+				.looted_item_link = "[Performer Ring]",
+				.grouped_bots = {
+					{
+						.name_stable_id = 7,
+						.name = "Warriorbot",
+						.race_id = Race::Human,
+						.class_id = Class::Warrior,
+						.equipped_items = {{.item = &old_warrior_ring, .slot_id = EQ::invslot::slotFinger1}}
+					},
+					{
+						.name_stable_id = 8,
+						.name = "Bardbot",
+						.race_id = Race::Human,
+						.class_id = Class::Bard,
+						.equipped_items = {{.item = &old_bard_ring, .slot_id = EQ::invslot::slotFinger1}}
+					}
+				}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(result.produced);
+		TEST_ASSERT_EQUALS(result.requesting_bot_stable_id, 8u);
+	}
+
+	void MeleeOffenseGearChangesWinnerForBaselineMeleeBotGearRoles()
+	{
+		const auto old_wizard_ring = AllClassGear(5901, "Wizard Copper Ring", EQ::invslot::slotFinger1);
+		const auto old_rogue_ring = AllClassGear(5902, "Rogue Copper Ring", EQ::invslot::slotFinger1);
+		auto looted = AllClassGear(5903, "Striker Ring", EQ::invslot::slotFinger1);
+		looted.AStr = 8;
+		looted.Attack = 10;
+		looted.Haste = 5;
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &looted,
+				.looted_item_link = "[Striker Ring]",
+				.grouped_bots = {
+					{
+						.name_stable_id = 7,
+						.name = "Wizardbot",
+						.race_id = Race::Human,
+						.class_id = Class::Wizard,
+						.equipped_items = {{.item = &old_wizard_ring, .slot_id = EQ::invslot::slotFinger1}}
+					},
+					{
+						.name_stable_id = 8,
+						.name = "Roguebot",
+						.race_id = Race::Human,
+						.class_id = Class::Rogue,
+						.equipped_items = {{.item = &old_rogue_ring, .slot_id = EQ::invslot::slotFinger1}}
+					}
+				}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(result.produced);
+		TEST_ASSERT_EQUALS(result.requesting_bot_stable_id, 8u);
 	}
 
 	void HighestUpgradeScoreWinsAcrossEligibleBots()

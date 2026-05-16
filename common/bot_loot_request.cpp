@@ -17,6 +17,7 @@
 */
 #include "bot_loot_request.h"
 
+#include "classes.h"
 #include "emu_constants.h"
 #include "http/httplib.h"
 #include "item_instance.h"
@@ -105,6 +106,43 @@ struct BotGearValueResult {
 	int required_level = 0;
 };
 
+struct BotGearEffectiveStats {
+	int ac = 0;
+	int hp = 0;
+	int mana = 0;
+	int endurance = 0;
+	int strength = 0;
+	int stamina = 0;
+	int agility = 0;
+	int dexterity = 0;
+	int charisma = 0;
+	int intelligence = 0;
+	int wisdom = 0;
+	int attack = 0;
+	int hp_regen = 0;
+	int mana_regen = 0;
+	int endurance_regen = 0;
+	int haste = 0;
+	int damage_shield = 0;
+	int heal_amount = 0;
+	int spell_damage = 0;
+	int required_level = 0;
+	int recommended_level = 0;
+};
+
+struct BotGearValueBreakdown {
+	int survivability = 0;
+	int resources = 0;
+	int melee_offense = 0;
+	int spell_offense = 0;
+	int healing_support = 0;
+
+	int Total() const
+	{
+		return survivability + resources + melee_offense + spell_offense + healing_support;
+	}
+};
+
 int RecommendedLevelScaledValue(uint8_t current_level, int recommended_level, int base_value)
 {
 	if (recommended_level > 0 && current_level > 0 && current_level < recommended_level) {
@@ -116,65 +154,238 @@ int RecommendedLevelScaledValue(uint8_t current_level, int recommended_level, in
 	return base_value;
 }
 
-int RawGearScore(const EQ::ItemData *item)
+bool UsesMana(uint8_t class_id)
 {
-	if (!item) {
-		return 0;
-	}
-
-	return item->AC + item->HP + item->Mana + item->Endur + item->AStr + item->ASta +
-		item->AAgi + item->ADex + item->ACha + item->AInt + item->AWis;
+	return IsCasterClass(class_id) || IsSpellFighterClass(class_id);
 }
 
-BotGearValueResult RawItemDataGearValue(const EQ::ItemData *item, uint8_t bot_level)
+bool UsesEndurance(uint8_t class_id)
+{
+	return IsFighterClass(class_id) || class_id == Class::Berserker;
+}
+
+bool UsesMeleeOffense(uint8_t class_id)
+{
+	return IsFighterClass(class_id) || class_id == Class::Berserker;
+}
+
+bool UsesSpellOffense(uint8_t class_id)
+{
+	switch (class_id) {
+	case Class::Druid:
+	case Class::Shaman:
+	case Class::Necromancer:
+	case Class::Wizard:
+	case Class::Magician:
+	case Class::Enchanter:
+	case Class::ShadowKnight:
+	case Class::Ranger:
+	case Class::Beastlord:
+		return true;
+	default:
+		return false;
+	}
+}
+
+bool UsesHealingSupport(uint8_t class_id)
+{
+	switch (class_id) {
+	case Class::Cleric:
+	case Class::Druid:
+	case Class::Shaman:
+	case Class::Paladin:
+	case Class::Ranger:
+	case Class::Beastlord:
+	case Class::Bard:
+		return true;
+	default:
+		return false;
+	}
+}
+
+bool UsesIntelligence(uint8_t class_id)
+{
+	return IsINTCasterClass(class_id) || class_id == Class::ShadowKnight;
+}
+
+bool UsesWisdom(uint8_t class_id)
+{
+	return IsWISCasterClass(class_id) ||
+		class_id == Class::Paladin ||
+		class_id == Class::Ranger ||
+		class_id == Class::Beastlord;
+}
+
+int SurvivabilityWeightPercent(uint8_t class_id)
+{
+	if (IsFighterClass(class_id) || class_id == Class::Berserker) {
+		return 100;
+	}
+
+	if (IsWISCasterClass(class_id)) {
+		return 85;
+	}
+
+	if (IsINTCasterClass(class_id)) {
+		return 75;
+	}
+
+	return 80;
+}
+
+BotGearValueBreakdown ScoreEffectiveStats(const BotGearEffectiveStats &stats, uint8_t class_id)
+{
+	BotGearValueBreakdown value;
+
+	const int survivability =
+		stats.ac +
+		stats.hp +
+		stats.hp_regen * 8 +
+		stats.stamina * 2 +
+		stats.agility;
+	value.survivability = survivability * SurvivabilityWeightPercent(class_id) / 100;
+
+	if (UsesMana(class_id)) {
+		value.resources += stats.mana + stats.mana_regen * 8;
+	}
+
+	if (UsesEndurance(class_id)) {
+		value.resources += stats.endurance + stats.endurance_regen * 8;
+	}
+
+	if (UsesMeleeOffense(class_id)) {
+		value.melee_offense +=
+			stats.strength +
+			stats.dexterity +
+			stats.attack +
+			stats.haste * 4 +
+			stats.damage_shield;
+	}
+
+	if (UsesIntelligence(class_id)) {
+		value.spell_offense += stats.intelligence * 2;
+	}
+
+	if (UsesWisdom(class_id)) {
+		value.resources += stats.wisdom * 2;
+	}
+
+	if (UsesSpellOffense(class_id)) {
+		value.spell_offense += stats.spell_damage * 8;
+	}
+
+	if (UsesHealingSupport(class_id)) {
+		value.healing_support += stats.heal_amount * 8;
+		if (class_id == Class::Bard) {
+			value.healing_support += stats.charisma * 2;
+		}
+	}
+
+	return value;
+}
+
+BotGearEffectiveStats RawItemDataEffectiveStats(const EQ::ItemData *item)
 {
 	if (!item) {
 		return {};
 	}
 
 	return {
-		.effective_value = RecommendedLevelScaledValue(bot_level, item->RecLevel, RawGearScore(item)),
-		.required_level = item->ReqLevel
+		.ac = item->AC,
+		.hp = item->HP,
+		.mana = item->Mana,
+		.endurance = item->Endur,
+		.strength = item->AStr,
+		.stamina = item->ASta,
+		.agility = item->AAgi,
+		.dexterity = item->ADex,
+		.charisma = item->ACha,
+		.intelligence = item->AInt,
+		.wisdom = item->AWis,
+		.attack = item->Attack,
+		.hp_regen = item->Regen,
+		.mana_regen = item->ManaRegen,
+		.endurance_regen = item->EnduranceRegen,
+		.haste = item->Haste,
+		.damage_shield = item->DamageShield,
+		.heal_amount = item->HealAmt,
+		.spell_damage = item->SpellDmg,
+		.required_level = item->ReqLevel,
+		.recommended_level = item->RecLevel
 	};
 }
 
-int InstanceGearScore(const EQ::ItemInstance *item_instance)
+int ItemInstanceEnduranceRegen(const EQ::ItemInstance *item_instance)
 {
-	if (!item_instance) {
+	if (!item_instance || !item_instance->GetItem()) {
 		return 0;
 	}
 
-	return item_instance->GetItemArmorClass(true) + item_instance->GetItemHP(true) +
-		item_instance->GetItemMana(true) + item_instance->GetItemEndur(true) +
-		item_instance->GetItemStr(true) + item_instance->GetItemSta(true) +
-		item_instance->GetItemAgi(true) + item_instance->GetItemDex(true) +
-		item_instance->GetItemCha(true) + item_instance->GetItemInt(true) +
-		item_instance->GetItemWis(true);
+	int endurance_regen = item_instance->GetItem()->EnduranceRegen;
+	for (int slot_id = EQ::invaug::SOCKET_BEGIN; slot_id <= EQ::invaug::SOCKET_END; ++slot_id) {
+		endurance_regen += ItemInstanceEnduranceRegen(item_instance->GetAugment(slot_id));
+	}
+
+	return endurance_regen;
 }
 
-BotGearValueResult ItemInstanceGearValue(const EQ::ItemInstance *item_instance, uint8_t bot_level)
+BotGearEffectiveStats ItemInstanceEffectiveStats(const EQ::ItemInstance *item_instance)
 {
 	if (!item_instance) {
 		return {};
 	}
+
+	return {
+		.ac = item_instance->GetItemArmorClass(true),
+		.hp = item_instance->GetItemHP(true),
+		.mana = item_instance->GetItemMana(true),
+		.endurance = item_instance->GetItemEndur(true),
+		.strength = item_instance->GetItemStr(true),
+		.stamina = item_instance->GetItemSta(true),
+		.agility = item_instance->GetItemAgi(true),
+		.dexterity = item_instance->GetItemDex(true),
+		.charisma = item_instance->GetItemCha(true),
+		.intelligence = item_instance->GetItemInt(true),
+		.wisdom = item_instance->GetItemWis(true),
+		.attack = item_instance->GetItemAttack(true),
+		.hp_regen = item_instance->GetItemRegen(true),
+		.mana_regen = item_instance->GetItemManaRegen(true),
+		.endurance_regen = ItemInstanceEnduranceRegen(item_instance),
+		.haste = item_instance->GetItemHaste(true),
+		.damage_shield = item_instance->GetItemDamageShield(true),
+		.heal_amount = item_instance->GetItemHealAmt(true),
+		.spell_damage = item_instance->GetItemSpellDamage(true),
+		.required_level = item_instance->GetItemRequiredLevel(true),
+		.recommended_level = item_instance->GetItemRecommendedLevel(true)
+	};
+}
+
+BotGearValueResult EffectiveStatsGearValue(const BotGearEffectiveStats &stats, uint8_t class_id, uint8_t bot_level)
+{
+	const auto value = ScoreEffectiveStats(stats, class_id);
 
 	return {
 		.effective_value = RecommendedLevelScaledValue(
 			bot_level,
-			item_instance->GetItemRecommendedLevel(true),
-			InstanceGearScore(item_instance)
+			stats.recommended_level,
+			value.Total()
 		),
-		.required_level = item_instance->GetItemRequiredLevel(true)
+		.required_level = stats.required_level
 	};
 }
 
-BotGearValueResult BotGearValue(const EQ::ItemData *item, const EQ::ItemInstance *item_instance, uint8_t bot_level)
+BotGearValueResult BotGearValue(
+	const EQ::ItemData *item,
+	const EQ::ItemInstance *item_instance,
+	uint8_t class_id,
+	uint8_t bot_level
+)
 {
 	if (item_instance) {
-		return ItemInstanceGearValue(item_instance, bot_level);
+		return EffectiveStatsGearValue(ItemInstanceEffectiveStats(item_instance), class_id, bot_level);
 	}
 
-	return RawItemDataGearValue(item, bot_level);
+	return EffectiveStatsGearValue(RawItemDataEffectiveStats(item), class_id, bot_level);
 }
 
 const ItemSnapshot *EquippedItemForSlot(const GroupedBotSnapshot &bot, int slot_id)
@@ -534,14 +745,14 @@ Request BuildRequestForSuccessfulLoot(const SuccessfulLootEvent &event, const Se
 				continue;
 			}
 
-			const auto looted_value = BotGearValue(event.looted_item, event.looted_item_instance, bot.level);
+			const auto looted_value = BotGearValue(event.looted_item, event.looted_item_instance, bot.class_id, bot.level);
 			if (bot.level > 0 && looted_value.required_level > bot.level) {
 				continue;
 			}
 
 			const auto equipped_item = EquippedItemForSlot(bot, slot_id);
 			const auto equipped_value = equipped_item ?
-				BotGearValue(equipped_item->item, equipped_item->item_instance, bot.level) :
+				BotGearValue(equipped_item->item, equipped_item->item_instance, bot.class_id, bot.level) :
 				BotGearValueResult{};
 			const int equipped_score = equipped_item ?
 				equipped_value.effective_value :
