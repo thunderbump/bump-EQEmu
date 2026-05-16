@@ -84,6 +84,14 @@ _Avoid_: Free-form parser magic, markdown command
 A deterministic bot interest event where the server decides that a bot should ask for an item looted by a player.
 _Avoid_: AI loot decision, bot loot automation
 
+**Bot Gear Value**:
+A deterministic estimate of how much a looted item improves a specific bot, based on server-applied equipment effects and bot class behavior.
+_Avoid_: Item score, raw stat score, AI gear rating
+
+**Bot Gear Role**:
+A class-specific valuation profile used by **Bot Gear Value** when one bot class benefits from item effects differently than another.
+_Avoid_: Archetype, generic role, loot role
+
 **Loot Request Dialogue**:
 Generated in-character phrasing for an already-decided **Bot Loot Request**.
 _Avoid_: AI loot request, generated loot decision
@@ -132,6 +140,16 @@ _Avoid_: AI loot request, generated loot decision
 - **Bot Loot Request** eligibility may include No Drop gear because bot equipment commands can equip bots outside ordinary player trade restrictions.
 - **Bot Loot Request** eligibility rejects items that would create a lore conflict for the requesting bot.
 - The first **Bot Loot Request** upgrade score is a simple deterministic comparison between the looted item and the bot's currently equipped item for an eligible slot.
+- Future **Bot Loot Request** scoring should use **Bot Gear Value** rather than raw item stat totals when the server-applied item effect differs by bot class or equipment slot.
+- **Bot Gear Value** should be based on item instances when available so augments and recommended-level scaling are represented in the deterministic comparison.
+- A **Bot Loot Request** should not be produced for an item above the requesting bot's required level, and **Bot Gear Value** should scale recommended-level item effects when the bot is below the recommended level.
+- **Bot Gear Role** should split Warrior, Paladin, and Shadow Knight rather than treating them as one tank role because their mana-stat benefits differ.
+- **Bot Gear Role** should split hybrids when item effects differ by class, including Paladin, Shadow Knight, Ranger, Beastlord, and Bard.
+- Weapon **Bot Gear Value** should use weapon-specific comparisons such as damage, delay, hand constraints, dual-wield eligibility, two-hander replacement cost, proc signals, and class-specific weapon behavior rather than treating weapons as ordinary stat items.
+- Ranged **Bot Gear Value** should be conservative and depend on effective ranged context such as ranged bot mode, compatible ammunition, and class behavior rather than treating range and ammo slots as ordinary stat gear.
+- Effect-based **Bot Gear Value** should include only server-applied item effects with clear low-noise valuation, and should exclude click effects until bots routinely use clicked item effects.
+- **Bot Gear Value** may produce an internal category breakdown for testing and reason summaries, but **Loot Request Dialogue** should receive only compact public intent rather than scoring weights, raw stat dumps, spell IDs, or full inventory details.
+- Richer **Bot Gear Value** may change which bot wins a **Bot Loot Request** when class-specific server-applied value differs from the first raw-stat scoring model.
 - When an item can equip in multiple slots, **Bot Loot Request** scoring uses the best valid replacement slot for each bot.
 - A **Bot Loot Request** requires a minimum positive upgrade score before dialogue generation is allowed.
 - If multiple bots are eligible for the same looted item, the first **Bot Loot Request** implementation selects one requesting bot by highest deterministic upgrade score.
