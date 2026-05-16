@@ -55,6 +55,7 @@ public:
 		TEST_ADD(BotLootRequestTest::LootRequestDialoguePromptUsesOnlyCompactIntent);
 		TEST_ADD(BotLootRequestTest::StaleGroupSuppressesDelayedLootRequestDialogue);
 		TEST_ADD(BotLootRequestTest::AcceptedGeneratedLootRequestDialogueUsesServerItemLink);
+		TEST_ADD(BotLootRequestTest::GeneratedLootRequestThatNamesLooterFallsBackToTemplate);
 		TEST_ADD(BotLootRequestTest::FailedGeneratedLootRequestDialogueFallsBackToTemplate);
 		TEST_ADD(BotLootRequestTest::UnsafeGeneratedLootRequestDialogueFallsBackToTemplate);
 	}
@@ -747,6 +748,24 @@ private:
 		TEST_ASSERT_EQUALS(result.requesting_bot_stable_id, 7u);
 		TEST_ASSERT_EQUALS(result.message, std::string("That breastplate would suit me. SERVER_ITEM_LINK::Bronze Breastplate"));
 		TEST_ASSERT(result.delivery_channel == BotLootRequest::DeliveryChannel::GroupChat);
+	}
+
+	void GeneratedLootRequestThatNamesLooterFallsBackToTemplate()
+	{
+		BotLootRequest::TestDelayedDialogueProvider provider;
+		BotLootRequest::DelayedDialogueQueue queue(provider, {});
+		ReadyAsyncRequest(queue);
+
+		TEST_ASSERT(provider.CompleteNextSuccess("Aten could use that breastplate."));
+
+		BotLootRequest::DialogueResult result;
+		const bool ready = queue.PopReadyResult(CurrentGroupStillValid, result);
+
+		TEST_ASSERT(ready);
+		TEST_ASSERT_EQUALS(
+			result.message,
+			std::string("Aten, could I use SERVER_ITEM_LINK::Bronze Breastplate? It looks like an upgrade for my chest.")
+		);
 	}
 
 	void FailedGeneratedLootRequestDialogueFallsBackToTemplate()

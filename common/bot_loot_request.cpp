@@ -255,6 +255,15 @@ bool ContainsItemLinkMarkup(const std::string &value)
 		value.find('\x12') != std::string::npos;
 }
 
+bool MentionsLooter(const std::string &line, const RequestDialogueIntent &intent)
+{
+	if (intent.looter_name.empty()) {
+		return false;
+	}
+
+	return ToLowerCopy(line).find(ToLowerCopy(intent.looter_name)) != std::string::npos;
+}
+
 bool IsUnsafeGeneratedSpeech(const std::string &line)
 {
 	if (line.empty() || line.front() == '/' || line.front() == '#' || line.front() == '!') {
@@ -495,7 +504,8 @@ std::string BuildLootRequestDialoguePrompt(const RequestDialogueIntent &intent)
 	std::ostringstream prompt;
 	prompt
 		<< "Write one short in-character group chat speech line for an EverQuest bot asking for loot. "
-		<< "The server has already decided the bot wants the item; do not make or explain gameplay decisions. "
+		<< "The server has already decided the bot wants the item; the bot is the only intended recipient. "
+		<< "Write in first person as the bot, and do not say or imply that the looter needs the item. "
 		<< "Use only the compact request intent below. Do not include item links, markup, emotes, commands, JSON, metadata, or explanations.\n"
 		<< "Bot: " << intent.requesting_bot_name << "\n"
 		<< "Looter: " << intent.looter_name << "\n"
@@ -581,6 +591,7 @@ bool DelayedDialogueQueue::PopReadyResult(const CurrentGroupResolver &resolver, 
 	const auto speech_line = TrimCopy(completion.dialogue_response);
 	if (
 		IsUnsafeGeneratedSpeech(speech_line) ||
+		MentionsLooter(speech_line, request.intent) ||
 		(settings_.max_generated_line_length > 0 && speech_line.size() > static_cast<size_t>(settings_.max_generated_line_length))
 	) {
 		result = TemplateDialogueResult(request, "loot_request_dialogue_rejected");
