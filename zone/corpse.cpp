@@ -78,6 +78,7 @@ void MaybeSendBotLootRequest(
 		.loot_event_id = loot_event_id,
 		.looter_name = looter->GetCleanName(),
 		.looted_item = inst->GetItem(),
+		.looted_item_instance = inst,
 		.looted_item_link = item_link
 	};
 
@@ -90,12 +91,17 @@ void MaybeSendBotLootRequest(
 			.name_stable_id = bot->GetBotID(),
 			.name = bot->GetCleanName(),
 			.race_id = bot->GetBaseRace(),
-			.class_id = bot->GetClass()
+			.class_id = bot->GetClass(),
+			.level = bot->GetLevel()
 		};
 
 		for (int slot_id = EQ::invslot::EQUIPMENT_BEGIN; slot_id <= EQ::invslot::EQUIPMENT_END; ++slot_id) {
 			if (const auto *bot_item = bot->GetBotItem(slot_id); bot_item && bot_item->GetItem()) {
-				bot_snapshot.equipped_items.push_back({.item = bot_item->GetItem(), .slot_id = slot_id});
+				bot_snapshot.equipped_items.push_back({
+					.item = bot_item->GetItem(),
+					.item_instance = bot_item,
+					.slot_id = slot_id
+				});
 			}
 		}
 

@@ -21,6 +21,7 @@
 #include "common/classes.h"
 #include "common/emu_constants.h"
 #include "common/item_data.h"
+#include "common/item_instance.h"
 #include "common/races.h"
 #include "common/rulesys.h"
 #include "cppunit/cpptest.h"
@@ -43,7 +44,12 @@ public:
 		TEST_ADD(BotLootRequestTest::NoDropGearCanStillBeRequested);
 		TEST_ADD(BotLootRequestTest::LoreConflictSuppressesRequest);
 		TEST_ADD(BotLootRequestTest::MultiSlotGearUsesBestReplacementSlot);
+		TEST_ADD(BotLootRequestTest::AugmentedLootedItemValueCanProduceRequest);
+		TEST_ADD(BotLootRequestTest::RequiredLevelAboveBotSuppressesRequest);
+		TEST_ADD(BotLootRequestTest::RecommendedLevelScalesLootedItemValue);
+		TEST_ADD(BotLootRequestTest::RecommendedLevelScalesEquippedItemValue);
 		TEST_ADD(BotLootRequestTest::NonUpgradeDoesNotProduceRequest);
+		TEST_ADD(BotLootRequestTest::AugmentedEquippedNonUpgradeDoesNotProduceRequest);
 		TEST_ADD(BotLootRequestTest::HighestUpgradeScoreWinsAcrossEligibleBots);
 		TEST_ADD(BotLootRequestTest::GroupOrderBreaksTiedUpgradeScores);
 		TEST_ADD(BotLootRequestTest::CooldownSuppressesSameLooterAndRequestingBot);
@@ -365,6 +371,126 @@ private:
 		TEST_ASSERT_EQUALS(result.upgrade_score, 9);
 	}
 
+	void AugmentedLootedItemValueCanProduceRequest()
+	{
+		const auto equipped = Gear(4101, "Polished Ring", EQ::invslot::slotFinger1, 12);
+		const auto looted = Gear(4102, "Socketed Ring", EQ::invslot::slotFinger1, 10);
+		auto augment = Gear(4103, "Sturdy Gem", EQ::invslot::slotCharm, 5);
+		augment.AugType = 1;
+
+		EQ::ItemInstance looted_instance(&looted);
+		looted_instance.PutAugment(EQ::invaug::SOCKET_BEGIN, EQ::ItemInstance(&augment));
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &looted,
+				.looted_item_instance = &looted_instance,
+				.looted_item_link = "[Socketed Ring]",
+				.grouped_bots = {{
+					.name_stable_id = 7,
+					.name = "Atenbot",
+					.race_id = Race::Human,
+					.class_id = Class::Warrior,
+					.equipped_items = {{.item = &equipped, .slot_id = EQ::invslot::slotFinger1}}
+				}}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(result.produced);
+		TEST_ASSERT_EQUALS(result.upgrade_score, 3);
+	}
+
+	void RequiredLevelAboveBotSuppressesRequest()
+	{
+		const auto equipped = Gear(4201, "Cloth Shirt", EQ::invslot::slotChest, 1);
+		auto looted = Gear(4202, "Veteran Breastplate", EQ::invslot::slotChest, 100);
+		looted.ReqLevel = 51;
+		EQ::ItemInstance looted_instance(&looted);
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &looted,
+				.looted_item_instance = &looted_instance,
+				.looted_item_link = "[Veteran Breastplate]",
+				.grouped_bots = {{
+					.name_stable_id = 7,
+					.name = "Atenbot",
+					.race_id = Race::Human,
+					.class_id = Class::Warrior,
+					.level = 50,
+					.equipped_items = {{.item = &equipped, .slot_id = EQ::invslot::slotChest}}
+				}}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(!result.produced);
+	}
+
+	void RecommendedLevelScalesLootedItemValue()
+	{
+		const auto equipped = Gear(4301, "Banded Mail", EQ::invslot::slotChest, 40);
+		auto looted = Gear(4302, "Aspirant Breastplate", EQ::invslot::slotChest, 100);
+		looted.RecLevel = 100;
+		EQ::ItemInstance looted_instance(&looted);
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &looted,
+				.looted_item_instance = &looted_instance,
+				.looted_item_link = "[Aspirant Breastplate]",
+				.grouped_bots = {{
+					.name_stable_id = 7,
+					.name = "Atenbot",
+					.race_id = Race::Human,
+					.class_id = Class::Warrior,
+					.level = 50,
+					.equipped_items = {{.item = &equipped, .slot_id = EQ::invslot::slotChest}}
+				}}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(result.produced);
+		TEST_ASSERT_EQUALS(result.upgrade_score, 10);
+	}
+
+	void RecommendedLevelScalesEquippedItemValue()
+	{
+		auto equipped = Gear(4401, "Aspirant Breastplate", EQ::invslot::slotChest, 100);
+		equipped.RecLevel = 100;
+		const auto looted = Gear(4402, "Veteran Breastplate", EQ::invslot::slotChest, 60);
+		EQ::ItemInstance equipped_instance(&equipped);
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &looted,
+				.looted_item_link = "[Veteran Breastplate]",
+				.grouped_bots = {{
+					.name_stable_id = 7,
+					.name = "Atenbot",
+					.race_id = Race::Human,
+					.class_id = Class::Warrior,
+					.level = 50,
+					.equipped_items = {{
+						.item = &equipped,
+						.item_instance = &equipped_instance,
+						.slot_id = EQ::invslot::slotChest
+					}}
+				}}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(result.produced);
+		TEST_ASSERT_EQUALS(result.upgrade_score, 10);
+	}
+
 	void NonUpgradeDoesNotProduceRequest()
 	{
 		const auto strong_chest = Gear(5001, "Fine Breastplate", EQ::invslot::slotChest, 20);
@@ -381,6 +507,38 @@ private:
 					.race_id = Race::Human,
 					.class_id = Class::Warrior,
 					.equipped_items = {{.item = &strong_chest, .slot_id = EQ::invslot::slotChest}}
+				}}
+			},
+			{.enabled = true}
+		);
+
+		TEST_ASSERT(!result.produced);
+	}
+
+	void AugmentedEquippedNonUpgradeDoesNotProduceRequest()
+	{
+		const auto equipped = Gear(5101, "Socketed Breastplate", EQ::invslot::slotChest, 10);
+		auto augment = Gear(5102, "Sturdy Gem", EQ::invslot::slotCharm, 10);
+		augment.AugType = 1;
+		const auto looted = Gear(5103, "Plain Breastplate", EQ::invslot::slotChest, 15);
+		EQ::ItemInstance equipped_instance(&equipped);
+		equipped_instance.PutAugment(EQ::invaug::SOCKET_BEGIN, EQ::ItemInstance(&augment));
+
+		const auto result = BotLootRequest::BuildRequestForSuccessfulLoot(
+			{
+				.looter_name = "Aten",
+				.looted_item = &looted,
+				.looted_item_link = "[Plain Breastplate]",
+				.grouped_bots = {{
+					.name_stable_id = 7,
+					.name = "Atenbot",
+					.race_id = Race::Human,
+					.class_id = Class::Warrior,
+					.equipped_items = {{
+						.item = &equipped,
+						.item_instance = &equipped_instance,
+						.slot_id = EQ::invslot::slotChest
+					}}
 				}}
 			},
 			{.enabled = true}

@@ -19,6 +19,7 @@
 
 #include "emu_constants.h"
 #include "http/httplib.h"
+#include "item_instance.h"
 #include "json/json.h"
 
 #include <fmt/format.h>
@@ -99,7 +100,23 @@ bool IsGearCandidateForBot(const EQ::ItemData &item, const GroupedBotSnapshot &b
 	return false;
 }
 
-int GearScore(const EQ::ItemData *item)
+struct BotGearValueResult {
+	int effective_value = 0;
+	int required_level = 0;
+};
+
+int RecommendedLevelScaledValue(uint8_t current_level, int recommended_level, int base_value)
+{
+	if (recommended_level > 0 && current_level > 0 && current_level < recommended_level) {
+		int32_t scaled_value = (current_level * 10000 / recommended_level) * base_value;
+		scaled_value += scaled_value < 0 ? -5000 : 5000;
+		return scaled_value / 10000;
+	}
+
+	return base_value;
+}
+
+int RawGearScore(const EQ::ItemData *item)
 {
 	if (!item) {
 		return 0;
@@ -109,11 +126,62 @@ int GearScore(const EQ::ItemData *item)
 		item->AAgi + item->ADex + item->ACha + item->AInt + item->AWis;
 }
 
-const EQ::ItemData *EquippedItemForSlot(const GroupedBotSnapshot &bot, int slot_id)
+BotGearValueResult RawItemDataGearValue(const EQ::ItemData *item, uint8_t bot_level)
+{
+	if (!item) {
+		return {};
+	}
+
+	return {
+		.effective_value = RecommendedLevelScaledValue(bot_level, item->RecLevel, RawGearScore(item)),
+		.required_level = item->ReqLevel
+	};
+}
+
+int InstanceGearScore(const EQ::ItemInstance *item_instance)
+{
+	if (!item_instance) {
+		return 0;
+	}
+
+	return item_instance->GetItemArmorClass(true) + item_instance->GetItemHP(true) +
+		item_instance->GetItemMana(true) + item_instance->GetItemEndur(true) +
+		item_instance->GetItemStr(true) + item_instance->GetItemSta(true) +
+		item_instance->GetItemAgi(true) + item_instance->GetItemDex(true) +
+		item_instance->GetItemCha(true) + item_instance->GetItemInt(true) +
+		item_instance->GetItemWis(true);
+}
+
+BotGearValueResult ItemInstanceGearValue(const EQ::ItemInstance *item_instance, uint8_t bot_level)
+{
+	if (!item_instance) {
+		return {};
+	}
+
+	return {
+		.effective_value = RecommendedLevelScaledValue(
+			bot_level,
+			item_instance->GetItemRecommendedLevel(true),
+			InstanceGearScore(item_instance)
+		),
+		.required_level = item_instance->GetItemRequiredLevel(true)
+	};
+}
+
+BotGearValueResult BotGearValue(const EQ::ItemData *item, const EQ::ItemInstance *item_instance, uint8_t bot_level)
+{
+	if (item_instance) {
+		return ItemInstanceGearValue(item_instance, bot_level);
+	}
+
+	return RawItemDataGearValue(item, bot_level);
+}
+
+const ItemSnapshot *EquippedItemForSlot(const GroupedBotSnapshot &bot, int slot_id)
 {
 	for (const auto &equipped_item : bot.equipped_items) {
 		if (equipped_item.item && equipped_item.slot_id == slot_id) {
-			return equipped_item.item;
+			return &equipped_item;
 		}
 	}
 
@@ -466,7 +534,19 @@ Request BuildRequestForSuccessfulLoot(const SuccessfulLootEvent &event, const Se
 				continue;
 			}
 
-			const int upgrade_score = GearScore(event.looted_item) - GearScore(EquippedItemForSlot(bot, slot_id));
+			const auto looted_value = BotGearValue(event.looted_item, event.looted_item_instance, bot.level);
+			if (bot.level > 0 && looted_value.required_level > bot.level) {
+				continue;
+			}
+
+			const auto equipped_item = EquippedItemForSlot(bot, slot_id);
+			const auto equipped_value = equipped_item ?
+				BotGearValue(equipped_item->item, equipped_item->item_instance, bot.level) :
+				BotGearValueResult{};
+			const int equipped_score = equipped_item ?
+				equipped_value.effective_value :
+				0;
+			const int upgrade_score = looted_value.effective_value - equipped_score;
 			if (upgrade_score <= 0) {
 				continue;
 			}

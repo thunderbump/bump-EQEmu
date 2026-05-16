@@ -30,6 +30,10 @@
 #include <unordered_set>
 #include <vector>
 
+namespace EQ {
+	class ItemInstance;
+}
+
 namespace BotLootRequest {
 
 enum class DeliveryChannel {
@@ -45,6 +49,7 @@ struct Settings {
 
 struct ItemSnapshot {
 	const EQ::ItemData *item = nullptr;
+	const EQ::ItemInstance *item_instance = nullptr;
 	int slot_id = -1;
 };
 
@@ -53,6 +58,7 @@ struct GroupedBotSnapshot {
 	std::string name;
 	uint16_t race_id = 0;
 	uint8_t class_id = 0;
+	uint8_t level = 0;
 	std::vector<ItemSnapshot> equipped_items;
 };
 
@@ -61,6 +67,7 @@ struct SuccessfulLootEvent {
 	uint64_t loot_event_id = 0;
 	std::string looter_name;
 	const EQ::ItemData *looted_item = nullptr;
+	const EQ::ItemInstance *looted_item_instance = nullptr;
 	std::string looted_item_link;
 	std::vector<GroupedBotSnapshot> grouped_bots;
 };
