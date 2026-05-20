@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.20.0)
 set(common_sources
     base_packet.cpp
     bazaar.cpp
+    bot_loot_request.cpp
     bodytypes.cpp
     classes.cpp
     cli/eqemu_command_handler.cpp

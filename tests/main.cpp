@@ -16,6 +16,7 @@
 	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 #include "tests/atobool_test.h"
+#include "tests/bot_loot_request_test.h"
 #include "tests/data_verification_test.h"
 #include "tests/fallback_dialogue_test.h"
 #include "tests/fixed_memory_test.h"
@@ -29,6 +30,7 @@
 
 #include "common/path_manager.h"
 #include "common/platform.h"
+#include "common/spdat.h"
 
 #include <chrono>
 #include <filesystem>
@@ -37,6 +39,8 @@
 #include <memory>
 
 const EQEmuConfig *Config;
+const SPDat_Spell_Struct *spells;
+int32 SPDAT_RECORDS = -1;
 
 int main()
 {
@@ -89,6 +93,7 @@ int main()
 		tests.add(new hextoi_32_64_Test());
 		tests.add(new StringUtilTest());
 		tests.add(new DataVerificationTest());
+		tests.add(new BotLootRequestTest());
 		tests.add(new FallbackDialogueTest());
 		tests.add(new SkillsUtilsTest());
 		tests.add(new TaskStateTest());

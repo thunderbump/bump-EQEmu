@@ -20,6 +20,7 @@
 #include "common/data_verification.h"
 #include "common/features.h"
 #include "zone/fallback_dialogue_runtime.h"
+#include "zone/bot_loot_request_runtime.h"
 #include "common/guilds.h"
 #include "zone/bot.h"
 #include "zone/dialogue_window.h"
@@ -3130,6 +3131,7 @@ void EntityList::Process()
 {
 	CheckSpawnQueue();
 	ZoneFallbackDialogueRuntime::ProcessReadyDelayedDialogue();
+	ZoneBotLootRequestRuntime::ProcessReadyLootRequestDialogue();
 }
 
 void EntityList::Depop(bool StartSpawnTimer)
