@@ -9853,7 +9853,7 @@ bool Bot::CastChecks(uint16 spell_id, Mob* tar, uint16 spell_type, bool precheck
 
 	if (
 		spells[spell_id].target_type != ST_Self &&
-		IsBeneficialSpell(spell_id) &&
+		(IsBeneficialSpell(spell_id) || spell_type == BotSpellTypes::Slow) &&
 		!IsAnyHealSpell(spell_id) &&
 		!IsCureSpell(spell_id) &&
 		!IsHealOverTimeSpell(spell_id) &&
@@ -12948,17 +12948,16 @@ Mob* Bot::SelectSingleTargetSlowMaintenanceTarget(uint16 spell_id, uint32 max_sc
 		return nullptr;
 	}
 
-	for (auto* candidate : GetSingleTargetSlowMaintenanceCandidates(max_scan_count)) {
-		if (SpellBreaksMez(spell_id) && candidate->IsMezzed()) {
-			continue;
+	return EQ::BotSlowTarget::SelectMaintenanceCandidate<Mob*>(
+		GetSingleTargetSlowMaintenanceCandidates(max_scan_count),
+		SpellBreaksMez(spell_id),
+		[](Mob* candidate) {
+			return candidate && candidate->IsMezzed();
+		},
+		[this, spell_id](Mob* candidate) {
+			return candidate && CastChecks(spell_id, candidate, BotSpellTypes::Slow, true);
 		}
-
-		if (CastChecks(spell_id, candidate, BotSpellTypes::Slow, true)) {
-			return candidate;
-		}
-	}
-
-	return nullptr;
+	);
 }
 
 std::vector<Mob*> Bot::GetBuffTargets(Mob* spellTarget) {

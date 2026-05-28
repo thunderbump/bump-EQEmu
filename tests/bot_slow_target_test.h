@@ -22,6 +22,8 @@ public:
 		TEST_ADD(BotSlowTargetTest::CurrentTargetSortsBeforeOtherThreats);
 		TEST_ADD(BotSlowTargetTest::ThreatOrderingPrefersOwnerGroupRaidThenPetsThenProximity);
 		TEST_ADD(BotSlowTargetTest::UnrelatedNearbyNpcIsNotAnEngagedHostileThreat);
+		TEST_ADD(BotSlowTargetTest::MaintenanceSelectionSkipsMezzedCandidates);
+		TEST_ADD(BotSlowTargetTest::MaintenanceSelectionRejectsAllInvalidCandidates);
 	}
 
 private:
@@ -65,5 +67,55 @@ private:
 
 		TEST_ASSERT(priority == ThreatPriority::None);
 		TEST_ASSERT(!IsEngagedHostileThreat(priority));
+	}
+
+	void MaintenanceSelectionSkipsMezzedCandidates()
+	{
+		using namespace EQ::BotSlowTarget;
+
+		struct Candidate {
+			int  id = 0;
+			bool mezzed = false;
+			bool castable = false;
+		};
+
+		const std::vector<Candidate> candidates{
+			{1, true, true},
+			{2, false, true},
+		};
+
+		const auto selected = SelectMaintenanceCandidate<Candidate>(
+			candidates,
+			true,
+			[](const Candidate &candidate) { return candidate.mezzed; },
+			[](const Candidate &candidate) { return candidate.castable; }
+		);
+
+		TEST_ASSERT(selected.id == 2);
+	}
+
+	void MaintenanceSelectionRejectsAllInvalidCandidates()
+	{
+		using namespace EQ::BotSlowTarget;
+
+		struct Candidate {
+			int  id = 0;
+			bool mezzed = false;
+			bool castable = false;
+		};
+
+		const std::vector<Candidate> candidates{
+			{1, true, true},
+			{2, false, false},
+		};
+
+		const auto selected = SelectMaintenanceCandidate<Candidate>(
+			candidates,
+			true,
+			[](const Candidate &candidate) { return candidate.mezzed; },
+			[](const Candidate &candidate) { return candidate.castable; }
+		);
+
+		TEST_ASSERT(selected.id == 0);
 	}
 };

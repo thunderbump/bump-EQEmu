@@ -10,6 +10,7 @@
 #pragma once
 
 #include <cstddef>
+#include <vector>
 
 namespace EQ
 {
@@ -61,6 +62,26 @@ inline bool CompareOrdering(const Ordering &left, const Ordering &right)
 	}
 
 	return left.sequence < right.sequence;
+}
+
+template <typename Candidate, typename IsMezzed, typename CastChecks>
+Candidate SelectMaintenanceCandidate(
+	const std::vector<Candidate> &candidates,
+	bool spell_breaks_mez,
+	IsMezzed is_mezzed,
+	CastChecks cast_checks
+) {
+	for (const auto& candidate : candidates) {
+		if (spell_breaks_mez && is_mezzed(candidate)) {
+			continue;
+		}
+
+		if (cast_checks(candidate)) {
+			return candidate;
+		}
+	}
+
+	return Candidate{};
 }
 }
 }
