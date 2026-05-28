@@ -96,6 +96,10 @@ _Avoid_: Archetype, generic role, loot role
 Generated in-character phrasing for an already-decided **Bot Loot Request**.
 _Avoid_: AI loot request, generated loot decision
 
+**Engaged Hostile**:
+An alive, attackable NPC that is currently part of the owner's group or raid combat situation and can be considered by bot combat-maintenance behavior. An **Engaged Hostile** is not merely nearby; it must be actively relevant to the fight and still pass ordinary spell validity constraints such as range, line of sight, immunity, crowd-control safety, and spell-specific cast checks.
+_Avoid_: Nearby mob, active combatant, add
+
 ## Relationships
 
 - **Fallback Dialogue** must not replace **Authored Dialogue**.
@@ -168,6 +172,18 @@ _Avoid_: AI loot request, generated loot decision
 - The first **Bot Loot Request** implementation should be disabled by default behind server settings.
 - The first **Bot Loot Request** implementation does not transfer items or mutate bot inventory.
 - **Bot Loot Request** decision behavior should be testable without remote **Loot Request Dialogue** generation.
+- Bot combat-maintenance behavior may consider **Engaged Hostiles** beyond the bot's current target, but should not treat every nearby NPC as part of the fight.
+- Bot slow maintenance should remain eventual rather than bursty: a bot may choose an unslowed **Engaged Hostile** beyond its current target during a normal slow opportunity, but should not cast multiple slow spells in one AI pass.
+- Bot slow maintenance should prefer the bot's current target first, then other unslowed **Engaged Hostiles** threatening the owner, group, or raid, then hostiles threatening group or raid pets, with proximity as a tie-breaker.
+- Bot slow maintenance should treat a hostile as needing slow when a candidate slow spell passes ordinary spell validity and stacking checks; it should not maintain a separate domain notion of slowed state unless runtime evidence shows existing spell checks are insufficient.
+- The first bot slow-maintenance improvement should apply to single-target `Slow` behavior only; `AESlow` should keep its existing area-target-count and area-safety behavior until a separate need is proven.
+- Bot slow maintenance should be the default behavior for bots that already have single-target `Slow` enabled, unless code exploration shows hostile enumeration is risky enough to require an opt-in rule.
+- The first bot slow-maintenance improvement should skip mezzed **Engaged Hostiles**. Slowing mezzed hostiles may be acceptable later, but should wait until the implementation can make spell-break safety explicit.
+- Bot slow maintenance should continue searching other **Engaged Hostiles** during the same slow opportunity when the current target is already slowed or otherwise does not need a slow. The slow opportunity should count as successful only when the bot begins casting a slow.
+- Bot slow maintenance may bound how many candidate **Engaged Hostiles** it examines in one slow opportunity; bounded search should delay maintenance in unusually large fights rather than change ordinary group-fight behavior.
+- Bot slow maintenance is intended to cover the owner's group or raid combat situation. A first implementation may fall back to group-only if raid-wide hostile discovery is not practical without broader combat-tracking changes.
+- The first bot slow-maintenance improvement should rely on existing spell casting and stacking checks to avoid duplicate slow casts from multiple bots. Explicit cross-bot slow coordination should wait for runtime evidence that duplicate casts are a real problem.
+- The first bot slow-maintenance implementation should stay specific to single-target `Slow`; a broader hostile-maintenance primitive should emerge only if the implementation naturally supports it without pulling in snare, debuff, dispel, mez, or root semantics.
 
 ## Example dialogue
 
