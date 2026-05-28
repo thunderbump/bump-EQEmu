@@ -22,11 +22,44 @@ public:
 		TEST_ADD(BotSlowTargetTest::CurrentTargetSortsBeforeOtherThreats);
 		TEST_ADD(BotSlowTargetTest::ThreatOrderingPrefersOwnerGroupRaidThenPetsThenProximity);
 		TEST_ADD(BotSlowTargetTest::UnrelatedNearbyNpcIsNotAnEngagedHostileThreat);
+		TEST_ADD(BotSlowTargetTest::MaintenanceSelectionCastsOnCurrentTargetFirst);
+		TEST_ADD(BotSlowTargetTest::MaintenanceSelectionCastsOnOtherEngagedHostile);
+		TEST_ADD(BotSlowTargetTest::MaintenanceSelectionDoesNotCastWhenNoCandidateNeedsSlow);
 		TEST_ADD(BotSlowTargetTest::MaintenanceSelectionSkipsMezzedCandidates);
 		TEST_ADD(BotSlowTargetTest::MaintenanceSelectionRejectsAllInvalidCandidates);
+		TEST_ADD(BotSlowTargetTest::MaintenanceSelectionHandlesOrdinaryMultiMobFightWithinScanBound);
 	}
 
 private:
+	struct MaintenanceCandidate {
+		int                         id = 0;
+		bool                        needs_slow = false;
+		bool                        mezzed = false;
+		EQ::BotSlowTarget::Ordering order;
+	};
+
+	static MaintenanceCandidate SelectMaintenanceCandidate(
+		std::vector<MaintenanceCandidate> candidates,
+		bool spell_breaks_mez = true
+	) {
+		using namespace EQ::BotSlowTarget;
+
+		std::sort(
+			candidates.begin(),
+			candidates.end(),
+			[](const MaintenanceCandidate &left, const MaintenanceCandidate &right) {
+				return CompareOrdering(left.order, right.order);
+			}
+		);
+
+		return EQ::BotSlowTarget::SelectMaintenanceCandidate<MaintenanceCandidate>(
+			candidates,
+			spell_breaks_mez,
+			[](const MaintenanceCandidate &candidate) { return candidate.mezzed; },
+			[](const MaintenanceCandidate &candidate) { return candidate.needs_slow; }
+		);
+	}
+
 	void CurrentTargetSortsBeforeOtherThreats()
 	{
 		using namespace EQ::BotSlowTarget;
@@ -69,26 +102,57 @@ private:
 		TEST_ASSERT(!IsEngagedHostileThreat(priority));
 	}
 
+	void MaintenanceSelectionCastsOnCurrentTargetFirst()
+	{
+		using namespace EQ::BotSlowTarget;
+
+		const auto selected = SelectMaintenanceCandidate(
+			{
+				{2, true, false, {false, ThreatPriority::OwnerGroupRaid, 1.0f, 1}},
+				{1, true, false, {true, ThreatPriority::OwnerGroupRaid, 500.0f, 0}},
+			}
+		);
+
+		TEST_ASSERT(selected.id == 1);
+	}
+
+	void MaintenanceSelectionCastsOnOtherEngagedHostile()
+	{
+		using namespace EQ::BotSlowTarget;
+
+		const auto selected = SelectMaintenanceCandidate(
+			{
+				{1, false, false, {true, ThreatPriority::OwnerGroupRaid, 1.0f, 0}},
+				{2, true, false, {false, ThreatPriority::OwnerGroupRaid, 10.0f, 1}},
+			}
+		);
+
+		TEST_ASSERT(selected.id == 2);
+	}
+
+	void MaintenanceSelectionDoesNotCastWhenNoCandidateNeedsSlow()
+	{
+		using namespace EQ::BotSlowTarget;
+
+		const auto selected = SelectMaintenanceCandidate(
+			{
+				{1, false, false, {true, ThreatPriority::OwnerGroupRaid, 1.0f, 0}},
+				{2, false, false, {false, ThreatPriority::OwnerGroupRaid, 2.0f, 1}},
+			}
+		);
+
+		TEST_ASSERT(selected.id == 0);
+	}
+
 	void MaintenanceSelectionSkipsMezzedCandidates()
 	{
 		using namespace EQ::BotSlowTarget;
 
-		struct Candidate {
-			int  id = 0;
-			bool mezzed = false;
-			bool castable = false;
-		};
-
-		const std::vector<Candidate> candidates{
-			{1, true, true},
-			{2, false, true},
-		};
-
-		const auto selected = SelectMaintenanceCandidate<Candidate>(
-			candidates,
-			true,
-			[](const Candidate &candidate) { return candidate.mezzed; },
-			[](const Candidate &candidate) { return candidate.castable; }
+		const auto selected = SelectMaintenanceCandidate(
+			{
+				{1, true, true, {false, ThreatPriority::OwnerGroupRaid, 1.0f, 0}},
+				{2, true, false, {false, ThreatPriority::OwnerGroupRaid, 2.0f, 1}},
+			}
 		);
 
 		TEST_ASSERT(selected.id == 2);
@@ -109,7 +173,7 @@ private:
 			{2, false, false},
 		};
 
-		const auto selected = SelectMaintenanceCandidate<Candidate>(
+		const auto selected = EQ::BotSlowTarget::SelectMaintenanceCandidate<Candidate>(
 			candidates,
 			true,
 			[](const Candidate &candidate) { return candidate.mezzed; },
@@ -117,5 +181,29 @@ private:
 		);
 
 		TEST_ASSERT(selected.id == 0);
+	}
+
+	void MaintenanceSelectionHandlesOrdinaryMultiMobFightWithinScanBound()
+	{
+		using namespace EQ::BotSlowTarget;
+
+		std::vector<MaintenanceCandidate> candidates{
+			{1, false, false, {true, ThreatPriority::OwnerGroupRaid, 1.0f, 0}},
+		};
+
+		for (std::size_t sequence = 1; sequence <= 48; ++sequence) {
+			candidates.push_back(
+				{
+					static_cast<int>(sequence + 1),
+					sequence == 24,
+					false,
+					{false, ThreatPriority::OwnerGroupRaid, static_cast<float>(sequence), sequence}
+				}
+			);
+		}
+
+		const auto selected = SelectMaintenanceCandidate(candidates);
+
+		TEST_ASSERT(selected.id == 25);
 	}
 };
