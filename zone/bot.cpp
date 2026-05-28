@@ -11317,6 +11317,10 @@ bool Bot::AttemptAICastSpell(uint16 spell_type, Mob* tar) {
 		}
 	}
 	else {
+		if (spell_type == BotSpellTypes::Slow) {
+			return AICastSpell(tar, GetChanceToCastBySpellType(spell_type), spell_type);
+		}
+
 		if (!PrecastChecks(tar, spell_type) || !AICastSpell(tar, GetChanceToCastBySpellType(spell_type), spell_type)) {
 			return result;
 		}

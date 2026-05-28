@@ -222,7 +222,14 @@ bool Bot::AICastSpell(Mob* tar, uint8 chance, uint16 spell_type, uint16 sub_targ
 			continue;
 		}
 
-		if (BotRequiresLoSToCast(spell_type, s.SpellId) && !HasLoS()) {
+		if (!IsCommandedSpell() && spell_type == BotSpellTypes::Slow) {
+			tar = SelectSingleTargetSlowMaintenanceTarget(s.SpellId);
+			if (!tar) {
+				continue;
+			}
+		}
+
+		if (BotRequiresLoSToCast(spell_type, s.SpellId) && !DoLosChecks(tar)) {
 			continue;
 		}
 
