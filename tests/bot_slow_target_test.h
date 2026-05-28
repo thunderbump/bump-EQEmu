@@ -28,6 +28,7 @@ public:
 		TEST_ADD(BotSlowTargetTest::MaintenanceSelectionSkipsMezzedCandidates);
 		TEST_ADD(BotSlowTargetTest::MaintenanceSelectionRejectsAllInvalidCandidates);
 		TEST_ADD(BotSlowTargetTest::MaintenanceSelectionHandlesOrdinaryMultiMobFightWithinScanBound);
+		TEST_ADD(BotSlowTargetTest::AESlowDoesNotUseSingleTargetMaintenanceRouting);
 	}
 
 private:
@@ -205,5 +206,14 @@ private:
 		const auto selected = SelectMaintenanceCandidate(candidates);
 
 		TEST_ASSERT(selected.id == 25);
+	}
+
+	void AESlowDoesNotUseSingleTargetMaintenanceRouting()
+	{
+		using namespace EQ::BotSlowTarget;
+
+		TEST_ASSERT(UsesSingleTargetMaintenance(BotSpellTypes::Slow, false));
+		TEST_ASSERT(!UsesSingleTargetMaintenance(BotSpellTypes::Slow, true));
+		TEST_ASSERT(!UsesSingleTargetMaintenance(BotSpellTypes::AESlow, false));
 	}
 };

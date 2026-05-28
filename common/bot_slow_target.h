@@ -9,6 +9,8 @@
 */
 #pragma once
 
+#include "spdat.h"
+
 #include <cstddef>
 #include <vector>
 
@@ -62,6 +64,11 @@ inline bool CompareOrdering(const Ordering &left, const Ordering &right)
 	}
 
 	return left.sequence < right.sequence;
+}
+
+inline bool UsesSingleTargetMaintenance(uint16 spell_type, bool commanded_spell)
+{
+	return !commanded_spell && spell_type == BotSpellTypes::Slow;
 }
 
 template <typename Candidate, typename IsMezzed, typename CastChecks>

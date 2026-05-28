@@ -17,6 +17,7 @@
 */
 #include "bot.h"
 
+#include "common/bot_slow_target.h"
 #include "common/data_verification.h"
 #include "common/repositories/bot_spells_entries_repository.h"
 #include "common/repositories/npc_spells_repository.h"
@@ -222,7 +223,7 @@ bool Bot::AICastSpell(Mob* tar, uint8 chance, uint16 spell_type, uint16 sub_targ
 			continue;
 		}
 
-		if (!IsCommandedSpell() && spell_type == BotSpellTypes::Slow) {
+		if (EQ::BotSlowTarget::UsesSingleTargetMaintenance(spell_type, IsCommandedSpell())) {
 			tar = SelectSingleTargetSlowMaintenanceTarget(s.SpellId);
 			if (!tar) {
 				continue;
