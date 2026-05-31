@@ -275,7 +275,7 @@ BotSlowMaintenanceScenarioResult ZoneHarnessRuntime::RunBotSlowMaintenanceScenar
 	uint32_t sleep_ms
 )
 {
-	std::lock_guard lock(mutex);
+	std::unique_lock lock(mutex);
 
 	BotSlowMaintenanceScenarioResult result{
 		.reason = "not_run",
@@ -404,11 +404,18 @@ BotSlowMaintenanceScenarioResult ZoneHarnessRuntime::RunBotSlowMaintenanceScenar
 	result.secondary_hostile = ScenarioEntityFor(secondary_hostile);
 
 	const uint64_t since_event_id = events.MaxEventID();
+	const uint16_t bot_id = bot->GetID();
+	const uint16_t expected_target_id = expected_target->GetID();
 	const uint32_t bounded_ticks = std::clamp<uint32_t>(max_ticks, 1, 1000);
 	const uint32_t bounded_sleep_ms = std::min<uint32_t>(sleep_ms, 250);
 	const auto started = std::chrono::steady_clock::now();
 
 	for (uint32_t tick = 0; tick < bounded_ticks; ++tick) {
+		if (!booted || !zone || !is_zone_loaded || shutdown_requested) {
+			result.reason = "zone_unavailable_during_scenario";
+			break;
+		}
+
 		ProcessOneTick();
 		++process_ticks;
 		++result.ticks_processed;
@@ -417,8 +424,8 @@ BotSlowMaintenanceScenarioResult ZoneHarnessRuntime::RunBotSlowMaintenanceScenar
 		const auto observed = std::find_if(
 			result.events.begin(),
 			result.events.end(),
-			[bot, expected_target](const ActorEvent &event) {
-				return IsExpectedSlowCast(event, bot->GetID(), expected_target->GetID());
+			[bot_id, expected_target_id](const ActorEvent &event) {
+				return IsExpectedSlowCast(event, bot_id, expected_target_id);
 			}
 		);
 
@@ -429,14 +436,16 @@ BotSlowMaintenanceScenarioResult ZoneHarnessRuntime::RunBotSlowMaintenanceScenar
 		}
 
 		if (bounded_sleep_ms > 0) {
+			lock.unlock();
 			std::this_thread::sleep_for(std::chrono::milliseconds(bounded_sleep_ms));
+			lock.lock();
 		}
 	}
 
 	result.elapsed_ms = static_cast<uint32_t>(
 		std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count()
 	);
-	if (!result.observed) {
+	if (!result.observed && result.reason == "not_run") {
 		result.reason = "expected_slow_cast_start_not_observed_within_bounds";
 		result.events = events.Since(since_event_id, 100);
 	}
