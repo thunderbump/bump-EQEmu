@@ -70,9 +70,10 @@ HealthSnapshot ZoneHarnessRuntime::Health()
 	std::lock_guard lock(mutex);
 
 	const auto runtime = RuntimeLocked();
+	const bool loaded = runtime.booted && runtime.zone.loaded;
 	return {
-		.healthy = runtime.booted && runtime.zone.loaded && !runtime.shutdown_requested,
-		.status = runtime.booted && runtime.zone.loaded ? "ok" : "not_booted",
+		.healthy = loaded && !runtime.shutdown_requested,
+		.status = runtime.shutdown_requested ? "shutdown_requested" : (loaded ? "ok" : "not_booted"),
 		.runtime = runtime,
 	};
 }
