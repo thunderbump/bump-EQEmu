@@ -163,6 +163,19 @@ done
 slow_scenario=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/bot-slow-maintenance/current-target\")
 assert_slow_scenario \"\$slow_scenario\" current-target HarnessSlowCurrentTarget
 
+entities_zero_sample=\$(curl -fsS \"http://127.0.0.1:${port}/api/v1/harness/entities?sample_limit=0\")
+ENTITIES_ZERO_SAMPLE=\"\$entities_zero_sample\" python3 - <<'PY'
+import json
+import os
+import sys
+
+payload = json.loads(os.environ["ENTITIES_ZERO_SAMPLE"])
+counts = payload.get("counts") or {}
+if counts.get("mobs", 0) <= 0 or payload.get("sample") != []:
+    print(json.dumps(payload, separators=(",", ":")), file=sys.stderr)
+    sys.exit(1)
+PY
+
 fallback_scenario=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/bot-slow-maintenance/fallback\")
 assert_slow_scenario \"\$fallback_scenario\" fallback HarnessSlowFallbackHostile true
 

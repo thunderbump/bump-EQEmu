@@ -47,6 +47,10 @@ EntitySnapshot HarnessSnapshotService::Entities(uint32_t sample_limit) const
 	snapshot.counts.doors = entity_list.GetDoorsList().size();
 	snapshot.counts.objects = entity_list.GetObjectList().size();
 
+	if (sample_limit == 0) {
+		return snapshot;
+	}
+
 	for (const auto &[entity_id, mob]: entity_list.GetMobList()) {
 		if (!mob) {
 			continue;
