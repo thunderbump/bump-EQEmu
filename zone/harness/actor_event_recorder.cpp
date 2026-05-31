@@ -174,6 +174,7 @@ void ActorEventRecorder::ObserveSpellCastStarted(
 
 void ActorEventRecorder::Record(const std::string &type, const std::string &message)
 {
+	std::lock_guard lock(state_mutex);
 	events.push_back({
 		.id = next_sequence++,
 		.time_ms = ::Timer::GetCurrentTime(),
@@ -195,6 +196,7 @@ void ActorEventRecorder::RecordSpellCastStarted(
 	int32_t original_cast_time_ms
 )
 {
+	std::lock_guard lock(state_mutex);
 	ActorEvent event{
 		.id = next_sequence++,
 		.time_ms = ::Timer::GetCurrentTime(),
@@ -226,6 +228,7 @@ void ActorEventRecorder::RecordSpellCastStarted(
 
 std::vector<ActorEvent> ActorEventRecorder::Drain()
 {
+	std::lock_guard lock(state_mutex);
 	auto drained = events;
 	events.clear();
 	return drained;
@@ -233,6 +236,7 @@ std::vector<ActorEvent> ActorEventRecorder::Drain()
 
 std::vector<ActorEvent> ActorEventRecorder::Since(uint64_t since_id, size_t limit) const
 {
+	std::lock_guard lock(state_mutex);
 	std::vector<ActorEvent> result;
 	const auto bounded_limit = std::clamp<size_t>(limit, 1, 1000);
 
@@ -250,11 +254,13 @@ std::vector<ActorEvent> ActorEventRecorder::Since(uint64_t since_id, size_t limi
 
 uint64_t ActorEventRecorder::PendingCount() const
 {
+	std::lock_guard lock(state_mutex);
 	return events.size();
 }
 
 uint64_t ActorEventRecorder::MaxEventID() const
 {
+	std::lock_guard lock(state_mutex);
 	return next_sequence > 1 ? next_sequence - 1 : 0;
 }
 

@@ -12,6 +12,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -80,6 +81,7 @@ public:
 	uint64_t MaxEventID() const;
 
 private:
+	mutable std::mutex state_mutex;
 	uint64_t next_sequence = 1;
 	std::vector<ActorEvent> events;
 	size_t max_events = 512;
