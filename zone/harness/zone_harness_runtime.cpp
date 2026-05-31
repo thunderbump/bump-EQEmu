@@ -10,8 +10,13 @@
 
 #include "zone_harness_runtime.h"
 
+#include "common/classes.h"
+#include "common/races.h"
 #include "common/timer.h"
+#include "zone/bot.h"
+#include "zone/client.h"
 #include "zone/entity.h"
+#include "zone/groups.h"
 #include "zone/npc.h"
 #include "zone/questmgr.h"
 #include "zone/worldserver.h"
@@ -19,6 +24,7 @@
 #include "zone/zone_event_scheduler.h"
 
 #include <algorithm>
+#include <thread>
 
 extern EntityList entity_list;
 extern WorldServer worldserver;
@@ -120,6 +126,47 @@ std::vector<ActorEvent> ZoneHarnessRuntime::EventsSince(uint64_t since_id, size_
 	return events.Since(since_id, limit);
 }
 
+namespace {
+
+constexpr uint32_t kHarnessShamanBotSpellListID = 3010;
+
+ActorEventEntity ScenarioEntityFor(Mob *mob)
+{
+	if (!mob) {
+		return {};
+	}
+
+	std::string kind = "mob";
+	if (mob->IsClient()) {
+		kind = "client";
+	}
+	else if (mob->IsBot()) {
+		kind = "bot";
+	}
+	else if (mob->IsNPC()) {
+		kind = "npc";
+	}
+
+	return {
+		.entity_id = mob->GetID(),
+		.entity_ref = "mob:" + std::to_string(mob->GetID()),
+		.name = mob->GetCleanName(),
+		.kind = kind,
+	};
+}
+
+bool IsExpectedSlowCast(const ActorEvent &event, uint16_t bot_id, uint16_t target_id)
+{
+	return event.type == "spell_cast_started" &&
+		event.caster.entity_id == bot_id &&
+		event.target.has_value() &&
+		event.target->entity_id == target_id &&
+		event.spell.category == "Slow" &&
+		event.spell.targeting == "single";
+}
+
+}
+
 SpellCastStartScenarioResult ZoneHarnessRuntime::StartKnownSpellCast(uint16_t spell_id)
 {
 	std::lock_guard lock(mutex);
@@ -175,6 +222,138 @@ SpellCastStartScenarioResult ZoneHarnessRuntime::StartKnownSpellCast(uint16_t sp
 		.spell_id = spell_id,
 		.runtime = RuntimeLocked(),
 	};
+}
+
+BotSlowMaintenanceCurrentTargetScenarioResult ZoneHarnessRuntime::RunBotSlowMaintenanceCurrentTarget(uint32_t max_ticks, uint32_t sleep_ms)
+{
+	std::lock_guard lock(mutex);
+
+	BotSlowMaintenanceCurrentTargetScenarioResult result{
+		.reason = "not_run",
+		.database_mutation = "none: synthetic owner, owned bot, group, NPCs, hate, and target state are in-memory only",
+	};
+
+	if (!booted || !zone || !is_zone_loaded) {
+		result.reason = "zone_not_booted";
+		result.runtime = RuntimeLocked();
+		return result;
+	}
+
+	auto *owner = new Client();
+	owner->TempName("HarnessSlowOwner");
+	owner->Mob::SetLevel(60);
+	owner->SetHP(10000);
+	owner->SetMana(10000);
+	owner->GMMove(0.0f, 0.0f, 0.0f, 0.0f);
+	entity_list.AddClient(owner);
+
+	auto *bot_type = Bot::CreateDefaultNPCTypeStructForBot(
+		"HarnessSlowBot",
+		"",
+		60,
+		Race::Barbarian,
+		Class::Shaman,
+		Gender::Male
+	);
+	bot_type->npc_spells_id = kHarnessShamanBotSpellListID;
+	bot_type->Mana = 6000;
+	bot_type->max_hp = 5000;
+	bot_type->current_hp = 5000;
+
+	auto *bot = new Bot(bot_type, owner);
+	bot->GMMove(2.0f, 0.0f, 0.0f, 0.0f);
+	bot->SetMana(bot->GetMaxMana());
+	bot->SetHP(bot->GetMaxHP());
+	bot->SetBotSpellID(kHarnessShamanBotSpellListID);
+	bot->LoadDefaultBotSettings();
+	for (uint16 spell_type = BotSpellTypes::START; spell_type <= BotSpellTypes::END; ++spell_type) {
+		bot->SetSpellTypePriority(spell_type, BotPriorityCategories::Engaged, spell_type == BotSpellTypes::Slow ? 1 : 0);
+	}
+
+	if (!bot->AI_AddBotSpells(kHarnessShamanBotSpellListID)) {
+		result.reason = "bot_spell_list_unavailable";
+		result.owner = ScenarioEntityFor(owner);
+		result.bot = ScenarioEntityFor(bot);
+		result.runtime = RuntimeLocked();
+		bot->Depop();
+		return result;
+	}
+
+	entity_list.AddBot(bot, false, true);
+	bot->AI_Bot_Start();
+
+	auto *group = new Group(owner);
+	group->AddMember(bot);
+	entity_list.AddGroup(group, 900001);
+
+	auto *target_type = content_db.LoadNPCTypesData(754008);
+	if (!target_type) {
+		result.reason = "npc_type_unavailable";
+		result.owner = ScenarioEntityFor(owner);
+		result.bot = ScenarioEntityFor(bot);
+		result.runtime = RuntimeLocked();
+		bot->Depop();
+		return result;
+	}
+
+	auto *expected_target = new NPC(target_type, nullptr, glm::vec4(12, 0, 0, 0), GravityBehavior::Water);
+	auto *secondary_hostile = new NPC(target_type, nullptr, glm::vec4(18, 0, 0, 0), GravityBehavior::Water);
+	expected_target->TempName("HarnessSlowCurrentTarget");
+	secondary_hostile->TempName("HarnessSlowSecondaryHostile");
+	entity_list.AddNPC(expected_target, false, true);
+	entity_list.AddNPC(secondary_hostile, false, true);
+
+	owner->SetTarget(expected_target);
+	bot->SetTarget(expected_target);
+	expected_target->AddToHateList(owner, 100, 1, false);
+	expected_target->AddToHateList(bot, 25, 1, false);
+	secondary_hostile->AddToHateList(owner, 25, 1, false);
+	bot->AddToHateList(expected_target, 100, 1, false);
+
+	result.owner = ScenarioEntityFor(owner);
+	result.bot = ScenarioEntityFor(bot);
+	result.expected_target = ScenarioEntityFor(expected_target);
+	result.secondary_hostile = ScenarioEntityFor(secondary_hostile);
+
+	const uint64_t since_event_id = events.MaxEventID();
+	const uint32_t bounded_ticks = std::clamp<uint32_t>(max_ticks, 1, 1000);
+	const uint32_t bounded_sleep_ms = std::min<uint32_t>(sleep_ms, 250);
+	const auto started = std::chrono::steady_clock::now();
+
+	for (uint32_t tick = 0; tick < bounded_ticks; ++tick) {
+		ProcessOneTick();
+		++process_ticks;
+		++result.ticks_processed;
+
+		result.events = events.Since(since_event_id, 100);
+		const auto observed = std::find_if(
+			result.events.begin(),
+			result.events.end(),
+			[bot, expected_target](const ActorEvent &event) {
+				return IsExpectedSlowCast(event, bot->GetID(), expected_target->GetID());
+			}
+		);
+
+		if (observed != result.events.end()) {
+			result.observed = true;
+			result.reason = "observed_expected_single_target_slow_cast_start";
+			break;
+		}
+
+		if (bounded_sleep_ms > 0) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(bounded_sleep_ms));
+		}
+	}
+
+	result.elapsed_ms = static_cast<uint32_t>(
+		std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count()
+	);
+	if (!result.observed) {
+		result.reason = "expected_slow_cast_start_not_observed_within_bounds";
+		result.events = events.Since(since_event_id, 100);
+	}
+	result.runtime = RuntimeLocked();
+	return result;
 }
 
 void ZoneHarnessRuntime::RequestShutdown()

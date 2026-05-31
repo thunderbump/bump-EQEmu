@@ -105,6 +105,12 @@ done
 [[ \"\$cast_events\" == *'\"type\":\"spell_cast_started\"'* ]] || { printf '%s\n' \"\$cast_events\" >&2; exit 1; }
 [[ \"\$cast_events\" == *'\"caster\"'* && \"\$cast_events\" == *'\"target\"'* && \"\$cast_events\" == *'\"spell\"'* && \"\$cast_events\" == *'\"cast\"'* ]] || { printf '%s\n' \"\$cast_events\" >&2; exit 1; }
 
+slow_scenario=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/bot-slow-maintenance/current-target\")
+[[ \"\$slow_scenario\" == *'\"observed\":true'* ]] || { printf '%s\n' \"\$slow_scenario\" >&2; exit 1; }
+[[ \"\$slow_scenario\" == *'\"database_mutation\":\"none:'* ]] || { printf '%s\n' \"\$slow_scenario\" >&2; exit 1; }
+[[ \"\$slow_scenario\" == *'\"expected_target\"'* && \"\$slow_scenario\" == *'\"secondary_hostile\"'* ]] || { printf '%s\n' \"\$slow_scenario\" >&2; exit 1; }
+[[ \"\$slow_scenario\" == *'\"category\":\"Slow\"'* && \"\$slow_scenario\" == *'\"targeting\":\"single\"'* ]] || { printf '%s\n' \"\$slow_scenario\" >&2; exit 1; }
+
 shutdown=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/shutdown\")
 [[ \"\$shutdown\" == *'\"shutdown_requested\":true'* ]] || { printf '%s\n' \"\$shutdown\" >&2; exit 1; }
 

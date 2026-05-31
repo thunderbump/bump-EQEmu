@@ -177,6 +177,28 @@ nlohmann::json ToJson(const SpellCastStartScenarioResult &result)
 	};
 }
 
+nlohmann::json ToJson(const BotSlowMaintenanceCurrentTargetScenarioResult &result)
+{
+	nlohmann::json events = nlohmann::json::array();
+	for (const auto &event: result.events) {
+		events.push_back(ToJson(event));
+	}
+
+	return {
+		{"observed", result.observed},
+		{"reason", result.reason},
+		{"ticks_processed", result.ticks_processed},
+		{"elapsed_ms", result.elapsed_ms},
+		{"database_mutation", result.database_mutation},
+		{"owner", ToJson(result.owner)},
+		{"bot", ToJson(result.bot)},
+		{"expected_target", ToJson(result.expected_target)},
+		{"secondary_hostile", ToJson(result.secondary_hostile)},
+		{"events", events},
+		{"runtime", ToJson(result.runtime)},
+	};
+}
+
 void SetJson(httplib::Response &res, const nlohmann::json &payload)
 {
 	res.set_content(payload.dump(), "application/json");
@@ -325,6 +347,10 @@ bool ServeHttp(const HttpServerOptions &options)
 
 	api.Post("/api/v1/harness/scenarios/spell-cast-start", [&runtime](const auto &req, auto &res) {
 		SetJson(res, ToJson(runtime.StartKnownSpellCast(ParseSpellID(req))));
+	});
+
+	api.Post("/api/v1/harness/scenarios/bot-slow-maintenance/current-target", [&runtime](const auto &, auto &res) {
+		SetJson(res, ToJson(runtime.RunBotSlowMaintenanceCurrentTarget()));
 	});
 
 	api.Post("/api/v1/harness/shutdown", [&runtime, &api](const auto &, auto &res) {

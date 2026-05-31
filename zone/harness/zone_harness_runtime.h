@@ -52,6 +52,20 @@ struct SpellCastStartScenarioResult {
 	RuntimeSnapshot runtime;
 };
 
+struct BotSlowMaintenanceCurrentTargetScenarioResult {
+	bool observed = false;
+	std::string reason;
+	uint32_t ticks_processed = 0;
+	uint32_t elapsed_ms = 0;
+	std::string database_mutation;
+	ActorEventEntity owner;
+	ActorEventEntity bot;
+	ActorEventEntity expected_target;
+	ActorEventEntity secondary_hostile;
+	std::vector<ActorEvent> events;
+	RuntimeSnapshot runtime;
+};
+
 class ZoneHarnessRuntime {
 public:
 	bool Boot(const std::string &zone_short_name, uint32_t instance_id = 0);
@@ -63,6 +77,7 @@ public:
 	std::vector<ActorEvent> DrainEvents();
 	std::vector<ActorEvent> EventsSince(uint64_t since_id, size_t limit);
 	SpellCastStartScenarioResult StartKnownSpellCast(uint16_t spell_id = 200);
+	BotSlowMaintenanceCurrentTargetScenarioResult RunBotSlowMaintenanceCurrentTarget(uint32_t max_ticks = 160, uint32_t sleep_ms = 25);
 	void RequestShutdown();
 	void Shutdown();
 
