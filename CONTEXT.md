@@ -100,6 +100,42 @@ _Avoid_: AI loot request, generated loot decision
 An alive, attackable NPC that is currently part of the owner's group or raid combat situation and can be considered by bot combat-maintenance behavior. An **Engaged Hostile** is not merely nearby; it must be actively relevant to the fight and still pass ordinary spell validity constraints such as range, line of sight, immunity, crowd-control safety, and spell-specific cast checks.
 _Avoid_: Nearby mob, active combatant, add
 
+**Incoming Damage Pressure**:
+A short-lived estimate of how quickly a bot heal target is losing HP during combat.
+_Avoid_: Damage rate, HP slope, heal urgency score
+
+**Healing Danger Window**:
+The short projected time before a bot heal target reaches a dangerous HP threshold under current **Incoming Damage Pressure**.
+_Avoid_: Raw DPS, urgency score, time-to-death
+
+**Recovery Healing**:
+Out-of-combat bot healing that returns players, bots, and pets to a ready state after active danger has passed.
+_Avoid_: Pressure healing, downtime topping-off
+
+**Bot-Aided Tracking**:
+An owned bot's ability to report nearby trackable spawns to its owner when the bot has an appropriate tracking-capable class and level.
+_Avoid_: Group tracking, shared Track skill, borrowed tracking
+
+**Autonomous Actor**:
+A server-controlled character or creature that can perceive ordinary gameplay state, choose bounded actions toward a goal, and act through normal gameplay paths without direct player input.
+_Avoid_: AI actor, test actor, entity, mob
+
+**Actor Perception**:
+The gameplay state visible or inferable to an **Autonomous Actor** at a decision point.
+_Avoid_: Actor context, AI context, full world state
+
+**Actor Action**:
+A bounded gameplay request made by an **Autonomous Actor** through ordinary server behavior.
+_Avoid_: Direct mutation, forced outcome, command injection
+
+**Actor Event**:
+An observable gameplay result used to understand what changed after **Actor Actions** and world processing.
+_Avoid_: Log line, debug trace, internal callback
+
+**Zone Harness**:
+Test infrastructure that controls and observes a zone runtime so gameplay behavior can be validated without relying on a manual client for every scenario.
+_Avoid_: Autonomous Actor runtime, test actor system, production sidecar
+
 ## Relationships
 
 - **Fallback Dialogue** must not replace **Authored Dialogue**.
@@ -184,6 +220,94 @@ _Avoid_: Nearby mob, active combatant, add
 - Bot slow maintenance is intended to cover the owner's group or raid combat situation. A first implementation may fall back to group-only if raid-wide hostile discovery is not practical without broader combat-tracking changes.
 - The first bot slow-maintenance improvement should rely on existing spell casting and stacking checks to avoid duplicate slow casts from multiple bots. Explicit cross-bot slow coordination should wait for runtime evidence that duplicate casts are a real problem.
 - The first bot slow-maintenance implementation should stay specific to single-target `Slow`; a broader hostile-maintenance primitive should emerge only if the implementation naturally supports it without pulling in snare, debuff, dispel, mez, or root semantics.
+- **Incoming Damage Pressure** may influence bot heal type selection, but should not replace ordinary heal thresholds, recast checks, mana limits, holds, aggro checks, or spell validity rules.
+- **Incoming Damage Pressure** applies to healable player, bot, and pet targets during combat, and should expire quickly when recent damage stops.
+- **Incoming Damage Pressure** belongs to the heal target's recent combat state, not to the bot healer choosing a spell.
+- **Incoming Damage Pressure** should measure recent damage taken only; healing received should affect current HP but should not reduce the pressure signal directly.
+- **Incoming Damage Pressure** should use final positive HP loss from combat damage sources, excluding obvious self-inflicted or non-combat environmental damage when the server can identify those cases cheaply.
+- **Incoming Damage Pressure** should be represented as lightweight rolling aggregate state rather than a detailed combat event history.
+- Bot heal type selection should use **Healing Danger Window** rather than raw **Incoming Damage Pressure** when comparing targets with different maximum HP or survivability.
+- Pressure-aware bot healing should apply to healable targets already considered by existing bot healing behavior, not introduce a new healing target-selection model.
+- **Healing Danger Window** should account for whether a candidate heal can land before the target crosses dangerous HP thresholds, while recast availability remains an ordinary spell validity check.
+- Pressure-aware bot healing should use existing bot heal HP thresholds as the dangerous HP thresholds, and add only time-window configuration for conservative projection.
+- The first pressure-aware bot healing settings should include feature enablement and a small number of time-window values, not per-class weights or per-spell coefficients.
+- HoT-based bot healing should be treated as low-pressure sustain; **Incoming Damage Pressure** should suppress HoT selection when the target is in active danger.
+- Low-pressure HoT sustain means the target is not projected to cross a direct-heal threshold soon; low pressure may allow HoT selection, but should not force HoTs ahead of ordinary heal settings.
+- Missing or expired **Incoming Damage Pressure** should prefer HoT-based sustain when an existing valid HoT option is available, while falling back to ordinary direct-heal behavior when HoTs are unavailable, held, invalid, unsafe to cast, or the target is already inside an emergency direct-heal threshold.
+- No-pressure HoT preference should be part of the first pressure-aware healing feature flag rather than a separate setting.
+- The first no-pressure HoT preference should apply only to single-target HoT healing, not group HoTs.
+- The first pressure-aware bot healing implementation should not suppress valid direct heals under low pressure; direct-heal conservation belongs to existing settings and separate efficient spell-selection work.
+- Complete-heal bot behavior should remain unchanged in the first pressure-aware healing implementation; conflicts between **Healing Danger Window** and complete-heal timing should be investigated separately if runtime evidence shows a problem.
+- **Recovery Healing** should not use stale **Incoming Damage Pressure** from a previous fight; existing out-of-combat heal settings should control how bots recover the group after active danger has passed.
+- **Incoming Damage Pressure** should gate or escalate bot heal type selection inside the existing bot heal settings model rather than replacing user-visible spell type priorities.
+- Pressure-aware bot healing should keep the pressure decision in a small testable helper, with bot AI integration limited to gathering runtime context and applying the helper's decision.
+- The first pressure-aware bot healing implementation should be server-operator opt-in until runtime evidence shows it preserves survivability and improves heal choice quality.
+- Pressure-aware direct-heal escalation should choose the least urgent direct heal type that is projected to land safely, not always jump to the fastest heal.
+- Pressure-aware bot healing should optimize for target survival before mana efficiency, and for mana efficiency before subjective healing feel.
+- The first pressure-aware bot healing implementation should rely on existing per-target recast timers and heal rotations rather than adding cross-healer coordination.
+- Raid-scale bot healing coordination should be investigated separately from first-pass **Incoming Damage Pressure** behavior.
+- Pressure-aware bot healing should not produce player-visible explanations for pressure-based choices; diagnostics should use tests, logs, or developer instrumentation instead.
+- Pressure-aware bot healing should be proven with deterministic decision tests before live smoke testing against real bot spell lists and zone combat timing.
+- The first pressure-aware bot healing implementation should document where **Incoming Damage Pressure** is updated and where bot heal selection reads it.
+- **Incoming Damage Pressure** should never make emergency bot healing less safe; it may escalate to faster or stronger heal types under pressure, but should not delay `VeryFastHeals` or `FastHeals` when a target is already inside emergency thresholds.
+- **Bot-Aided Tracking** should work through the requesting player's owned spawned bots, not through any capable bot in the player's group.
+- **Bot-Aided Tracking** should not grant the player the Tracking skill or bypass native class tracking rules.
+- The first **Bot-Aided Tracking** implementation should use a bot-produced tracking report popup rather than the native client Track window.
+- **Bot-Aided Tracking** should use the owned bot's class and level to determine whether a report is available, but center the reported search area on the requesting player.
+- The first **Bot-Aided Tracking** report should list trackable NPC spawns only, not clients, bots, pets, familiars, mercenaries, or corpses.
+- **Bot-Aided Tracking** should respect whether a reported spawn is visible to the requesting player; bot tracking should not reveal spawns hidden from that player through ordinary invisibility checks.
+- **Bot-Aided Tracking** should not claim an authoritative rare-versus-normal spawn distinction until that spawn classification is investigated separately.
+- The existing **Bot-Aided Tracking** rare/filter option may remain as a compatibility heuristic, but should be revisited after rare-versus-normal spawn research determines whether a stronger spawn classification exists.
+- The first **Bot-Aided Tracking** report should include approximate distance in the popup, but should not provide live direction updates or set the player's tracking target.
+- **Bot-Aided Tracking** reports should sort trackable NPC spawns nearest-first, with con color as presentation rather than the primary grouping.
+- The first **Bot-Aided Tracking** implementation should preserve the current bot class, level, and range tiers rather than introducing bot Tracking skill progression.
+- **Bot-Aided Tracking** should not interrupt the reporting bot's current spell cast or combat action in the first implementation.
+- **Bot-Aided Tracking** may be used in combat as a passive report, but should have a small reuse cooldown to prevent popup spam.
+- The **Bot-Aided Tracking** popup should be sent only to the requesting player; any bot chat announcement should remain short and non-essential.
+- **Bot-Aided Tracking** should show clean player-facing spawn names, not raw NPC names, spawn IDs, entity IDs, or database metadata.
+- **Bot-Aided Tracking** should use a popup when eligible spawns are found and a brief private message when no eligible spawns are found.
+- **Bot-Aided Tracking** reports should have an explicit result cap, with truncation communicated as part of the report when more eligible spawns exist.
+- The first **Bot-Aided Tracking** report should be informational only, with no clickable target selection, no tracking target assignment, and no automatic navigation.
+- The first **Bot-Aided Tracking** cleanup should not add a new server rule; existing bot command access controls are sufficient for an explicit tracking command.
+- **Bot-Aided Tracking** should be validated with deterministic report-selection tests before live smoke testing Ranger, Druid, and Bard bot tracking commands in a real zone.
+- An **Autonomous Actor** may be represented by an NPC, bot, mercenary, or future player-like server agent, but existing feature names such as **Bot-Aided Tracking**, bot slow maintenance, and **Fallback Dialogue** remain the right terms for those specific behaviors.
+- An **Autonomous Actor** is not the same as a player because players provide direct intent; an **Autonomous Actor** acts without direct player input.
+- **Fallback Dialogue** may be one action available to an **Autonomous Actor**, but **Fallback Dialogue** alone does not make a target an **Autonomous Actor**.
+- Test-only direct state mutation may support setup and reset, but **Autonomous Actor** behavior should act through normal gameplay paths where practical.
+- The first **Autonomous Actor** work should use owned spawned bots as the actor boundary; NPCs, mercenaries, and player-like server agents should wait for later actor-specific design.
+- A test-spawned NPC controlled by the **Zone Harness** is a fixture unless it is explicitly running **Autonomous Actor** behavior.
+- The first **Autonomous Actor** work should be reactive and bounded, responding to existing gameplay opportunities such as combat ticks, damage events, tracking commands, loot events, and **Targeted Say** rather than introducing long-running goal planning.
+- Long-running goals such as exploring, farming, travelling, pulling, or maintaining cross-session conversation memory should wait for separate actor design after the **Zone Harness** proves the perception-action-event loop.
+- The first **Autonomous Actor** behavior for owned bots should stay inside existing bot controls such as stance, spell holds, spell priorities, mana thresholds, owner and group membership, class, level, spell lists, equipment, and reuse cooldowns.
+- New actor-specific settings should be added only when existing bot controls cannot express an important safety boundary.
+- **Actor Perception** can include tactical state available to server-controlled gameplay behavior; **Public Gameplay Context** is the dialogue-safe subset suitable for remote response generation.
+- **Actor Perception** should represent what the **Autonomous Actor** can legitimately know through gameplay rules, not the omniscient state a **Zone Harness** can inspect for diagnostics.
+- **Actor Perception** should not include hidden spawn metadata, database identifiers, future spawns, GM-only state, or invisible entities unless ordinary gameplay rules make that information available to the actor.
+- The first **Actor Perception** and **Actor Event** uses should support deterministic server logic, tests, and diagnostics; they should not be treated as remote model payloads.
+- Remote dialogue generation should continue using **Public Gameplay Context** or a separately designed safe export format rather than raw **Actor Perception**.
+- **Zone Harness** diagnostic snapshots may include omniscient fields for assertions, but those snapshots should not be treated as **Actor Perception**.
+- An **Actor Action** expresses intent such as saying, targeting, moving, assisting, casting, attacking, tracking, or looting; it should not describe a forced outcome such as directly applying a buff, setting HP, forcing spell success, or marking an NPC as tracked.
+- **Actor Actions** should be intent requests when ordinary server rules exist for the behavior, so spell validity, range, line of sight, cooldowns, mana checks, aggro checks, holds, priorities, and resist outcomes remain authoritative.
+- An **Actor Event** may be captured by tests or diagnostics, but not every **Actor Event** needs to be player-visible.
+- The first **Zone Harness** use of **Actor Events** should be ephemeral test observation, not durable world history, replay, analytics, learning memory, or cross-session actor state.
+- Durable memory for future **Autonomous Actors** should be designed separately rather than inferred from the first **Zone Harness** event drain.
+- The **Zone Harness** is a proving tool for gameplay behavior; it may exercise **Autonomous Actor** behavior but is not itself part of the **Autonomous Actor** domain.
+- **Zone Harness** shortcuts for setup and reset should remain visibly separate from ordinary gameplay actions that future **Autonomous Actors** might use.
+- The first **Zone Harness** scenarios should run in a separate one-off zone process by default, not attach to an already-running live zone.
+- Persistent dev runtime and real-client checks should remain separate smoke tiers for world, login, zoning, packet, UI, and client-visible behavior.
+- HTTP may be used as a **Zone Harness** transport for scripts and agents, but harness behavior should live behind typed in-process scenario, perception, action, and event interfaces rather than inside route handlers.
+- **Zone Harness** scenarios should remain callable without HTTP when practical, so CLI checks and HTTP-driven checks can share behavior.
+- The first **Zone Harness** tests should prefer synthetic in-process owners for server-observable behavior and reserve real connected clients for packet, UI, login, zoning, and final visual validation.
+- A **Zone Harness** scenario should say explicitly when the behavior under test requires a real connected client instead of silently replacing client-visible behavior with a test shortcut.
+- **Zone Harness** scenarios should prefer in-memory fixtures and read-only content/database access; persistent database mutation should be explicit, risk-classified, cleaned up or backup-gated, and avoided in the default bot slow maintenance scenario.
+- **Zone Harness** scenarios may use bounded normal world processing and event polling, but should not directly force AI timers, spell cooldowns, recast readiness, or spell outcomes unless a lower-level helper is explicitly under test.
+- Broad decision matrices should stay in fast unit or helper tests; **Zone Harness** scenarios should prove representative runtime wiring and cadence through normal zone and bot paths.
+- Live client smoke should remain the validation layer for UI, packet, login, zoning, and subjective player-visible behavior that the **Zone Harness** cannot observe.
+- The first full **Zone Harness** scenario should prove bot slow maintenance against **Engaged Hostiles**, because it exercises owned bots, combat state, spell selection, buff observation, and asynchronous world processing without requiring client UI.
+- The first **Zone Harness** bot slow maintenance scenario should create **Engaged Hostiles** through existing combat or hate paths where practical; directly tagging an NPC as engaged is only acceptable as setup fallback and should not be the behavior being proven.
+- Fully organic pulling, pathing, and client-driven combat can remain a later live-runtime smoke after the harness proves bot target selection against combat-relevant NPCs.
+- The first **Zone Harness** bot slow maintenance pass condition should be that the bot begins a normal single-target `Slow` cast at the expected **Engaged Hostile**; slow buff application may be a secondary observation when spell landing can be made deterministic enough.
+- Bot slow maintenance harness assertions should allow bounded eventual timing and should avoid depending on a specific slow spell ID unless the bot setup makes the spell list stable.
 
 ## Example dialogue
 
