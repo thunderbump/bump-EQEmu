@@ -324,8 +324,11 @@ BotSlowMaintenanceScenarioResult ZoneHarnessRuntime::RunBotSlowMaintenanceScenar
 		result.reason = "bot_spell_list_unavailable";
 		result.owner = ScenarioEntityFor(owner);
 		result.bot = ScenarioEntityFor(bot);
+
+		delete bot;
+		entity_list.RemoveMob(owner->GetID());
+
 		result.runtime = RuntimeLocked();
-		bot->Depop();
 		return result;
 	}
 
