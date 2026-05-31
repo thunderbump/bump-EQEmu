@@ -52,18 +52,30 @@ struct SpellCastStartScenarioResult {
 	RuntimeSnapshot runtime;
 };
 
-struct BotSlowMaintenanceCurrentTargetScenarioResult {
+struct BotSlowMaintenanceScenarioResult {
 	bool observed = false;
 	std::string reason;
+	std::string scenario;
 	uint32_t ticks_processed = 0;
 	uint32_t elapsed_ms = 0;
 	std::string database_mutation;
 	ActorEventEntity owner;
 	ActorEventEntity bot;
+	ActorEventEntity current_target;
 	ActorEventEntity expected_target;
 	ActorEventEntity secondary_hostile;
+	ActorEventEntity mezzed_hostile;
+	uint16_t slow_spell_id = 0;
+	bool current_target_slowed = false;
+	bool mezzed_hostile_mezzed = false;
 	std::vector<ActorEvent> events;
 	RuntimeSnapshot runtime;
+};
+
+enum class BotSlowMaintenanceScenarioKind {
+	CurrentTarget,
+	Fallback,
+	Mezzed,
 };
 
 class ZoneHarnessRuntime {
@@ -77,11 +89,18 @@ public:
 	std::vector<ActorEvent> DrainEvents();
 	std::vector<ActorEvent> EventsSince(uint64_t since_id, size_t limit);
 	SpellCastStartScenarioResult StartKnownSpellCast(uint16_t spell_id = 200);
-	BotSlowMaintenanceCurrentTargetScenarioResult RunBotSlowMaintenanceCurrentTarget(uint32_t max_ticks = 160, uint32_t sleep_ms = 25);
+	BotSlowMaintenanceScenarioResult RunBotSlowMaintenanceCurrentTarget(uint32_t max_ticks = 160, uint32_t sleep_ms = 25);
+	BotSlowMaintenanceScenarioResult RunBotSlowMaintenanceFallback(uint32_t max_ticks = 160, uint32_t sleep_ms = 25);
+	BotSlowMaintenanceScenarioResult RunBotSlowMaintenanceMezzed(uint32_t max_ticks = 160, uint32_t sleep_ms = 25);
 	void RequestShutdown();
 	void Shutdown();
 
 private:
+	BotSlowMaintenanceScenarioResult RunBotSlowMaintenanceScenario(
+		BotSlowMaintenanceScenarioKind scenario,
+		uint32_t max_ticks,
+		uint32_t sleep_ms
+	);
 	RuntimeSnapshot RuntimeLocked() const;
 	void ProcessOneTick();
 

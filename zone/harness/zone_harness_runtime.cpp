@@ -130,6 +130,20 @@ namespace {
 
 constexpr uint32_t kHarnessShamanBotSpellListID = 3010;
 
+std::string ScenarioName(BotSlowMaintenanceScenarioKind scenario)
+{
+	switch (scenario) {
+		case BotSlowMaintenanceScenarioKind::CurrentTarget:
+			return "current-target";
+		case BotSlowMaintenanceScenarioKind::Fallback:
+			return "fallback";
+		case BotSlowMaintenanceScenarioKind::Mezzed:
+			return "mezzed";
+	}
+
+	return "unknown";
+}
+
 ActorEventEntity ScenarioEntityFor(Mob *mob)
 {
 	if (!mob) {
@@ -163,6 +177,22 @@ bool IsExpectedSlowCast(const ActorEvent &event, uint16_t bot_id, uint16_t targe
 		event.target->entity_id == target_id &&
 		event.spell.category == "Slow" &&
 		event.spell.targeting == "single";
+}
+
+uint16_t FindPreparedSingleTargetSlowSpell(Bot *bot, Mob *target)
+{
+	if (!bot || !target) {
+		return 0;
+	}
+
+	const auto slow_spells = Bot::GetPrioritizedBotSpellsBySpellType(bot, BotSpellTypes::Slow, target, false);
+	for (const auto &spell: slow_spells) {
+		if (IsValidSpell(spell.SpellId) && IsSlowSpell(spell.SpellId) && !IsAnyAESpell(spell.SpellId)) {
+			return spell.SpellId;
+		}
+	}
+
+	return 0;
 }
 
 }
@@ -224,12 +254,32 @@ SpellCastStartScenarioResult ZoneHarnessRuntime::StartKnownSpellCast(uint16_t sp
 	};
 }
 
-BotSlowMaintenanceCurrentTargetScenarioResult ZoneHarnessRuntime::RunBotSlowMaintenanceCurrentTarget(uint32_t max_ticks, uint32_t sleep_ms)
+BotSlowMaintenanceScenarioResult ZoneHarnessRuntime::RunBotSlowMaintenanceCurrentTarget(uint32_t max_ticks, uint32_t sleep_ms)
+{
+	return RunBotSlowMaintenanceScenario(BotSlowMaintenanceScenarioKind::CurrentTarget, max_ticks, sleep_ms);
+}
+
+BotSlowMaintenanceScenarioResult ZoneHarnessRuntime::RunBotSlowMaintenanceFallback(uint32_t max_ticks, uint32_t sleep_ms)
+{
+	return RunBotSlowMaintenanceScenario(BotSlowMaintenanceScenarioKind::Fallback, max_ticks, sleep_ms);
+}
+
+BotSlowMaintenanceScenarioResult ZoneHarnessRuntime::RunBotSlowMaintenanceMezzed(uint32_t max_ticks, uint32_t sleep_ms)
+{
+	return RunBotSlowMaintenanceScenario(BotSlowMaintenanceScenarioKind::Mezzed, max_ticks, sleep_ms);
+}
+
+BotSlowMaintenanceScenarioResult ZoneHarnessRuntime::RunBotSlowMaintenanceScenario(
+	BotSlowMaintenanceScenarioKind scenario,
+	uint32_t max_ticks,
+	uint32_t sleep_ms
+)
 {
 	std::lock_guard lock(mutex);
 
-	BotSlowMaintenanceCurrentTargetScenarioResult result{
+	BotSlowMaintenanceScenarioResult result{
 		.reason = "not_run",
+		.scenario = ScenarioName(scenario),
 		.database_mutation = "none: synthetic owner, owned bot, group, NPCs, hate, and target state are in-memory only",
 	};
 
@@ -296,22 +346,57 @@ BotSlowMaintenanceCurrentTargetScenarioResult ZoneHarnessRuntime::RunBotSlowMain
 		return result;
 	}
 
-	auto *expected_target = new NPC(target_type, nullptr, glm::vec4(12, 0, 0, 0), GravityBehavior::Water);
+	auto *current_target = new NPC(target_type, nullptr, glm::vec4(12, 0, 0, 0), GravityBehavior::Water);
 	auto *secondary_hostile = new NPC(target_type, nullptr, glm::vec4(18, 0, 0, 0), GravityBehavior::Water);
-	expected_target->TempName("HarnessSlowCurrentTarget");
-	secondary_hostile->TempName("HarnessSlowSecondaryHostile");
-	entity_list.AddNPC(expected_target, false, true);
+	current_target->TempName(
+		scenario == BotSlowMaintenanceScenarioKind::Mezzed ?
+			"HarnessSlowMezzedCurrentTarget" :
+			"HarnessSlowCurrentTarget"
+	);
+	secondary_hostile->TempName(
+		scenario == BotSlowMaintenanceScenarioKind::Fallback ?
+			"HarnessSlowFallbackHostile" :
+			"HarnessSlowSecondaryHostile"
+	);
+	entity_list.AddNPC(current_target, false, true);
 	entity_list.AddNPC(secondary_hostile, false, true);
 
-	owner->SetTarget(expected_target);
-	bot->SetTarget(expected_target);
-	expected_target->AddToHateList(owner, 100, 1, false);
-	expected_target->AddToHateList(bot, 25, 1, false);
+	owner->SetTarget(current_target);
+	bot->SetTarget(current_target);
+	current_target->AddToHateList(owner, 100, 1, false);
+	current_target->AddToHateList(bot, 25, 1, false);
 	secondary_hostile->AddToHateList(owner, 25, 1, false);
-	bot->AddToHateList(expected_target, 100, 1, false);
+	secondary_hostile->AddToHateList(bot, 25, 1, false);
+	bot->AddToHateList(current_target, 100, 1, false);
+	entity_list.ScanCloseMobs(bot);
+
+	result.slow_spell_id = FindPreparedSingleTargetSlowSpell(bot, current_target);
+	if (!result.slow_spell_id) {
+		result.reason = "single_target_slow_spell_unavailable";
+		result.owner = ScenarioEntityFor(owner);
+		result.bot = ScenarioEntityFor(bot);
+		result.current_target = ScenarioEntityFor(current_target);
+		result.secondary_hostile = ScenarioEntityFor(secondary_hostile);
+		result.runtime = RuntimeLocked();
+		return result;
+	}
+
+	Mob *expected_target = current_target;
+	if (scenario == BotSlowMaintenanceScenarioKind::Fallback) {
+		current_target->AddBuff(bot, result.slow_spell_id, 600, bot->GetLevel());
+		result.current_target_slowed = current_target->FindBuff(result.slow_spell_id);
+		expected_target = secondary_hostile;
+	}
+	else if (scenario == BotSlowMaintenanceScenarioKind::Mezzed) {
+		current_target->Mesmerize();
+		result.mezzed_hostile_mezzed = current_target->IsMezzed();
+		result.mezzed_hostile = ScenarioEntityFor(current_target);
+		expected_target = secondary_hostile;
+	}
 
 	result.owner = ScenarioEntityFor(owner);
 	result.bot = ScenarioEntityFor(bot);
+	result.current_target = ScenarioEntityFor(current_target);
 	result.expected_target = ScenarioEntityFor(expected_target);
 	result.secondary_hostile = ScenarioEntityFor(secondary_hostile);
 

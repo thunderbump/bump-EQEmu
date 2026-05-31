@@ -91,6 +91,61 @@ process=\$(curl -fsS -X POST -H 'Content-Type: application/json' --data '{\"tick
 events=\$(curl -fsS \"http://127.0.0.1:${port}/api/v1/harness/events\")
 [[ \"\$events\" == *'\"events\":[]'* ]] || { printf '%s\n' \"\$events\" >&2; exit 1; }
 
+assert_slow_scenario() {
+  local payload=\"\$1\"
+  local scenario=\"\$2\"
+  local expected_name=\"\$3\"
+  local require_current_slowed=\"\${4:-false}\"
+  local require_mezzed=\"\${5:-false}\"
+
+  SCENARIO_PAYLOAD=\"\$payload\" python3 - \"\$scenario\" \"\$expected_name\" \"\$require_current_slowed\" \"\$require_mezzed\" <<'PY'
+import json
+import os
+import sys
+
+scenario, expected_name, require_current_slowed, require_mezzed = sys.argv[1:5]
+payload = json.loads(os.environ["SCENARIO_PAYLOAD"])
+
+def fail(message):
+    print(json.dumps({"error": message, "payload": payload}, separators=(",", ":")), file=sys.stderr)
+    sys.exit(1)
+
+if payload.get("scenario") != scenario:
+    fail("unexpected scenario")
+if payload.get("observed") is not True:
+    fail("expected slow cast start was not observed")
+if not str(payload.get("database_mutation", "")).startswith("none:"):
+    fail("scenario reported database mutation")
+if require_current_slowed == "true" and payload.get("current_target_slowed") is not True:
+    fail("current target was not marked slowed during setup")
+if require_mezzed == "true" and payload.get("mezzed_hostile_mezzed") is not True:
+    fail("mezzed hostile was not marked mezzed during setup")
+
+expected_target = payload.get("expected_target") or {}
+if expected_target.get("name") != expected_name:
+    fail("unexpected expected_target")
+
+events = payload.get("events") or []
+matching = [
+    event for event in events
+    if event.get("type") == "spell_cast_started"
+    and event.get("spell", {}).get("category") == "Slow"
+    and event.get("spell", {}).get("targeting") == "single"
+    and event.get("target", {}).get("entity_id") == expected_target.get("entity_id")
+]
+if not matching:
+    fail("expected target slow cast-start event was not present")
+
+mezzed = payload.get("mezzed_hostile") or {}
+if require_mezzed == "true" and any(
+    event.get("type") == "spell_cast_started"
+    and event.get("target", {}).get("entity_id") == mezzed.get("entity_id")
+    for event in events
+):
+    fail("slow cast-start targeted the mezzed hostile")
+PY
+}
+
 scenario=\$(curl -fsS -X POST -H 'Content-Type: application/json' --data '{\"spell_id\":200}' \"http://127.0.0.1:${port}/api/v1/harness/scenarios/spell-cast-start\")
 [[ \"\$scenario\" == *'\"started\":true'* ]] || { printf '%s\n' \"\$scenario\" >&2; exit 1; }
 
@@ -106,10 +161,13 @@ done
 [[ \"\$cast_events\" == *'\"caster\"'* && \"\$cast_events\" == *'\"target\"'* && \"\$cast_events\" == *'\"spell\"'* && \"\$cast_events\" == *'\"cast\"'* ]] || { printf '%s\n' \"\$cast_events\" >&2; exit 1; }
 
 slow_scenario=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/bot-slow-maintenance/current-target\")
-[[ \"\$slow_scenario\" == *'\"observed\":true'* ]] || { printf '%s\n' \"\$slow_scenario\" >&2; exit 1; }
-[[ \"\$slow_scenario\" == *'\"database_mutation\":\"none:'* ]] || { printf '%s\n' \"\$slow_scenario\" >&2; exit 1; }
-[[ \"\$slow_scenario\" == *'\"expected_target\"'* && \"\$slow_scenario\" == *'\"secondary_hostile\"'* ]] || { printf '%s\n' \"\$slow_scenario\" >&2; exit 1; }
-[[ \"\$slow_scenario\" == *'\"category\":\"Slow\"'* && \"\$slow_scenario\" == *'\"targeting\":\"single\"'* ]] || { printf '%s\n' \"\$slow_scenario\" >&2; exit 1; }
+assert_slow_scenario \"\$slow_scenario\" current-target HarnessSlowCurrentTarget
+
+fallback_scenario=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/bot-slow-maintenance/fallback\")
+assert_slow_scenario \"\$fallback_scenario\" fallback HarnessSlowFallbackHostile true
+
+mezzed_scenario=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/bot-slow-maintenance/mezzed\")
+assert_slow_scenario \"\$mezzed_scenario\" mezzed HarnessSlowSecondaryHostile false true
 
 shutdown=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/shutdown\")
 [[ \"\$shutdown\" == *'\"shutdown_requested\":true'* ]] || { printf '%s\n' \"\$shutdown\" >&2; exit 1; }

@@ -12950,7 +12950,7 @@ Mob* Bot::SelectSingleTargetSlowMaintenanceTarget(uint16 spell_id, uint32 max_sc
 
 	return EQ::BotSlowTarget::SelectMaintenanceCandidate<Mob*>(
 		GetSingleTargetSlowMaintenanceCandidates(max_scan_count),
-		SpellBreaksMez(spell_id),
+		true,
 		[](Mob* candidate) {
 			return candidate && candidate->IsMezzed();
 		},

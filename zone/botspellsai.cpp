@@ -1106,7 +1106,12 @@ std::vector<BotSpell_wPriority> Bot::GetPrioritizedBotSpellsBySpellType(Bot* cas
 					continue;
 				}
 
-				if (!IsPBAESpell(bot_spell_list[i].spellid) && !caster->CastChecks(bot_spell_list[i].spellid, tar, spell_type, false, IsAEBotSpellType(spell_type))) {
+				const bool select_single_target_slow_later = EQ::BotSlowTarget::UsesSingleTargetMaintenance(spell_type, caster->IsCommandedSpell());
+				if (
+					!select_single_target_slow_later &&
+					!IsPBAESpell(bot_spell_list[i].spellid) &&
+					!caster->CastChecks(bot_spell_list[i].spellid, tar, spell_type, false, IsAEBotSpellType(spell_type))
+				) {
 					continue;
 				}
 

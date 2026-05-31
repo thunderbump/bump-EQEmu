@@ -177,7 +177,7 @@ nlohmann::json ToJson(const SpellCastStartScenarioResult &result)
 	};
 }
 
-nlohmann::json ToJson(const BotSlowMaintenanceCurrentTargetScenarioResult &result)
+nlohmann::json ToJson(const BotSlowMaintenanceScenarioResult &result)
 {
 	nlohmann::json events = nlohmann::json::array();
 	for (const auto &event: result.events) {
@@ -187,13 +187,19 @@ nlohmann::json ToJson(const BotSlowMaintenanceCurrentTargetScenarioResult &resul
 	return {
 		{"observed", result.observed},
 		{"reason", result.reason},
+		{"scenario", result.scenario},
 		{"ticks_processed", result.ticks_processed},
 		{"elapsed_ms", result.elapsed_ms},
 		{"database_mutation", result.database_mutation},
 		{"owner", ToJson(result.owner)},
 		{"bot", ToJson(result.bot)},
+		{"current_target", ToJson(result.current_target)},
 		{"expected_target", ToJson(result.expected_target)},
 		{"secondary_hostile", ToJson(result.secondary_hostile)},
+		{"mezzed_hostile", ToJson(result.mezzed_hostile)},
+		{"slow_spell_id", result.slow_spell_id},
+		{"current_target_slowed", result.current_target_slowed},
+		{"mezzed_hostile_mezzed", result.mezzed_hostile_mezzed},
 		{"events", events},
 		{"runtime", ToJson(result.runtime)},
 	};
@@ -351,6 +357,14 @@ bool ServeHttp(const HttpServerOptions &options)
 
 	api.Post("/api/v1/harness/scenarios/bot-slow-maintenance/current-target", [&runtime](const auto &, auto &res) {
 		SetJson(res, ToJson(runtime.RunBotSlowMaintenanceCurrentTarget()));
+	});
+
+	api.Post("/api/v1/harness/scenarios/bot-slow-maintenance/fallback", [&runtime](const auto &, auto &res) {
+		SetJson(res, ToJson(runtime.RunBotSlowMaintenanceFallback()));
+	});
+
+	api.Post("/api/v1/harness/scenarios/bot-slow-maintenance/mezzed", [&runtime](const auto &, auto &res) {
+		SetJson(res, ToJson(runtime.RunBotSlowMaintenanceMezzed()));
 	});
 
 	api.Post("/api/v1/harness/shutdown", [&runtime, &api](const auto &, auto &res) {
