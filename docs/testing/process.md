@@ -244,7 +244,94 @@ database had 267 tables, including 67,530 `npc_types` rows, 165,711 `spawn2` row
 failed because that container path did not have an initialized server config/database connection; that is separate
 from the SQL import result.
 
-## Tier 3: Optional Live Server Smoke
+## Tier 3: Zone Harness Validation
+
+Use this when the change affects runtime gameplay behavior that can be observed inside one booted zone without a
+real connected client. The Zone Harness is the right tier for server-observable actor behavior, combat state,
+spell cast-start events, bounded zone processing, entity snapshots, and scenario fixtures that can run in a
+one-off zone process.
+
+Do not move broad decision matrices into harness scenarios. Unit and helper tests remain the right place for
+large combinations of target selection, eligibility, ordering, and edge-case rules. The harness should prove that
+the runtime wiring, ordinary processing loop, and event observations work for a small number of representative
+scenarios.
+
+Do not use the harness as a replacement for persistent runtime or manual client validation when the behavior
+depends on UI, login, zoning between zones, client protocol packets, final visible gameplay, or real client
+timing. Those still belong in the live server and manual tiers below.
+
+The one-off harness process command is:
+
+```sh
+zone tests:serve-http --zone qrg --port 9099 --max-runtime-seconds 30
+```
+
+In normal repo validation, prefer the wrapper instead of hand-assembling the AkkStack container, temporary runtime
+directory, server asset links, and `./bin/zone` invocation:
+
+```sh
+./scripts/smoke-zone-harness.sh
+```
+
+The wrapper starts a one-off AkkStack runtime with host ports disabled, waits for MariaDB through Docker service
+DNS, builds a temporary runtime directory that links the repo build binaries and initialized server assets, runs
+`zone tests:serve-http --zone qrg --port 9099 --max-runtime-seconds 30`, then checks:
+
+- `GET /api/v1/harness/health` returns healthy JSON.
+- `GET /api/v1/harness/zone` reports `short_name` `qrg`.
+- `GET /api/v1/harness/entities` returns entity counts.
+- `POST /api/v1/harness/process` with `{"ticks":2}` reports two processed ticks.
+- `GET /api/v1/harness/events` initially returns an empty event list.
+- `POST /api/v1/harness/scenarios/spell-cast-start` can produce a drained `spell_cast_started` Actor Event.
+- `POST /api/v1/harness/scenarios/bot-slow-maintenance/current-target` proves the current target case.
+- `POST /api/v1/harness/scenarios/bot-slow-maintenance/fallback` proves fallback to another unslowed
+  **Engaged Hostile** after the current target is already slowed.
+- `POST /api/v1/harness/scenarios/bot-slow-maintenance/mezzed` proves the bot skips a mezzed hostile and slows
+  another eligible hostile.
+- `POST /api/v1/harness/shutdown` requests clean shutdown.
+
+Expected validation result: the wrapper exits `0` with no scenario payload printed. On failure it prints either
+the failed HTTP response, a compact scenario error payload, or `logs/zone_harness.out` from the temporary runtime.
+
+Fixture and database expectations:
+
+- Default harness scenarios should use in-memory fixtures and read-only database/content access.
+- Any scenario that mutates persistent database rows is not a default harness check. Classify it as read-mostly,
+  persistent-data-mutating, or schema-mutating in this document before using it in routine validation.
+- Persistent-data-mutating scenarios must either clean up exactly after themselves or require a documented backup
+  gate. Schema-mutating scenarios always require the backup gate.
+- The default bot slow maintenance scenarios report `database_mutation` beginning with `none:` and should not
+  leave persistent database changes.
+
+Processing expectations:
+
+- Harness scenarios may request bounded normal processing, such as a fixed number of process ticks or a bounded
+  wait for an event.
+- Do not force AI timers, directly complete spell outcomes, or mark a spell as landed to make a scenario pass.
+  The primary pass condition should be observable behavior produced by ordinary zone processing.
+- Setup shortcuts are acceptable only as fixtures. They must stay separate from the behavior under test and from
+  actor actions that should flow through normal server intent paths.
+
+The bot slow maintenance harness scenarios prove the first runtime slice for single-target `Slow` maintenance.
+Their primary pass condition is that a normal `spell_cast_started` Actor Event is observed for a single-target
+`Slow` spell at the expected **Engaged Hostile**. The current-target scenario expects the bot to begin slowing its
+current target. The fallback scenario expects another unslowed engaged hostile after the current target is already
+slowed. The mezzed scenario expects the mezzed hostile to remain untargeted while a different eligible hostile is
+slowed.
+
+For AFK agents, use `./scripts/smoke-zone-harness.sh` after Tier 1 when a task touches harness-covered runtime
+gameplay. If a validation wrapper is requested, wire it to this smoke script rather than duplicating the long
+Docker command.
+
+Observed runtime validation on the bot slow maintenance slices used:
+
+```sh
+./scripts/validate.sh tier1
+./scripts/smoke-zone-harness.sh
+git diff --check
+```
+
+## Tier 4: Optional Live Server Smoke
 
 Use this when the change affects runtime wiring, startup behavior, config loading, database connectivity, process orchestration, or server command surfaces.
 
@@ -284,7 +371,7 @@ make DOCKER='docker-compose -f docker-compose.yml -f docker-compose.dev.yml -f d
 
 If world telnet is enabled in `eqemu_config.json`, localhost console commands provide another smoke surface, including `ping`, `version`, `who`, `zonestatus`, `zonebootup`, and `zoneshutdown`.
 
-## Tier 4: Manual Client Test
+## Tier 5: Manual Client Test
 
 Use manual client testing only when behavior cannot be observed through build output, unit tests, CLI hooks, database checks, sidecar HTTP, or logs.
 
@@ -343,7 +430,8 @@ may need the one-off container to be stopped after validation.
 - Common utility or isolated logic: Tier 1.
 - Database-backed game logic with an existing CLI hook: Tier 1 plus targeted Tier 2.
 - Schema or migration work: backup gate, then Tier 1 plus targeted Tier 2.
-- Runtime process, config, startup, or integration behavior: Tier 1 plus Tier 3.
-- Client-visible behavior or packet flow: Tier 1 plus Tier 3 and Tier 4.
+- Runtime gameplay behavior covered by a harness scenario: Tier 1 plus Tier 3.
+- Runtime process, config, startup, or integration behavior: Tier 1 plus Tier 4.
+- Client-visible behavior or packet flow: Tier 1 plus Tier 4 and Tier 5.
 
 Escalate only as far as the touched area requires.

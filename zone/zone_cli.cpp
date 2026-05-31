@@ -53,8 +53,8 @@ void ZoneCLI::CommandHandler(int argc, char **argv)
 	function_map["tests:databuckets"]            = &ZoneCLI::TestDataBuckets;
 	function_map["tests:npc-handins"]            = &ZoneCLI::TestNpcHandins;
 	function_map["tests:npc-handins-multiquest"] = &ZoneCLI::TestNpcHandinsMultiQuest;
+	function_map["tests:serve-http"]             = &ZoneCLI::TestServeHttp;
 	function_map["tests:zone-state"]             = &ZoneCLI::TestZoneState;
 
 	EQEmuCommand::HandleMenu(function_map, cmd, argc, argv);
 }
-

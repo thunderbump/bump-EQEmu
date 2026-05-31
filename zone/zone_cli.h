@@ -33,5 +33,6 @@ public:
 	static void TestDataBuckets(int argc, char **argv, argh::parser &cmd, std::string &description);
 	static void TestNpcHandins(int argc, char **argv, argh::parser &cmd, std::string &description);
 	static void TestNpcHandinsMultiQuest(int argc, char **argv, argh::parser &cmd, std::string &description);
+	static void TestServeHttp(int argc, char **argv, argh::parser &cmd, std::string &description);
 	static void TestZoneState(int argc, char **argv, argh::parser &cmd, std::string &description);
 };

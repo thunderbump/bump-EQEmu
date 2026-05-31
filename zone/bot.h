@@ -536,6 +536,8 @@ public:
 
 	// Targeting
 	std::vector<Mob*> GatherSpellTargets(bool entireRaid = false, Mob* target = nullptr, bool no_clients = false, bool no_bots = false);
+	std::vector<Mob*> GetSingleTargetSlowMaintenanceCandidates(uint32 max_scan_count = 48);
+	Mob* SelectSingleTargetSlowMaintenanceTarget(uint16 spell_id, uint32 max_scan_count = 48);
 	bool HasValidAETarget(Bot* caster, uint16 spell_id, uint16 spell_type, Mob* tar);
 	void SetHasLoS(bool has_los) { _hasLoS = has_los; }
 	bool HasLoS() const { return _hasLoS; }

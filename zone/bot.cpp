@@ -17,6 +17,7 @@
 */
 #include "bot.h"
 
+#include "common/bot_slow_target.h"
 #include "common/data_verification.h"
 #include "common/repositories/bot_inventories_repository.h"
 #include "common/repositories/bot_spell_settings_repository.h"
@@ -9852,7 +9853,7 @@ bool Bot::CastChecks(uint16 spell_id, Mob* tar, uint16 spell_type, bool precheck
 
 	if (
 		spells[spell_id].target_type != ST_Self &&
-		IsBeneficialSpell(spell_id) &&
+		(IsBeneficialSpell(spell_id) || spell_type == BotSpellTypes::Slow) &&
 		!IsAnyHealSpell(spell_id) &&
 		!IsCureSpell(spell_id) &&
 		!IsHealOverTimeSpell(spell_id) &&
@@ -11316,6 +11317,10 @@ bool Bot::AttemptAICastSpell(uint16 spell_type, Mob* tar) {
 		}
 	}
 	else {
+		if (spell_type == BotSpellTypes::Slow) {
+			return AICastSpell(tar, GetChanceToCastBySpellType(spell_type), spell_type);
+		}
+
 		if (!PrecastChecks(tar, spell_type) || !AICastSpell(tar, GetChanceToCastBySpellType(spell_type), spell_type)) {
 			return result;
 		}
@@ -12820,6 +12825,139 @@ std::vector<Mob*> Bot::GatherSpellTargets(bool entire_raid, Mob* target, bool no
 	}
 
 	return valid_spell_targets;
+}
+
+std::vector<Mob*> Bot::GetSingleTargetSlowMaintenanceCandidates(uint32 max_scan_count)
+{
+	struct Candidate {
+		Mob*                       mob = nullptr;
+		EQ::BotSlowTarget::Ordering order;
+	};
+
+	std::vector<Mob*> combat_members;
+	combat_members.reserve(16);
+
+	auto add_combat_member = [&combat_members](Mob* member) {
+		if (!member) {
+			return;
+		}
+
+		if (std::find(combat_members.begin(), combat_members.end(), member) == combat_members.end()) {
+			combat_members.emplace_back(member);
+		}
+	};
+
+	add_combat_member(GetOwner());
+
+	for (auto* member : GatherSpellTargets(true, GetOwner())) {
+		add_combat_member(member);
+	}
+
+	std::vector<Candidate> candidates;
+	candidates.reserve(max_scan_count ? max_scan_count + 1 : 1);
+
+	auto add_candidate = [this, &combat_members, &candidates](Mob* mob, bool current_target, std::size_t sequence) {
+		if (
+			!mob ||
+			!mob->IsNPC() ||
+			mob->GetAppearance() == eaDead ||
+			!IsAttackAllowed(mob) ||
+			(mob->GetSpecialAbility(SpecialAbility::SlowImmunity))
+		) {
+			return;
+		}
+
+		bool threatens_combat_member = false;
+		bool threatens_pet = false;
+
+		auto* npc = mob->CastToNPC();
+		for (auto* member : combat_members) {
+			if (npc->IsOnHatelist(member)) {
+				threatens_combat_member = true;
+				break;
+			}
+		}
+
+		if (!threatens_combat_member) {
+			for (auto* member : combat_members) {
+				auto* pet = member ? member->GetPet() : nullptr;
+				if (pet && npc->IsOnHatelist(pet)) {
+					threatens_pet = true;
+					break;
+				}
+			}
+		}
+
+		const auto threat_priority = EQ::BotSlowTarget::GetThreatPriority(threatens_combat_member, threatens_pet);
+		if (!EQ::BotSlowTarget::IsEngagedHostileThreat(threat_priority)) {
+			return;
+		}
+
+		if (std::find_if(candidates.begin(), candidates.end(), [mob](const Candidate &candidate) { return candidate.mob == mob; }) != candidates.end()) {
+			return;
+		}
+
+		candidates.push_back(
+			{
+				mob,
+				{
+					current_target,
+					threat_priority,
+					DistanceSquared(GetPosition(), mob->GetPosition()),
+					sequence
+				}
+			}
+		);
+	};
+
+	add_candidate(GetTarget(), true, 0);
+
+	const uint32 effective_max_scan_count = max_scan_count ? max_scan_count : 48;
+	uint32 scanned = 0;
+	std::size_t sequence = 1;
+	for (const auto& close_mob : m_close_mobs) {
+		if (scanned >= effective_max_scan_count) {
+			break;
+		}
+
+		++scanned;
+		add_candidate(close_mob.second, false, sequence++);
+	}
+
+	std::sort(
+		candidates.begin(),
+		candidates.end(),
+		[](const Candidate &left, const Candidate &right) {
+			return EQ::BotSlowTarget::CompareOrdering(left.order, right.order);
+		}
+	);
+
+	std::vector<Mob*> candidate_mobs;
+	candidate_mobs.reserve(candidates.size());
+
+	for (const auto& candidate : candidates) {
+		candidate_mobs.emplace_back(candidate.mob);
+	}
+
+	return candidate_mobs;
+}
+
+Mob* Bot::SelectSingleTargetSlowMaintenanceTarget(uint16 spell_id, uint32 max_scan_count)
+{
+	if (!IsValidSpell(spell_id) || !IsSlowSpell(spell_id) || IsAnyAESpell(spell_id)) {
+		return nullptr;
+	}
+
+	return EQ::BotSlowTarget::SelectMaintenanceCandidate<Mob*>(
+		GetSingleTargetSlowMaintenanceCandidates(max_scan_count),
+		true,
+		[](Mob* candidate) {
+			return candidate && candidate->IsMezzed();
+		},
+		[this, spell_id](Mob* candidate) {
+			return candidate && CastChecks(spell_id, candidate, BotSpellTypes::Slow, true);
+		}
+	);
 }
 
 std::vector<Mob*> Bot::GetBuffTargets(Mob* spellTarget) {

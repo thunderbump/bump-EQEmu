@@ -17,6 +17,7 @@
 */
 #include "bot.h"
 
+#include "common/bot_slow_target.h"
 #include "common/data_verification.h"
 #include "common/repositories/bot_spells_entries_repository.h"
 #include "common/repositories/npc_spells_repository.h"
@@ -222,7 +223,14 @@ bool Bot::AICastSpell(Mob* tar, uint8 chance, uint16 spell_type, uint16 sub_targ
 			continue;
 		}
 
-		if (BotRequiresLoSToCast(spell_type, s.SpellId) && !HasLoS()) {
+		if (EQ::BotSlowTarget::UsesSingleTargetMaintenance(spell_type, IsCommandedSpell())) {
+			tar = SelectSingleTargetSlowMaintenanceTarget(s.SpellId);
+			if (!tar) {
+				continue;
+			}
+		}
+
+		if (BotRequiresLoSToCast(spell_type, s.SpellId) && !DoLosChecks(tar)) {
 			continue;
 		}
 
@@ -1098,7 +1106,12 @@ std::vector<BotSpell_wPriority> Bot::GetPrioritizedBotSpellsBySpellType(Bot* cas
 					continue;
 				}
 
-				if (!IsPBAESpell(bot_spell_list[i].spellid) && !caster->CastChecks(bot_spell_list[i].spellid, tar, spell_type, false, IsAEBotSpellType(spell_type))) {
+				const bool select_single_target_slow_later = EQ::BotSlowTarget::UsesSingleTargetMaintenance(spell_type, caster->IsCommandedSpell());
+				if (
+					!select_single_target_slow_later &&
+					!IsPBAESpell(bot_spell_list[i].spellid) &&
+					!caster->CastChecks(bot_spell_list[i].spellid, tar, spell_type, false, IsAEBotSpellType(spell_type))
+				) {
 					continue;
 				}
 
