@@ -631,7 +631,7 @@ private:
 		Client* GetBotOwnerByBotID(const uint32 bot_id);
 		std::vector<Bot*> GetBotsByBotOwnerCharacterID(uint32 botOwnerCharacterID);
 
-		void ShowSpawnWindow(Client* client, int Distance, bool NamedOnly); // TODO: Implement ShowSpawnWindow in the bot class but it needs entity list stuff
+		void ShowSpawnWindow(Client* client, int Distance, bool RareOnly); // TODO: Implement ShowSpawnWindow in the bot class but it needs entity list stuff
 
 		void GetBotList(std::list<Bot*> &b_list);
 	private:
