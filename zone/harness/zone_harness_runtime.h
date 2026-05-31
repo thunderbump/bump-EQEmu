@@ -27,6 +27,7 @@ struct RuntimeSnapshot {
 	uint64_t uptime_ms = 0;
 	uint64_t process_ticks = 0;
 	uint64_t pending_events = 0;
+	uint64_t max_event_id = 0;
 	ZoneIdentitySnapshot zone;
 };
 
@@ -42,6 +43,15 @@ struct ProcessResult {
 	RuntimeSnapshot runtime;
 };
 
+struct SpellCastStartScenarioResult {
+	bool started = false;
+	std::string reason;
+	uint16_t caster_id = 0;
+	uint16_t target_id = 0;
+	uint16_t spell_id = 0;
+	RuntimeSnapshot runtime;
+};
+
 class ZoneHarnessRuntime {
 public:
 	bool Boot(const std::string &zone_short_name, uint32_t instance_id = 0);
@@ -51,6 +61,8 @@ public:
 	EntitySnapshot Entities(uint32_t sample_limit = 25);
 	ProcessResult ProcessWorld(uint32_t ticks);
 	std::vector<ActorEvent> DrainEvents();
+	std::vector<ActorEvent> EventsSince(uint64_t since_id, size_t limit);
+	SpellCastStartScenarioResult StartKnownSpellCast(uint16_t spell_id = 200);
 	void RequestShutdown();
 	void Shutdown();
 

@@ -12,6 +12,7 @@
 
 #include "common/timer.h"
 #include "zone/entity.h"
+#include "zone/npc.h"
 #include "zone/questmgr.h"
 #include "zone/worldserver.h"
 #include "zone/zone.h"
@@ -54,6 +55,7 @@ bool ZoneHarnessRuntime::Boot(const std::string &zone_short_name, uint32_t insta
 	booted = true;
 	shutdown_requested = false;
 	process_ticks = 0;
+	ActorEventRecorder::RegisterActiveRecorder(&events);
 	return true;
 }
 
@@ -112,6 +114,69 @@ std::vector<ActorEvent> ZoneHarnessRuntime::DrainEvents()
 	return events.Drain();
 }
 
+std::vector<ActorEvent> ZoneHarnessRuntime::EventsSince(uint64_t since_id, size_t limit)
+{
+	std::lock_guard lock(mutex);
+	return events.Since(since_id, limit);
+}
+
+SpellCastStartScenarioResult ZoneHarnessRuntime::StartKnownSpellCast(uint16_t spell_id)
+{
+	std::lock_guard lock(mutex);
+
+	if (!booted || !zone || !is_zone_loaded) {
+		return {
+			.started = false,
+			.reason = "zone_not_booted",
+			.spell_id = spell_id,
+			.runtime = RuntimeLocked(),
+		};
+	}
+
+	if (!IsValidSpell(spell_id)) {
+		return {
+			.started = false,
+			.reason = "invalid_spell",
+			.spell_id = spell_id,
+			.runtime = RuntimeLocked(),
+		};
+	}
+
+	auto *caster_type = content_db.LoadNPCTypesData(754008);
+	auto *target_type = content_db.LoadNPCTypesData(754008);
+	if (!caster_type || !target_type) {
+		return {
+			.started = false,
+			.reason = "npc_type_unavailable",
+			.spell_id = spell_id,
+			.runtime = RuntimeLocked(),
+		};
+	}
+
+	auto *caster = new NPC(caster_type, nullptr, glm::vec4(0, 0, 0, 0), GravityBehavior::Water);
+	auto *target = new NPC(target_type, nullptr, glm::vec4(5, 0, 0, 0), GravityBehavior::Water);
+	caster->TempName("HarnessCastStartCaster");
+	target->TempName("HarnessCastStartTarget");
+	entity_list.AddNPC(caster, false, true);
+	entity_list.AddNPC(target, false, true);
+	caster->SetTarget(target);
+
+	const bool started = caster->CastSpell(spell_id, target->GetID(), EQ::spells::CastingSlot::Gem2);
+	if (!started) {
+		caster->Depop(false);
+		target->Depop(false);
+	}
+
+	return {
+		.started = started,
+		.reason = started ? "cast_started" : "cast_not_started",
+		.caster_id = caster->GetID(),
+		.target_id = target->GetID(),
+		.spell_id = spell_id,
+		.runtime = RuntimeLocked(),
+	};
+}
+
 void ZoneHarnessRuntime::RequestShutdown()
 {
 	std::lock_guard lock(mutex);
@@ -122,6 +187,7 @@ void ZoneHarnessRuntime::Shutdown()
 {
 	std::lock_guard lock(mutex);
 	shutdown_requested = true;
+	ActorEventRecorder::ClearActiveRecorder(&events);
 
 	entity_list.Clear();
 	entity_list.RemoveAllEncounters();
@@ -145,6 +211,7 @@ RuntimeSnapshot ZoneHarnessRuntime::RuntimeLocked() const
 		.uptime_ms = static_cast<uint64_t>(elapsed),
 		.process_ticks = process_ticks,
 		.pending_events = events.PendingCount(),
+		.max_event_id = events.MaxEventID(),
 		.zone = snapshots.ZoneIdentity(),
 	};
 }

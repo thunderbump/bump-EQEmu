@@ -90,7 +90,38 @@ nlohmann::json ToJson(const RuntimeSnapshot &snapshot)
 		{"uptime_ms", snapshot.uptime_ms},
 		{"process_ticks", snapshot.process_ticks},
 		{"pending_events", snapshot.pending_events},
+		{"max_event_id", snapshot.max_event_id},
 		{"zone", ToJson(snapshot.zone)},
+	};
+}
+
+nlohmann::json ToJson(const ActorEventEntity &entity)
+{
+	return {
+		{"entity_id", entity.entity_id},
+		{"entity_ref", entity.entity_ref},
+		{"name", entity.name},
+		{"kind", entity.kind},
+	};
+}
+
+nlohmann::json ToJson(const ActorEventSpell &spell)
+{
+	return {
+		{"id", spell.id},
+		{"name", spell.name},
+		{"category", spell.category},
+		{"targeting", spell.targeting},
+		{"target_type", spell.target_type},
+	};
+}
+
+nlohmann::json ToJson(const ActorEventCast &cast)
+{
+	return {
+		{"slot", cast.slot},
+		{"cast_time_ms", cast.cast_time_ms},
+		{"original_cast_time_ms", cast.original_cast_time_ms},
 	};
 }
 
@@ -114,10 +145,35 @@ nlohmann::json ToJson(const ProcessResult &result)
 
 nlohmann::json ToJson(const ActorEvent &event)
 {
-	return {
-		{"sequence", event.sequence},
+	auto payload = nlohmann::json{
+		{"id", event.id},
+		{"time_ms", event.time_ms},
 		{"type", event.type},
 		{"message", event.message},
+		{"caster", ToJson(event.caster)},
+		{"spell", ToJson(event.spell)},
+		{"cast", ToJson(event.cast)},
+	};
+
+	if (event.target.has_value()) {
+		payload["target"] = ToJson(*event.target);
+	}
+	else {
+		payload["target"] = nullptr;
+	}
+
+	return payload;
+}
+
+nlohmann::json ToJson(const SpellCastStartScenarioResult &result)
+{
+	return {
+		{"started", result.started},
+		{"reason", result.reason},
+		{"caster_id", result.caster_id},
+		{"target_id", result.target_id},
+		{"spell_id", result.spell_id},
+		{"runtime", ToJson(result.runtime)},
 	};
 }
 
@@ -147,6 +203,29 @@ uint32_t ParseTicks(const httplib::Request &req)
 	}
 
 	return 1;
+}
+
+uint16_t ParseSpellID(const httplib::Request &req)
+{
+	if (req.has_param("spell_id")) {
+		return static_cast<uint16_t>(Strings::ToUnsignedInt(req.get_param_value("spell_id")));
+	}
+
+	if (req.body.empty()) {
+		return 200;
+	}
+
+	try {
+		const auto payload = nlohmann::json::parse(req.body);
+		if (payload.contains("spell_id") && payload["spell_id"].is_number()) {
+			return payload["spell_id"].get<uint16_t>();
+		}
+	}
+	catch (const std::exception &) {
+		return 200;
+	}
+
+	return 200;
 }
 
 bool IsAuthorized(const httplib::Request &req, const std::string &bearer_token)
@@ -217,9 +296,18 @@ bool ServeHttp(const HttpServerOptions &options)
 		SetJson(res, ToJson(runtime.ProcessWorld(ParseTicks(req))));
 	});
 
-	api.Get("/api/v1/harness/events", [&runtime](const auto &, auto &res) {
+	api.Get("/api/v1/harness/events", [&runtime](const auto &req, auto &res) {
+		uint64_t since = 0;
+		size_t limit = 100;
+		if (req.has_param("since")) {
+			since = Strings::ToUnsignedBigInt(req.get_param_value("since"));
+		}
+		if (req.has_param("limit")) {
+			limit = Strings::ToUnsignedInt(req.get_param_value("limit"));
+		}
+
 		nlohmann::json events = nlohmann::json::array();
-		for (const auto &event: runtime.DrainEvents()) {
+		for (const auto &event: runtime.EventsSince(since, limit)) {
 			events.push_back(ToJson(event));
 		}
 
@@ -233,6 +321,10 @@ bool ServeHttp(const HttpServerOptions &options)
 		}
 
 		SetJson(res, {{"events", events}});
+	});
+
+	api.Post("/api/v1/harness/scenarios/spell-cast-start", [&runtime](const auto &req, auto &res) {
+		SetJson(res, ToJson(runtime.StartKnownSpellCast(ParseSpellID(req))));
 	});
 
 	api.Post("/api/v1/harness/shutdown", [&runtime, &api](const auto &, auto &res) {

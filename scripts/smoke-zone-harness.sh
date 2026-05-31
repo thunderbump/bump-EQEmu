@@ -91,6 +91,20 @@ process=\$(curl -fsS -X POST -H 'Content-Type: application/json' --data '{\"tick
 events=\$(curl -fsS \"http://127.0.0.1:${port}/api/v1/harness/events\")
 [[ \"\$events\" == *'\"events\":[]'* ]] || { printf '%s\n' \"\$events\" >&2; exit 1; }
 
+scenario=\$(curl -fsS -X POST -H 'Content-Type: application/json' --data '{\"spell_id\":200}' \"http://127.0.0.1:${port}/api/v1/harness/scenarios/spell-cast-start\")
+[[ \"\$scenario\" == *'\"started\":true'* ]] || { printf '%s\n' \"\$scenario\" >&2; exit 1; }
+
+cast_events=''
+for _ in \$(seq 1 20); do
+  cast_events=\$(curl -fsS \"http://127.0.0.1:${port}/api/v1/harness/events?since=0&limit=10\")
+  if [[ \"\$cast_events\" == *'\"type\":\"spell_cast_started\"'* ]]; then
+    break
+  fi
+  sleep 1
+done
+[[ \"\$cast_events\" == *'\"type\":\"spell_cast_started\"'* ]] || { printf '%s\n' \"\$cast_events\" >&2; exit 1; }
+[[ \"\$cast_events\" == *'\"caster\"'* && \"\$cast_events\" == *'\"target\"'* && \"\$cast_events\" == *'\"spell\"'* && \"\$cast_events\" == *'\"cast\"'* ]] || { printf '%s\n' \"\$cast_events\" >&2; exit 1; }
+
 shutdown=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/shutdown\")
 [[ \"\$shutdown\" == *'\"shutdown_requested\":true'* ]] || { printf '%s\n' \"\$shutdown\" >&2; exit 1; }
 
