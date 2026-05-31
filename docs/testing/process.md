@@ -338,6 +338,32 @@ the same container or add explicit port publishing for an intentional host-side
 check. The current sidecar process handles `SIGTERM` by logging the signal but
 may need the one-off container to be stopped after validation.
 
+## Zone Harness HTTP Tracer
+
+Use the Zone Harness tracer when a runtime validation needs to boot one known
+zone, inspect basic health and snapshots, run bounded normal processing, drain
+ephemeral Actor Events, and shut down cleanly without a real connected client.
+
+The repo-local smoke wrapper follows the same one-off AkkStack runtime shape as
+the sidecar checks. It starts the persistent AkkStack MariaDB container if
+needed with host ports disabled for the smoke, then runs the harness in a
+temporary one-off `eqemu-server` container:
+
+```sh
+./scripts/smoke-zone-harness.sh
+```
+
+The wrapper runs `zone tests:serve-http --zone qrg --port 9099
+--max-runtime-seconds 30` inside a temporary runtime directory in an
+`eqemu-server` container, then checks:
+
+- `GET /api/v1/harness/health`
+- `GET /api/v1/harness/zone`
+- `GET /api/v1/harness/entities`
+- `POST /api/v1/harness/process`
+- `GET /api/v1/harness/events`
+- `POST /api/v1/harness/shutdown`
+
 ## Choosing A Tier
 
 - Common utility or isolated logic: Tier 1.

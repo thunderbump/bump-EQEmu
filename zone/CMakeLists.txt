@@ -22,6 +22,7 @@ set(zone_sources
     cli/tests/cli_npc_handins.cpp
     cli/tests/cli_npc_handins_multiquest.cpp
     cli/tests/cli_test_util.cpp
+    cli/tests/cli_zone_harness_serve_http.cpp
     cli/tests/cli_zone_state.cpp
     client.cpp
     client_bot.cpp
@@ -50,6 +51,10 @@ set(zone_sources
     groups.cpp
     guild.cpp
     guild_mgr.cpp
+    harness/actor_event_recorder.cpp
+    harness/harness_snapshot_service.cpp
+    harness/zone_harness_http.cpp
+    harness/zone_harness_runtime.cpp
     hate_list.cpp
     heal_rotation.cpp
     horse.cpp
@@ -152,6 +157,10 @@ set(zone_headers
     global_loot_manager.h
     groups.h
     guild_mgr.h
+    harness/actor_event_recorder.h
+    harness/harness_snapshot_service.h
+    harness/zone_harness_http.h
+    harness/zone_harness_runtime.h
     hate_list.h
     heal_rotation.h
     horse.h
