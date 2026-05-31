@@ -49,7 +49,7 @@ void bot_command_track(Client *c, const Seperator *sep)
 	}
 
 	int base_distance = 0;
-	bool track_named = false;
+	bool track_rare = false;
 	std::string tracking_msg;
 	switch (my_bot->GetClass()) {
 		case Class::Ranger:
@@ -59,7 +59,7 @@ void bot_command_track(Client *c, const Seperator *sep)
 			}
 			else if (!tracking_scope.compare("rare")) {
 				base_distance = 80;
-				bool track_named = true;
+				track_rare = true;
 				tracking_msg = "Master tracking...";
 			}
 			else { // default to 'all'
@@ -85,5 +85,5 @@ void bot_command_track(Client *c, const Seperator *sep)
 
 	my_bot->InterruptSpell();
 	my_bot->RaidGroupSay(tracking_msg.c_str());
-	entity_list.ShowSpawnWindow(c, (c->GetLevel() * base_distance), track_named);
+	entity_list.ShowSpawnWindow(c, (c->GetLevel() * base_distance), track_rare);
 }

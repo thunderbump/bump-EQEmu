@@ -116,6 +116,10 @@ _Avoid_: Pressure healing, downtime topping-off
 An owned bot's ability to report nearby trackable spawns to its owner when the bot has an appropriate tracking-capable class and level.
 _Avoid_: Group tracking, shared Track skill, borrowed tracking
 
+**Rare Spawn**:
+A gameplay-notable NPC spawn marked by the server's rare-spawn data flag.
+_Avoid_: Named Spawn, name-prefix match, spawn-probability guess, ordinary spawn
+
 **Autonomous Actor**:
 A server-controlled character or creature that can perceive ordinary gameplay state, choose bounded actions toward a goal, and act through normal gameplay paths without direct player input.
 _Avoid_: AI actor, test actor, entity, mob
@@ -256,8 +260,8 @@ _Avoid_: Autonomous Actor runtime, test actor system, production sidecar
 - **Bot-Aided Tracking** should use the owned bot's class and level to determine whether a report is available, but center the reported search area on the requesting player.
 - The first **Bot-Aided Tracking** report should list trackable NPC spawns only, not clients, bots, pets, familiars, mercenaries, or corpses.
 - **Bot-Aided Tracking** should respect whether a reported spawn is visible to the requesting player; bot tracking should not reveal spawns hidden from that player through ordinary invisibility checks.
-- **Bot-Aided Tracking** should not claim an authoritative rare-versus-normal spawn distinction until that spawn classification is investigated separately.
-- The existing **Bot-Aided Tracking** rare/filter option may remain as a compatibility heuristic, but should be revisited after rare-versus-normal spawn research determines whether a stronger spawn classification exists.
+- **Bot-Aided Tracking** rare filtering should use **Rare Spawn** classification from the existing rare-spawn data flag.
+- Spawn chance, spawn limits, killed-named logging, raid conventions, and name-shape heuristics should not expand **Rare Spawn** classification until real data gaps are found and reviewed.
 - The first **Bot-Aided Tracking** report should include approximate distance in the popup, but should not provide live direction updates or set the player's tracking target.
 - **Bot-Aided Tracking** reports should sort trackable NPC spawns nearest-first, with con color as presentation rather than the primary grouping.
 - The first **Bot-Aided Tracking** implementation should preserve the current bot class, level, and range tiers rather than introducing bot Tracking skill progression.
