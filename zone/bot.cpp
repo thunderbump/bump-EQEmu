@@ -7612,6 +7612,7 @@ void EntityList::ShowSpawnWindow(Client* client, int Distance, EQ::BotAidedTrack
 			!curMob ||
 			!curMob->IsTrackable() ||
 			!curMob->IsNPC() ||
+			curMob->IsInvisible(client) ||
 			curMob->IsBot() ||
 			curMob->IsPet() ||
 			curMob->IsFamiliar() ||
