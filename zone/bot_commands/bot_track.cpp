@@ -17,6 +17,8 @@
 */
 #include "zone/bot_command.h"
 
+#include "common/bot_aided_tracking.h"
+
 void bot_command_track(Client *c, const Seperator *sep)
 {
 	if (helper_command_alias_fail(c, "bot_command_track", sep->arg[0], "track"))
@@ -49,17 +51,18 @@ void bot_command_track(Client *c, const Seperator *sep)
 	}
 
 	int base_distance = 0;
-	bool track_rare = false;
+	auto report_scope = EQ::BotAidedTracking::ReportScope::All;
 	std::string tracking_msg;
 	switch (my_bot->GetClass()) {
 		case Class::Ranger:
 			if (!tracking_scope.compare("local")) {
 				base_distance = 30;
+				report_scope = EQ::BotAidedTracking::ReportScope::Local;
 				tracking_msg = "Local tracking...";
 			}
 			else if (!tracking_scope.compare("rare")) {
 				base_distance = 80;
-				track_rare = true;
+				report_scope = EQ::BotAidedTracking::ReportScope::Rare;
 				tracking_msg = "Master tracking...";
 			}
 			else { // default to 'all'
@@ -85,5 +88,5 @@ void bot_command_track(Client *c, const Seperator *sep)
 
 	my_bot->InterruptSpell();
 	my_bot->RaidGroupSay(tracking_msg.c_str());
-	entity_list.ShowSpawnWindow(c, (c->GetLevel() * base_distance), track_rare);
+	entity_list.ShowSpawnWindow(c, (c->GetLevel() * base_distance), report_scope);
 }

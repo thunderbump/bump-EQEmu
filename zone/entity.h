@@ -18,6 +18,7 @@
 #pragma once
 
 #include "common/bodytypes.h"
+#include "common/bot_aided_tracking.h"
 #include "common/emu_constants.h"
 #include "common/eq_constants.h"
 #include "common/linked_list.h"
@@ -631,7 +632,7 @@ private:
 		Client* GetBotOwnerByBotID(const uint32 bot_id);
 		std::vector<Bot*> GetBotsByBotOwnerCharacterID(uint32 botOwnerCharacterID);
 
-		void ShowSpawnWindow(Client* client, int Distance, bool RareOnly); // TODO: Implement ShowSpawnWindow in the bot class but it needs entity list stuff
+		void ShowSpawnWindow(Client* client, int Distance, EQ::BotAidedTracking::ReportScope scope); // TODO: Implement ShowSpawnWindow in the bot class but it needs entity list stuff
 
 		void GetBotList(std::list<Bot*> &b_list);
 	private:
