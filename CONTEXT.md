@@ -116,6 +116,10 @@ _Avoid_: Pressure healing, downtime topping-off
 An owned bot's ability to report nearby trackable spawns to its owner when the bot has an appropriate tracking-capable class and level.
 _Avoid_: Group tracking, shared Track skill, borrowed tracking
 
+**Bot-Aided Tracking Report**:
+A player-facing list of eligible nearby trackable NPC spawns produced through **Bot-Aided Tracking**.
+_Avoid_: Track window, spawn window, tracking packet, raw mob list
+
 **Rare Spawn**:
 A gameplay-notable NPC spawn marked by the server's rare-spawn data flag.
 _Avoid_: Named Spawn, name-prefix match, spawn-probability guess, ordinary spawn
@@ -257,13 +261,17 @@ _Avoid_: Autonomous Actor runtime, test actor system, production sidecar
 - **Bot-Aided Tracking** should work through the requesting player's owned spawned bots, not through any capable bot in the player's group.
 - **Bot-Aided Tracking** should not grant the player the Tracking skill or bypass native class tracking rules.
 - The first **Bot-Aided Tracking** implementation should use a bot-produced tracking report popup rather than the native client Track window.
+- A **Bot-Aided Tracking Report** is the selected report content before any popup, private message, or bot chat presentation is applied.
 - **Bot-Aided Tracking** should use the owned bot's class and level to determine whether a report is available, but center the reported search area on the requesting player.
 - The first **Bot-Aided Tracking** report should list trackable NPC spawns only, not clients, bots, pets, familiars, mercenaries, or corpses.
 - **Bot-Aided Tracking** should respect whether a reported spawn is visible to the requesting player; bot tracking should not reveal spawns hidden from that player through ordinary invisibility checks.
+- A **Bot-Aided Tracking Report** should be selected from spawns already visible to the requesting player; hidden-spawn handling belongs to ordinary runtime visibility rules, not report selection.
 - **Bot-Aided Tracking** rare filtering should use **Rare Spawn** classification from the existing rare-spawn data flag.
 - Spawn chance, spawn limits, killed-named logging, raid conventions, and name-shape heuristics should not expand **Rare Spawn** classification until real data gaps are found and reviewed.
 - The first **Bot-Aided Tracking** report should include approximate distance in the popup, but should not provide live direction updates or set the player's tracking target.
+- **Bot-Aided Tracking Report** distance should be a rounded horizontal distance from the requesting player to the spawn, not a direction, pathing route, or vertical-distance-aware navigation hint.
 - **Bot-Aided Tracking** reports should sort trackable NPC spawns nearest-first, with con color as presentation rather than the primary grouping.
+- **Bot-Aided Tracking Report** entries at the same approximate distance should sort by clean player-facing spawn name rather than by entity ID or spawn metadata.
 - The first **Bot-Aided Tracking** implementation should preserve the current bot class, level, and range tiers rather than introducing bot Tracking skill progression.
 - **Bot-Aided Tracking** should not interrupt the reporting bot's current spell cast or combat action in the first implementation.
 - **Bot-Aided Tracking** may be used in combat as a passive report, but should have a small reuse cooldown to prevent popup spam.
@@ -271,6 +279,7 @@ _Avoid_: Autonomous Actor runtime, test actor system, production sidecar
 - **Bot-Aided Tracking** should show clean player-facing spawn names, not raw NPC names, spawn IDs, entity IDs, or database metadata.
 - **Bot-Aided Tracking** should use a popup when eligible spawns are found and a brief private message when no eligible spawns are found.
 - **Bot-Aided Tracking** reports should have an explicit result cap, with truncation communicated as part of the report when more eligible spawns exist.
+- The first **Bot-Aided Tracking Report** result cap should be 50 entries and should be part of report selection rather than popup formatting.
 - The first **Bot-Aided Tracking** report should be informational only, with no clickable target selection, no tracking target assignment, and no automatic navigation.
 - The first **Bot-Aided Tracking** cleanup should not add a new server rule; existing bot command access controls are sufficient for an explicit tracking command.
 - **Bot-Aided Tracking** should be validated with deterministic report-selection tests before live smoke testing Ranger, Druid, and Bard bot tracking commands in a real zone.
