@@ -19,6 +19,27 @@
 
 #include "common/bot_aided_tracking.h"
 
+namespace
+{
+EQ::BotAidedTracking::TrackingBotClass TrackingClassForBot(Bot *bot)
+{
+	if (!bot) {
+		return EQ::BotAidedTracking::TrackingBotClass::Other;
+	}
+
+	switch (bot->GetClass()) {
+		case Class::Ranger:
+			return EQ::BotAidedTracking::TrackingBotClass::Ranger;
+		case Class::Druid:
+			return EQ::BotAidedTracking::TrackingBotClass::Druid;
+		case Class::Bard:
+			return EQ::BotAidedTracking::TrackingBotClass::Bard;
+		default:
+			return EQ::BotAidedTracking::TrackingBotClass::Other;
+	}
+}
+}
+
 void bot_command_track(Client *c, const Seperator *sep)
 {
 	if (helper_command_alias_fail(c, "bot_command_track", sep->arg[0], "track"))
@@ -38,54 +59,29 @@ void bot_command_track(Client *c, const Seperator *sep)
 	uint16 class_mask = (player_class_bitmasks[Class::Ranger] | player_class_bitmasks[Class::Druid] | player_class_bitmasks[Class::Bard]);
 	ActionableBots::Filter_ByClasses(c, sbl, class_mask);
 
-	Bot* my_bot = ActionableBots::AsSpawned_ByMinLevelAndClass(c, sbl, 1, Class::Ranger);
-	if (tracking_scope.empty()) {
-		if (!my_bot)
-			my_bot = ActionableBots::AsSpawned_ByMinLevelAndClass(c, sbl, 20, Class::Druid);
-		if (!my_bot)
-			my_bot = ActionableBots::AsSpawned_ByMinLevelAndClass(c, sbl, 35, Class::Bard);
+	std::vector<EQ::BotAidedTracking::CapabilityCandidate> capability_candidates;
+	capability_candidates.reserve(sbl.size());
+	for (auto bot_iter : sbl) {
+		capability_candidates.push_back(
+			{
+				TrackingClassForBot(bot_iter),
+				static_cast<uint8_t>(bot_iter->GetLevel())
+			}
+		);
 	}
-	if (!my_bot) {
+
+	const auto capability = EQ::BotAidedTracking::ResolveCapability(capability_candidates, tracking_scope);
+	if (!capability.capable || capability.selected_candidate_index >= sbl.size()) {
 		c->Message(Chat::White, "No bots are capable of performing this action");
 		return;
 	}
 
-	int base_distance = 0;
-	auto report_scope = EQ::BotAidedTracking::ReportScope::All;
-	std::string tracking_msg;
-	switch (my_bot->GetClass()) {
-		case Class::Ranger:
-			if (!tracking_scope.compare("local")) {
-				base_distance = 30;
-				report_scope = EQ::BotAidedTracking::ReportScope::Local;
-				tracking_msg = "Local tracking...";
-			}
-			else if (!tracking_scope.compare("rare")) {
-				base_distance = 80;
-				report_scope = EQ::BotAidedTracking::ReportScope::Rare;
-				tracking_msg = "Master tracking...";
-			}
-			else { // default to 'all'
-				base_distance = 80;
-				tracking_msg = "Advanced tracking...";
-			}
-			break;
-		case Class::Druid:
-			base_distance = 30;
-			tracking_msg = "Local tracking...";
-			break;
-		case Class::Bard:
-			base_distance = 20;
-			tracking_msg = "Near tracking...";
-			break;
-		default:
-			return;
-	}
-	if (!base_distance) {
+	if (!capability.base_distance_per_level) {
 		c->Message(Chat::White, "An unknown codition has occurred");
 		return;
 	}
 
-	my_bot->RaidGroupSay(tracking_msg.c_str());
-	entity_list.ShowSpawnWindow(c, (c->GetLevel() * base_distance), report_scope);
+	Bot *my_bot = sbl[capability.selected_candidate_index];
+	my_bot->RaidGroupSay(capability.tracking_message);
+	entity_list.ShowSpawnWindow(c, (c->GetLevel() * capability.base_distance_per_level), capability.report_scope);
 }

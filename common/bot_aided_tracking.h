@@ -45,9 +45,74 @@ struct Report {
 	bool                     truncated = false;
 };
 
+enum class TrackingBotClass {
+	Ranger,
+	Druid,
+	Bard,
+	Other
+};
+
+struct CapabilityCandidate {
+	TrackingBotClass tracking_class = TrackingBotClass::Other;
+	uint8_t          level = 0;
+};
+
+struct Capability {
+	bool        capable = false;
+	std::size_t selected_candidate_index = 0;
+	ReportScope report_scope = ReportScope::All;
+	uint32_t    base_distance_per_level = 0;
+	const char *tracking_message = "";
+};
+
 inline bool IsCandidateInScope(const CandidateSnapshot &candidate, ReportScope scope)
 {
 	return scope != ReportScope::Rare || candidate.rare_spawn;
+}
+
+inline Capability CapabilityForRanger(std::size_t candidate_index, const std::string &requested_scope)
+{
+	if (requested_scope == "local") {
+		return {true, candidate_index, ReportScope::Local, 30, "Local tracking..."};
+	}
+
+	if (requested_scope == "rare") {
+		return {true, candidate_index, ReportScope::Rare, 80, "Master tracking..."};
+	}
+
+	return {true, candidate_index, ReportScope::All, 80, "Advanced tracking..."};
+}
+
+inline Capability ResolveCapability(
+	const std::vector<CapabilityCandidate> &candidates,
+	const std::string &requested_scope
+) {
+	for (std::size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
+		const auto &candidate = candidates[candidate_index];
+		if (candidate.tracking_class == TrackingBotClass::Ranger && candidate.level >= 1) {
+			return CapabilityForRanger(candidate_index, requested_scope);
+		}
+	}
+
+	if (!requested_scope.empty()) {
+		return {};
+	}
+
+	for (std::size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
+		const auto &candidate = candidates[candidate_index];
+		if (candidate.tracking_class == TrackingBotClass::Druid && candidate.level >= 20) {
+			return {true, candidate_index, ReportScope::All, 30, "Local tracking..."};
+		}
+	}
+
+	for (std::size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
+		const auto &candidate = candidates[candidate_index];
+		if (candidate.tracking_class == TrackingBotClass::Bard && candidate.level >= 35) {
+			return {true, candidate_index, ReportScope::All, 20, "Near tracking..."};
+		}
+	}
+
+	return {};
 }
 
 inline Report SelectReport(
