@@ -86,7 +86,6 @@ void bot_command_track(Client *c, const Seperator *sep)
 		return;
 	}
 
-	my_bot->InterruptSpell();
 	my_bot->RaidGroupSay(tracking_msg.c_str());
 	entity_list.ShowSpawnWindow(c, (c->GetLevel() * base_distance), report_scope);
 }
