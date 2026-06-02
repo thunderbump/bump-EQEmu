@@ -26,6 +26,26 @@ enum class ReportScope {
 	Local
 };
 
+inline bool TryParseReportScope(const std::string &requested_scope, ReportScope &scope)
+{
+	if (requested_scope.empty() || requested_scope == "all") {
+		scope = ReportScope::All;
+		return true;
+	}
+
+	if (requested_scope == "rare") {
+		scope = ReportScope::Rare;
+		return true;
+	}
+
+	if (requested_scope == "local") {
+		scope = ReportScope::Local;
+		return true;
+	}
+
+	return false;
+}
+
 struct CandidateSnapshot {
 	std::string clean_name;
 	uint32_t    rounded_horizontal_distance = 0;

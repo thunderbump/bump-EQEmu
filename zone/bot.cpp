@@ -17,7 +17,6 @@
 */
 #include "bot.h"
 
-#include "common/bot_aided_tracking.h"
 #include "common/bot_slow_target.h"
 #include "common/data_verification.h"
 #include "common/repositories/bot_inventories_repository.h"
@@ -7578,88 +7577,6 @@ bool EntityList::RemoveBot(uint16 entityID) {
 		return true;
 	}
 	return false;
-}
-
-namespace {
-constexpr size_t BotAidedTrackingResultLimit = 50;
-
-const char *BotAidedTrackingConColor(uint32 con)
-{
-	switch (con) {
-		case ConsiderColor::Green:
-			return "#00FF00";
-		case ConsiderColor::LightBlue:
-			return "#8080FF";
-		case ConsiderColor::DarkBlue:
-			return "#2020FF";
-		case ConsiderColor::Yellow:
-			return "#FFFF00";
-		case ConsiderColor::Red:
-			return "#FF0000";
-		default:
-			return "#FFFFFF";
-	}
-}
-}
-
-void EntityList::ShowSpawnWindow(Client* client, int Distance, EQ::BotAidedTracking::ReportScope scope) {
-	const char *WindowTitle = "Bot Tracking Window";
-	std::vector<EQ::BotAidedTracking::CandidateSnapshot> candidates;
-
-	for (const auto& m : mob_list) {
-		auto* curMob = m.second;
-		if (
-			!curMob ||
-			!curMob->IsTrackable() ||
-			!curMob->IsNPC() ||
-			curMob->IsInvisible(client) ||
-			curMob->IsBot() ||
-			curMob->IsPet() ||
-			curMob->IsFamiliar() ||
-			curMob->IsMerc()
-		) {
-			continue;
-		}
-
-		const auto distance = static_cast<uint32>(DistanceNoZ(curMob->GetPosition(), client->GetPosition()) + 0.5f);
-		candidates.push_back(
-			{
-				curMob->GetCleanName(),
-				distance,
-				static_cast<uint32>(client->GetLevelCon(curMob->GetLevel())),
-				curMob->IsRareSpawn()
-			}
-		);
-	}
-
-	const auto report = EQ::BotAidedTracking::SelectReport(
-		std::move(candidates),
-		scope,
-		static_cast<uint32>(Distance),
-		BotAidedTrackingResultLimit
-	);
-
-	if (report.entries.empty()) {
-		client->Message(Chat::White, "No trackable spawns found");
-		return;
-	}
-
-	std::string WindowText;
-	for (const auto& entry : report.entries) {
-		WindowText += fmt::format(
-			"<c \"{}\">{} - {}</c><br>",
-			BotAidedTrackingConColor(entry.presentation),
-			entry.clean_name,
-			entry.rounded_horizontal_distance
-		);
-	}
-
-	if (report.truncated) {
-		WindowText += "<br>List truncated... too many mobs to display";
-	}
-
-	client->SendPopupToClient(WindowTitle, WindowText.c_str());
-	return;
 }
 
 uint8 Bot::GetNumberNeedingHealedInGroup(Mob* tar, uint16 spell_type, uint16 spell_id, float range) {

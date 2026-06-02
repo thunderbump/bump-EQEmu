@@ -17,28 +17,7 @@
 */
 #include "zone/bot_command.h"
 
-#include "common/bot_aided_tracking.h"
-
-namespace
-{
-EQ::BotAidedTracking::TrackingBotClass TrackingClassForBot(Bot *bot)
-{
-	if (!bot) {
-		return EQ::BotAidedTracking::TrackingBotClass::Other;
-	}
-
-	switch (bot->GetClass()) {
-		case Class::Ranger:
-			return EQ::BotAidedTracking::TrackingBotClass::Ranger;
-		case Class::Druid:
-			return EQ::BotAidedTracking::TrackingBotClass::Druid;
-		case Class::Bard:
-			return EQ::BotAidedTracking::TrackingBotClass::Bard;
-		default:
-			return EQ::BotAidedTracking::TrackingBotClass::Other;
-	}
-}
-}
+#include "zone/bot_aided_tracking_runtime.h"
 
 void bot_command_track(Client *c, const Seperator *sep)
 {
@@ -51,37 +30,5 @@ void bot_command_track(Client *c, const Seperator *sep)
 		return;
 	}
 
-	std::string tracking_scope = sep->arg[1];
-
-	std::vector<Bot*> sbl;
-	MyBots::PopulateSBL_BySpawnedBots(c, sbl);
-
-	uint16 class_mask = (player_class_bitmasks[Class::Ranger] | player_class_bitmasks[Class::Druid] | player_class_bitmasks[Class::Bard]);
-	ActionableBots::Filter_ByClasses(c, sbl, class_mask);
-
-	std::vector<EQ::BotAidedTracking::CapabilityCandidate> capability_candidates;
-	capability_candidates.reserve(sbl.size());
-	for (auto bot_iter : sbl) {
-		capability_candidates.push_back(
-			{
-				TrackingClassForBot(bot_iter),
-				static_cast<uint8_t>(bot_iter->GetLevel())
-			}
-		);
-	}
-
-	const auto capability = EQ::BotAidedTracking::ResolveCapability(capability_candidates, tracking_scope);
-	if (!capability.capable || capability.selected_candidate_index >= sbl.size()) {
-		c->Message(Chat::White, "No bots are capable of performing this action");
-		return;
-	}
-
-	if (!capability.base_distance_per_level) {
-		c->Message(Chat::White, "An unknown codition has occurred");
-		return;
-	}
-
-	Bot *my_bot = sbl[capability.selected_candidate_index];
-	my_bot->RaidGroupSay(capability.tracking_message);
-	entity_list.ShowSpawnWindow(c, (c->GetLevel() * capability.base_distance_per_level), capability.report_scope);
+	ZoneBotAidedTrackingRuntime::RunBotAidedTracking(c, sep->arg[0], sep->arg[1]);
 }

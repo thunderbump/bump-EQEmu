@@ -26,6 +26,7 @@ public:
 		TEST_ADD(BotAidedTrackingTest::ReportSelectionAllowsEmptyReports);
 		TEST_ADD(BotAidedTrackingTest::ReportEntriesCarryPresentationValues);
 		TEST_ADD(BotAidedTrackingTest::RangerCapabilitySupportsAllScopes);
+		TEST_ADD(BotAidedTrackingTest::ReportScopeParsingRejectsUnknownScope);
 		TEST_ADD(BotAidedTrackingTest::EmptyScopeFallsBackToDruidThenBard);
 		TEST_ADD(BotAidedTrackingTest::NonEmptyScopeRequiresRanger);
 		TEST_ADD(BotAidedTrackingTest::CapabilityRejectsUnderleveledTrackingBots);
@@ -192,6 +193,25 @@ private:
 		TEST_ASSERT(local_capability.report_scope == ReportScope::Local);
 		TEST_ASSERT(local_capability.base_distance_per_level == 30);
 		TEST_ASSERT(std::string(local_capability.tracking_message) == "Local tracking...");
+	}
+
+	void ReportScopeParsingRejectsUnknownScope()
+	{
+		ReportScope scope = ReportScope::All;
+
+		TEST_ASSERT(EQ::BotAidedTracking::TryParseReportScope("", scope));
+		TEST_ASSERT(scope == ReportScope::All);
+
+		TEST_ASSERT(EQ::BotAidedTracking::TryParseReportScope("all", scope));
+		TEST_ASSERT(scope == ReportScope::All);
+
+		TEST_ASSERT(EQ::BotAidedTracking::TryParseReportScope("rare", scope));
+		TEST_ASSERT(scope == ReportScope::Rare);
+
+		TEST_ASSERT(EQ::BotAidedTracking::TryParseReportScope("local", scope));
+		TEST_ASSERT(scope == ReportScope::Local);
+
+		TEST_ASSERT(!EQ::BotAidedTracking::TryParseReportScope("banana", scope));
 	}
 
 	void EmptyScopeFallsBackToDruidThenBard()
