@@ -18,6 +18,7 @@ set(tests_headers
 	hextoi_32_64_test.h
 	ipc_mutex_test.h
 	memory_mapped_file_test.h
+	pressure_aware_healing_test.h
 	string_util_test.h
 	skills_util_test.h
 	task_state_test.h

@@ -17,6 +17,8 @@
 */
 #include "bot.h"
 
+#include "common/pressure_aware_healing.h"
+
 #include "common/bot_slow_target.h"
 #include "common/data_verification.h"
 #include "common/repositories/bot_spells_entries_repository.h"
@@ -523,6 +525,9 @@ bool Bot::BotCastHeal(Mob* tar, uint8 bot_class, BotSpell& bot_spell, uint16 spe
 	if (!TargetValidation(tar)) {
 		return false;
 	}
+
+	const auto pressure_aware_healing_settings = PressureAwareHealing::LoadSettingsFromRules();
+	spell_type = PressureAwareHealing::DisabledModeSpellType(spell_type, pressure_aware_healing_settings);
 
 	bot_spell = GetSpellByHealType(spell_type, tar);
 

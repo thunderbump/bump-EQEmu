@@ -103,6 +103,7 @@ set(common_sources
     patches/uf.cpp
     path_manager.cpp
     path_manager.cpp
+    pressure_aware_healing.cpp
     perl_eqdb_res.cpp
     perl_eqdb.cpp
     platform.cpp

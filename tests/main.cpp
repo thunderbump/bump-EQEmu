@@ -26,6 +26,7 @@
 #include "tests/hextoi_32_64_test.h"
 #include "tests/ipc_mutex_test.h"
 #include "tests/memory_mapped_file_test.h"
+#include "tests/pressure_aware_healing_test.h"
 #include "tests/skills_util_test.h"
 #include "tests/string_util_test.h"
 #include "tests/task_state_test.h"
@@ -98,6 +99,7 @@ int main()
 		tests.add(new BotAidedTrackingTest());
 		tests.add(new BotLootRequestTest());
 		tests.add(new BotSlowTargetTest());
+		tests.add(new PressureAwareHealingTest());
 		tests.add(new FallbackDialogueTest());
 		tests.add(new SkillsUtilsTest());
 		tests.add(new TaskStateTest());
