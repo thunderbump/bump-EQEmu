@@ -529,7 +529,24 @@ bool Bot::BotCastHeal(Mob* tar, uint8 bot_class, BotSpell& bot_spell, uint16 spe
 	const auto pressure_aware_healing_settings = PressureAwareHealing::LoadSettingsFromRules();
 	spell_type = PressureAwareHealing::DisabledModeSpellType(spell_type, pressure_aware_healing_settings);
 
-	bot_spell = GetSpellByHealType(spell_type, tar);
+	const uint16 original_spell_type = spell_type;
+	const uint16 hot_spell_type = PressureAwareHealing::SustainHoTSpellTypeFor(original_spell_type);
+	BotSpell hot_spell{};
+
+	if (
+		pressure_aware_healing_settings.enabled &&
+		hot_spell_type &&
+		PrecastChecks(tar, hot_spell_type)
+	) {
+		hot_spell = GetSpellByHealType(hot_spell_type, tar);
+	}
+
+	spell_type = PressureAwareHealing::SelectSustainHealSpellType(
+		original_spell_type,
+		IsValidSpell(hot_spell.SpellId) ? hot_spell_type : 0,
+		pressure_aware_healing_settings
+	);
+	bot_spell = (spell_type == hot_spell_type) ? hot_spell : GetSpellByHealType(spell_type, tar);
 
 	if (!IsValidSpell(bot_spell.SpellId)) {
 		return false;

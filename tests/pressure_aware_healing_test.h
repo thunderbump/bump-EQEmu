@@ -21,6 +21,7 @@
 
 #include "common/pressure_aware_healing.h"
 #include "common/rulesys.h"
+#include "common/spdat.h"
 
 class PressureAwareHealingTest : public Test::Suite {
 public:
@@ -28,6 +29,11 @@ public:
 	{
 		TEST_ADD(PressureAwareHealingTest::DefaultRulesDisablePressureAwareHealing);
 		TEST_ADD(PressureAwareHealingTest::DisabledPressureAwareHealingKeepsCurrentSpellType);
+		TEST_ADD(PressureAwareHealingTest::NoPressureRegularHealPrefersSingleTargetHoT);
+		TEST_ADD(PressureAwareHealingTest::UnavailableHoTKeepsRegularHealFallback);
+		TEST_ADD(PressureAwareHealingTest::EmergencyDirectHealsDoNotPreferHoT);
+		TEST_ADD(PressureAwareHealingTest::GroupAndCompleteHealsRemainUnchanged);
+		TEST_ADD(PressureAwareHealingTest::PetRegularHealPrefersPetHoT);
 	}
 
 private:
@@ -55,6 +61,128 @@ private:
 		TEST_ASSERT_EQUALS(
 			PressureAwareHealing::DisabledModeSpellType(27, settings),
 			27
+		);
+	}
+
+	void NoPressureRegularHealPrefersSingleTargetHoT()
+	{
+		const PressureAwareHealing::Settings settings{
+			.enabled = true,
+			.pressure_sample_ms = 1000,
+			.emergency_projection_ms = 1000,
+			.hot_sustain_ms = 1000
+		};
+
+		TEST_ASSERT_EQUALS(
+			PressureAwareHealing::SelectSustainHealSpellType(
+				BotSpellTypes::RegularHeal,
+				BotSpellTypes::HoTHeals,
+				settings
+			),
+			BotSpellTypes::HoTHeals
+		);
+	}
+
+	void UnavailableHoTKeepsRegularHealFallback()
+	{
+		const PressureAwareHealing::Settings settings{
+			.enabled = true,
+			.pressure_sample_ms = 1000,
+			.emergency_projection_ms = 1000,
+			.hot_sustain_ms = 1000
+		};
+
+		TEST_ASSERT_EQUALS(
+			PressureAwareHealing::SelectSustainHealSpellType(
+				BotSpellTypes::RegularHeal,
+				0,
+				settings
+			),
+			BotSpellTypes::RegularHeal
+		);
+	}
+
+	void EmergencyDirectHealsDoNotPreferHoT()
+	{
+		const PressureAwareHealing::Settings settings{
+			.enabled = true,
+			.pressure_sample_ms = 1000,
+			.emergency_projection_ms = 1000,
+			.hot_sustain_ms = 1000
+		};
+
+		TEST_ASSERT_EQUALS(
+			PressureAwareHealing::SelectSustainHealSpellType(
+				BotSpellTypes::FastHeals,
+				BotSpellTypes::HoTHeals,
+				settings
+			),
+			BotSpellTypes::FastHeals
+		);
+
+		TEST_ASSERT_EQUALS(
+			PressureAwareHealing::SelectSustainHealSpellType(
+				BotSpellTypes::VeryFastHeals,
+				BotSpellTypes::HoTHeals,
+				settings
+			),
+			BotSpellTypes::VeryFastHeals
+		);
+	}
+
+	void GroupAndCompleteHealsRemainUnchanged()
+	{
+		const PressureAwareHealing::Settings settings{
+			.enabled = true,
+			.pressure_sample_ms = 1000,
+			.emergency_projection_ms = 1000,
+			.hot_sustain_ms = 1000
+		};
+
+		TEST_ASSERT_EQUALS(
+			PressureAwareHealing::SelectSustainHealSpellType(
+				BotSpellTypes::GroupHeals,
+				BotSpellTypes::HoTHeals,
+				settings
+			),
+			BotSpellTypes::GroupHeals
+		);
+
+		TEST_ASSERT_EQUALS(
+			PressureAwareHealing::SelectSustainHealSpellType(
+				BotSpellTypes::GroupHoTHeals,
+				BotSpellTypes::HoTHeals,
+				settings
+			),
+			BotSpellTypes::GroupHoTHeals
+		);
+
+		TEST_ASSERT_EQUALS(
+			PressureAwareHealing::SelectSustainHealSpellType(
+				BotSpellTypes::CompleteHeal,
+				BotSpellTypes::HoTHeals,
+				settings
+			),
+			BotSpellTypes::CompleteHeal
+		);
+	}
+
+	void PetRegularHealPrefersPetHoT()
+	{
+		const PressureAwareHealing::Settings settings{
+			.enabled = true,
+			.pressure_sample_ms = 1000,
+			.emergency_projection_ms = 1000,
+			.hot_sustain_ms = 1000
+		};
+
+		TEST_ASSERT_EQUALS(
+			PressureAwareHealing::SelectSustainHealSpellType(
+				BotSpellTypes::PetRegularHeals,
+				BotSpellTypes::PetHoTHeals,
+				settings
+			),
+			BotSpellTypes::PetHoTHeals
 		);
 	}
 };

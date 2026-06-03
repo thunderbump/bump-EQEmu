@@ -31,5 +31,11 @@ struct Settings {
 Settings LoadSettingsFromRules();
 
 uint16_t DisabledModeSpellType(uint16_t current_spell_type, const Settings &settings);
+uint16_t SustainHoTSpellTypeFor(uint16_t current_spell_type);
+uint16_t SelectSustainHealSpellType(
+	uint16_t current_spell_type,
+	uint16_t hot_spell_type,
+	const Settings &settings
+);
 
 }
