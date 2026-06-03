@@ -11,6 +11,7 @@ set(zone_sources
     beacon.cpp
     bonuses.cpp
     bot.cpp
+    bot_aided_tracking_runtime.cpp
     bot_database.cpp
     bot_loot_request_runtime.cpp
     bot_raid.cpp
@@ -131,6 +132,7 @@ set(zone_headers
     aura.h
     beacon.h
     bot.h
+    bot_aided_tracking_runtime.h
     bot_command.h
     bot_database.h
     bot_structs.h

@@ -16,6 +16,7 @@
 	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 #include "tests/atobool_test.h"
+#include "tests/bot_aided_tracking_test.h"
 #include "tests/bot_loot_request_test.h"
 #include "tests/bot_slow_target_test.h"
 #include "tests/data_verification_test.h"
@@ -94,6 +95,7 @@ int main()
 		tests.add(new hextoi_32_64_Test());
 		tests.add(new StringUtilTest());
 		tests.add(new DataVerificationTest());
+		tests.add(new BotAidedTrackingTest());
 		tests.add(new BotLootRequestTest());
 		tests.add(new BotSlowTargetTest());
 		tests.add(new FallbackDialogueTest());
