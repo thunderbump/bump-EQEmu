@@ -53,9 +53,38 @@ uint16_t SustainHoTSpellTypeFor(uint16_t current_spell_type)
 	}
 }
 
+bool ShouldRecordCombatDamage(int64_t damage, bool has_attacker, bool is_self_inflicted)
+{
+	return damage > 0 && has_attacker && !is_self_inflicted;
+}
+
+void RecordCombatDamage(IncomingDamagePressure &pressure, int64_t damage, uint32_t current_time_ms)
+{
+	if (damage <= 0) {
+		return;
+	}
+
+	pressure.damage += damage;
+	pressure.updated_at_ms = current_time_ms;
+}
+
+bool HasActiveDamagePressure(
+	const IncomingDamagePressure &pressure,
+	const Settings &settings,
+	uint32_t current_time_ms
+)
+{
+	if (!settings.enabled || pressure.damage <= 0 || settings.pressure_sample_ms <= 0) {
+		return false;
+	}
+
+	return current_time_ms - pressure.updated_at_ms <= static_cast<uint32_t>(settings.pressure_sample_ms);
+}
+
 uint16_t SelectSustainHealSpellType(
 	uint16_t current_spell_type,
 	uint16_t hot_spell_type,
+	bool has_active_damage_pressure,
 	const Settings &settings
 )
 {
@@ -64,6 +93,10 @@ uint16_t SelectSustainHealSpellType(
 	}
 
 	if (hot_spell_type == 0) {
+		return current_spell_type;
+	}
+
+	if (has_active_damage_pressure) {
 		return current_spell_type;
 	}
 

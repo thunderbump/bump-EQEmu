@@ -544,6 +544,7 @@ bool Bot::BotCastHeal(Mob* tar, uint8 bot_class, BotSpell& bot_spell, uint16 spe
 	spell_type = PressureAwareHealing::SelectSustainHealSpellType(
 		original_spell_type,
 		IsValidSpell(hot_spell.SpellId) ? hot_spell_type : 0,
+		tar->HasActiveIncomingDamagePressure(pressure_aware_healing_settings),
 		pressure_aware_healing_settings
 	);
 	bot_spell = (spell_type == hot_spell_type) ? hot_spell : GetSpellByHealType(spell_type, tar);

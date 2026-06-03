@@ -34,6 +34,11 @@ public:
 		TEST_ADD(PressureAwareHealingTest::EmergencyDirectHealsDoNotPreferHoT);
 		TEST_ADD(PressureAwareHealingTest::GroupAndCompleteHealsRemainUnchanged);
 		TEST_ADD(PressureAwareHealingTest::PetRegularHealPrefersPetHoT);
+		TEST_ADD(PressureAwareHealingTest::FreshIncomingDamageSuppressesHoTSustain);
+		TEST_ADD(PressureAwareHealingTest::ExpiredIncomingDamageAllowsHoTSustain);
+		TEST_ADD(PressureAwareHealingTest::HealingAndNonPositiveDamageDoNotChangePressure);
+		TEST_ADD(PressureAwareHealingTest::EnvironmentalAndSelfDamageAreExcluded);
+		TEST_ADD(PressureAwareHealingTest::DisabledSettingsDoNotReportActivePressure);
 	}
 
 private:
@@ -77,6 +82,7 @@ private:
 			PressureAwareHealing::SelectSustainHealSpellType(
 				BotSpellTypes::RegularHeal,
 				BotSpellTypes::HoTHeals,
+				false,
 				settings
 			),
 			BotSpellTypes::HoTHeals
@@ -96,6 +102,7 @@ private:
 			PressureAwareHealing::SelectSustainHealSpellType(
 				BotSpellTypes::RegularHeal,
 				0,
+				false,
 				settings
 			),
 			BotSpellTypes::RegularHeal
@@ -115,6 +122,7 @@ private:
 			PressureAwareHealing::SelectSustainHealSpellType(
 				BotSpellTypes::FastHeals,
 				BotSpellTypes::HoTHeals,
+				false,
 				settings
 			),
 			BotSpellTypes::FastHeals
@@ -124,6 +132,7 @@ private:
 			PressureAwareHealing::SelectSustainHealSpellType(
 				BotSpellTypes::VeryFastHeals,
 				BotSpellTypes::HoTHeals,
+				false,
 				settings
 			),
 			BotSpellTypes::VeryFastHeals
@@ -143,6 +152,7 @@ private:
 			PressureAwareHealing::SelectSustainHealSpellType(
 				BotSpellTypes::GroupHeals,
 				BotSpellTypes::HoTHeals,
+				false,
 				settings
 			),
 			BotSpellTypes::GroupHeals
@@ -152,6 +162,7 @@ private:
 			PressureAwareHealing::SelectSustainHealSpellType(
 				BotSpellTypes::GroupHoTHeals,
 				BotSpellTypes::HoTHeals,
+				false,
 				settings
 			),
 			BotSpellTypes::GroupHoTHeals
@@ -161,6 +172,7 @@ private:
 			PressureAwareHealing::SelectSustainHealSpellType(
 				BotSpellTypes::CompleteHeal,
 				BotSpellTypes::HoTHeals,
+				false,
 				settings
 			),
 			BotSpellTypes::CompleteHeal
@@ -180,9 +192,97 @@ private:
 			PressureAwareHealing::SelectSustainHealSpellType(
 				BotSpellTypes::PetRegularHeals,
 				BotSpellTypes::PetHoTHeals,
+				false,
 				settings
 			),
 			BotSpellTypes::PetHoTHeals
 		);
+	}
+
+	void FreshIncomingDamageSuppressesHoTSustain()
+	{
+		const PressureAwareHealing::Settings settings{
+			.enabled = true,
+			.pressure_sample_ms = 1000,
+			.emergency_projection_ms = 1000,
+			.hot_sustain_ms = 1000
+		};
+		PressureAwareHealing::IncomingDamagePressure pressure{};
+
+		PressureAwareHealing::RecordCombatDamage(pressure, 250, 1000);
+
+		TEST_ASSERT(PressureAwareHealing::HasActiveDamagePressure(pressure, settings, 1400));
+		TEST_ASSERT_EQUALS(
+			PressureAwareHealing::SelectSustainHealSpellType(
+				BotSpellTypes::RegularHeal,
+				BotSpellTypes::HoTHeals,
+				PressureAwareHealing::HasActiveDamagePressure(pressure, settings, 1400),
+				settings
+			),
+			BotSpellTypes::RegularHeal
+		);
+	}
+
+	void ExpiredIncomingDamageAllowsHoTSustain()
+	{
+		const PressureAwareHealing::Settings settings{
+			.enabled = true,
+			.pressure_sample_ms = 1000,
+			.emergency_projection_ms = 1000,
+			.hot_sustain_ms = 1000
+		};
+		PressureAwareHealing::IncomingDamagePressure pressure{};
+
+		PressureAwareHealing::RecordCombatDamage(pressure, 250, 1000);
+
+		TEST_ASSERT(!PressureAwareHealing::HasActiveDamagePressure(pressure, settings, 2001));
+		TEST_ASSERT_EQUALS(
+			PressureAwareHealing::SelectSustainHealSpellType(
+				BotSpellTypes::RegularHeal,
+				BotSpellTypes::HoTHeals,
+				PressureAwareHealing::HasActiveDamagePressure(pressure, settings, 2001),
+				settings
+			),
+			BotSpellTypes::HoTHeals
+		);
+	}
+
+	void HealingAndNonPositiveDamageDoNotChangePressure()
+	{
+		const PressureAwareHealing::Settings settings{
+			.enabled = true,
+			.pressure_sample_ms = 1000,
+			.emergency_projection_ms = 1000,
+			.hot_sustain_ms = 1000
+		};
+		PressureAwareHealing::IncomingDamagePressure pressure{};
+
+		PressureAwareHealing::RecordCombatDamage(pressure, 0, 1000);
+		PressureAwareHealing::RecordCombatDamage(pressure, -250, 1100);
+
+		TEST_ASSERT(!PressureAwareHealing::HasActiveDamagePressure(pressure, settings, 1200));
+	}
+
+	void EnvironmentalAndSelfDamageAreExcluded()
+	{
+		TEST_ASSERT(!PressureAwareHealing::ShouldRecordCombatDamage(250, false, false));
+		TEST_ASSERT(!PressureAwareHealing::ShouldRecordCombatDamage(250, true, true));
+		TEST_ASSERT(!PressureAwareHealing::ShouldRecordCombatDamage(0, true, false));
+		TEST_ASSERT(PressureAwareHealing::ShouldRecordCombatDamage(250, true, false));
+	}
+
+	void DisabledSettingsDoNotReportActivePressure()
+	{
+		const PressureAwareHealing::Settings settings{
+			.enabled = false,
+			.pressure_sample_ms = 1000,
+			.emergency_projection_ms = 1000,
+			.hot_sustain_ms = 1000
+		};
+		PressureAwareHealing::IncomingDamagePressure pressure{};
+
+		PressureAwareHealing::RecordCombatDamage(pressure, 250, 1000);
+
+		TEST_ASSERT(!PressureAwareHealing::HasActiveDamagePressure(pressure, settings, 1200));
 	}
 };

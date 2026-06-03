@@ -28,13 +28,26 @@ struct Settings {
 	int hot_sustain_ms = 8000;
 };
 
+struct IncomingDamagePressure {
+	int64_t damage = 0;
+	uint32_t updated_at_ms = 0;
+};
+
 Settings LoadSettingsFromRules();
 
 uint16_t DisabledModeSpellType(uint16_t current_spell_type, const Settings &settings);
 uint16_t SustainHoTSpellTypeFor(uint16_t current_spell_type);
+bool ShouldRecordCombatDamage(int64_t damage, bool has_attacker, bool is_self_inflicted);
+void RecordCombatDamage(IncomingDamagePressure &pressure, int64_t damage, uint32_t current_time_ms);
+bool HasActiveDamagePressure(
+	const IncomingDamagePressure &pressure,
+	const Settings &settings,
+	uint32_t current_time_ms
+);
 uint16_t SelectSustainHealSpellType(
 	uint16_t current_spell_type,
 	uint16_t hot_spell_type,
+	bool has_active_damage_pressure,
 	const Settings &settings
 );
 

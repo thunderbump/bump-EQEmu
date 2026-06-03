@@ -20,6 +20,7 @@
 #include "common/data_bucket.h"
 #include "common/emu_constants.h"
 #include "common/light_source.h"
+#include "common/pressure_aware_healing.h"
 #include "zone/aa_ability.h"
 #include "zone/aa.h"
 #include "zone/combat_record.h"
@@ -657,6 +658,12 @@ public:
 	inline virtual int32 GetDelayDeath() const { return 0; }
 	inline int64 GetHP() const { return current_hp; }
 	inline int64 GetMaxHP() const { return max_hp; }
+	void RecordIncomingDamagePressure(int64 damage, uint32 current_time_ms);
+	bool HasActiveIncomingDamagePressure(
+		const PressureAwareHealing::Settings &settings,
+		uint32 current_time_ms
+	) const;
+	bool HasActiveIncomingDamagePressure(const PressureAwareHealing::Settings &settings) const;
 	virtual int64 CalcMaxHP();
 	virtual int64 CalcHPRegenCap() { return 0; }
 	inline int64 GetMaxMana() const { return max_mana; }
@@ -1577,6 +1584,7 @@ protected:
 	bool trackable;
 	int64 current_hp;
 	int64 max_hp;
+	PressureAwareHealing::IncomingDamagePressure incoming_damage_pressure;
 	int64 base_hp;
 	int64 current_mana;
 	int64 max_mana;
