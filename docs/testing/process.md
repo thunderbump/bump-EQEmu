@@ -82,6 +82,10 @@ The repo-local wrapper for this tier is:
 The wrapper runs the AkkStack contract preflight first, then runs the raw Tier 1 command shown above from
 `../bump-akk-stack`. Keep the raw command visible here so failures can still be reproduced or narrowed manually.
 
+Pressure-aware bot healing has deterministic unit coverage in `tests/pressure_aware_healing_test.h`. Live runtime
+validation for real bot spell lists and combat timing is documented separately in
+`docs/testing/pressure-aware-healing-smoke.md`.
+
 ## Tier 2: DB-Backed CLI Tests
 
 Use this when the change touches code that is exercised by existing `zone` or `world` command hooks.

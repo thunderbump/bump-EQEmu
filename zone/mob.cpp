@@ -531,6 +531,33 @@ Mob::Mob(
 	current_alliance_faction = -1;
 }
 
+void Mob::RecordIncomingDamagePressure(int64 damage, uint32 current_time_ms)
+{
+	PressureAwareHealing::RecordCombatDamage(incoming_damage_pressure, damage, current_time_ms);
+}
+
+const PressureAwareHealing::IncomingDamagePressure &Mob::GetIncomingDamagePressure() const
+{
+	return incoming_damage_pressure;
+}
+
+bool Mob::HasActiveIncomingDamagePressure(
+	const PressureAwareHealing::Settings &settings,
+	uint32 current_time_ms
+) const
+{
+	return PressureAwareHealing::HasActiveDamagePressure(
+		incoming_damage_pressure,
+		settings,
+		current_time_ms
+	);
+}
+
+bool Mob::HasActiveIncomingDamagePressure(const PressureAwareHealing::Settings &settings) const
+{
+	return HasActiveIncomingDamagePressure(settings, Timer::GetCurrentTime());
+}
+
 Mob::~Mob()
 {
 	m_destroying = true;
