@@ -24,6 +24,8 @@
 #include "common/repositories/bot_spells_entries_repository.h"
 #include "common/repositories/npc_spells_repository.h"
 
+#include <array>
+
 bool Bot::AICastSpell(Mob* tar, uint8 chance, uint16 spell_type, uint16 sub_target_type, uint16 sub_type) {
 	if (!tar) {
 		return false;
@@ -529,8 +531,68 @@ bool Bot::BotCastHeal(Mob* tar, uint8 bot_class, BotSpell& bot_spell, uint16 spe
 	const auto pressure_aware_healing_settings = PressureAwareHealing::LoadSettingsFromRules();
 	spell_type = PressureAwareHealing::DisabledModeSpellType(spell_type, pressure_aware_healing_settings);
 
-	const uint16 original_spell_type = spell_type;
-	const uint16 hot_spell_type = PressureAwareHealing::SustainHoTSpellTypeFor(original_spell_type);
+	const bool has_active_damage_pressure = tar->HasActiveIncomingDamagePressure(pressure_aware_healing_settings);
+	BotSpell direct_heal_spell{};
+
+	if (
+		pressure_aware_healing_settings.enabled &&
+		has_active_damage_pressure &&
+		(
+			spell_type == BotSpellTypes::RegularHeal ||
+			spell_type == BotSpellTypes::FastHeals ||
+			spell_type == BotSpellTypes::VeryFastHeals
+		)
+	) {
+		constexpr std::array<uint16, 3> direct_heal_spell_types = {
+			BotSpellTypes::RegularHeal,
+			BotSpellTypes::FastHeals,
+			BotSpellTypes::VeryFastHeals
+		};
+
+		std::array<PressureAwareHealing::DirectHealCandidate, direct_heal_spell_types.size()> candidates{};
+		std::array<BotSpell, direct_heal_spell_types.size()> candidate_spells{};
+
+		for (size_t i = 0; i < direct_heal_spell_types.size(); ++i) {
+			const auto candidate_spell_type = direct_heal_spell_types[i];
+			BotSpell candidate_spell{};
+
+			if (PrecastChecks(tar, candidate_spell_type)) {
+				candidate_spell = GetSpellByHealType(candidate_spell_type, tar);
+			}
+
+			candidate_spells[i] = candidate_spell;
+			candidates[i] = {
+				.spell_type = candidate_spell_type,
+				.available = IsValidSpell(candidate_spell.SpellId),
+				.cast_time_ms = IsValidSpell(candidate_spell.SpellId) ?
+					static_cast<uint32>(GetActSpellCasttime(candidate_spell.SpellId, spells[candidate_spell.SpellId].cast_time)) :
+					0,
+				.max_threshold_percent = GetUltimateSpellTypeMaxThreshold(candidate_spell_type, tar)
+			};
+		}
+
+		const auto direct_heal_spell_type = PressureAwareHealing::SelectDirectHealSpellType(
+			spell_type,
+			tar->GetIncomingDamagePressure(),
+			pressure_aware_healing_settings,
+			tar->GetHP(),
+			tar->GetMaxHP(),
+			{candidates[0], candidates[1], candidates[2]}
+		);
+
+		if (direct_heal_spell_type != spell_type) {
+			for (size_t i = 0; i < direct_heal_spell_types.size(); ++i) {
+				if (direct_heal_spell_types[i] == direct_heal_spell_type) {
+					direct_heal_spell = candidate_spells[i];
+					break;
+				}
+			}
+
+			spell_type = direct_heal_spell_type;
+		}
+	}
+
+	const uint16 hot_spell_type = PressureAwareHealing::SustainHoTSpellTypeFor(spell_type);
 	BotSpell hot_spell{};
 
 	if (
@@ -542,12 +604,15 @@ bool Bot::BotCastHeal(Mob* tar, uint8 bot_class, BotSpell& bot_spell, uint16 spe
 	}
 
 	spell_type = PressureAwareHealing::SelectSustainHealSpellType(
-		original_spell_type,
+		spell_type,
 		IsValidSpell(hot_spell.SpellId) ? hot_spell_type : 0,
-		tar->HasActiveIncomingDamagePressure(pressure_aware_healing_settings),
+		has_active_damage_pressure,
 		pressure_aware_healing_settings
 	);
-	bot_spell = (spell_type == hot_spell_type) ? hot_spell : GetSpellByHealType(spell_type, tar);
+	bot_spell = (spell_type == hot_spell_type) ? hot_spell : direct_heal_spell;
+	if (!IsValidSpell(bot_spell.SpellId)) {
+		bot_spell = GetSpellByHealType(spell_type, tar);
+	}
 
 	if (!IsValidSpell(bot_spell.SpellId)) {
 		return false;

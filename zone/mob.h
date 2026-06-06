@@ -659,6 +659,7 @@ public:
 	inline int64 GetHP() const { return current_hp; }
 	inline int64 GetMaxHP() const { return max_hp; }
 	void RecordIncomingDamagePressure(int64 damage, uint32 current_time_ms);
+	const PressureAwareHealing::IncomingDamagePressure &GetIncomingDamagePressure() const;
 	bool HasActiveIncomingDamagePressure(
 		const PressureAwareHealing::Settings &settings,
 		uint32 current_time_ms

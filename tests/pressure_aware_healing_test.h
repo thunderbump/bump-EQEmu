@@ -39,6 +39,11 @@ public:
 		TEST_ADD(PressureAwareHealingTest::HealingAndNonPositiveDamageDoNotChangePressure);
 		TEST_ADD(PressureAwareHealingTest::EnvironmentalAndSelfDamageAreExcluded);
 		TEST_ADD(PressureAwareHealingTest::DisabledSettingsDoNotReportActivePressure);
+		TEST_ADD(PressureAwareHealingTest::RegularHealRemainsEligibleWhenDangerWindowIsSafe);
+		TEST_ADD(PressureAwareHealingTest::RegularHealEscalatesToFastHealWhenDangerWindowIsUnsafe);
+		TEST_ADD(PressureAwareHealingTest::FastHealEscalatesToVeryFastHealWhenDangerWindowIsUnsafe);
+		TEST_ADD(PressureAwareHealingTest::MissingPressureKeepsDirectHealType);
+		TEST_ADD(PressureAwareHealingTest::EmergencyThresholdDirectHealDoesNotPreferHoT);
 	}
 
 private:
@@ -284,5 +289,139 @@ private:
 		PressureAwareHealing::RecordCombatDamage(pressure, 250, 1000);
 
 		TEST_ASSERT(!PressureAwareHealing::HasActiveDamagePressure(pressure, settings, 1200));
+	}
+
+	void RegularHealRemainsEligibleWhenDangerWindowIsSafe()
+	{
+		const PressureAwareHealing::Settings settings{
+			.enabled = true,
+			.pressure_sample_ms = 1000,
+			.emergency_projection_ms = 2000,
+			.hot_sustain_ms = 1000
+		};
+		PressureAwareHealing::IncomingDamagePressure pressure{};
+
+		PressureAwareHealing::RecordCombatDamage(pressure, 100, 1000);
+
+		TEST_ASSERT_EQUALS(
+			PressureAwareHealing::SelectDirectHealSpellType(
+				BotSpellTypes::RegularHeal,
+				pressure,
+				settings,
+				900,
+				1000,
+				{
+					PressureAwareHealing::DirectHealCandidate{BotSpellTypes::RegularHeal, true, 2000, 60},
+					PressureAwareHealing::DirectHealCandidate{BotSpellTypes::FastHeals, true, 1000, 40},
+					PressureAwareHealing::DirectHealCandidate{BotSpellTypes::VeryFastHeals, true, 0, 25}
+				}
+			),
+			BotSpellTypes::RegularHeal
+		);
+	}
+
+	void RegularHealEscalatesToFastHealWhenDangerWindowIsUnsafe()
+	{
+		const PressureAwareHealing::Settings settings{
+			.enabled = true,
+			.pressure_sample_ms = 1000,
+			.emergency_projection_ms = 2000,
+			.hot_sustain_ms = 1000
+		};
+		PressureAwareHealing::IncomingDamagePressure pressure{};
+
+		PressureAwareHealing::RecordCombatDamage(pressure, 100, 1000);
+
+		TEST_ASSERT_EQUALS(
+			PressureAwareHealing::SelectDirectHealSpellType(
+				BotSpellTypes::RegularHeal,
+				pressure,
+				settings,
+				700,
+				1000,
+				{
+					PressureAwareHealing::DirectHealCandidate{BotSpellTypes::RegularHeal, true, 2000, 60},
+					PressureAwareHealing::DirectHealCandidate{BotSpellTypes::FastHeals, true, 1000, 40},
+					PressureAwareHealing::DirectHealCandidate{BotSpellTypes::VeryFastHeals, true, 0, 25}
+				}
+			),
+			BotSpellTypes::FastHeals
+		);
+	}
+
+	void FastHealEscalatesToVeryFastHealWhenDangerWindowIsUnsafe()
+	{
+		const PressureAwareHealing::Settings settings{
+			.enabled = true,
+			.pressure_sample_ms = 1000,
+			.emergency_projection_ms = 2000,
+			.hot_sustain_ms = 1000
+		};
+		PressureAwareHealing::IncomingDamagePressure pressure{};
+
+		PressureAwareHealing::RecordCombatDamage(pressure, 100, 1000);
+
+		TEST_ASSERT_EQUALS(
+			PressureAwareHealing::SelectDirectHealSpellType(
+				BotSpellTypes::FastHeals,
+				pressure,
+				settings,
+				500,
+				1000,
+				{
+					PressureAwareHealing::DirectHealCandidate{BotSpellTypes::RegularHeal, true, 2000, 60},
+					PressureAwareHealing::DirectHealCandidate{BotSpellTypes::FastHeals, true, 1000, 40},
+					PressureAwareHealing::DirectHealCandidate{BotSpellTypes::VeryFastHeals, true, 0, 25}
+				}
+			),
+			BotSpellTypes::VeryFastHeals
+		);
+	}
+
+	void MissingPressureKeepsDirectHealType()
+	{
+		const PressureAwareHealing::Settings settings{
+			.enabled = true,
+			.pressure_sample_ms = 1000,
+			.emergency_projection_ms = 2000,
+			.hot_sustain_ms = 1000
+		};
+		PressureAwareHealing::IncomingDamagePressure pressure{};
+
+		TEST_ASSERT_EQUALS(
+			PressureAwareHealing::SelectDirectHealSpellType(
+				BotSpellTypes::RegularHeal,
+				pressure,
+				settings,
+				500,
+				1000,
+				{
+					PressureAwareHealing::DirectHealCandidate{BotSpellTypes::RegularHeal, true, 2000, 60},
+					PressureAwareHealing::DirectHealCandidate{BotSpellTypes::FastHeals, true, 1000, 40},
+					PressureAwareHealing::DirectHealCandidate{BotSpellTypes::VeryFastHeals, true, 0, 25}
+				}
+			),
+			BotSpellTypes::RegularHeal
+		);
+	}
+
+	void EmergencyThresholdDirectHealDoesNotPreferHoT()
+	{
+		const PressureAwareHealing::Settings settings{
+			.enabled = true,
+			.pressure_sample_ms = 1000,
+			.emergency_projection_ms = 2000,
+			.hot_sustain_ms = 1000
+		};
+
+		TEST_ASSERT_EQUALS(
+			PressureAwareHealing::SelectSustainHealSpellType(
+				BotSpellTypes::FastHeals,
+				BotSpellTypes::HoTHeals,
+				true,
+				settings
+			),
+			BotSpellTypes::FastHeals
+		);
 	}
 };

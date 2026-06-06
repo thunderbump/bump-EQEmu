@@ -20,6 +20,8 @@
 #include "rulesys.h"
 #include "spdat.h"
 
+#include <vector>
+
 namespace PressureAwareHealing {
 
 Settings LoadSettingsFromRules()
@@ -107,6 +109,54 @@ uint16_t SelectSustainHealSpellType(
 		default:
 			return current_spell_type;
 	}
+}
+
+uint16_t SelectDirectHealSpellType(
+	uint16_t current_spell_type,
+	const IncomingDamagePressure &pressure,
+	const Settings &settings,
+	int64_t current_hp,
+	int64_t max_hp,
+	std::initializer_list<DirectHealCandidate> candidates
+)
+{
+	if (!settings.enabled || pressure.damage <= 0 || settings.pressure_sample_ms <= 0 || current_hp <= 0 || max_hp <= 0) {
+		return current_spell_type;
+	}
+
+	const std::vector<DirectHealCandidate> ordered_candidates(candidates);
+	size_t start_index = 0;
+	for (; start_index < ordered_candidates.size(); ++start_index) {
+		if (ordered_candidates[start_index].spell_type == current_spell_type) {
+			break;
+		}
+	}
+
+	if (start_index >= ordered_candidates.size()) {
+		return current_spell_type;
+	}
+
+	for (size_t i = start_index; i < ordered_candidates.size(); ++i) {
+		const auto &candidate = ordered_candidates[i];
+		if (!candidate.available) {
+			continue;
+		}
+
+		if (i + 1 >= ordered_candidates.size()) {
+			return candidate.spell_type;
+		}
+
+		const auto danger_threshold = ordered_candidates[i + 1].max_threshold_percent;
+		const auto projection_ms = static_cast<int64_t>(candidate.cast_time_ms) + settings.emergency_projection_ms;
+		const auto projected_hp = current_hp - ((pressure.damage * projection_ms) / settings.pressure_sample_ms);
+		const auto projected_hp_percent = (projected_hp * 100) / max_hp;
+
+		if (projected_hp_percent > danger_threshold) {
+			return candidate.spell_type;
+		}
+	}
+
+	return current_spell_type;
 }
 
 }

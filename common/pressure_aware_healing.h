@@ -18,6 +18,7 @@
 #pragma once
 
 #include <cstdint>
+#include <initializer_list>
 
 namespace PressureAwareHealing {
 
@@ -31,6 +32,13 @@ struct Settings {
 struct IncomingDamagePressure {
 	int64_t damage = 0;
 	uint32_t updated_at_ms = 0;
+};
+
+struct DirectHealCandidate {
+	uint16_t spell_type = 0;
+	bool available = false;
+	uint32_t cast_time_ms = 0;
+	uint8_t max_threshold_percent = 0;
 };
 
 Settings LoadSettingsFromRules();
@@ -49,6 +57,14 @@ uint16_t SelectSustainHealSpellType(
 	uint16_t hot_spell_type,
 	bool has_active_damage_pressure,
 	const Settings &settings
+);
+uint16_t SelectDirectHealSpellType(
+	uint16_t current_spell_type,
+	const IncomingDamagePressure &pressure,
+	const Settings &settings,
+	int64_t current_hp,
+	int64_t max_hp,
+	std::initializer_list<DirectHealCandidate> candidates
 );
 
 }
