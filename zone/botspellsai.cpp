@@ -953,7 +953,7 @@ bool Bot::AIHealRotation(Mob* tar, bool useFastHeals) {
 	botSpell.ManaCost = 0;
 
 	if (useFastHeals) {
-		botSpell = GetBestBotSpellForRegularSingleTargetHeal(this, tar);
+		botSpell = GetBestBotSpellForRegularSingleTargetHeal(this, tar, BotSpellTypes::RegularHeal, true);
 
 		if (!IsValidSpell(botSpell.SpellId))
 			botSpell = GetBestBotSpellForFastHeal(this, tar);
@@ -962,7 +962,7 @@ bool Bot::AIHealRotation(Mob* tar, bool useFastHeals) {
 		botSpell = GetBestBotSpellForPercentageHeal(this, tar);
 
 		if (!IsValidSpell(botSpell.SpellId)) {
-			botSpell = GetBestBotSpellForRegularSingleTargetHeal(this, tar);
+			botSpell = GetBestBotSpellForRegularSingleTargetHeal(this, tar, BotSpellTypes::RegularHeal, true);
 		}
 		if (!IsValidSpell(botSpell.SpellId)) {
 			botSpell = GetFirstBotSpellForSingleTargetHeal(this, tar);
@@ -1373,7 +1373,7 @@ BotSpell Bot::GetBestBotSpellForPercentageHeal(Bot* caster, Mob* tar, uint16 spe
 	return result;
 }
 
-BotSpell Bot::GetBestBotSpellForRegularSingleTargetHeal(Bot* caster, Mob* tar, uint16 spell_type) {
+BotSpell Bot::GetBestBotSpellForRegularSingleTargetHeal(Bot* caster, Mob* tar, uint16 spell_type, bool is_heal_rotation) {
 	BotSpell result;
 
 	result.SpellId = 0;
@@ -1382,9 +1382,11 @@ BotSpell Bot::GetBestBotSpellForRegularSingleTargetHeal(Bot* caster, Mob* tar, u
 
 	if (caster) {
 		const auto settings = RegularHealEfficiency::LoadSettingsFromRules();
-		const bool prefer_efficient_regular_heals =
-			spell_type == BotSpellTypes::RegularHeal &&
-			settings.prefer_efficient_regular_heals;
+		const bool prefer_efficient_regular_heals = RegularHealEfficiency::ShouldUseEfficientSelection(
+			settings,
+			spell_type,
+			is_heal_rotation
+		);
 		std::list<BotSpell> bot_spell_list = GetBotSpellsForSpellEffect(caster, spell_type, SpellEffect::CurrentHP);
 		std::vector<BotSpell> valid_spells;
 		std::vector<RegularHealEfficiency::Candidate> candidates;

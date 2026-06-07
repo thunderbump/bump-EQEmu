@@ -31,6 +31,8 @@ public:
 	RegularHealEfficiencyTest()
 	{
 		TEST_ADD(RegularHealEfficiencyTest::DefaultRuleDisablesEfficientRegularHeals);
+		TEST_ADD(RegularHealEfficiencyTest::OnlyNonRotationRegularHealsUseEfficientSelection);
+		TEST_ADD(RegularHealEfficiencyTest::ExcludedHealTypesDoNotUseEfficientSelection);
 		TEST_ADD(RegularHealEfficiencyTest::OrdinaryDirectHealProducesUsableAdjustedEstimate);
 		TEST_ADD(RegularHealEfficiencyTest::NonPositiveDirectHealEstimateIsUnusable);
 		TEST_ADD(RegularHealEfficiencyTest::UncertainDirectHealEstimateIsUnusable);
@@ -95,6 +97,53 @@ private:
 		const auto settings = RegularHealEfficiency::LoadSettingsFromRules();
 
 		TEST_ASSERT(!settings.prefer_efficient_regular_heals);
+	}
+
+	void OnlyNonRotationRegularHealsUseEfficientSelection()
+	{
+		const RegularHealEfficiency::Settings settings{
+			.prefer_efficient_regular_heals = true
+		};
+
+		TEST_ASSERT(RegularHealEfficiency::ShouldUseEfficientSelection(
+			settings,
+			BotSpellTypes::RegularHeal,
+			false
+		));
+		TEST_ASSERT(!RegularHealEfficiency::ShouldUseEfficientSelection(
+			settings,
+			BotSpellTypes::RegularHeal,
+			true
+		));
+	}
+
+	void ExcludedHealTypesDoNotUseEfficientSelection()
+	{
+		const RegularHealEfficiency::Settings enabled_settings{
+			.prefer_efficient_regular_heals = true
+		};
+		const uint16_t excluded_spell_types[] = {
+			BotSpellTypes::VeryFastHeals,
+			BotSpellTypes::FastHeals,
+			BotSpellTypes::CompleteHeal,
+			BotSpellTypes::GroupCompleteHeals,
+			BotSpellTypes::HoTHeals,
+			BotSpellTypes::GroupHoTHeals,
+			BotSpellTypes::GroupHeals,
+			BotSpellTypes::PetRegularHeals,
+			BotSpellTypes::PetFastHeals,
+			BotSpellTypes::PetVeryFastHeals,
+			BotSpellTypes::PetCompleteHeals,
+			BotSpellTypes::PetHoTHeals
+		};
+
+		for (const auto spell_type : excluded_spell_types) {
+			TEST_ASSERT(!RegularHealEfficiency::ShouldUseEfficientSelection(
+				enabled_settings,
+				spell_type,
+				false
+			));
+		}
 	}
 
 	void OrdinaryDirectHealProducesUsableAdjustedEstimate()

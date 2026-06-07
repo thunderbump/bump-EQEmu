@@ -31,6 +31,17 @@ Settings LoadSettingsFromRules()
 	};
 }
 
+bool ShouldUseEfficientSelection(
+	const Settings &settings,
+	uint16_t spell_type,
+	bool is_heal_rotation
+)
+{
+	return settings.prefer_efficient_regular_heals &&
+		spell_type == BotSpellTypes::RegularHeal &&
+		!is_heal_rotation;
+}
+
 HealEstimate EstimateRegularHealAmount(
 	uint16_t spell_id,
 	const SpellEffectValueCalculator &calculate_spell_effect_value,
