@@ -28,6 +28,7 @@ install_manifest.txt
 [Bb]uild*/
 log/
 logs/
+graphify-out/
 vcpkg/
 perl/
 

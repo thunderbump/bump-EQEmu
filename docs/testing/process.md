@@ -54,6 +54,16 @@ Use this for every change before running heavier checks.
 - Check that no secrets were written into tracked files.
 - For schema-sensitive work, identify whether the backup gate applies before running commands.
 
+### Graphify Deterministic Update
+
+When the local knowledge graph already exists, code-only graph refreshes can run without semantic extraction:
+
+```sh
+./scripts/graphify-deterministic-update.sh
+```
+
+This wrapper calls `graphify update <repo> --no-cluster`, so it is suitable for a local pre-commit hook or manual refresh after code changes. It does not run LLM semantic extraction, community labeling, full report generation, or HTML regeneration. If `graphify` or `graphify-out/graph.json` is not present, the wrapper skips cleanly.
+
 ## Tier 1: Container Build And Unit Tests
 
 Use this as the default automated validation tier for code changes.
