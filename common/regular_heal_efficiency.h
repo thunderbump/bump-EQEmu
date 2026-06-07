@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <functional>
 #include <initializer_list>
+#include <span>
 
 namespace RegularHealEfficiency {
 
@@ -55,6 +56,12 @@ HealEstimate EstimateRegularHealAmount(
 	uint16_t spell_id,
 	const SpellEffectValueCalculator &calculate_spell_effect_value,
 	const SpellHealingAdjuster &adjust_spell_healing
+);
+Selection SelectRegularHealCandidate(
+	const Settings &settings,
+	int64_t target_missing_hp,
+	int64_t sufficient_heal_margin,
+	std::span<const Candidate> candidates
 );
 Selection SelectRegularHealCandidate(
 	const Settings &settings,

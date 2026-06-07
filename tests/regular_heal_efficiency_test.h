@@ -35,6 +35,8 @@ public:
 		TEST_ADD(RegularHealEfficiencyTest::NonPositiveDirectHealEstimateIsUnusable);
 		TEST_ADD(RegularHealEfficiencyTest::UncertainDirectHealEstimateIsUnusable);
 		TEST_ADD(RegularHealEfficiencyTest::EstimatorFedUnusableCandidateRemainsFallbackOnly);
+		TEST_ADD(RegularHealEfficiencyTest::DisabledRuleReturnsPriorityFirstFromRuntimeCandidateList);
+		TEST_ADD(RegularHealEfficiencyTest::EnabledRuleCanChooseLaterSmallerRuntimeCandidate);
 		TEST_ADD(RegularHealEfficiencyTest::DisabledRuleReturnsPriorityFirstFallback);
 		TEST_ADD(RegularHealEfficiencyTest::EnabledRuleChoosesSmallestSufficientOverheal);
 		TEST_ADD(RegularHealEfficiencyTest::InsufficientSmallerHealsAreNotSelected);
@@ -228,6 +230,52 @@ private:
 		TEST_ASSERT(result.found);
 		TEST_ASSERT_EQUALS(result.spell_id, static_cast<uint16_t>(2));
 		TEST_ASSERT(!result.selected_for_efficiency);
+	}
+
+	void DisabledRuleReturnsPriorityFirstFromRuntimeCandidateList()
+	{
+		const RegularHealEfficiency::Settings settings{
+			.prefer_efficient_regular_heals = false
+		};
+		const std::vector<RegularHealEfficiency::Candidate> candidates{
+			{.spell_id = 701, .list_order = 0, .mana_cost = 120, .has_usable_estimated_heal = true, .estimated_heal = 1200},
+			{.spell_id = 702, .list_order = 1, .mana_cost = 40, .has_usable_estimated_heal = true, .estimated_heal = 520}
+		};
+
+		const auto result = RegularHealEfficiency::SelectRegularHealCandidate(
+			settings,
+			500,
+			0,
+			candidates
+		);
+
+		TEST_ASSERT(result.found);
+		TEST_ASSERT_EQUALS(result.spell_id, static_cast<uint16_t>(701));
+		TEST_ASSERT_EQUALS(result.list_order, 0u);
+		TEST_ASSERT(!result.selected_for_efficiency);
+	}
+
+	void EnabledRuleCanChooseLaterSmallerRuntimeCandidate()
+	{
+		const RegularHealEfficiency::Settings settings{
+			.prefer_efficient_regular_heals = true
+		};
+		const std::vector<RegularHealEfficiency::Candidate> candidates{
+			{.spell_id = 801, .list_order = 0, .mana_cost = 120, .has_usable_estimated_heal = true, .estimated_heal = 1200},
+			{.spell_id = 802, .list_order = 1, .mana_cost = 40, .has_usable_estimated_heal = true, .estimated_heal = 520}
+		};
+
+		const auto result = RegularHealEfficiency::SelectRegularHealCandidate(
+			settings,
+			500,
+			0,
+			candidates
+		);
+
+		TEST_ASSERT(result.found);
+		TEST_ASSERT_EQUALS(result.spell_id, static_cast<uint16_t>(802));
+		TEST_ASSERT_EQUALS(result.list_order, 1u);
+		TEST_ASSERT(result.selected_for_efficiency);
 	}
 
 	void DisabledRuleReturnsPriorityFirstFallback()

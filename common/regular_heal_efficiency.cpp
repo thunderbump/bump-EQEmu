@@ -124,7 +124,7 @@ Selection SelectRegularHealCandidate(
 	const Settings &settings,
 	int64_t target_missing_hp,
 	int64_t sufficient_heal_margin,
-	std::initializer_list<Candidate> candidates
+	std::span<const Candidate> candidates
 )
 {
 	Selection fallback{};
@@ -161,6 +161,21 @@ Selection SelectRegularHealCandidate(
 	}
 
 	return ToSelection(best_candidate, true);
+}
+
+Selection SelectRegularHealCandidate(
+	const Settings &settings,
+	int64_t target_missing_hp,
+	int64_t sufficient_heal_margin,
+	std::initializer_list<Candidate> candidates
+)
+{
+	return SelectRegularHealCandidate(
+		settings,
+		target_missing_hp,
+		sufficient_heal_margin,
+		std::span<const Candidate>(candidates.begin(), candidates.size())
+	);
 }
 
 }

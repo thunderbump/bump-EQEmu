@@ -18,6 +18,7 @@
 #include "bot.h"
 
 #include "common/pressure_aware_healing.h"
+#include "common/regular_heal_efficiency.h"
 
 #include "common/bot_slow_target.h"
 #include "common/data_verification.h"
@@ -25,6 +26,7 @@
 #include "common/repositories/npc_spells_repository.h"
 
 #include <array>
+#include <vector>
 
 bool Bot::AICastSpell(Mob* tar, uint8 chance, uint16 spell_type, uint16 sub_target_type, uint16 sub_type) {
 	if (!tar) {
@@ -1379,15 +1381,64 @@ BotSpell Bot::GetBestBotSpellForRegularSingleTargetHeal(Bot* caster, Mob* tar, u
 	result.ManaCost = 0;
 
 	if (caster) {
+		const auto settings = RegularHealEfficiency::LoadSettingsFromRules();
+		const bool prefer_efficient_regular_heals =
+			spell_type == BotSpellTypes::RegularHeal &&
+			settings.prefer_efficient_regular_heals;
 		std::list<BotSpell> bot_spell_list = GetBotSpellsForSpellEffect(caster, spell_type, SpellEffect::CurrentHP);
+		std::vector<BotSpell> valid_spells;
+		std::vector<RegularHealEfficiency::Candidate> candidates;
+		uint32 list_order = 0;
 
 		for (std::list<BotSpell>::iterator bot_spell_list_itr = bot_spell_list.begin(); bot_spell_list_itr != bot_spell_list.end(); ++bot_spell_list_itr) {
-			if (IsRegularSingleTargetHealSpell(bot_spell_list_itr->SpellId) && caster->CastChecks(bot_spell_list_itr->SpellId, tar, spell_type)) {
+			if (!IsRegularSingleTargetHealSpell(bot_spell_list_itr->SpellId) || !caster->CastChecks(bot_spell_list_itr->SpellId, tar, spell_type)) {
+				continue;
+			}
+
+			if (!prefer_efficient_regular_heals) {
 				result.SpellId = bot_spell_list_itr->SpellId;
 				result.SpellIndex = bot_spell_list_itr->SpellIndex;
 				result.ManaCost = bot_spell_list_itr->ManaCost;
 
 				break;
+			}
+
+			const auto estimate = RegularHealEfficiency::EstimateRegularHealAmount(
+				bot_spell_list_itr->SpellId,
+				[caster](uint16_t spell_id, int effect_index) {
+					return caster->CalcSpellEffectValue(
+						spell_id,
+						effect_index,
+						caster->GetLevel(),
+						caster->GetInstrumentMod(spell_id),
+						caster
+					);
+				},
+				[caster, tar](uint16_t spell_id, int64_t value) {
+					return caster->GetActSpellHealing(spell_id, value, tar);
+				}
+			);
+
+			valid_spells.push_back(*bot_spell_list_itr);
+			candidates.push_back({
+				.spell_id = bot_spell_list_itr->SpellId,
+				.list_order = list_order++,
+				.mana_cost = bot_spell_list_itr->ManaCost,
+				.has_usable_estimated_heal = estimate.usable,
+				.estimated_heal = estimate.amount
+			});
+		}
+
+		if (prefer_efficient_regular_heals && !candidates.empty()) {
+			const auto selection = RegularHealEfficiency::SelectRegularHealCandidate(
+				settings,
+				tar ? tar->GetMaxHP() - tar->GetHP() : 0,
+				0,
+				candidates
+			);
+
+			if (selection.found && selection.list_order < valid_spells.size()) {
+				result = valid_spells[selection.list_order];
 			}
 		}
 	}
