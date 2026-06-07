@@ -96,6 +96,10 @@ Pressure-aware bot healing has deterministic unit coverage in `tests/pressure_aw
 validation for real bot spell lists and combat timing is documented separately in
 `docs/testing/pressure-aware-healing-smoke.md`.
 
+Efficient `RegularHeal` selection has deterministic unit coverage in `tests/regular_heal_efficiency_test.h`, with
+pressure ordering covered in `tests/pressure_aware_healing_test.h`. Live runtime validation for rule-off/rule-on
+real bot spell-list behavior is documented separately in `docs/testing/efficient-regular-heal-smoke.md`.
+
 ## Tier 2: DB-Backed CLI Tests
 
 Use this when the change touches code that is exercised by existing `zone` or `world` command hooks.
