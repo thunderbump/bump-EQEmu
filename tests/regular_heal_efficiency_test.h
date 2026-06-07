@@ -21,12 +21,20 @@
 
 #include "common/regular_heal_efficiency.h"
 #include "common/rulesys.h"
+#include "common/spdat.h"
+
+#include <cstring>
+#include <vector>
 
 class RegularHealEfficiencyTest : public Test::Suite {
 public:
 	RegularHealEfficiencyTest()
 	{
 		TEST_ADD(RegularHealEfficiencyTest::DefaultRuleDisablesEfficientRegularHeals);
+		TEST_ADD(RegularHealEfficiencyTest::OrdinaryDirectHealProducesUsableAdjustedEstimate);
+		TEST_ADD(RegularHealEfficiencyTest::NonPositiveDirectHealEstimateIsUnusable);
+		TEST_ADD(RegularHealEfficiencyTest::UncertainDirectHealEstimateIsUnusable);
+		TEST_ADD(RegularHealEfficiencyTest::EstimatorFedUnusableCandidateRemainsFallbackOnly);
 		TEST_ADD(RegularHealEfficiencyTest::DisabledRuleReturnsPriorityFirstFallback);
 		TEST_ADD(RegularHealEfficiencyTest::EnabledRuleChoosesSmallestSufficientOverheal);
 		TEST_ADD(RegularHealEfficiencyTest::InsufficientSmallerHealsAreNotSelected);
@@ -37,6 +45,47 @@ public:
 	}
 
 private:
+	struct TestSpellGlobals {
+		TestSpellGlobals()
+		{
+			previous_spells = spells;
+			previous_records = SPDAT_RECORDS;
+			test_spells.resize(16);
+			for (auto &spell : test_spells) {
+				std::strncpy(spell.player_1, "PLAYER_1", sizeof(spell.player_1) - 1);
+			}
+			spells = test_spells.data();
+			SPDAT_RECORDS = static_cast<int32>(test_spells.size());
+		}
+
+		~TestSpellGlobals()
+		{
+			spells = previous_spells;
+			SPDAT_RECORDS = previous_records;
+		}
+
+		void SetOrdinaryRegularHeal(uint16 spell_id, int base_value)
+		{
+			test_spells[spell_id].cast_time = MAX_FAST_HEAL_CASTING_TIME + 1;
+			test_spells[spell_id].target_type = ST_Target;
+			test_spells[spell_id].effect_id[0] = SpellEffect::CurrentHP;
+			test_spells[spell_id].base_value[0] = base_value;
+		}
+
+		void SetTriggeredRegularHeal(uint16 spell_id, uint16 trigger_spell_id)
+		{
+			test_spells[spell_id].cast_time = MAX_FAST_HEAL_CASTING_TIME + 1;
+			test_spells[spell_id].target_type = ST_Target;
+			test_spells[spell_id].effect_id[0] = SpellEffect::TriggerOnCast;
+			test_spells[spell_id].limit_value[0] = trigger_spell_id;
+			SetOrdinaryRegularHeal(trigger_spell_id, 125);
+		}
+
+		std::vector<SPDat_Spell_Struct> test_spells;
+		const SPDat_Spell_Struct *previous_spells = nullptr;
+		int32 previous_records = 0;
+	};
+
 	void DefaultRuleDisablesEfficientRegularHeals()
 	{
 		RuleManager::Instance()->ResetRules();
@@ -44,6 +93,141 @@ private:
 		const auto settings = RegularHealEfficiency::LoadSettingsFromRules();
 
 		TEST_ASSERT(!settings.prefer_efficient_regular_heals);
+	}
+
+	void OrdinaryDirectHealProducesUsableAdjustedEstimate()
+	{
+		TestSpellGlobals spell_globals;
+		spell_globals.SetOrdinaryRegularHeal(2, 125);
+
+		bool calculated_effect = false;
+		bool adjusted_healing = false;
+		uint16_t calculated_spell_id = 0;
+		int calculated_effect_index = -1;
+		uint16_t adjusted_spell_id = 0;
+		int64_t adjusted_value = 0;
+
+		const auto estimate = RegularHealEfficiency::EstimateRegularHealAmount(
+			2,
+			[&](uint16_t spell_id, int effect_index) {
+				calculated_effect = true;
+				calculated_spell_id = spell_id;
+				calculated_effect_index = effect_index;
+				return static_cast<int64_t>(450);
+			},
+			[&](uint16_t spell_id, int64_t value) {
+				adjusted_healing = true;
+				adjusted_spell_id = spell_id;
+				adjusted_value = value;
+				return static_cast<int64_t>(525);
+			}
+		);
+
+		TEST_ASSERT(calculated_effect);
+		TEST_ASSERT_EQUALS(calculated_spell_id, static_cast<uint16_t>(2));
+		TEST_ASSERT_EQUALS(calculated_effect_index, 0);
+		TEST_ASSERT(adjusted_healing);
+		TEST_ASSERT_EQUALS(adjusted_spell_id, static_cast<uint16_t>(2));
+		TEST_ASSERT_EQUALS(adjusted_value, static_cast<int64_t>(450));
+		TEST_ASSERT(estimate.usable);
+		TEST_ASSERT_EQUALS(estimate.amount, static_cast<int64_t>(525));
+	}
+
+	void NonPositiveDirectHealEstimateIsUnusable()
+	{
+		TestSpellGlobals spell_globals;
+		spell_globals.SetOrdinaryRegularHeal(2, 125);
+		spell_globals.SetOrdinaryRegularHeal(3, 125);
+
+		const auto non_positive_formula = RegularHealEfficiency::EstimateRegularHealAmount(
+			2,
+			[](uint16_t, int) { return static_cast<int64_t>(0); },
+			[](uint16_t, int64_t value) { return value; }
+		);
+
+		TEST_ASSERT(!non_positive_formula.usable);
+		TEST_ASSERT_EQUALS(non_positive_formula.amount, static_cast<int64_t>(0));
+
+		const auto non_positive_adjustment = RegularHealEfficiency::EstimateRegularHealAmount(
+			3,
+			[](uint16_t, int) { return static_cast<int64_t>(450); },
+			[](uint16_t, int64_t) { return static_cast<int64_t>(0); }
+		);
+
+		TEST_ASSERT(!non_positive_adjustment.usable);
+		TEST_ASSERT_EQUALS(non_positive_adjustment.amount, static_cast<int64_t>(0));
+	}
+
+	void UncertainDirectHealEstimateIsUnusable()
+	{
+		TestSpellGlobals spell_globals;
+		spell_globals.SetOrdinaryRegularHeal(2, 125);
+		spell_globals.test_spells[3].cast_time = MAX_FAST_HEAL_CASTING_TIME + 1;
+		spell_globals.test_spells[3].target_type = ST_Target;
+		spell_globals.SetTriggeredRegularHeal(4, 2);
+		spell_globals.test_spells[5].cast_time = MAX_FAST_HEAL_CASTING_TIME + 1;
+		spell_globals.test_spells[5].target_type = ST_Target;
+		spell_globals.test_spells[5].effect_id[0] = SpellEffect::CurrentHPOnce;
+		spell_globals.test_spells[5].base_value[0] = 125;
+
+		const auto calculator = [](uint16_t, int) { return static_cast<int64_t>(450); };
+		const auto adjuster = [](uint16_t, int64_t value) { return value; };
+
+		const auto missing_current_hp = RegularHealEfficiency::EstimateRegularHealAmount(3, calculator, adjuster);
+		TEST_ASSERT(!missing_current_hp.usable);
+
+		const auto triggered_heal = RegularHealEfficiency::EstimateRegularHealAmount(4, calculator, adjuster);
+		TEST_ASSERT(!triggered_heal.usable);
+
+		const auto current_hp_once = RegularHealEfficiency::EstimateRegularHealAmount(5, calculator, adjuster);
+		TEST_ASSERT(!current_hp_once.usable);
+	}
+
+	void EstimatorFedUnusableCandidateRemainsFallbackOnly()
+	{
+		TestSpellGlobals spell_globals;
+		spell_globals.SetOrdinaryRegularHeal(2, 125);
+		spell_globals.SetOrdinaryRegularHeal(3, 125);
+
+		const auto unusable_estimate = RegularHealEfficiency::EstimateRegularHealAmount(
+			2,
+			[](uint16_t, int) { return static_cast<int64_t>(0); },
+			[](uint16_t, int64_t value) { return value; }
+		);
+		const auto insufficient_estimate = RegularHealEfficiency::EstimateRegularHealAmount(
+			3,
+			[](uint16_t, int) { return static_cast<int64_t>(450); },
+			[](uint16_t, int64_t value) { return value; }
+		);
+
+		const RegularHealEfficiency::Settings settings{
+			.prefer_efficient_regular_heals = true
+		};
+		const auto result = RegularHealEfficiency::SelectRegularHealCandidate(
+			settings,
+			500,
+			0,
+			{
+				{
+					.spell_id = 2,
+					.list_order = 0,
+					.mana_cost = 10,
+					.has_usable_estimated_heal = unusable_estimate.usable,
+					.estimated_heal = unusable_estimate.amount
+				},
+				{
+					.spell_id = 3,
+					.list_order = 1,
+					.mana_cost = 10,
+					.has_usable_estimated_heal = insufficient_estimate.usable,
+					.estimated_heal = insufficient_estimate.amount
+				}
+			}
+		);
+
+		TEST_ASSERT(result.found);
+		TEST_ASSERT_EQUALS(result.spell_id, static_cast<uint16_t>(2));
+		TEST_ASSERT(!result.selected_for_efficiency);
 	}
 
 	void DisabledRuleReturnsPriorityFirstFallback()

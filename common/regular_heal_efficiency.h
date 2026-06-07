@@ -18,6 +18,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <initializer_list>
 
 namespace RegularHealEfficiency {
@@ -41,7 +42,20 @@ struct Selection {
 	bool selected_for_efficiency = false;
 };
 
+struct HealEstimate {
+	bool usable = false;
+	int64_t amount = 0;
+};
+
+using SpellEffectValueCalculator = std::function<int64_t(uint16_t spell_id, int effect_index)>;
+using SpellHealingAdjuster = std::function<int64_t(uint16_t spell_id, int64_t value)>;
+
 Settings LoadSettingsFromRules();
+HealEstimate EstimateRegularHealAmount(
+	uint16_t spell_id,
+	const SpellEffectValueCalculator &calculate_spell_effect_value,
+	const SpellHealingAdjuster &adjust_spell_healing
+);
 Selection SelectRegularHealCandidate(
 	const Settings &settings,
 	int64_t target_missing_hp,

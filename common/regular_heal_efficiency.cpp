@@ -18,6 +18,7 @@
 #include "regular_heal_efficiency.h"
 
 #include "rulesys.h"
+#include "spdat.h"
 
 #include <limits>
 
@@ -27,6 +28,45 @@ Settings LoadSettingsFromRules()
 {
 	return {
 		.prefer_efficient_regular_heals = RuleB(Bots, PreferEfficientRegularHeals)
+	};
+}
+
+HealEstimate EstimateRegularHealAmount(
+	uint16_t spell_id,
+	const SpellEffectValueCalculator &calculate_spell_effect_value,
+	const SpellHealingAdjuster &adjust_spell_healing
+)
+{
+	if (!calculate_spell_effect_value || !adjust_spell_healing) {
+		return {};
+	}
+
+	if (!IsRegularSingleTargetHealSpell(spell_id)) {
+		return {};
+	}
+
+	if (IsEffectInSpell(spell_id, SpellEffect::CurrentHPOnce)) {
+		return {};
+	}
+
+	const auto effect_index = GetSpellEffectIndex(spell_id, SpellEffect::CurrentHP);
+	if (effect_index < 0) {
+		return {};
+	}
+
+	const auto raw_heal = calculate_spell_effect_value(spell_id, effect_index);
+	if (raw_heal <= 0) {
+		return {};
+	}
+
+	const auto adjusted_heal = adjust_spell_healing(spell_id, raw_heal);
+	if (adjusted_heal <= 0) {
+		return {};
+	}
+
+	return {
+		.usable = true,
+		.amount = adjusted_heal
 	};
 }
 
