@@ -10525,7 +10525,11 @@ void Bot::SetBotSpellRecastTimer(uint16 spell_type, Mob* tar, bool precast) {
 	}
 }
 
-BotSpell Bot::GetSpellByHealType(uint16 spell_type, Mob* tar) {
+BotSpell Bot::GetSpellByHealType(
+	uint16 spell_type,
+	Mob* tar,
+	const RegularHealEfficiency::Settings* regular_heal_efficiency_settings
+) {
 	if (!TargetValidation(tar)) {
 		BotSpell result{};
 
@@ -10541,7 +10545,13 @@ BotSpell Bot::GetSpellByHealType(uint16 spell_type, Mob* tar) {
 			return GetBestBotSpellForFastHeal(this, tar, spell_type);
 		case BotSpellTypes::RegularHeal:
 		case BotSpellTypes::PetRegularHeals:
-			return GetBestBotSpellForRegularSingleTargetHeal(this, tar, spell_type);
+			return GetBestBotSpellForRegularSingleTargetHeal(
+				this,
+				tar,
+				spell_type,
+				false,
+				regular_heal_efficiency_settings
+			);
 		case BotSpellTypes::GroupHeals:
 			return GetBestBotSpellForGroupHeal(this, tar, spell_type);
 		case BotSpellTypes::CompleteHeal:

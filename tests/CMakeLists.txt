@@ -9,6 +9,7 @@ set(tests_sources
 set(tests_headers
 	atobool_test.h
 	bot_aided_tracking_test.h
+	bot_heal_selection_test.h
 	bot_loot_request_test.h
 	bot_slow_target_test.h
 	data_verification_test.h
