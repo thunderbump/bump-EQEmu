@@ -29,8 +29,7 @@ Settings LoadSettingsFromRules()
 	return {
 		.enabled = RuleB(Bots, PressureAwareHealingEnabled),
 		.pressure_sample_ms = RuleI(Bots, PressureAwareHealingPressureSampleMS),
-		.emergency_projection_ms = RuleI(Bots, PressureAwareHealingEmergencyProjectionMS),
-		.hot_sustain_ms = RuleI(Bots, PressureAwareHealingHoTSustainMS)
+		.emergency_projection_ms = RuleI(Bots, PressureAwareHealingEmergencyProjectionMS)
 	};
 }
 

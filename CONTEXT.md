@@ -252,7 +252,7 @@ _Avoid_: Autonomous Actor runtime, test actor system, production sidecar
 - **Bot Heal Selection** should fall back to the ordinary requested heal spell when an alternative pressure-aware or **Recovery Healing** choice cannot produce a valid concrete spell; no-selection should mean the requested heal type also has no valid spell.
 - Heal rotation behavior should remain outside the first **Bot Heal Selection** pass because heal rotations have separate cadence and fast-heal behavior.
 - Efficient regular-heal choice is a **Bot Heal Selection** policy, not a separate gameplay-facing concept.
-- The first pressure-aware bot healing settings should include feature enablement and a small number of time-window values, not per-class weights or per-spell coefficients.
+- The first pressure-aware bot healing settings should include feature enablement, the **Incoming Damage Pressure** sample window, and the **Healing Danger Window** projection only, not a separate HoT sustain window, per-class weights, or per-spell coefficients.
 - HoT-based bot healing should be treated as low-pressure sustain; **Incoming Damage Pressure** should suppress HoT selection when the target is in active danger.
 - Low-pressure HoT sustain means the target is not projected to cross a direct-heal threshold soon; low pressure may allow HoT selection, but should not force HoTs ahead of ordinary heal settings.
 - Missing or expired **Incoming Damage Pressure** should prefer HoT-based sustain when an existing valid HoT option is available, while falling back to ordinary direct-heal behavior when HoTs are unavailable, held, invalid, unsafe to cast, or the target is already inside an emergency direct-heal threshold.

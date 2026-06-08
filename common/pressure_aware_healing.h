@@ -26,7 +26,6 @@ struct Settings {
 	bool enabled = false;
 	int pressure_sample_ms = 3000;
 	int emergency_projection_ms = 2000;
-	int hot_sustain_ms = 8000;
 };
 
 struct IncomingDamagePressure {

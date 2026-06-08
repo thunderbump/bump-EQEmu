@@ -64,7 +64,6 @@ private:
 		TEST_ASSERT(!settings.enabled);
 		TEST_ASSERT_EQUALS(settings.pressure_sample_ms, 3000);
 		TEST_ASSERT_EQUALS(settings.emergency_projection_ms, 2000);
-		TEST_ASSERT_EQUALS(settings.hot_sustain_ms, 8000);
 	}
 
 	void DisabledPressureAwareHealingKeepsCurrentSpellType()
@@ -72,8 +71,7 @@ private:
 		const PressureAwareHealing::Settings settings{
 			.enabled = false,
 			.pressure_sample_ms = 1000,
-			.emergency_projection_ms = 1000,
-			.hot_sustain_ms = 1000
+			.emergency_projection_ms = 1000
 		};
 
 		TEST_ASSERT_EQUALS(
@@ -87,8 +85,7 @@ private:
 		const PressureAwareHealing::Settings settings{
 			.enabled = true,
 			.pressure_sample_ms = 1000,
-			.emergency_projection_ms = 1000,
-			.hot_sustain_ms = 1000
+			.emergency_projection_ms = 1000
 		};
 
 		TEST_ASSERT_EQUALS(
@@ -107,8 +104,7 @@ private:
 		const PressureAwareHealing::Settings settings{
 			.enabled = true,
 			.pressure_sample_ms = 1000,
-			.emergency_projection_ms = 1000,
-			.hot_sustain_ms = 1000
+			.emergency_projection_ms = 1000
 		};
 
 		TEST_ASSERT_EQUALS(
@@ -127,8 +123,7 @@ private:
 		const PressureAwareHealing::Settings settings{
 			.enabled = true,
 			.pressure_sample_ms = 1000,
-			.emergency_projection_ms = 1000,
-			.hot_sustain_ms = 1000
+			.emergency_projection_ms = 1000
 		};
 
 		TEST_ASSERT_EQUALS(
@@ -157,8 +152,7 @@ private:
 		const PressureAwareHealing::Settings settings{
 			.enabled = true,
 			.pressure_sample_ms = 1000,
-			.emergency_projection_ms = 1000,
-			.hot_sustain_ms = 1000
+			.emergency_projection_ms = 1000
 		};
 
 		TEST_ASSERT_EQUALS(
@@ -197,8 +191,7 @@ private:
 		const PressureAwareHealing::Settings settings{
 			.enabled = true,
 			.pressure_sample_ms = 1000,
-			.emergency_projection_ms = 1000,
-			.hot_sustain_ms = 1000
+			.emergency_projection_ms = 1000
 		};
 
 		TEST_ASSERT_EQUALS(
@@ -217,8 +210,7 @@ private:
 		const PressureAwareHealing::Settings settings{
 			.enabled = true,
 			.pressure_sample_ms = 1000,
-			.emergency_projection_ms = 1000,
-			.hot_sustain_ms = 1000
+			.emergency_projection_ms = 1000
 		};
 		PressureAwareHealing::IncomingDamagePressure pressure{};
 
@@ -241,8 +233,7 @@ private:
 		const PressureAwareHealing::Settings settings{
 			.enabled = true,
 			.pressure_sample_ms = 1000,
-			.emergency_projection_ms = 1000,
-			.hot_sustain_ms = 1000
+			.emergency_projection_ms = 1000
 		};
 		PressureAwareHealing::IncomingDamagePressure pressure{};
 
@@ -265,8 +256,7 @@ private:
 		const PressureAwareHealing::Settings settings{
 			.enabled = true,
 			.pressure_sample_ms = 1000,
-			.emergency_projection_ms = 1000,
-			.hot_sustain_ms = 1000
+			.emergency_projection_ms = 1000
 		};
 		PressureAwareHealing::IncomingDamagePressure pressure{};
 
@@ -289,8 +279,7 @@ private:
 		const PressureAwareHealing::Settings settings{
 			.enabled = false,
 			.pressure_sample_ms = 1000,
-			.emergency_projection_ms = 1000,
-			.hot_sustain_ms = 1000
+			.emergency_projection_ms = 1000
 		};
 		PressureAwareHealing::IncomingDamagePressure pressure{};
 
@@ -304,8 +293,7 @@ private:
 		const PressureAwareHealing::Settings settings{
 			.enabled = true,
 			.pressure_sample_ms = 1000,
-			.emergency_projection_ms = 2000,
-			.hot_sustain_ms = 1000
+			.emergency_projection_ms = 2000
 		};
 		PressureAwareHealing::IncomingDamagePressure pressure{};
 
@@ -334,7 +322,6 @@ private:
 			.enabled = true,
 			.pressure_sample_ms = 1000,
 			.emergency_projection_ms = 2000,
-			.hot_sustain_ms = 1000
 		};
 		PressureAwareHealing::IncomingDamagePressure pressure{};
 
@@ -363,7 +350,6 @@ private:
 			.enabled = true,
 			.pressure_sample_ms = 1000,
 			.emergency_projection_ms = 2000,
-			.hot_sustain_ms = 1000
 		};
 		PressureAwareHealing::IncomingDamagePressure pressure{};
 
@@ -392,7 +378,6 @@ private:
 			.enabled = true,
 			.pressure_sample_ms = 1000,
 			.emergency_projection_ms = 2000,
-			.hot_sustain_ms = 1000
 		};
 		PressureAwareHealing::IncomingDamagePressure pressure{};
 
@@ -421,7 +406,6 @@ private:
 			.enabled = true,
 			.pressure_sample_ms = 1000,
 			.emergency_projection_ms = 2000,
-			.hot_sustain_ms = 1000
 		};
 		PressureAwareHealing::IncomingDamagePressure pressure{};
 
@@ -450,7 +434,6 @@ private:
 			.enabled = true,
 			.pressure_sample_ms = 1000,
 			.emergency_projection_ms = 2000,
-			.hot_sustain_ms = 1000
 		};
 		PressureAwareHealing::IncomingDamagePressure pressure{};
 
@@ -479,7 +462,6 @@ private:
 			.enabled = true,
 			.pressure_sample_ms = 1000,
 			.emergency_projection_ms = 2000,
-			.hot_sustain_ms = 1000
 		};
 		const RegularHealEfficiency::Settings efficiency_settings{
 			.prefer_efficient_regular_heals = true
@@ -515,7 +497,6 @@ private:
 			.enabled = true,
 			.pressure_sample_ms = 1000,
 			.emergency_projection_ms = 2000,
-			.hot_sustain_ms = 1000
 		};
 		PressureAwareHealing::IncomingDamagePressure pressure{};
 
@@ -542,7 +523,6 @@ private:
 			.enabled = false,
 			.pressure_sample_ms = 1000,
 			.emergency_projection_ms = 2000,
-			.hot_sustain_ms = 1000
 		};
 		PressureAwareHealing::IncomingDamagePressure pressure{};
 
@@ -571,7 +551,6 @@ private:
 			.enabled = true,
 			.pressure_sample_ms = 1000,
 			.emergency_projection_ms = 2000,
-			.hot_sustain_ms = 1000
 		};
 
 		TEST_ASSERT_EQUALS(
@@ -591,7 +570,6 @@ private:
 			.enabled = true,
 			.pressure_sample_ms = 1000,
 			.emergency_projection_ms = 2000,
-			.hot_sustain_ms = 1000
 		};
 		PressureAwareHealing::IncomingDamagePressure pressure{};
 
@@ -635,7 +613,6 @@ private:
 			.enabled = true,
 			.pressure_sample_ms = 1000,
 			.emergency_projection_ms = 2000,
-			.hot_sustain_ms = 1000
 		};
 		PressureAwareHealing::IncomingDamagePressure pressure{};
 
