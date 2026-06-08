@@ -20,6 +20,7 @@
 #include "cppunit/cpptest.h"
 
 #include "common/pressure_aware_healing.h"
+#include "common/regular_heal_efficiency.h"
 #include "common/rulesys.h"
 #include "common/spdat.h"
 
@@ -44,6 +45,7 @@ public:
 		TEST_ADD(PressureAwareHealingTest::FastHealEscalatesToVeryFastHealWhenDangerWindowIsUnsafe);
 		TEST_ADD(PressureAwareHealingTest::DirectHealEscalationSkipsUnavailableCandidates);
 		TEST_ADD(PressureAwareHealingTest::DirectHealEscalationKeepsCurrentTypeWhenNoCandidateIsAvailable);
+		TEST_ADD(PressureAwareHealingTest::PressureEscalationRunsBeforeRegularHealEfficiencySelection);
 		TEST_ADD(PressureAwareHealingTest::MissingPressureKeepsDirectHealType);
 		TEST_ADD(PressureAwareHealingTest::DisabledSettingsKeepDirectHealTypeUnderPressure);
 		TEST_ADD(PressureAwareHealingTest::EmergencyThresholdDirectHealDoesNotPreferHoT);
@@ -439,6 +441,42 @@ private:
 			),
 			BotSpellTypes::RegularHeal
 		);
+	}
+
+	void PressureEscalationRunsBeforeRegularHealEfficiencySelection()
+	{
+		const PressureAwareHealing::Settings pressure_settings{
+			.enabled = true,
+			.pressure_sample_ms = 1000,
+			.emergency_projection_ms = 2000,
+			.hot_sustain_ms = 1000
+		};
+		const RegularHealEfficiency::Settings efficiency_settings{
+			.prefer_efficient_regular_heals = true
+		};
+		PressureAwareHealing::IncomingDamagePressure pressure{};
+
+		PressureAwareHealing::RecordCombatDamage(pressure, 100, 1000);
+
+		const auto spell_type = PressureAwareHealing::SelectDirectHealSpellType(
+			BotSpellTypes::RegularHeal,
+			pressure,
+			pressure_settings,
+			700,
+			1000,
+			{
+				PressureAwareHealing::DirectHealCandidate{BotSpellTypes::RegularHeal, true, 2000, 60},
+				PressureAwareHealing::DirectHealCandidate{BotSpellTypes::FastHeals, true, 1000, 40},
+				PressureAwareHealing::DirectHealCandidate{BotSpellTypes::VeryFastHeals, true, 0, 25}
+			}
+		);
+
+		TEST_ASSERT_EQUALS(spell_type, BotSpellTypes::FastHeals);
+		TEST_ASSERT(!RegularHealEfficiency::ShouldUseEfficientSelection(
+			efficiency_settings,
+			spell_type,
+			false
+		));
 	}
 
 	void MissingPressureKeepsDirectHealType()

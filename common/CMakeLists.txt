@@ -104,6 +104,7 @@ set(common_sources
     path_manager.cpp
     path_manager.cpp
     pressure_aware_healing.cpp
+    regular_heal_efficiency.cpp
     perl_eqdb_res.cpp
     perl_eqdb.cpp
     platform.cpp

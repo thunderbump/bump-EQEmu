@@ -258,6 +258,12 @@ _Avoid_: Autonomous Actor runtime, test actor system, production sidecar
 - Pressure-aware bot healing should be proven with deterministic decision tests before live smoke testing against real bot spell lists and zone combat timing.
 - The first pressure-aware bot healing implementation should document where **Incoming Damage Pressure** is updated and where bot heal selection reads it.
 - **Incoming Damage Pressure** should never make emergency bot healing less safe; it may escalate to faster or stronger heal types under pressure, but should not delay `VeryFastHeals` or `FastHeals` when a target is already inside emergency thresholds.
+- Smarter `RegularHeal` spell choice should stay inside the existing bot spell settings model rather than becoming a new stance or domain concept.
+- When enabled, smarter `RegularHeal` spell choice should apply across bot stances; stance should continue to control thresholds, delays, priorities, holds, and mana limits.
+- Smarter `RegularHeal` spell choice should prefer the smallest valid direct heal that covers the target's missing HP plus a conservative margin, and should fall back to the current priority-first spell choice when heal amount cannot be estimated cleanly or no sufficient candidate exists.
+- Smarter `RegularHeal` spell choice may choose across existing bot spell entry priority order once the server operator has opted in; ordinary cast validity and bot spell settings remain authoritative, while priority/list order becomes a stability tie-breaker after sufficient heal amount, overheal, and mana cost.
+- Smarter `RegularHeal` spell choice should be controlled by a global server rule defaulting off in the first implementation, not by a new player command or per-bot setting. A narrow safety-margin rule may be added if implementation needs operator-tunable conservatism.
+- The first smarter `RegularHeal` spell-choice implementation should not change `PetRegularHeals`; pet regular-heal selection can reuse the same approach later if ordinary pet-healing waste becomes important.
 - **Bot-Aided Tracking** should work through the requesting player's owned spawned bots, not through any capable bot in the player's group.
 - **Bot-Aided Tracking** should not grant the player the Tracking skill or bypass native class tracking rules.
 - The first **Bot-Aided Tracking** implementation should use a bot-produced tracking report popup rather than the native client Track window.

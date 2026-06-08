@@ -54,6 +54,16 @@ Use this for every change before running heavier checks.
 - Check that no secrets were written into tracked files.
 - For schema-sensitive work, identify whether the backup gate applies before running commands.
 
+### Graphify Deterministic Update
+
+When the local knowledge graph already exists, code-only graph refreshes can run without semantic extraction:
+
+```sh
+./scripts/graphify-deterministic-update.sh
+```
+
+This wrapper calls `graphify update <repo> --no-cluster`, so it is suitable for a local pre-commit hook or manual refresh after code changes. It does not run LLM semantic extraction, community labeling, full report generation, or HTML regeneration. If `graphify` or `graphify-out/graph.json` is not present, the wrapper skips cleanly.
+
 ## Tier 1: Container Build And Unit Tests
 
 Use this as the default automated validation tier for code changes.
@@ -85,6 +95,10 @@ The wrapper runs the AkkStack contract preflight first, then runs the raw Tier 1
 Pressure-aware bot healing has deterministic unit coverage in `tests/pressure_aware_healing_test.h`. Live runtime
 validation for real bot spell lists and combat timing is documented separately in
 `docs/testing/pressure-aware-healing-smoke.md`.
+
+Efficient `RegularHeal` selection has deterministic unit coverage in `tests/regular_heal_efficiency_test.h`, with
+pressure ordering covered in `tests/pressure_aware_healing_test.h`. Live runtime validation for rule-off/rule-on
+real bot spell-list behavior is documented separately in `docs/testing/efficient-regular-heal-smoke.md`.
 
 ## Tier 2: DB-Backed CLI Tests
 
