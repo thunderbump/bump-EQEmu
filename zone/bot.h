@@ -18,7 +18,6 @@
 #pragma once
 
 #include "common/misc_functions.h"
-#include "common/regular_heal_efficiency.h"
 #include "common/zone_store.h"
 #include "zone/bot_structs.h"
 #include "zone/client.h"
@@ -38,6 +37,10 @@ constexpr uint32 BOT_KEEP_ALIVE_INTERVAL = 5000; // 5 seconds
 constexpr uint32 MAG_EPIC_1_0 = 28034;
 
 extern WorldServer worldserver;
+
+namespace RegularHealEfficiency {
+	struct Settings;
+}
 
 constexpr int NegativeItemReuse = -1; // Unlinked timer for items
 
