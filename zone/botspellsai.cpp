@@ -535,6 +535,8 @@ bool Bot::BotCastHeal(Mob* tar, uint8 bot_class, BotSpell& bot_spell, uint16 spe
 
 	const bool has_active_damage_pressure = tar->HasActiveIncomingDamagePressure(pressure_aware_healing_settings);
 	BotSpell direct_heal_spell{};
+	std::array<uint16, 3> direct_heal_spell_types{};
+	bool can_select_direct_heal_type = false;
 
 	if (
 		pressure_aware_healing_settings.enabled &&
@@ -542,15 +544,35 @@ bool Bot::BotCastHeal(Mob* tar, uint8 bot_class, BotSpell& bot_spell, uint16 spe
 		(
 			spell_type == BotSpellTypes::RegularHeal ||
 			spell_type == BotSpellTypes::FastHeals ||
-			spell_type == BotSpellTypes::VeryFastHeals
+			spell_type == BotSpellTypes::VeryFastHeals ||
+			spell_type == BotSpellTypes::PetRegularHeals ||
+			spell_type == BotSpellTypes::PetFastHeals ||
+			spell_type == BotSpellTypes::PetVeryFastHeals
 		)
 	) {
-		constexpr std::array<uint16, 3> direct_heal_spell_types = {
-			BotSpellTypes::RegularHeal,
-			BotSpellTypes::FastHeals,
-			BotSpellTypes::VeryFastHeals
-		};
+		if (
+			spell_type == BotSpellTypes::PetRegularHeals ||
+			spell_type == BotSpellTypes::PetFastHeals ||
+			spell_type == BotSpellTypes::PetVeryFastHeals
+		) {
+			direct_heal_spell_types = {
+				BotSpellTypes::PetRegularHeals,
+				BotSpellTypes::PetFastHeals,
+				BotSpellTypes::PetVeryFastHeals
+			};
+		}
+		else {
+			direct_heal_spell_types = {
+				BotSpellTypes::RegularHeal,
+				BotSpellTypes::FastHeals,
+				BotSpellTypes::VeryFastHeals
+			};
+		}
 
+		can_select_direct_heal_type = true;
+	}
+
+	if (can_select_direct_heal_type) {
 		std::array<PressureAwareHealing::DirectHealCandidate, direct_heal_spell_types.size()> candidates{};
 		std::array<BotSpell, direct_heal_spell_types.size()> candidate_spells{};
 

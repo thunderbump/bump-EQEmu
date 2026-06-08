@@ -112,6 +112,10 @@ _Avoid_: Raw DPS, urgency score, time-to-death
 Out-of-combat bot healing that returns players, bots, and pets to a ready state after active danger has passed.
 _Avoid_: Pressure healing, downtime topping-off
 
+**Bot Heal Selection**:
+Choosing the concrete heal spell a bot should cast for an already-selected heal target and requested bot heal spell type, including pressure-aware escalation, Recovery Healing HoT preference, and efficient regular-heal choice when those behaviors are enabled.
+_Avoid_: Regular heal efficiency service, heal optimizer, pressure healing module
+
 **Bot-Aided Tracking**:
 An owned bot's ability to report nearby trackable spawns to its owner when the bot has an appropriate tracking-capable class and level.
 _Avoid_: Group tracking, shared Track skill, borrowed tracking
@@ -238,6 +242,8 @@ _Avoid_: Autonomous Actor runtime, test actor system, production sidecar
 - Pressure-aware bot healing should apply to healable targets already considered by existing bot healing behavior, not introduce a new healing target-selection model.
 - **Healing Danger Window** should account for whether a candidate heal can land before the target crosses dangerous HP thresholds, while recast availability remains an ordinary spell validity check.
 - Pressure-aware bot healing should use existing bot heal HP thresholds as the dangerous HP thresholds, and add only time-window configuration for conservative projection.
+- **Bot Heal Selection** owns choosing the concrete spell for single-target bot heal families before the cast begins; it should not replace target selection, recast timers, mana checks, holds, aggro checks, or ordinary spell validity rules.
+- Efficient regular-heal choice is a **Bot Heal Selection** policy, not a separate gameplay-facing concept.
 - The first pressure-aware bot healing settings should include feature enablement and a small number of time-window values, not per-class weights or per-spell coefficients.
 - HoT-based bot healing should be treated as low-pressure sustain; **Incoming Damage Pressure** should suppress HoT selection when the target is in active danger.
 - Low-pressure HoT sustain means the target is not projected to cross a direct-heal threshold soon; low pressure may allow HoT selection, but should not force HoTs ahead of ordinary heal settings.

@@ -32,6 +32,7 @@ public:
 	{
 		TEST_ADD(RegularHealEfficiencyTest::DefaultRuleDisablesEfficientRegularHeals);
 		TEST_ADD(RegularHealEfficiencyTest::OnlyNonRotationRegularHealsUseEfficientSelection);
+		TEST_ADD(RegularHealEfficiencyTest::PetRegularHealsUseEfficientSelection);
 		TEST_ADD(RegularHealEfficiencyTest::ExcludedHealTypesDoNotUseEfficientSelection);
 		TEST_ADD(RegularHealEfficiencyTest::OrdinaryDirectHealProducesUsableAdjustedEstimate);
 		TEST_ADD(RegularHealEfficiencyTest::NonPositiveDirectHealEstimateIsUnusable);
@@ -117,6 +118,19 @@ private:
 		));
 	}
 
+	void PetRegularHealsUseEfficientSelection()
+	{
+		const RegularHealEfficiency::Settings settings{
+			.prefer_efficient_regular_heals = true
+		};
+
+		TEST_ASSERT(RegularHealEfficiency::ShouldUseEfficientSelection(
+			settings,
+			BotSpellTypes::PetRegularHeals,
+			false
+		));
+	}
+
 	void ExcludedHealTypesDoNotUseEfficientSelection()
 	{
 		const RegularHealEfficiency::Settings enabled_settings{
@@ -130,7 +144,6 @@ private:
 			BotSpellTypes::HoTHeals,
 			BotSpellTypes::GroupHoTHeals,
 			BotSpellTypes::GroupHeals,
-			BotSpellTypes::PetRegularHeals,
 			BotSpellTypes::PetFastHeals,
 			BotSpellTypes::PetVeryFastHeals,
 			BotSpellTypes::PetCompleteHeals,
