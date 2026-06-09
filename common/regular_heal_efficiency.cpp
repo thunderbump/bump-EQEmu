@@ -38,7 +38,7 @@ bool ShouldUseEfficientSelection(
 )
 {
 	return settings.prefer_efficient_regular_heals &&
-		spell_type == BotSpellTypes::RegularHeal &&
+		(spell_type == BotSpellTypes::RegularHeal || spell_type == BotSpellTypes::PetRegularHeals) &&
 		!is_heal_rotation;
 }
 

@@ -33,7 +33,6 @@ Pressure-aware healing is controlled separately by these `Bots` rules:
 - `PressureAwareHealingEnabled`, default `false`
 - `PressureAwareHealingPressureSampleMS`, default `3000`
 - `PressureAwareHealingEmergencyProjectionMS`, default `2000`
-- `PressureAwareHealingHoTSustainMS`, default `8000`
 
 When pressure-aware healing is enabled and the target has active **Incoming Damage Pressure**, pressure-aware
 selection may keep `RegularHeal` or escalate to `FastHeals` or `VeryFastHeals` before efficient `RegularHeal`
@@ -134,7 +133,6 @@ before and after, deaths or near-deaths, and whether the target remained safely 
    PressureAwareHealingEnabled=true
    PressureAwareHealingPressureSampleMS=3000
    PressureAwareHealingEmergencyProjectionMS=2000
-   PressureAwareHealingHoTSustainMS=8000
    ```
 
 3. Create controlled active combat pressure against the same tank-like target with one attackable NPC.
@@ -157,8 +155,7 @@ Keep the server running long enough to capture evidence, then record:
 
 - exact server commit and branch;
 - rule values for `PreferEfficientRegularHeals`, `PressureAwareHealingEnabled`,
-  `PressureAwareHealingPressureSampleMS`, `PressureAwareHealingEmergencyProjectionMS`, and
-  `PressureAwareHealingHoTSustainMS`;
+  `PressureAwareHealingPressureSampleMS`, and `PressureAwareHealingEmergencyProjectionMS`;
 - healer bot name, class, level, stance, spell holds, spell priorities, thresholds, delays, and mana settings;
 - target type, max HP, current HP before and after each heal opportunity, and whether the target was already under
   an emergency direct-heal threshold;

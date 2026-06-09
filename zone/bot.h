@@ -38,6 +38,10 @@ constexpr uint32 MAG_EPIC_1_0 = 28034;
 
 extern WorldServer worldserver;
 
+namespace RegularHealEfficiency {
+	struct Settings;
+}
+
 constexpr int NegativeItemReuse = -1; // Unlinked timer for items
 
 constexpr uint8 SumWater               = 1;
@@ -736,7 +740,11 @@ public:
 	static std::vector<BotSpell_wPriority> GetPrioritizedBotSpellsBySpellType(Bot* caster, uint16 spell_type, Mob* tar, bool AE = false, uint16 sub_target_type = UINT16_MAX, uint16 sub_type = UINT16_MAX);
 
 	static BotSpell GetFirstBotSpellBySpellType(Bot* caster, uint16 spell_type);
-	BotSpell GetSpellByHealType(uint16 spell_type, Mob* tar);
+	BotSpell GetSpellByHealType(
+		uint16 spell_type,
+		Mob* tar,
+		const RegularHealEfficiency::Settings* regular_heal_efficiency_settings = nullptr
+	);
 	static BotSpell GetBestBotSpellForVeryFastHeal(Bot* caster, Mob* tar, uint16 spell_type = BotSpellTypes::RegularHeal);
 	static BotSpell GetBestBotSpellForFastHeal(Bot* caster, Mob* tar, uint16 spell_type = BotSpellTypes::RegularHeal);
 	static BotSpell GetBestBotSpellForHealOverTime(Bot* caster, Mob* tar, uint16 spell_type = BotSpellTypes::RegularHeal);
@@ -745,7 +753,8 @@ public:
 		Bot* caster,
 		Mob* tar,
 		uint16 spell_type = BotSpellTypes::RegularHeal,
-		bool is_heal_rotation = false
+		bool is_heal_rotation = false,
+		const RegularHealEfficiency::Settings* settings = nullptr
 	);
 	static BotSpell GetFirstBotSpellForSingleTargetHeal(Bot* caster, Mob* tar, uint16 spell_type = BotSpellTypes::RegularHeal);
 	static BotSpell GetBestBotSpellForGroupHealOverTime(Bot* caster, Mob* tar, uint16 spell_type = BotSpellTypes::RegularHeal);

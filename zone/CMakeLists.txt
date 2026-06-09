@@ -13,6 +13,7 @@ set(zone_sources
     bot.cpp
     bot_aided_tracking_runtime.cpp
     bot_database.cpp
+    bot_heal_selection.cpp
     bot_loot_request_runtime.cpp
     bot_raid.cpp
     botspellsai.cpp

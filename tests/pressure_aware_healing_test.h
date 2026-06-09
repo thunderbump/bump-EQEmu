@@ -43,6 +43,7 @@ public:
 		TEST_ADD(PressureAwareHealingTest::RegularHealRemainsEligibleWhenDangerWindowIsSafe);
 		TEST_ADD(PressureAwareHealingTest::RegularHealEscalatesToFastHealWhenDangerWindowIsUnsafe);
 		TEST_ADD(PressureAwareHealingTest::FastHealEscalatesToVeryFastHealWhenDangerWindowIsUnsafe);
+		TEST_ADD(PressureAwareHealingTest::PetRegularHealEscalatesToPetFastHealWhenDangerWindowIsUnsafe);
 		TEST_ADD(PressureAwareHealingTest::DirectHealEscalationSkipsUnavailableCandidates);
 		TEST_ADD(PressureAwareHealingTest::DirectHealEscalationKeepsCurrentTypeWhenNoCandidateIsAvailable);
 		TEST_ADD(PressureAwareHealingTest::PressureEscalationRunsBeforeRegularHealEfficiencySelection);
@@ -63,7 +64,6 @@ private:
 		TEST_ASSERT(!settings.enabled);
 		TEST_ASSERT_EQUALS(settings.pressure_sample_ms, 3000);
 		TEST_ASSERT_EQUALS(settings.emergency_projection_ms, 2000);
-		TEST_ASSERT_EQUALS(settings.hot_sustain_ms, 8000);
 	}
 
 	void DisabledPressureAwareHealingKeepsCurrentSpellType()
@@ -71,8 +71,7 @@ private:
 		const PressureAwareHealing::Settings settings{
 			.enabled = false,
 			.pressure_sample_ms = 1000,
-			.emergency_projection_ms = 1000,
-			.hot_sustain_ms = 1000
+			.emergency_projection_ms = 1000
 		};
 
 		TEST_ASSERT_EQUALS(
@@ -86,8 +85,7 @@ private:
 		const PressureAwareHealing::Settings settings{
 			.enabled = true,
 			.pressure_sample_ms = 1000,
-			.emergency_projection_ms = 1000,
-			.hot_sustain_ms = 1000
+			.emergency_projection_ms = 1000
 		};
 
 		TEST_ASSERT_EQUALS(
@@ -106,8 +104,7 @@ private:
 		const PressureAwareHealing::Settings settings{
 			.enabled = true,
 			.pressure_sample_ms = 1000,
-			.emergency_projection_ms = 1000,
-			.hot_sustain_ms = 1000
+			.emergency_projection_ms = 1000
 		};
 
 		TEST_ASSERT_EQUALS(
@@ -126,8 +123,7 @@ private:
 		const PressureAwareHealing::Settings settings{
 			.enabled = true,
 			.pressure_sample_ms = 1000,
-			.emergency_projection_ms = 1000,
-			.hot_sustain_ms = 1000
+			.emergency_projection_ms = 1000
 		};
 
 		TEST_ASSERT_EQUALS(
@@ -156,8 +152,7 @@ private:
 		const PressureAwareHealing::Settings settings{
 			.enabled = true,
 			.pressure_sample_ms = 1000,
-			.emergency_projection_ms = 1000,
-			.hot_sustain_ms = 1000
+			.emergency_projection_ms = 1000
 		};
 
 		TEST_ASSERT_EQUALS(
@@ -196,8 +191,7 @@ private:
 		const PressureAwareHealing::Settings settings{
 			.enabled = true,
 			.pressure_sample_ms = 1000,
-			.emergency_projection_ms = 1000,
-			.hot_sustain_ms = 1000
+			.emergency_projection_ms = 1000
 		};
 
 		TEST_ASSERT_EQUALS(
@@ -216,8 +210,7 @@ private:
 		const PressureAwareHealing::Settings settings{
 			.enabled = true,
 			.pressure_sample_ms = 1000,
-			.emergency_projection_ms = 1000,
-			.hot_sustain_ms = 1000
+			.emergency_projection_ms = 1000
 		};
 		PressureAwareHealing::IncomingDamagePressure pressure{};
 
@@ -240,8 +233,7 @@ private:
 		const PressureAwareHealing::Settings settings{
 			.enabled = true,
 			.pressure_sample_ms = 1000,
-			.emergency_projection_ms = 1000,
-			.hot_sustain_ms = 1000
+			.emergency_projection_ms = 1000
 		};
 		PressureAwareHealing::IncomingDamagePressure pressure{};
 
@@ -264,8 +256,7 @@ private:
 		const PressureAwareHealing::Settings settings{
 			.enabled = true,
 			.pressure_sample_ms = 1000,
-			.emergency_projection_ms = 1000,
-			.hot_sustain_ms = 1000
+			.emergency_projection_ms = 1000
 		};
 		PressureAwareHealing::IncomingDamagePressure pressure{};
 
@@ -288,8 +279,7 @@ private:
 		const PressureAwareHealing::Settings settings{
 			.enabled = false,
 			.pressure_sample_ms = 1000,
-			.emergency_projection_ms = 1000,
-			.hot_sustain_ms = 1000
+			.emergency_projection_ms = 1000
 		};
 		PressureAwareHealing::IncomingDamagePressure pressure{};
 
@@ -303,8 +293,7 @@ private:
 		const PressureAwareHealing::Settings settings{
 			.enabled = true,
 			.pressure_sample_ms = 1000,
-			.emergency_projection_ms = 2000,
-			.hot_sustain_ms = 1000
+			.emergency_projection_ms = 2000
 		};
 		PressureAwareHealing::IncomingDamagePressure pressure{};
 
@@ -333,7 +322,6 @@ private:
 			.enabled = true,
 			.pressure_sample_ms = 1000,
 			.emergency_projection_ms = 2000,
-			.hot_sustain_ms = 1000
 		};
 		PressureAwareHealing::IncomingDamagePressure pressure{};
 
@@ -362,7 +350,6 @@ private:
 			.enabled = true,
 			.pressure_sample_ms = 1000,
 			.emergency_projection_ms = 2000,
-			.hot_sustain_ms = 1000
 		};
 		PressureAwareHealing::IncomingDamagePressure pressure{};
 
@@ -385,13 +372,40 @@ private:
 		);
 	}
 
+	void PetRegularHealEscalatesToPetFastHealWhenDangerWindowIsUnsafe()
+	{
+		const PressureAwareHealing::Settings settings{
+			.enabled = true,
+			.pressure_sample_ms = 1000,
+			.emergency_projection_ms = 2000,
+		};
+		PressureAwareHealing::IncomingDamagePressure pressure{};
+
+		PressureAwareHealing::RecordCombatDamage(pressure, 100, 1000);
+
+		TEST_ASSERT_EQUALS(
+			PressureAwareHealing::SelectDirectHealSpellType(
+				BotSpellTypes::PetRegularHeals,
+				pressure,
+				settings,
+				700,
+				1000,
+				{
+					PressureAwareHealing::DirectHealCandidate{BotSpellTypes::PetRegularHeals, true, 2000, 60},
+					PressureAwareHealing::DirectHealCandidate{BotSpellTypes::PetFastHeals, true, 1000, 40},
+					PressureAwareHealing::DirectHealCandidate{BotSpellTypes::PetVeryFastHeals, true, 0, 25}
+				}
+			),
+			BotSpellTypes::PetFastHeals
+		);
+	}
+
 	void DirectHealEscalationSkipsUnavailableCandidates()
 	{
 		const PressureAwareHealing::Settings settings{
 			.enabled = true,
 			.pressure_sample_ms = 1000,
 			.emergency_projection_ms = 2000,
-			.hot_sustain_ms = 1000
 		};
 		PressureAwareHealing::IncomingDamagePressure pressure{};
 
@@ -420,7 +434,6 @@ private:
 			.enabled = true,
 			.pressure_sample_ms = 1000,
 			.emergency_projection_ms = 2000,
-			.hot_sustain_ms = 1000
 		};
 		PressureAwareHealing::IncomingDamagePressure pressure{};
 
@@ -449,7 +462,6 @@ private:
 			.enabled = true,
 			.pressure_sample_ms = 1000,
 			.emergency_projection_ms = 2000,
-			.hot_sustain_ms = 1000
 		};
 		const RegularHealEfficiency::Settings efficiency_settings{
 			.prefer_efficient_regular_heals = true
@@ -485,7 +497,6 @@ private:
 			.enabled = true,
 			.pressure_sample_ms = 1000,
 			.emergency_projection_ms = 2000,
-			.hot_sustain_ms = 1000
 		};
 		PressureAwareHealing::IncomingDamagePressure pressure{};
 
@@ -512,7 +523,6 @@ private:
 			.enabled = false,
 			.pressure_sample_ms = 1000,
 			.emergency_projection_ms = 2000,
-			.hot_sustain_ms = 1000
 		};
 		PressureAwareHealing::IncomingDamagePressure pressure{};
 
@@ -541,7 +551,6 @@ private:
 			.enabled = true,
 			.pressure_sample_ms = 1000,
 			.emergency_projection_ms = 2000,
-			.hot_sustain_ms = 1000
 		};
 
 		TEST_ASSERT_EQUALS(
@@ -561,7 +570,6 @@ private:
 			.enabled = true,
 			.pressure_sample_ms = 1000,
 			.emergency_projection_ms = 2000,
-			.hot_sustain_ms = 1000
 		};
 		PressureAwareHealing::IncomingDamagePressure pressure{};
 
@@ -605,7 +613,6 @@ private:
 			.enabled = true,
 			.pressure_sample_ms = 1000,
 			.emergency_projection_ms = 2000,
-			.hot_sustain_ms = 1000
 		};
 		PressureAwareHealing::IncomingDamagePressure pressure{};
 

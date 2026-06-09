@@ -819,7 +819,6 @@ RULE_INT(Bots, PercentChanceToCastHeal, 90, "The chance for a bot to attempt to 
 RULE_BOOL(Bots, PressureAwareHealingEnabled, false, "Enables pressure-aware bot healing selection. Default false.")
 RULE_INT(Bots, PressureAwareHealingPressureSampleMS, 3000, "Incoming Damage Pressure sample window in milliseconds for pressure-aware bot healing. Default 3000.")
 RULE_INT(Bots, PressureAwareHealingEmergencyProjectionMS, 2000, "Healing Danger Window projection in milliseconds for emergency pressure-aware bot healing. Default 2000.")
-RULE_INT(Bots, PressureAwareHealingHoTSustainMS, 8000, "HoT sustain projection window in milliseconds for pressure-aware bot healing. Default 8000.")
 RULE_BOOL(Bots, PreferEfficientRegularHeals, false, "Enables efficient bot RegularHeal spell selection. Default false.")
 RULE_INT(Bots, PercentChanceToCastRoot, 75, "The chance for a bot to attempt to cast the given spell type in combat. Default 75%.")
 RULE_INT(Bots, PercentChanceToCastBuff, 90, "The chance for a bot to attempt to cast the given spell type in combat. Default 90%.")

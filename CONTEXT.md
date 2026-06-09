@@ -112,6 +112,10 @@ _Avoid_: Raw DPS, urgency score, time-to-death
 Out-of-combat bot healing that returns players, bots, and pets to a ready state after active danger has passed.
 _Avoid_: Pressure healing, downtime topping-off
 
+**Bot Heal Selection**:
+Choosing the concrete heal spell a bot should cast for an already-selected heal target and requested bot heal spell type, including pressure-aware escalation, Recovery Healing HoT preference, and efficient regular-heal choice when those behaviors are enabled.
+_Avoid_: Regular heal efficiency service, heal optimizer, pressure healing module
+
 **Bot-Aided Tracking**:
 An owned bot's ability to report nearby trackable spawns to its owner when the bot has an appropriate tracking-capable class and level.
 _Avoid_: Group tracking, shared Track skill, borrowed tracking
@@ -238,7 +242,12 @@ _Avoid_: Autonomous Actor runtime, test actor system, production sidecar
 - Pressure-aware bot healing should apply to healable targets already considered by existing bot healing behavior, not introduce a new healing target-selection model.
 - **Healing Danger Window** should account for whether a candidate heal can land before the target crosses dangerous HP thresholds, while recast availability remains an ordinary spell validity check.
 - Pressure-aware bot healing should use existing bot heal HP thresholds as the dangerous HP thresholds, and add only time-window configuration for conservative projection.
-- The first pressure-aware bot healing settings should include feature enablement and a small number of time-window values, not per-class weights or per-spell coefficients.
+- **Bot Heal Selection** owns choosing the concrete spell for single-target bot heal families before the cast begins; it should not replace target selection, recast timers, mana checks, holds, aggro checks, or ordinary spell validity rules.
+- **Bot Heal Selection** produces both the selected bot heal spell type and the concrete heal spell; the selected spell type may differ from the requested spell type when pressure-aware escalation or **Recovery Healing** applies.
+- **Bot Heal Selection** owns **Recovery Healing** HoT substitution only when starting from a single-target direct-heal request; primary HoT requests, group heals, group HoTs, and complete heals remain separate behavior until runtime evidence supports broadening the module.
+- Heal rotation behavior should remain outside the first **Bot Heal Selection** pass because heal rotations have separate cadence and fast-heal behavior.
+- Efficient regular-heal choice is a **Bot Heal Selection** policy, not a separate gameplay-facing concept.
+- The first pressure-aware bot healing settings should include feature enablement, the **Incoming Damage Pressure** sample window, and the **Healing Danger Window** projection only, not a separate HoT sustain window, per-class weights, or per-spell coefficients.
 - HoT-based bot healing should be treated as low-pressure sustain; **Incoming Damage Pressure** should suppress HoT selection when the target is in active danger.
 - Low-pressure HoT sustain means the target is not projected to cross a direct-heal threshold soon; low pressure may allow HoT selection, but should not force HoTs ahead of ordinary heal settings.
 - Missing or expired **Incoming Damage Pressure** should prefer HoT-based sustain when an existing valid HoT option is available, while falling back to ordinary direct-heal behavior when HoTs are unavailable, held, invalid, unsafe to cast, or the target is already inside an emergency direct-heal threshold.

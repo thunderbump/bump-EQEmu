@@ -23,7 +23,6 @@ Pressure-aware healing is controlled by server rules under the `Bots` rule categ
 - `PressureAwareHealingEnabled`, default `false`
 - `PressureAwareHealingPressureSampleMS`, default `3000`
 - `PressureAwareHealingEmergencyProjectionMS`, default `2000`
-- `PressureAwareHealingHoTSustainMS`, default `8000`
 
 `PressureAwareHealingEnabled` must be set to `true` for pressure-aware selection to affect bot heal choice.
 With the default `false` value, bot healing should follow existing behavior.
@@ -73,7 +72,6 @@ spawn edits.
    PressureAwareHealingEnabled=true
    PressureAwareHealingPressureSampleMS=3000
    PressureAwareHealingEmergencyProjectionMS=2000
-   PressureAwareHealingHoTSustainMS=8000
    ```
 
    Use the local server's normal rule-editing workflow. If rule changes require a world or zone restart, record
@@ -195,7 +193,7 @@ Keep the server running long enough to capture evidence, then record:
 
 - exact server commit and branch;
 - rule values for `PressureAwareHealingEnabled`, `PressureAwareHealingPressureSampleMS`,
-  `PressureAwareHealingEmergencyProjectionMS`, and `PressureAwareHealingHoTSustainMS`;
+  and `PressureAwareHealingEmergencyProjectionMS`;
 - healer bot names, classes, levels, stances, spell holds, priorities, thresholds, delays, and mana settings;
 - target type, max HP, current HP at each heal opportunity, and whether the target was already under an emergency
   direct-heal threshold;
