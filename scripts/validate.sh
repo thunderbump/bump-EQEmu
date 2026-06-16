@@ -29,14 +29,16 @@ Commands:
   preflight       Verify the local AkkStack contract.
   tier1           Run the container build and unit test tier.
   tier2-readonly  Run read-mostly DB-backed zone CLI tests.
+  tier3-harness   Run the canonical Zone Harness smoke.
   safe            Run preflight, tier1, and tier2-readonly.
 
-This wrapper intentionally does not run DB-mutating Tier 2 checks or Tier 3
-live server smoke tests. Use docs/testing/process.md for those raw commands
-and their backup gate.
+The safe command intentionally does not run DB-mutating Tier 2 checks or Tier 3
+Zone Harness validation. Use tier3-harness as an explicit opt-in command and
+docs/testing/process.md for DB-mutating raw commands and their backup gate.
 
-tier2-readonly and safe require the AkkStack eqemu-server container to already
-be running.
+tier2-readonly and safe start or verify the selected AkkStack MariaDB service
+with canonical Compose and then run read-mostly zone CLI checks in a one-off
+eqemu-server container.
 USAGE
 }
 
@@ -49,7 +51,7 @@ validation_action() {
       printf '%s\n' "would run preflight, container build, and unit tests"
       ;;
     tier2-readonly)
-      printf '%s\n' "would run preflight and read-mostly zone CLI tests"
+      printf '%s\n' "would run preflight, start or verify MariaDB with canonical Compose (--no-recreate), and run tests:npc-handins and tests:npc-handins-multiquest as separate zone CLI processes in a single one-off eqemu-server container"
       ;;
     safe)
       printf '%s\n' "would run preflight, tier1, and tier2-readonly"
@@ -69,18 +71,37 @@ run_tier1() {
   )
 }
 
-run_zone_test() {
-  local test_name="$1"
-
+run_mariadb() {
   (
     cd "$stack_dir"
-    "${compose[@]}" exec -T eqemu-server bash -lc "cd ~/server && ~/code/build/bin/zone $test_name"
+    "${compose[@]}" up -d --no-recreate mariadb
+  )
+}
+
+run_tier2_readonly_zone_tests() {
+  (
+    cd "$stack_dir"
+    "${compose[@]}" run --rm --no-deps --entrypoint bash eqemu-server -lc \
+      'set -euo pipefail
+cd ~/server
+~/code/build/bin/zone tests:npc-handins
+~/code/build/bin/zone tests:npc-handins-multiquest'
   )
 }
 
 run_tier2_readonly() {
-  run_zone_test tests:npc-handins
-  run_zone_test tests:npc-handins-multiquest
+  run_mariadb
+  run_tier2_readonly_zone_tests
+}
+
+run_tier3_harness() {
+  local smoke_args=(--stack "$AKKSTACK_STACK_ROLE")
+
+  if [[ "$AKKSTACK_DRY_RUN" -eq 1 ]]; then
+    smoke_args+=(--dry-run)
+  fi
+
+  "$repo_root/scripts/smoke-zone-harness.sh" "${smoke_args[@]}"
 }
 
 if [[ "$AKKSTACK_HELP" -eq 1 ]]; then
@@ -96,13 +117,18 @@ fi
 command="${AKKSTACK_REMAINING_ARGS[0]}"
 
 case "$command" in
-  preflight|tier1|tier2-readonly|safe)
+  preflight|tier1|tier2-readonly|tier3-harness|safe)
     ;;
   *)
     usage >&2
     exit 2
     ;;
 esac
+
+if [[ "$command" == "tier3-harness" ]]; then
+  run_tier3_harness
+  exit 0
+fi
 
 akkstack_warn_if_validation_command_targets_gameplay "scripts/validate.sh"
 

@@ -135,14 +135,16 @@ real bot spell-list behavior is documented separately in `docs/testing/efficient
 Use this when the change touches code that is exercised by existing `zone` or `world` command hooks.
 
 Run targeted tests rather than the whole live server whenever possible. Read-mostly DB-backed validation should
-run in one-off validation containers against the validation database, not by `exec` into the persistent gameplay
+run in a one-off validation container against the validation database, not by `exec` into the persistent gameplay
 server:
 
 ```sh
 cd ../bump-akk-stack-validation
 docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --no-recreate mariadb
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml run --rm --no-deps --entrypoint bash eqemu-server -lc 'cd ~/server && ~/code/build/bin/zone tests:npc-handins'
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml run --rm --no-deps --entrypoint bash eqemu-server -lc 'cd ~/server && ~/code/build/bin/zone tests:npc-handins-multiquest'
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml run --rm --no-deps --entrypoint bash eqemu-server -lc 'set -euo pipefail
+cd ~/server
+~/code/build/bin/zone tests:npc-handins
+~/code/build/bin/zone tests:npc-handins-multiquest'
 ```
 
 `tests:databuckets` and `tests:zone-state` are intentionally omitted from the default command block because they
@@ -153,12 +155,15 @@ The repo-local wrapper covers only the read-mostly targeted zone checks:
 
 ```sh
 ./scripts/validate.sh --stack validation tier2-readonly
+./scripts/validate.sh --stack validation --dry-run tier2-readonly
 ```
 
-That command runs the preflight, then `tests:npc-handins` and `tests:npc-handins-multiquest`. It intentionally
-does not run `tests:databuckets` or `tests:zone-state`; use the raw commands after applying the backup gate when a
-change specifically needs those caution-tier checks. The wrapper should run these checks through one-off
-validation containers and should not require the persistent gameplay `eqemu-server` container to be running.
+That command runs the preflight, starts or verifies validation MariaDB through the canonical Compose files with
+`--no-recreate`, then runs `tests:npc-handins` and `tests:npc-handins-multiquest` as separate `zone` processes
+inside a single one-off validation `eqemu-server` container. It intentionally does not run `tests:databuckets` or
+`tests:zone-state`; use the raw commands after applying the backup gate when a change specifically needs those
+caution-tier checks. The wrapper should not require the persistent gameplay `eqemu-server` container to be running
+and should not `exec` into it.
 
 Risk classification:
 
@@ -327,10 +332,29 @@ directory, server asset links, and `./bin/zone` invocation:
 ./scripts/smoke-zone-harness.sh --stack validation --dry-run
 ```
 
-The wrapper starts a one-off validation `eqemu-server` container with host gameplay ports disabled, waits for the
-validation MariaDB service through Docker service DNS, builds a temporary runtime directory that links the repo
-build binaries and initialized server assets, runs
-`zone tests:serve-http --zone qrg --port 9099 --max-runtime-seconds 30`, then checks:
+The top-level opt-in Tier 3 validation command delegates to the same canonical smoke implementation:
+
+```sh
+./scripts/validate.sh --stack validation tier3-harness
+./scripts/validate.sh --stack validation --dry-run tier3-harness
+```
+
+The wrapper first starts or verifies validation `mariadb` with canonical Compose and `--no-recreate`:
+
+```sh
+cd ../bump-akk-stack-validation
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --no-recreate mariadb
+```
+
+It then applies a temporary Compose override only to the one-off validation `eqemu-server` service so host
+gameplay ports are disabled for that short-lived server container. Do not apply that temporary port override to
+`mariadb`; the database should stay on the canonical validation stack Compose definition so Compose does not
+recreate the long-running database container.
+
+Inside the one-off `eqemu-server` container, the wrapper waits for the validation MariaDB service through Docker
+service DNS, builds a temporary runtime directory that links the repo build binaries and initialized server
+assets, runs `zone tests:serve-http --zone qrg --port 9099 --max-runtime-seconds 30`, curls localhost from inside
+the same container, and checks:
 
 - `GET /api/v1/harness/health` returns healthy JSON.
 - `GET /api/v1/harness/zone` reports `short_name` `qrg`.
@@ -382,7 +406,7 @@ Observed runtime validation on the bot slow maintenance slices used:
 
 ```sh
 ./scripts/validate.sh --stack validation tier1
-./scripts/smoke-zone-harness.sh --stack validation
+./scripts/validate.sh --stack validation tier3-harness
 git diff --check
 ```
 

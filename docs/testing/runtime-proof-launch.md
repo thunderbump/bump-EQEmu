@@ -7,13 +7,20 @@ stack.
 ```sh
 ./scripts/start-akkstack-runtime-proof.sh
 ./scripts/start-akkstack-runtime-proof.sh --stack gameplay
+./scripts/start-akkstack-runtime-proof.sh --stack validation --dry-run
 ./scripts/start-akkstack-runtime-proof.sh --stack gameplay --dry-run
 ```
 
-The helper defaults to `--stack gameplay`. `--dry-run` prints the selected stack role, resolved path, Compose
-files, and high-level action without invoking Docker. `AKKSTACK_DIR=/path/to/stack` remains an explicit
-custom-path override for diagnostics; the selected role is still printed so custom paths are not mistaken for a
-role default.
+The helper defaults to `--stack gameplay`. Pass `--stack validation` only when a runtime proof intentionally
+targets the validation AkkStack; dry-run output labels that as a non-default runtime-proof selection.
+`AKKSTACK_DIR=/path/to/stack` remains an explicit custom-path override for diagnostics; the selected role is
+still printed so custom paths are not mistaken for a role default.
+
+Use `--dry-run` before changing runtime state. It prints the selected stack role, resolved path, path source,
+Compose files, `mariadb` and `eqemu-server` services, and the launcher/runtime actions that would run without
+invoking Docker. Those actions include starting the services, waiting for MariaDB, using Spire launcher restart
+when available, using the fallback supervised runtime when Spire is unavailable, and waiting for stable zone
+capacity.
 
 The helper:
 

@@ -10,7 +10,7 @@ Usage: scripts/start-akkstack-runtime-proof.sh [--stack <validation|gameplay>] [
 
 Options:
   --stack <validation|gameplay>  Select the role default stack. Defaults to gameplay.
-  --dry-run                     Print selected stack, Compose files, and action without Docker.
+  --dry-run                     Print selected stack, Compose files, services, and actions without Docker.
   -h, --help                    Show this help.
 
 AKKSTACK_DIR=/path/to/stack remains an explicit custom-path override for the
@@ -51,8 +51,30 @@ else
 fi
 dry_run_compose_files+=("docker-compose.local.yml (if host port 8080 is already listening)")
 
+print_runtime_proof_dry_run() {
+  akkstack_print_selection "AkkStack dry run"
+  printf '  runtime-proof default: gameplay\n'
+  if [[ "$AKKSTACK_STACK_ROLE" == "$AKKSTACK_DEFAULT_ROLE" ]]; then
+    printf '  runtime-proof selection: %s (default)\n' "$AKKSTACK_STACK_ROLE"
+  else
+    printf '  runtime-proof selection: %s (non-default; default is %s)\n' "$AKKSTACK_STACK_ROLE" "$AKKSTACK_DEFAULT_ROLE"
+  fi
+  akkstack_print_compose_files "$@"
+  printf '  services:\n'
+  printf '    - mariadb\n'
+  printf '    - eqemu-server\n'
+  printf '  launcher/runtime actions:\n'
+  printf '    - start mariadb and eqemu-server with docker-compose up -d\n'
+  printf '    - wait for MariaDB from the eqemu-server container\n'
+  printf '    - restart Spire launcher-managed runtime when ./bin/spire is available\n'
+  printf '    - otherwise start fallback supervised runtime with %s dynamic zones\n' "$supervised_zone_count"
+  printf '    - wait for stable zone capacity before reporting ready\n'
+  printf '  action: would start the selected AkkStack runtime and wait for stable zone capacity\n'
+  printf 'Dry run: Docker was not invoked.\n'
+}
+
 if [[ "$AKKSTACK_DRY_RUN" -eq 1 ]]; then
-  akkstack_print_dry_run "would start the selected AkkStack gameplay runtime and wait for stable zone capacity" "${dry_run_compose_files[@]}"
+  print_runtime_proof_dry_run "${dry_run_compose_files[@]}"
   exit 0
 fi
 

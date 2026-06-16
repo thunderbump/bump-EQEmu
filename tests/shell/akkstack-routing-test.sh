@@ -108,6 +108,13 @@ test_runtime_proof_defaults_to_gameplay() {
   assert_contains "$output" "compose files:"
   assert_contains "$output" "docker-compose.yml"
   assert_contains "$output" "docker-compose.dev.yml"
+  assert_contains "$output" "services:"
+  assert_contains "$output" "mariadb"
+  assert_contains "$output" "eqemu-server"
+  assert_contains "$output" "launcher/runtime actions:"
+  assert_contains "$output" "restart Spire launcher-managed runtime"
+  assert_contains "$output" "fallback supervised runtime"
+  assert_contains "$output" "wait for stable zone capacity"
   assert_contains "$output" "action:"
 }
 
@@ -138,10 +145,12 @@ test_explicit_roles_are_accepted_by_wrappers() {
   capture_run status output "$fixture_repo/scripts/start-akkstack-runtime-proof.sh" --stack validation --dry-run
   [[ "$status" -eq 0 ]] || return 1
   assert_contains "$output" "stack role: validation"
+  assert_contains "$output" "runtime-proof selection: validation (non-default; default is gameplay)"
 
   capture_run status output "$fixture_repo/scripts/start-akkstack-runtime-proof.sh" --stack gameplay --dry-run
   [[ "$status" -eq 0 ]] || return 1
   assert_contains "$output" "stack role: gameplay"
+  assert_contains "$output" "runtime-proof selection: gameplay (default)"
 }
 
 test_invalid_role_fails() {
@@ -208,6 +217,45 @@ test_validation_commands_warn_on_gameplay_stack() {
   assert_contains "$output" "persistent gameplay data"
 }
 
+test_zone_harness_dry_run_describes_stable_db_and_portless_server() {
+  local fixture_repo fixture_parent fake_bin marker status output
+  make_fixture fixture_repo fixture_parent
+  fake_bin="$(mktemp -d "$tmp_root/fake-bin.XXXXXX")"
+  marker="$fake_bin/docker-compose-called"
+
+  printf '#!/usr/bin/env bash\n: >"%s"\nexit 99\n' "$marker" >"$fake_bin/docker-compose"
+  chmod +x "$fake_bin/docker-compose"
+
+  capture_run status output env PATH="$fake_bin:$PATH" "$fixture_repo/scripts/smoke-zone-harness.sh" --stack validation --dry-run
+
+  [[ "$status" -eq 0 ]] || return 1
+  [[ ! -e "$marker" ]] || return 1
+  assert_contains "$output" "stack role: validation"
+  assert_contains "$output" "docker-compose.yml"
+  assert_contains "$output" "docker-compose.dev.yml"
+  assert_contains "$output" "<generated eqemu-server portless override>"
+  assert_contains "$output" "canonical Compose"
+  assert_contains "$output" "--no-recreate"
+  assert_contains "$output" "one-off eqemu-server container"
+  assert_contains "$output" "only eqemu-server host ports disabled"
+}
+
+test_validate_tier3_harness_delegates_to_smoke_script() {
+  local fixture_repo fixture_parent calls status output
+  make_fixture fixture_repo fixture_parent
+  calls="$tmp_root/smoke-zone-harness.args"
+
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >"$SMOKE_ZONE_HARNESS_ARGS"\nprintf "smoke delegated\\n"\n' >"$fixture_repo/scripts/smoke-zone-harness.sh"
+  chmod +x "$fixture_repo/scripts/smoke-zone-harness.sh"
+
+  capture_run status output env SMOKE_ZONE_HARNESS_ARGS="$calls" "$fixture_repo/scripts/validate.sh" --stack gameplay --dry-run tier3-harness
+
+  [[ "$status" -eq 0 ]] || return 1
+  assert_contains "$output" "smoke delegated"
+  [[ -f "$calls" ]] || return 1
+  [[ "$(cat "$calls")" == "--stack gameplay --dry-run" ]] || return 1
+}
+
 test_help_mentions_stack_and_dry_run() {
   local fixture_repo fixture_parent status output script
   make_fixture fixture_repo fixture_parent
@@ -237,6 +285,48 @@ test_dry_run_prints_route_and_skips_docker() {
   assert_contains "$output" "stack path: $fixture_parent/bump-akk-stack-validation"
   assert_contains "$output" "compose files:"
   assert_contains "$output" "action:"
+
+  rm -f "$marker"
+  capture_run status output env PATH="$fake_bin:$PATH" "$fixture_repo/scripts/start-akkstack-runtime-proof.sh" --stack validation --dry-run
+
+  [[ "$status" -eq 0 ]] || return 1
+  [[ ! -e "$marker" ]] || return 1
+  assert_contains "$output" "stack role: validation"
+  assert_contains "$output" "stack path: $fixture_parent/bump-akk-stack-validation"
+  assert_contains "$output" "runtime-proof selection: validation (non-default; default is gameplay)"
+  assert_contains "$output" "services:"
+  assert_contains "$output" "launcher/runtime actions:"
+}
+
+test_tier2_readonly_dry_run_describes_single_one_off_container() {
+  local fixture_repo fixture_parent fake_bin marker status output
+  make_fixture fixture_repo fixture_parent
+  fake_bin="$(mktemp -d "$tmp_root/fake-bin.XXXXXX")"
+  marker="$fake_bin/docker-compose-called"
+
+  printf '#!/usr/bin/env bash\n: >"%s"\nexit 99\n' "$marker" >"$fake_bin/docker-compose"
+  chmod +x "$fake_bin/docker-compose"
+
+  capture_run status output env PATH="$fake_bin:$PATH" "$fixture_repo/scripts/validate.sh" --dry-run tier2-readonly
+
+  [[ "$status" -eq 0 ]] || return 1
+  [[ ! -e "$marker" ]] || return 1
+  assert_contains "$output" "start or verify MariaDB with canonical Compose (--no-recreate)"
+  assert_contains "$output" "single one-off eqemu-server container"
+  assert_contains "$output" "tests:npc-handins and tests:npc-handins-multiquest as separate zone CLI processes"
+}
+
+test_safe_dry_run_keeps_readonly_composition() {
+  local fixture_repo fixture_parent status output
+  make_fixture fixture_repo fixture_parent
+
+  capture_run status output "$fixture_repo/scripts/validate.sh" --dry-run safe
+
+  [[ "$status" -eq 0 ]] || return 1
+  assert_contains "$output" "would run preflight, tier1, and tier2-readonly"
+  assert_not_contains "$output" "Zone Harness"
+  assert_not_contains "$output" "tests:databuckets"
+  assert_not_contains "$output" "tests:zone-state"
 }
 
 run_test "preflight defaults to validation" test_preflight_defaults_to_validation
@@ -247,8 +337,12 @@ run_test "custom path override is explicit" test_custom_path_override
 run_test "missing default validation fails clearly" test_missing_default_validation_fails_clearly
 run_test "default role paths are distinct" test_default_roles_must_not_resolve_to_same_directory
 run_test "validation commands warn on gameplay stack" test_validation_commands_warn_on_gameplay_stack
+run_test "zone harness dry-run describes stable DB and portless server" test_zone_harness_dry_run_describes_stable_db_and_portless_server
+run_test "validate tier3-harness delegates to smoke script" test_validate_tier3_harness_delegates_to_smoke_script
 run_test "help mentions stack and dry-run" test_help_mentions_stack_and_dry_run
 run_test "dry-run prints route and skips Docker" test_dry_run_prints_route_and_skips_docker
+run_test "tier2-readonly dry-run describes one-off container" test_tier2_readonly_dry_run_describes_single_one_off_container
+run_test "safe dry-run keeps readonly composition" test_safe_dry_run_keeps_readonly_composition
 
 if [[ "$failures" -gt 0 ]]; then
   exit 1

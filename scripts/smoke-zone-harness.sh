@@ -33,12 +33,12 @@ fi
 
 stack_dir="$AKKSTACK_STACK_DIR"
 port="${ZONE_HARNESS_PORT:-9099}"
-compose_files=(docker-compose.yml docker-compose.dev.yml "<generated portless override>")
+compose_files=(docker-compose.yml docker-compose.dev.yml "<generated eqemu-server portless override>")
 
 akkstack_warn_if_validation_command_targets_gameplay "scripts/smoke-zone-harness.sh"
 
 if [[ "$AKKSTACK_DRY_RUN" -eq 1 ]]; then
-  akkstack_print_dry_run "would start validation MariaDB and run the Zone Harness smoke in a one-off eqemu-server container" "${compose_files[@]}"
+  akkstack_print_dry_run "would start or verify the selected stack MariaDB with canonical Compose and --no-recreate, then run the Zone Harness smoke in a one-off eqemu-server container with only eqemu-server host ports disabled" "${compose_files[@]}"
   exit 0
 fi
 
@@ -48,8 +48,6 @@ cat >"$compose_override" <<'COMPOSE'
 services:
   eqemu-server:
     ports: !override []
-  mariadb:
-    ports: !override []
 COMPOSE
 
 cleanup() {
@@ -57,7 +55,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-compose=(docker-compose -f docker-compose.yml -f docker-compose.dev.yml -f "$compose_override")
+canonical_compose=(docker-compose -f docker-compose.yml -f docker-compose.dev.yml)
+harness_compose=(docker-compose -f docker-compose.yml -f docker-compose.dev.yml -f "$compose_override")
 
 die() {
   printf 'error: %s\n' "$*" >&2
@@ -70,8 +69,8 @@ command -v docker-compose >/dev/null 2>&1 || die "docker-compose is required"
 
 (
   cd "$stack_dir"
-  "${compose[@]}" up -d mariadb >/dev/null
-  "${compose[@]}" run --rm --no-deps --entrypoint bash eqemu-server -lc "
+  "${canonical_compose[@]}" up -d --no-recreate mariadb >/dev/null
+  "${harness_compose[@]}" run --rm --no-deps --entrypoint bash eqemu-server -lc "
 set -euo pipefail
 
 until mysqladmin status -ueqemu -p\"\$EQEMU_DB_PASSWORD\" -h mariadb --silent; do
