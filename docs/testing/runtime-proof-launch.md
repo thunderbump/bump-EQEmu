@@ -1,17 +1,25 @@
 # Runtime Proof Launch
 
-Use this path when a client-visible smoke test needs the local dev EQEmu runtime to stay available after idle.
-It is intentionally scoped to the sibling AkkStack checkout at `../bump-akk-stack`.
+Use this path when a client-visible smoke test needs the persistent gameplay EQEmu runtime to stay available after
+idle. It is intentionally scoped to the gameplay AkkStack checkout at `../bump-akk-stack`, not the validation
+stack.
 
 ```sh
 ./scripts/start-akkstack-runtime-proof.sh
+./scripts/start-akkstack-runtime-proof.sh --stack gameplay
+./scripts/start-akkstack-runtime-proof.sh --stack gameplay --dry-run
 ```
+
+The helper defaults to `--stack gameplay`. `--dry-run` prints the selected stack role, resolved path, Compose
+files, and high-level action without invoking Docker. `AKKSTACK_DIR=/path/to/stack` remains an explicit
+custom-path override for diagnostics; the selected role is still printed so custom paths are not mistaken for a
+role default.
 
 The helper:
 
-- verifies the AkkStack contract for this checkout;
+- verifies and prints the selected AkkStack role and path for this checkout;
 - starts only the AkkStack `mariadb` and `eqemu-server` services;
-- uses `../bump-akk-stack/docker-compose.local.yml` when host port `8080` is already occupied;
+- uses the gameplay stack `docker-compose.local.yml` when host port `8080` is already occupied;
 - restarts runtime processes through `./bin/spire spire:launcher restart` when Spire is available;
 - otherwise starts `world`, `ucs`, and a dev-only supervisor that keeps five sleeping dynamic `zone` processes up;
 - waits until `world` is running and the configured zone capacity is present.

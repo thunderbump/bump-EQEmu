@@ -2,7 +2,35 @@
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-akkstack_dir="${AKKSTACK_DIR:-"${repo_dir}/../bump-akk-stack"}"
+source "$repo_dir/scripts/lib/akkstack-routing.sh"
+
+usage() {
+  cat <<'USAGE'
+Usage: scripts/start-akkstack-runtime-proof.sh [--stack <validation|gameplay>] [--dry-run]
+
+Options:
+  --stack <validation|gameplay>  Select the role default stack. Defaults to gameplay.
+  --dry-run                     Print selected stack, Compose files, and action without Docker.
+  -h, --help                    Show this help.
+
+AKKSTACK_DIR=/path/to/stack remains an explicit custom-path override for the
+selected role.
+USAGE
+}
+
+akkstack_init_routing "$repo_dir" gameplay "$@"
+
+if [[ "$AKKSTACK_HELP" -eq 1 ]]; then
+  usage
+  exit 0
+fi
+
+if [[ "${#AKKSTACK_REMAINING_ARGS[@]}" -ne 0 ]]; then
+  usage >&2
+  exit 2
+fi
+
+akkstack_dir="$AKKSTACK_STACK_DIR"
 min_zone_timeout_seconds="${AKKSTACK_ZONE_READY_TIMEOUT_SECONDS:-120}"
 supervised_zone_count="${AKKSTACK_SUPERVISED_ZONE_COUNT:-5}"
 
@@ -15,10 +43,23 @@ info() {
   printf '%s\n' "$*"
 }
 
+dry_run_compose_files=(docker-compose.yml)
+if [[ -f "${akkstack_dir}/.env" ]] && grep -q '^ENV=development$' "${akkstack_dir}/.env" 2>/dev/null; then
+  dry_run_compose_files+=(docker-compose.dev.yml)
+else
+  dry_run_compose_files+=("docker-compose.dev.yml (if ENV=development)")
+fi
+dry_run_compose_files+=("docker-compose.local.yml (if host port 8080 is already listening)")
+
+if [[ "$AKKSTACK_DRY_RUN" -eq 1 ]]; then
+  akkstack_print_dry_run "would start the selected AkkStack gameplay runtime and wait for stable zone capacity" "${dry_run_compose_files[@]}"
+  exit 0
+fi
+
+"${repo_dir}/scripts/check-akkstack-contract.sh" --stack "$AKKSTACK_STACK_ROLE"
+
 command -v docker-compose >/dev/null 2>&1 || die "docker-compose is required"
 command -v ss >/dev/null 2>&1 || die "ss is required"
-
-"${repo_dir}/scripts/check-akkstack-contract.sh"
 
 [[ -d "${akkstack_dir}" ]] || die "AkkStack directory not found: ${akkstack_dir}"
 [[ -f "${akkstack_dir}/docker-compose.yml" ]] || die "AkkStack docker-compose.yml not found"

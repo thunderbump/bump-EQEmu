@@ -3,8 +3,45 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
-stack_dir="${AKKSTACK_DIR:-$repo_root/../bump-akk-stack}"
+source "$script_dir/lib/akkstack-routing.sh"
+
+usage() {
+  cat <<'USAGE'
+Usage: scripts/smoke-zone-harness.sh [--stack <validation|gameplay>] [--dry-run]
+
+Options:
+  --stack <validation|gameplay>  Select the role default stack. Defaults to validation.
+  --dry-run                     Print selected stack, Compose files, and action without Docker.
+  -h, --help                    Show this help.
+
+AKKSTACK_DIR=/path/to/stack remains an explicit custom-path override for the
+selected role.
+USAGE
+}
+
+akkstack_init_routing "$repo_root" validation "$@"
+
+if [[ "$AKKSTACK_HELP" -eq 1 ]]; then
+  usage
+  exit 0
+fi
+
+if [[ "${#AKKSTACK_REMAINING_ARGS[@]}" -ne 0 ]]; then
+  usage >&2
+  exit 2
+fi
+
+stack_dir="$AKKSTACK_STACK_DIR"
 port="${ZONE_HARNESS_PORT:-9099}"
+compose_files=(docker-compose.yml docker-compose.dev.yml "<generated portless override>")
+
+akkstack_warn_if_validation_command_targets_gameplay "scripts/smoke-zone-harness.sh"
+
+if [[ "$AKKSTACK_DRY_RUN" -eq 1 ]]; then
+  akkstack_print_dry_run "would start validation MariaDB and run the Zone Harness smoke in a one-off eqemu-server container" "${compose_files[@]}"
+  exit 0
+fi
+
 compose_override="$(mktemp)"
 
 cat >"$compose_override" <<'COMPOSE'
@@ -27,7 +64,7 @@ die() {
   exit 1
 }
 
-"$repo_root/scripts/check-akkstack-contract.sh"
+"$repo_root/scripts/check-akkstack-contract.sh" --stack "$AKKSTACK_STACK_ROLE"
 
 command -v docker-compose >/dev/null 2>&1 || die "docker-compose is required"
 

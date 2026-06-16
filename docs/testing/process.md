@@ -1,41 +1,69 @@
 # Testing Process
 
-This repo is validated through a persistent local AkkStack development environment. The normal path assumes `../bump-akk-stack` is already initialized and can run the EQEmu server containers locally.
+This repo is validated through local AkkStack environments. Automated validation should run against a validation stack, while client-facing play and live smoke checks should use a separate gameplay stack.
 
 Bootstrap from zero is a separate setup task. Do not fold `make install`, environment generation, data downloads, or first-time database setup into every validation pass.
 
 ## Environment Contract
 
-- Use `../bump-akk-stack` for local containerized validation.
-- `../bump-akk-stack/code` should point at this checkout, preferably as a symlink to `/home/bump/Projects/bump-eqemu/bump-EQEmu`.
+- Use a validation AkkStack checkout for automated validation. The intended local path is
+  `../bump-akk-stack-validation`.
+- Use a separate gameplay AkkStack checkout for client-facing runtime and manual play. The current local gameplay
+  path is `../bump-akk-stack`.
+- The validation stack and gameplay stack should have separate `.env`, `server/eqemu_config.json`, Docker Compose
+  project state, volumes, and `data/mariadb` directories.
+- The validation stack `code` path should point at this checkout, preferably as a symlink to
+  `/home/bump/Projects/bump-eqemu/bump-EQEmu`.
 - Use local AkkStack `make` commands where possible.
-- Do not change `../bump-akk-stack` unless existing hooks are not enough.
-- Treat the AkkStack database as a persistent developer database, not a disposable test schema.
+- Do not change the gameplay stack unless a live/client smoke check specifically requires it.
+- Treat the validation database as a persistent developer database, not a disposable test schema.
+- Keep the validation `mariadb` service available through the canonical validation stack Compose config. Do not
+  apply test-specific port-remap overlays to `mariadb`; those can cause Compose to recreate a long-running
+  database container.
+- Run automated `eqemu-server` validation through one-off validation containers when possible. A one-off validation
+  container is a short-lived `docker-compose run --rm --no-deps --entrypoint bash eqemu-server ...` process that
+  does not own the persistent gameplay server and does not publish host gameplay ports.
+
+Role-aware wrappers select the stack with `--stack validation` or `--stack gameplay`. Validation-oriented
+wrappers default to `--stack validation`; runtime-proof helpers default to `--stack gameplay`. `AKKSTACK_DIR`
+remains an explicit custom-path override for diagnostics, and wrappers print the selected role and resolved path
+before acting. Use `--dry-run` to preview the selected stack, resolved path, Compose files, and high-level action
+without invoking Docker.
+
+Validation wrappers print a warning when they are intentionally routed to `--stack gameplay` or to a custom path
+that resolves to the gameplay default, because those commands may read or mutate persistent gameplay data.
 
 Before running container validation, confirm the stack is initialized:
 
 ```sh
-./scripts/check-akkstack-contract.sh
+./scripts/check-akkstack-contract.sh --stack validation
+./scripts/check-akkstack-contract.sh --stack validation --dry-run
 ```
 
-Then start the stack from AkkStack:
+If a task needs a custom stack path, keep the role explicit and use `AKKSTACK_DIR` only for the path override:
 
 ```sh
-cd ../bump-akk-stack
-make up
+AKKSTACK_DIR=/path/to/custom-validation-stack ./scripts/check-akkstack-contract.sh --stack validation
 ```
 
-The preflight intentionally checks for `../bump-akk-stack/.env` without printing it. If `.env` is missing,
+Then keep the validation database running from the validation stack:
+
+```sh
+cd ../bump-akk-stack-validation
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --no-recreate mariadb
+```
+
+The preflight intentionally checks for the selected AkkStack `.env` without printing it. If `.env` is missing,
 initialize the persistent AkkStack environment before running validation; do not generate or paste secrets as
 part of an ordinary test pass.
 
-The preflight also identifies whether `../bump-akk-stack/code` is a symlink, a directory checkout, or an
+The preflight also identifies whether the selected AkkStack `code` path is a symlink, a directory checkout, or an
 invalid path. The default contract is that it resolves to `/home/bump/Projects/bump-eqemu/bump-EQEmu`. If it
 points somewhere else, fix the AkkStack `code` mount to point at this checkout before validating changes from
 this repo. A symlink is preferred when `code` is missing:
 
 ```sh
-cd ../bump-akk-stack
+cd ../bump-akk-stack-validation
 ln -s /home/bump/Projects/bump-eqemu/bump-EQEmu code
 ```
 
@@ -72,7 +100,7 @@ Run the full configured build inside the AkkStack dev container, with tests enab
 
 ```sh
 git submodule update --init --recursive
-cd ../bump-akk-stack
+cd ../bump-akk-stack-validation
 docker-compose -f docker-compose.yml -f docker-compose.dev.yml run --rm --no-deps --entrypoint bash eqemu-server -lc 'cd ~/code && cmake --preset linux-debug && cmake --build build --parallel && ./build/bin/tests'
 ```
 
@@ -86,11 +114,13 @@ Host-native CMake is not the primary path because this codebase has specific run
 The repo-local wrapper for this tier is:
 
 ```sh
-./scripts/validate.sh tier1
+./scripts/validate.sh --stack validation tier1
+./scripts/validate.sh --stack validation --dry-run tier1
 ```
 
-The wrapper runs the AkkStack contract preflight first, then runs the raw Tier 1 command shown above from
-`../bump-akk-stack`. Keep the raw command visible here so failures can still be reproduced or narrowed manually.
+The wrapper runs the AkkStack contract preflight first, then runs the raw Tier 1 command shown above from the
+selected validation stack. Keep the raw command visible here so failures can still be reproduced or narrowed
+manually.
 
 Pressure-aware bot healing has deterministic unit coverage in `tests/pressure_aware_healing_test.h`. Live runtime
 validation for real bot spell lists and combat timing is documented separately in
@@ -104,26 +134,31 @@ real bot spell-list behavior is documented separately in `docs/testing/efficient
 
 Use this when the change touches code that is exercised by existing `zone` or `world` command hooks.
 
-Run targeted tests rather than the whole live server whenever possible:
+Run targeted tests rather than the whole live server whenever possible. Read-mostly DB-backed validation should
+run in one-off validation containers against the validation database, not by `exec` into the persistent gameplay
+server:
 
 ```sh
-cd ../bump-akk-stack
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec -T eqemu-server bash -lc 'cd ~/server && ~/code/build/bin/zone tests:npc-handins'
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec -T eqemu-server bash -lc 'cd ~/server && ~/code/build/bin/zone tests:npc-handins-multiquest'
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec -T eqemu-server bash -lc 'cd ~/server && ~/code/build/bin/zone tests:databuckets'
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec -T eqemu-server bash -lc 'cd ~/server && ~/code/build/bin/zone tests:zone-state'
+cd ../bump-akk-stack-validation
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --no-recreate mariadb
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml run --rm --no-deps --entrypoint bash eqemu-server -lc 'cd ~/server && ~/code/build/bin/zone tests:npc-handins'
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml run --rm --no-deps --entrypoint bash eqemu-server -lc 'cd ~/server && ~/code/build/bin/zone tests:npc-handins-multiquest'
 ```
+
+`tests:databuckets` and `tests:zone-state` are intentionally omitted from the default command block because they
+mutate persistent validation data. Use the raw `zone tests:*` commands for those checks only after applying the
+backup gate and confirming the validation database is the intended target.
 
 The repo-local wrapper covers only the read-mostly targeted zone checks:
 
 ```sh
-./scripts/validate.sh tier2-readonly
+./scripts/validate.sh --stack validation tier2-readonly
 ```
 
 That command runs the preflight, then `tests:npc-handins` and `tests:npc-handins-multiquest`. It intentionally
-does not run `tests:databuckets` or `tests:zone-state`; use the raw commands above after applying the backup gate
-when a change specifically needs those caution-tier checks. The read-mostly Tier 2 wrapper assumes the AkkStack
-`eqemu-server` container is already running.
+does not run `tests:databuckets` or `tests:zone-state`; use the raw commands after applying the backup gate when a
+change specifically needs those caution-tier checks. The wrapper should run these checks through one-off
+validation containers and should not require the persistent gameplay `eqemu-server` container to be running.
 
 Risk classification:
 
@@ -177,9 +212,9 @@ lootdrop entry; the dev database was restored afterward.
 World CLI checks can also be targeted:
 
 ```sh
-cd ../bump-akk-stack
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec -T eqemu-server bash -lc 'cd ~/code/build && ./bin/world database:version'
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec -T eqemu-server bash -lc 'cd ~/code/build && ./bin/world database:schema'
+cd ../bump-akk-stack-validation
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml run --rm --no-deps --entrypoint bash eqemu-server -lc 'cd ~/code/build && ./bin/world database:version'
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml run --rm --no-deps --entrypoint bash eqemu-server -lc 'cd ~/code/build && ./bin/world database:schema'
 ```
 
 ## Backup Gate
@@ -187,20 +222,20 @@ docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec -T eqemu-ser
 Before any validation that may mutate schema or run migrations, back up the persistent dev database:
 
 ```sh
-cd ../bump-akk-stack
+cd ../bump-akk-stack-validation
 make mysql-backup
 ```
 
 The backup artifact is written under the AkkStack checkout at:
 
 ```text
-../bump-akk-stack/backup/database/<database-name>-MM-DD-YYYY.tar.gz
+../bump-akk-stack-validation/backup/database/<database-name>-MM-DD-YYYY.tar.gz
 ```
 
 For the default local database name, an observed artifact was:
 
 ```text
-../bump-akk-stack/backup/database/peq-05-03-2026.tar.gz
+../bump-akk-stack-validation/backup/database/peq-05-03-2026.tar.gz
 ```
 
 The archive contains the SQL dump named with the same base name, such as `peq-05-03-2026.sql`.
@@ -241,7 +276,7 @@ test -n "$selected_backup"
 restore_source="/tmp/eqemu-restore-$(basename "$selected_backup")"
 cp -p "$selected_backup" "$restore_source"
 sql_member="$(tar -tzf "$restore_source" | sed -n '1p')"
-cd ../bump-akk-stack
+cd ../bump-akk-stack-validation
 make -s mysql-backup
 tar -xOzf "$restore_source" "$sql_member" \
   | docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec -T mariadb bash -lc 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -h localhost "$MYSQL_DATABASE"'
@@ -250,7 +285,7 @@ tar -xOzf "$restore_source" "$sql_member" \
 After import, verify that the database actually has content before relying on it for Tier 2 checks:
 
 ```sh
-cd ../bump-akk-stack
+cd ../bump-akk-stack-validation
 docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec -T mariadb bash -lc 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -h localhost "$MYSQL_DATABASE" -Nse "select count(*) from information_schema.tables where table_schema = database()"'
 ```
 
@@ -288,11 +323,13 @@ In normal repo validation, prefer the wrapper instead of hand-assembling the Akk
 directory, server asset links, and `./bin/zone` invocation:
 
 ```sh
-./scripts/smoke-zone-harness.sh
+./scripts/smoke-zone-harness.sh --stack validation
+./scripts/smoke-zone-harness.sh --stack validation --dry-run
 ```
 
-The wrapper starts a one-off AkkStack runtime with host ports disabled, waits for MariaDB through Docker service
-DNS, builds a temporary runtime directory that links the repo build binaries and initialized server assets, runs
+The wrapper starts a one-off validation `eqemu-server` container with host gameplay ports disabled, waits for the
+validation MariaDB service through Docker service DNS, builds a temporary runtime directory that links the repo
+build binaries and initialized server assets, runs
 `zone tests:serve-http --zone qrg --port 9099 --max-runtime-seconds 30`, then checks:
 
 - `GET /api/v1/harness/health` returns healthy JSON.
@@ -344,8 +381,8 @@ Docker command.
 Observed runtime validation on the bot slow maintenance slices used:
 
 ```sh
-./scripts/validate.sh tier1
-./scripts/smoke-zone-harness.sh
+./scripts/validate.sh --stack validation tier1
+./scripts/smoke-zone-harness.sh --stack validation
 git diff --check
 ```
 
@@ -353,7 +390,7 @@ git diff --check
 
 Use this when the change affects runtime wiring, startup behavior, config loading, database connectivity, process orchestration, or server command surfaces.
 
-Start the stack and run a lightweight server command:
+Start the gameplay stack and run a lightweight server command:
 
 ```sh
 cd ../bump-akk-stack
@@ -409,13 +446,13 @@ Use sidecar HTTP checks when the touched code is reachable through the zone
 sidecar and the behavior can be observed without an EQ client. Prefer extending
 sidecar hooks in this repo over adding AkkStack-specific test behavior.
 
-Run the sidecar from a one-off `eqemu-server` container so Docker service DNS
-for `mariadb` is available, but execute the built checkout binaries through a
+Run the sidecar from a one-off validation `eqemu-server` container so Docker service DNS
+for validation `mariadb` is available, but execute the built checkout binaries through a
 temporary runtime directory that points at the initialized server config,
 plugins, Lua modules, and shared-memory files:
 
 ```sh
-cd ../bump-akk-stack
+cd ../bump-akk-stack-validation
 docker-compose -f docker-compose.yml -f docker-compose.dev.yml run --rm --no-deps --entrypoint bash eqemu-server -lc '
 set -eu
 runtime=/tmp/sidecar-validation-runtime

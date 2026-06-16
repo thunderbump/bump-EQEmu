@@ -3,7 +3,35 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
-stack_dir="${AKKSTACK_DIR:-$repo_root/../bump-akk-stack}"
+source "$script_dir/lib/akkstack-routing.sh"
+
+usage() {
+  cat <<'USAGE'
+Usage: scripts/check-akkstack-contract.sh [--stack <validation|gameplay>] [--dry-run]
+
+Options:
+  --stack <validation|gameplay>  Select the role default stack. Defaults to validation.
+  --dry-run                     Print the selected route without checking the stack.
+  -h, --help                    Show this help.
+
+AKKSTACK_DIR=/path/to/stack remains an explicit custom-path override for the
+selected role.
+USAGE
+}
+
+akkstack_init_routing "$repo_root" validation "$@"
+
+if [[ "$AKKSTACK_HELP" -eq 1 ]]; then
+  usage
+  exit 0
+fi
+
+if [[ "${#AKKSTACK_REMAINING_ARGS[@]}" -ne 0 ]]; then
+  usage >&2
+  exit 2
+fi
+
+stack_dir="$AKKSTACK_STACK_DIR"
 expected_checkout="${EXPECTED_EQEMU_CHECKOUT:-$repo_root}"
 code_path="$stack_dir/code"
 
@@ -18,23 +46,21 @@ fail() {
   failures=$((failures + 1))
 }
 
-resolve_path() {
-  if command -v realpath >/dev/null 2>&1; then
-    realpath "$1"
-  else
-    readlink -f "$1"
-  fi
-}
-
 note "AkkStack contract preflight"
-note "  stack:    $stack_dir"
-note "  expected: $(resolve_path "$expected_checkout")"
+note "  stack role: $AKKSTACK_STACK_ROLE"
+note "  stack path: $stack_dir"
+note "  path source: $AKKSTACK_PATH_SOURCE"
+note "  expected: $(akkstack_resolve_path "$expected_checkout")"
 
-if [[ ! -d "$stack_dir" ]]; then
-  fail "AkkStack directory is missing: $stack_dir"
-else
-  note "OK: AkkStack directory exists"
+if [[ "$AKKSTACK_DRY_RUN" -eq 1 ]]; then
+  akkstack_print_compose_files
+  note "  action: would verify selected AkkStack directory, .env, and code checkout contract"
+  note "Dry run: Docker was not invoked."
+  exit 0
 fi
+
+akkstack_require_selected_stack_dir
+note "OK: AkkStack directory exists"
 
 if [[ -f "$stack_dir/.env" ]]; then
   note "OK: AkkStack .env exists"
@@ -57,8 +83,8 @@ else
   fi
 
   if [[ -e "$code_path" ]]; then
-    resolved_code="$(resolve_path "$code_path")"
-    resolved_expected="$(resolve_path "$expected_checkout")"
+    resolved_code="$(akkstack_resolve_path "$code_path")"
+    resolved_expected="$(akkstack_resolve_path "$expected_checkout")"
     note "  resolved code: $resolved_code"
 
     if [[ "$resolved_code" == "$resolved_expected" ]]; then
