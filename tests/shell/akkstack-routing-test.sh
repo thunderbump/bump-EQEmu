@@ -795,6 +795,58 @@ EOF
   [[ "$(readlink "$stack_dir/code")" == "$fixture_repo" ]] || return 1
 }
 
+test_validation_worker_profile_uses_akkstack_dir_for_automation_worktree() {
+  local fixture_repo fixture_parent alternate_parent alternate_repo stack_dir request evidence status output result validation_log
+  make_fixture fixture_repo fixture_parent
+  alternate_parent="$(mktemp -d "$tmp_root/automation-worktree.XXXXXX")"
+  alternate_repo="$alternate_parent/agent-central-6lt8"
+  stack_dir="$fixture_parent/bump-akk-stack-validation"
+  validation_log="$fixture_parent/akkstack-dir-validated-checkout.log"
+  mkdir -p "$alternate_repo"
+  cp -R "$fixture_repo/scripts" "$alternate_repo/"
+  cat >"$alternate_repo/scripts/validate.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_dir="$(cd "$script_dir/.." && pwd)"
+resolved_code="$(realpath -m "$VALIDATION_STACK_DIR/code")"
+{
+  printf 'repo=%s\n' "$repo_dir"
+  printf 'akkstack_dir=%s\n' "${AKKSTACK_DIR:-}"
+  printf 'resolved_code=%s\n' "$resolved_code"
+  printf 'args=%s\n' "$*"
+} >"$VALIDATION_BINDING_LOG"
+[[ "${AKKSTACK_DIR:-}" == "$VALIDATION_STACK_DIR" ]]
+[[ "$resolved_code" == "$repo_dir" ]]
+EOF
+  chmod +x "$alternate_repo/scripts/validate.sh"
+  request="$fixture_parent/automation-akkstack-dir-request.json"
+  evidence="$fixture_parent/evidence/automation-akkstack-dir"
+  cat >"$request" <<EOF
+{
+  "profile": "safe",
+  "target_worktree_checkout": "$alternate_repo",
+  "evidence_dir": "$evidence",
+  "dryRun": true,
+  "timeout_seconds": 30,
+  "lockWaitSeconds": 30
+}
+EOF
+
+  capture_run status output env AKKSTACK_DIR="$stack_dir" VALIDATION_STACK_DIR="$stack_dir" VALIDATION_BINDING_LOG="$validation_log" "$fixture_repo/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 0 ]] || return 1
+  result="$(cat "$evidence/result.json")"
+  assert_contains "$output" "pass: safe"
+  assert_contains "$result" '"stackPath": "'"$stack_dir"'"'
+  assert_contains "$(cat "$validation_log")" "repo=$alternate_repo"
+  assert_contains "$(cat "$validation_log")" "akkstack_dir=$stack_dir"
+  assert_contains "$(cat "$validation_log")" "resolved_code=$alternate_repo"
+  assert_contains "$(cat "$validation_log")" "args=--stack validation --dry-run safe"
+  [[ "$(readlink "$stack_dir/code")" == "$fixture_repo" ]] || return 1
+}
+
 test_validation_worker_profile_requests_use_stack_global_lock() {
   local fixture_repo fixture_parent stack_dir first_request second_request first_evidence second_evidence state_dir first_output first_pid first_status status output
   make_fixture fixture_repo fixture_parent
@@ -1028,6 +1080,7 @@ run_test "validation worker preflight accepts automation schema commit and evide
 run_test "validation worker safe profile records command evidence" test_validation_worker_safe_profile_records_command_evidence
 run_test "validation worker safe profile binds requested checkout and restores stack code" test_validation_worker_safe_profile_binds_requested_checkout_and_restores_stack_code
 run_test "validation worker safe profile accepts automation schema and binds requested checkout" test_validation_worker_safe_profile_accepts_automation_schema_and_binds_requested_checkout
+run_test "validation worker profile uses AKKSTACK_DIR for automation worktree" test_validation_worker_profile_uses_akkstack_dir_for_automation_worktree
 run_test "validation worker profile requests use stack global lock" test_validation_worker_profile_requests_use_stack_global_lock
 run_test "validation worker profile refuses non-symlink stack code" test_validation_worker_profile_refuses_non_symlink_stack_code
 run_test "validation worker tier3 profile records harness command" test_validation_worker_tier3_profile_records_harness_command
