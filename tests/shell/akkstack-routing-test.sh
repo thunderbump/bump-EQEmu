@@ -329,6 +329,79 @@ test_safe_dry_run_keeps_readonly_composition() {
   assert_not_contains "$output" "tests:zone-state"
 }
 
+write_validation_worker_request() {
+  local request_file="$1" repo_path="$2" stack_path="$3" evidence_dir="$4"
+  cat >"$request_file" <<EOF
+{
+  "profile": "preflight",
+  "repo": { "path": "$repo_path" },
+  "stack": { "role": "validation", "path": "$stack_path" },
+  "evidenceDir": "$evidence_dir",
+  "checks": {
+    "dockerRequired": false,
+    "databaseRequired": false,
+    "assetsRequired": false
+  }
+}
+EOF
+}
+
+test_validation_worker_preflight_writes_structured_evidence() {
+  local fixture_repo fixture_parent request evidence status output
+  make_fixture fixture_repo fixture_parent
+  printf 'SUPER_SECRET_SHOULD_NOT_PRINT=1\n' >>"$fixture_parent/bump-akk-stack-validation/.env"
+  request="$fixture_parent/preflight-request.json"
+  evidence="$fixture_parent/evidence/preflight"
+  write_validation_worker_request "$request" "$fixture_repo" "$fixture_parent/bump-akk-stack-validation" "$evidence"
+
+  capture_run status output "$fixture_repo/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 0 ]] || return 1
+  [[ -f "$evidence/result.json" ]] || return 1
+  assert_contains "$output" "pass: stack_selection"
+  assert_contains "$output" "skip: mariadb"
+  assert_contains "$(cat "$evidence/result.json")" '"status": "pass"'
+  assert_contains "$(cat "$evidence/result.json")" '"name": "env_file"'
+  assert_not_contains "$output" "SUPER_SECRET_SHOULD_NOT_PRINT"
+  assert_not_contains "$(cat "$evidence/steps/env_file.log")" "SUPER_SECRET_SHOULD_NOT_PRINT"
+}
+
+test_validation_worker_preflight_reports_missing_stack_category() {
+  local fixture_repo fixture_parent request evidence status output result
+  make_fixture fixture_repo fixture_parent
+  rm -rf "$fixture_parent/bump-akk-stack-validation"
+  request="$fixture_parent/preflight-request.json"
+  evidence="$fixture_parent/evidence/preflight"
+  write_validation_worker_request "$request" "$fixture_repo" "$fixture_parent/bump-akk-stack-validation" "$evidence"
+
+  capture_run status output "$fixture_repo/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 1 ]] || return 1
+  result="$(cat "$evidence/result.json")"
+  assert_contains "$output" "missing_validation_stack"
+  assert_contains "$result" '"status": "fail"'
+  assert_contains "$result" '"category": "missing_validation_stack"'
+}
+
+test_validation_worker_preflight_reports_wrong_checkout_category() {
+  local fixture_repo fixture_parent other_repo request evidence status output result
+  make_fixture fixture_repo fixture_parent
+  other_repo="$fixture_parent/other-EQEmu"
+  mkdir -p "$other_repo"
+  rm "$fixture_parent/bump-akk-stack-validation/code"
+  ln -s "$other_repo" "$fixture_parent/bump-akk-stack-validation/code"
+  request="$fixture_parent/preflight-request.json"
+  evidence="$fixture_parent/evidence/preflight"
+  write_validation_worker_request "$request" "$fixture_repo" "$fixture_parent/bump-akk-stack-validation" "$evidence"
+
+  capture_run status output "$fixture_repo/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 1 ]] || return 1
+  result="$(cat "$evidence/result.json")"
+  assert_contains "$output" "wrong_checkout"
+  assert_contains "$result" '"category": "wrong_checkout"'
+}
+
 run_test "preflight defaults to validation" test_preflight_defaults_to_validation
 run_test "runtime proof defaults to gameplay" test_runtime_proof_defaults_to_gameplay
 run_test "explicit roles are accepted by wrappers" test_explicit_roles_are_accepted_by_wrappers
@@ -343,6 +416,9 @@ run_test "help mentions stack and dry-run" test_help_mentions_stack_and_dry_run
 run_test "dry-run prints route and skips Docker" test_dry_run_prints_route_and_skips_docker
 run_test "tier2-readonly dry-run describes one-off container" test_tier2_readonly_dry_run_describes_single_one_off_container
 run_test "safe dry-run keeps readonly composition" test_safe_dry_run_keeps_readonly_composition
+run_test "validation worker preflight writes structured evidence" test_validation_worker_preflight_writes_structured_evidence
+run_test "validation worker preflight reports missing stack category" test_validation_worker_preflight_reports_missing_stack_category
+run_test "validation worker preflight reports wrong checkout category" test_validation_worker_preflight_reports_wrong_checkout_category
 
 if [[ "$failures" -gt 0 ]]; then
   exit 1
