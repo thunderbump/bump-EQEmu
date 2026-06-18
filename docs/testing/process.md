@@ -101,13 +101,20 @@ Run the full configured build inside the AkkStack dev container, with tests enab
 ```sh
 git submodule update --init --recursive
 cd ../bump-akk-stack-validation
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml run --rm --no-deps --entrypoint bash eqemu-server -lc 'cd ~/code && cmake --preset linux-debug && cmake --build build --parallel && ./build/bin/tests'
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml run --rm --no-deps --entrypoint bash eqemu-server -lc 'set -euo pipefail
+cd ~/code
+export CCACHE_DIR="$HOME/code/build/.ccache"
+mkdir -p "$CCACHE_DIR"
+cmake --preset linux-debug
+cmake --build build --parallel
+./build/bin/tests'
 ```
 
 Use `docker-compose run` for Tier 1 instead of `make up` plus `exec`. The build and unit test pass does not need
 server ports or a running database, and avoiding published service ports keeps this tier usable when local web or
 game ports are already occupied. The `--entrypoint bash` override bypasses the image's normal server startup loop
-so the validation command runs directly.
+so the validation command runs directly. Tier 1 sets `CCACHE_DIR` under `~/code/build/.ccache`, inside the mounted
+checkout/build tree, so the one-off container does not depend on `/home/eqemu/.ccache` being writable.
 
 Host-native CMake is not the primary path because this codebase has specific runtime and dependency version expectations. The container is the closer match for local server development.
 

@@ -67,7 +67,13 @@ run_tier1() {
   (
     cd "$stack_dir"
     "${compose[@]}" run --rm --no-deps --entrypoint bash eqemu-server -lc \
-      'cd ~/code && cmake --preset linux-debug && cmake --build build --parallel && ./build/bin/tests'
+      'set -euo pipefail
+cd ~/code
+export CCACHE_DIR="$HOME/code/build/.ccache"
+mkdir -p "$CCACHE_DIR"
+cmake --preset linux-debug
+cmake --build build --parallel
+./build/bin/tests'
   )
 }
 

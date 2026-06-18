@@ -298,6 +298,30 @@ test_dry_run_prints_route_and_skips_docker() {
   assert_contains "$output" "launcher/runtime actions:"
 }
 
+test_tier1_uses_checkout_build_ccache_dir() {
+  local fixture_repo fixture_parent fake_bin calls status output args
+  make_fixture fixture_repo fixture_parent
+  fake_bin="$(mktemp -d "$tmp_root/fake-bin.XXXXXX")"
+  calls="$fake_bin/docker-compose.args"
+
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" >"%s"\n' "$calls" >"$fake_bin/docker-compose"
+  chmod +x "$fake_bin/docker-compose"
+
+  capture_run status output env PATH="$fake_bin:$PATH" "$fixture_repo/scripts/validate.sh" tier1
+
+  [[ "$status" -eq 0 ]] || return 1
+  [[ -f "$calls" ]] || return 1
+  args="$(cat "$calls")"
+  assert_contains "$args" "run"
+  assert_contains "$args" "--rm"
+  assert_contains "$args" "--no-deps"
+  assert_contains "$args" "eqemu-server"
+  assert_contains "$args" 'export CCACHE_DIR="$HOME/code/build/.ccache"'
+  assert_contains "$args" 'mkdir -p "$CCACHE_DIR"'
+  assert_contains "$args" "cmake --preset linux-debug"
+  assert_contains "$args" "./build/bin/tests"
+}
+
 test_tier2_readonly_dry_run_describes_single_one_off_container() {
   local fixture_repo fixture_parent fake_bin marker status output
   make_fixture fixture_repo fixture_parent
@@ -708,6 +732,7 @@ run_test "zone harness dry-run describes stable DB and portless server" test_zon
 run_test "validate tier3-harness delegates to smoke script" test_validate_tier3_harness_delegates_to_smoke_script
 run_test "help mentions stack and dry-run" test_help_mentions_stack_and_dry_run
 run_test "dry-run prints route and skips Docker" test_dry_run_prints_route_and_skips_docker
+run_test "tier1 uses checkout build ccache dir" test_tier1_uses_checkout_build_ccache_dir
 run_test "tier2-readonly dry-run describes one-off container" test_tier2_readonly_dry_run_describes_single_one_off_container
 run_test "safe dry-run keeps readonly composition" test_safe_dry_run_keeps_readonly_composition
 run_test "validation worker preflight writes structured evidence" test_validation_worker_preflight_writes_structured_evidence
