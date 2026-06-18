@@ -26,6 +26,7 @@ profile_database_behavior() {
     preflight) printf 'no mutation expected\n' ;;
     safe) printf 'read-mostly\n' ;;
     tier3-harness) printf 'read-mostly/runtime fixture use\n' ;;
+    tier1-tier3-harness) printf 'read-mostly/runtime fixture use\n' ;;
     *) printf 'unknown\n' ;;
   esac
 }
@@ -66,7 +67,7 @@ done
 
 profile="$(json_get "$request_file" profile)"
 case "$profile" in
-  preflight|safe|tier3-harness)
+  preflight|safe|tier3-harness|tier1-tier3-harness)
     ;;
   *)
     printf 'error: unsupported validation profile: %s\n' "${profile:-<empty>}" >&2
@@ -281,6 +282,13 @@ if [[ "$profile" != "preflight" ]]; then
     tier3-harness)
       validate_args+=(tier3-harness)
       record_command_step tier3_harness "${validate_args[@]}" || true
+      ;;
+    tier1-tier3-harness)
+      if record_command_step tier1 "${validate_args[@]}" tier1; then
+        record_command_step tier3_harness "${validate_args[@]}" tier3-harness || true
+      else
+        record_step tier3_harness skip prerequisite_failed "tier1 failed; skipped tier3-harness"
+      fi
       ;;
   esac
   write_result

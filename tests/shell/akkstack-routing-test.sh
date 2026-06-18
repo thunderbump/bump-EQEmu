@@ -900,6 +900,69 @@ test_validation_worker_tier3_profile_records_harness_command() {
   assert_contains "$(cat "$evidence/steps/tier3_harness.log")" "only eqemu-server host ports disabled"
 }
 
+test_validation_worker_tier1_tier3_profile_records_ordered_dry_run_commands() {
+  local fixture_repo fixture_parent request evidence status output result command_steps
+  make_fixture fixture_repo fixture_parent
+  request="$fixture_parent/tier1-tier3-request.json"
+  evidence="$fixture_parent/evidence/tier1-tier3"
+  write_validation_worker_profile_request "$request" tier1-tier3-harness "$fixture_repo" "$fixture_parent/bump-akk-stack-validation" "$evidence"
+
+  capture_run status output "$fixture_repo/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 0 ]] || return 1
+  result="$(cat "$evidence/result.json")"
+  command_steps="$(python3 - "$evidence/result.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as f:
+    result = json.load(f)
+
+print(" ".join(step["name"] for step in result["steps"] if step["name"] in {"tier1", "tier3_harness"}))
+PY
+)"
+  [[ "$command_steps" == "tier1 tier3_harness" ]] || return 1
+  assert_contains "$output" "pass: tier1"
+  assert_contains "$output" "pass: tier3_harness"
+  assert_contains "$result" '"profile": "tier1-tier3-harness"'
+  assert_contains "$result" '"databaseBehavior": "read-mostly/runtime fixture use"'
+  assert_contains "$(cat "$evidence/steps/tier1.log")" "would run preflight, container build, and unit tests"
+  assert_contains "$(cat "$evidence/steps/tier3_harness.log")" "canonical Compose"
+}
+
+test_validation_worker_tier1_tier3_profile_skips_harness_after_tier1_failure() {
+  local fixture_repo fixture_parent request evidence calls status output result
+  make_fixture fixture_repo fixture_parent
+  request="$fixture_parent/tier1-tier3-failure-request.json"
+  evidence="$fixture_parent/evidence/tier1-tier3-failure"
+  calls="$fixture_parent/validate.calls"
+  write_validation_worker_profile_request "$request" tier1-tier3-harness "$fixture_repo" "$fixture_parent/bump-akk-stack-validation" "$evidence"
+  cat >"$fixture_repo/scripts/validate.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"${VALIDATE_CALLS:?}"
+case "${@: -1}" in
+  tier1) exit 42 ;;
+  tier3-harness) exit 0 ;;
+esac
+exit 0
+EOF
+  chmod +x "$fixture_repo/scripts/validate.sh"
+
+  capture_run status output env VALIDATE_CALLS="$calls" "$fixture_repo/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 1 ]] || return 1
+  result="$(cat "$evidence/result.json")"
+  assert_contains "$output" "fail: tier1"
+  assert_contains "$output" "skip: tier3_harness [prerequisite_failed]"
+  assert_contains "$(cat "$calls")" "tier1"
+  assert_not_contains "$(cat "$calls")" "tier3-harness"
+  assert_contains "$result" '"status": "fail"'
+  assert_contains "$result" '"name": "tier3_harness"'
+  assert_contains "$result" '"status": "skip"'
+  assert_contains "$result" '"category": "prerequisite_failed"'
+}
+
 test_validation_worker_profile_failure_and_timeout_categories() {
   local fixture_repo fixture_parent request evidence status output result
   make_fixture fixture_repo fixture_parent
@@ -968,6 +1031,8 @@ run_test "validation worker safe profile accepts automation schema and binds req
 run_test "validation worker profile requests use stack global lock" test_validation_worker_profile_requests_use_stack_global_lock
 run_test "validation worker profile refuses non-symlink stack code" test_validation_worker_profile_refuses_non_symlink_stack_code
 run_test "validation worker tier3 profile records harness command" test_validation_worker_tier3_profile_records_harness_command
+run_test "validation worker tier1 plus tier3 profile records ordered dry-run commands" test_validation_worker_tier1_tier3_profile_records_ordered_dry_run_commands
+run_test "validation worker tier1 plus tier3 profile skips harness after tier1 failure" test_validation_worker_tier1_tier3_profile_skips_harness_after_tier1_failure
 run_test "validation worker profile failure and timeout categories" test_validation_worker_profile_failure_and_timeout_categories
 
 if [[ "$failures" -gt 0 ]]; then
