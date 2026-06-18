@@ -55,6 +55,7 @@ set(zone_sources
     guild_mgr.cpp
     harness/actor_event_recorder.cpp
     harness/harness_snapshot_service.cpp
+    harness/owned_bot_actor_fixture.cpp
     harness/zone_harness_http.cpp
     harness/zone_harness_runtime.cpp
     hate_list.cpp
@@ -162,6 +163,7 @@ set(zone_headers
     guild_mgr.h
     harness/actor_event_recorder.h
     harness/harness_snapshot_service.h
+    harness/owned_bot_actor_fixture.h
     harness/zone_harness_http.h
     harness/zone_harness_runtime.h
     hate_list.h
