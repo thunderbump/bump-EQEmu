@@ -627,6 +627,7 @@ test_validation_worker_preflight_reports_wrong_checkout_category() {
 
 write_validation_worker_profile_request() {
   local request_file="$1" profile="$2" repo_path="$3" stack_path="$4" evidence_dir="$5" timeout_seconds="${6:-30}"
+  local lock_wait_seconds="${7:-30}"
 
   cat >"$request_file" <<EOF
 {
@@ -635,7 +636,8 @@ write_validation_worker_profile_request() {
   "stack": { "role": "validation", "path": "$stack_path" },
   "evidenceDir": "$evidence_dir",
   "dryRun": true,
-  "timeoutSeconds": $timeout_seconds
+  "timeoutSeconds": $timeout_seconds,
+  "lockWaitSeconds": $lock_wait_seconds
 }
 EOF
 }
@@ -661,6 +663,133 @@ test_validation_worker_safe_profile_records_command_evidence() {
   assert_contains "$(cat "$evidence/steps/safe.log")" "would run preflight, tier1, and tier2-readonly"
   assert_not_contains "$(cat "$evidence/steps/safe.log")" "tests:databuckets"
   assert_not_contains "$(cat "$evidence/steps/safe.log")" "tests:zone-state"
+}
+
+test_validation_worker_safe_profile_binds_requested_checkout_and_restores_stack_code() {
+  local fixture_repo fixture_parent alternate_repo stack_dir request evidence status output validation_log
+  make_fixture fixture_repo fixture_parent
+  alternate_repo="$fixture_parent/alternate-EQEmu"
+  stack_dir="$fixture_parent/bump-akk-stack-validation"
+  validation_log="$fixture_parent/validated-checkout.log"
+  mkdir -p "$alternate_repo"
+  cp -R "$fixture_repo/scripts" "$alternate_repo/"
+  cat >"$alternate_repo/scripts/validate.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_dir="$(cd "$script_dir/.." && pwd)"
+resolved_code="$(realpath -m "$VALIDATION_STACK_DIR/code")"
+{
+  printf 'repo=%s\n' "$repo_dir"
+  printf 'akkstack_dir=%s\n' "${AKKSTACK_DIR:-}"
+  printf 'resolved_code=%s\n' "$resolved_code"
+  printf 'args=%s\n' "$*"
+} >"$VALIDATION_BINDING_LOG"
+[[ "${AKKSTACK_DIR:-}" == "$VALIDATION_STACK_DIR" ]]
+[[ "$resolved_code" == "$repo_dir" ]]
+EOF
+  chmod +x "$alternate_repo/scripts/validate.sh"
+  request="$fixture_parent/alternate-safe-request.json"
+  evidence="$fixture_parent/evidence/alternate-safe"
+  write_validation_worker_profile_request "$request" safe "$alternate_repo" "$stack_dir" "$evidence"
+
+  capture_run status output env VALIDATION_STACK_DIR="$stack_dir" VALIDATION_BINDING_LOG="$validation_log" "$fixture_repo/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 0 ]] || return 1
+  assert_contains "$output" "pass: safe"
+  assert_contains "$(cat "$validation_log")" "repo=$alternate_repo"
+  assert_contains "$(cat "$validation_log")" "akkstack_dir=$stack_dir"
+  assert_contains "$(cat "$validation_log")" "resolved_code=$alternate_repo"
+  assert_contains "$(cat "$validation_log")" "args=--stack validation --dry-run safe"
+  [[ "$(readlink "$stack_dir/code")" == "$fixture_repo" ]] || return 1
+}
+
+test_validation_worker_profile_requests_use_stack_global_lock() {
+  local fixture_repo fixture_parent stack_dir first_request second_request first_evidence second_evidence state_dir first_output first_pid first_status status output
+  make_fixture fixture_repo fixture_parent
+  stack_dir="$fixture_parent/bump-akk-stack-validation"
+  state_dir="$fixture_parent/lock-state"
+  mkdir -p "$state_dir"
+  cat >"$fixture_repo/scripts/validate.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if mkdir "$VALIDATION_LOCK_STATE/first-entered" 2>/dev/null; then
+  touch "$VALIDATION_LOCK_STATE/first-started"
+  while [[ ! -e "$VALIDATION_LOCK_STATE/release" ]]; do
+    sleep 0.05
+  done
+else
+  touch "$VALIDATION_LOCK_STATE/second-entered"
+fi
+EOF
+  chmod +x "$fixture_repo/scripts/validate.sh"
+  first_request="$fixture_parent/first-safe-request.json"
+  second_request="$fixture_parent/second-safe-request.json"
+  first_evidence="$fixture_parent/evidence/first-safe"
+  second_evidence="$fixture_parent/evidence/second-safe"
+  first_output="$fixture_parent/first-worker.out"
+  write_validation_worker_profile_request "$first_request" safe "$fixture_repo" "$stack_dir" "$first_evidence" 10 10
+  write_validation_worker_profile_request "$second_request" safe "$fixture_repo" "$stack_dir" "$second_evidence" 10 1
+
+  env VALIDATION_LOCK_STATE="$state_dir" "$fixture_repo/scripts/validation-worker.sh" run --request "$first_request" >"$first_output" 2>&1 &
+  first_pid=$!
+  for _ in {1..100}; do
+    [[ -e "$state_dir/first-started" ]] && break
+    kill -0 "$first_pid" 2>/dev/null || break
+    sleep 0.05
+  done
+  if [[ ! -e "$state_dir/first-started" ]]; then
+    touch "$state_dir/release"
+    set +e
+    wait "$first_pid"
+    set -e
+    return 1
+  fi
+
+  capture_run status output env VALIDATION_LOCK_STATE="$state_dir" "$fixture_repo/scripts/validation-worker.sh" run --request "$second_request"
+  touch "$state_dir/release"
+  set +e
+  wait "$first_pid"
+  first_status=$?
+  set -e
+
+  [[ "$first_status" -eq 0 ]] || return 1
+  [[ "$status" -eq 75 ]] || return 1
+  assert_contains "$output" "timed out waiting for validation worker lock"
+  assert_contains "$output" "bump-eqemu-validation-worker-locks"
+  assert_not_contains "$output" "$second_evidence/worker.lock"
+  [[ ! -e "$state_dir/second-entered" ]] || return 1
+}
+
+test_validation_worker_profile_refuses_non_symlink_stack_code() {
+  local fixture_repo fixture_parent alternate_repo stack_dir request evidence marker status output result
+  make_fixture fixture_repo fixture_parent
+  alternate_repo="$fixture_parent/alternate-EQEmu"
+  stack_dir="$fixture_parent/bump-akk-stack-validation"
+  marker="$fixture_parent/validate-ran"
+  mkdir -p "$alternate_repo"
+  cp -R "$fixture_repo/scripts" "$alternate_repo/"
+  cat >"$alternate_repo/scripts/validate.sh" <<EOF
+#!/usr/bin/env bash
+touch "$marker"
+EOF
+  chmod +x "$alternate_repo/scripts/validate.sh"
+  rm "$stack_dir/code"
+  mkdir "$stack_dir/code"
+  request="$fixture_parent/unsafe-code-safe-request.json"
+  evidence="$fixture_parent/evidence/unsafe-code-safe"
+  write_validation_worker_profile_request "$request" safe "$alternate_repo" "$stack_dir" "$evidence"
+
+  capture_run status output "$fixture_repo/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 1 ]] || return 1
+  result="$(cat "$evidence/result.json")"
+  assert_contains "$output" "unsafe_code_path"
+  assert_contains "$result" '"category": "unsafe_code_path"'
+  [[ ! -e "$marker" ]] || return 1
+  [[ -d "$stack_dir/code" && ! -L "$stack_dir/code" ]] || return 1
 }
 
 test_validation_worker_tier3_profile_records_harness_command() {
@@ -743,6 +872,9 @@ run_test "validation worker preflight reports missing Docker category" test_vali
 run_test "validation worker preflight reports missing stack category" test_validation_worker_preflight_reports_missing_stack_category
 run_test "validation worker preflight reports wrong checkout category" test_validation_worker_preflight_reports_wrong_checkout_category
 run_test "validation worker safe profile records command evidence" test_validation_worker_safe_profile_records_command_evidence
+run_test "validation worker safe profile binds requested checkout and restores stack code" test_validation_worker_safe_profile_binds_requested_checkout_and_restores_stack_code
+run_test "validation worker profile requests use stack global lock" test_validation_worker_profile_requests_use_stack_global_lock
+run_test "validation worker profile refuses non-symlink stack code" test_validation_worker_profile_refuses_non_symlink_stack_code
 run_test "validation worker tier3 profile records harness command" test_validation_worker_tier3_profile_records_harness_command
 run_test "validation worker profile failure and timeout categories" test_validation_worker_profile_failure_and_timeout_categories
 
