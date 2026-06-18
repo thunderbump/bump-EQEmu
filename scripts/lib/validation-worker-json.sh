@@ -22,6 +22,21 @@ else:
 PY
 }
 
+json_get_first() {
+  local request="$1" default_value="$2" expr value
+  shift 2
+
+  for expr in "$@"; do
+    value="$(json_get "$request" "$expr")"
+    if [[ -n "$value" ]]; then
+      printf '%s\n' "$value"
+      return 0
+    fi
+  done
+
+  printf '%s\n' "$default_value"
+}
+
 json_bool() {
   local value="$1" default_value="$2"
   case "$value" in

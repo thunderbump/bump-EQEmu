@@ -75,15 +75,15 @@ case "$profile" in
 esac
 
 request_dir="$(cd "$(dirname "$request_file")" && pwd)"
-repo_root="$(json_get "$request_file" repo.path "$repo_default")"
+repo_root="$(json_get_first "$request_file" "$repo_default" repo.path target_worktree_checkout target_checkout_path)"
 [[ "$repo_root" == /* ]] || repo_root="$request_dir/$repo_root"
 repo_root="$(akkstack_resolve_path "$repo_root")"
 role="$(json_get "$request_file" stack.role validation)"
 stack_path="$(json_get "$request_file" stack.path)"
-evidence_dir="$(json_get "$request_file" evidenceDir "$repo_root/.case/validation-worker/preflight")"
+evidence_dir="$(json_get_first "$request_file" "$repo_root/.case/validation-worker/preflight" evidenceDir evidence_dir)"
 [[ "$evidence_dir" == /* ]] || evidence_dir="$request_dir/$evidence_dir"
 evidence_dir="$(akkstack_resolve_path "$evidence_dir")"
-expected_commit="$(json_get "$request_file" repo.commit)"
+expected_commit="$(json_get_first "$request_file" "" repo.commit commit)"
 docker_required="$(json_bool "$(json_get "$request_file" checks.dockerRequired)" true)"
 database_required="$(json_bool "$(json_get "$request_file" checks.databaseRequired)" false)"
 assets_required="$(json_bool "$(json_get "$request_file" checks.assetsRequired)" false)"
@@ -94,7 +94,7 @@ if [[ "$docker_command" == */* && "$docker_command" != /* ]]; then
 fi
 docker_cmd=("$docker_command")
 dry_run="$(json_bool "$(json_get "$request_file" dryRun)" false)"
-timeout_seconds="$(json_int "$(json_get "$request_file" timeoutSeconds)" 0)"
+timeout_seconds="$(json_int "$(json_get_first "$request_file" 0 timeoutSeconds timeout_seconds)" 0)"
 lock_wait_seconds="$(json_int "$(json_get "$request_file" lockWaitSeconds)" 30)"
 
 mkdir -p "$evidence_dir/steps"
