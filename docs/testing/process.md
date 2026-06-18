@@ -2,6 +2,8 @@
 
 This repo is validated through local AkkStack environments. Automated validation should run against a validation stack, while client-facing play and live smoke checks should use a separate gameplay stack.
 
+ADR 0006 defines the portable automation contract: automation should call `scripts/validation-worker.sh run --request <request.json>` with a fetchable repo/ref or commit and an evidence directory. The worker fetches into worker-owned storage, acquires an exclusive validation slot, delegates to the project validation profile, and writes mechanical evidence (`request.json`, `result.json`, and logs). Direct path-based wrapper usage such as `scripts/validate.sh` remains supported for local diagnostics and narrowing failures, but it is not the portable automation contract because it assumes the caller can see the local checkout, AkkStack path, and Docker host.
+
 Bootstrap from zero is a separate setup task. Do not fold `make install`, environment generation, data downloads, or first-time database setup into every validation pass.
 
 ## Environment Contract
