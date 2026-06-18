@@ -601,6 +601,101 @@ test_validation_worker_preflight_reports_wrong_checkout_category() {
   assert_contains "$result" '"category": "wrong_checkout"'
 }
 
+write_validation_worker_profile_request() {
+  local request_file="$1" profile="$2" repo_path="$3" stack_path="$4" evidence_dir="$5" timeout_seconds="${6:-30}"
+
+  cat >"$request_file" <<EOF
+{
+  "profile": "$profile",
+  "repo": { "path": "$repo_path" },
+  "stack": { "role": "validation", "path": "$stack_path" },
+  "evidenceDir": "$evidence_dir",
+  "dryRun": true,
+  "timeoutSeconds": $timeout_seconds
+}
+EOF
+}
+
+test_validation_worker_safe_profile_records_command_evidence() {
+  local fixture_repo fixture_parent request evidence status output result
+  make_fixture fixture_repo fixture_parent
+  request="$fixture_parent/safe-request.json"
+  evidence="$fixture_parent/evidence/safe"
+  write_validation_worker_profile_request "$request" safe "$fixture_repo" "$fixture_parent/bump-akk-stack-validation" "$evidence"
+
+  capture_run status output "$fixture_repo/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 0 ]] || return 1
+  result="$(cat "$evidence/result.json")"
+  assert_contains "$output" "pass: safe"
+  assert_contains "$result" '"profile": "safe"'
+  assert_contains "$result" '"databaseBehavior": "read-mostly"'
+  assert_contains "$result" '"command":'
+  assert_contains "$result" '"startedAt":'
+  assert_contains "$result" '"endedAt":'
+  assert_contains "$result" '"exitCode": 0'
+  assert_contains "$(cat "$evidence/steps/safe.log")" "would run preflight, tier1, and tier2-readonly"
+  assert_not_contains "$(cat "$evidence/steps/safe.log")" "tests:databuckets"
+  assert_not_contains "$(cat "$evidence/steps/safe.log")" "tests:zone-state"
+}
+
+test_validation_worker_tier3_profile_records_harness_command() {
+  local fixture_repo fixture_parent request evidence status output result
+  make_fixture fixture_repo fixture_parent
+  request="$fixture_parent/tier3-request.json"
+  evidence="$fixture_parent/evidence/tier3"
+  write_validation_worker_profile_request "$request" tier3-harness "$fixture_repo" "$fixture_parent/bump-akk-stack-validation" "$evidence"
+
+  capture_run status output "$fixture_repo/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 0 ]] || return 1
+  result="$(cat "$evidence/result.json")"
+  assert_contains "$output" "pass: tier3_harness"
+  assert_contains "$result" '"profile": "tier3-harness"'
+  assert_contains "$result" '"databaseBehavior": "read-mostly/runtime fixture use"'
+  assert_contains "$(cat "$evidence/steps/tier3_harness.log")" "canonical Compose"
+  assert_contains "$(cat "$evidence/steps/tier3_harness.log")" "only eqemu-server host ports disabled"
+}
+
+test_validation_worker_profile_failure_and_timeout_categories() {
+  local fixture_repo fixture_parent request evidence status output result
+  make_fixture fixture_repo fixture_parent
+  cat >"$fixture_repo/scripts/validate.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'forced validate failure\n'
+exit 42
+EOF
+  chmod +x "$fixture_repo/scripts/validate.sh"
+  request="$fixture_parent/failing-safe-request.json"
+  evidence="$fixture_parent/evidence/failing-safe"
+  write_validation_worker_profile_request "$request" safe "$fixture_repo" "$fixture_parent/bump-akk-stack-validation" "$evidence"
+
+  capture_run status output "$fixture_repo/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 1 ]] || return 1
+  result="$(cat "$evidence/result.json")"
+  assert_contains "$output" "validation_failed"
+  assert_contains "$result" '"category": "validation_failed"'
+  assert_contains "$(cat "$evidence/steps/safe.log")" "forced validate failure"
+
+  make_fixture fixture_repo fixture_parent
+  cat >"$fixture_repo/scripts/validate.sh" <<'EOF'
+#!/usr/bin/env bash
+sleep 5
+EOF
+  chmod +x "$fixture_repo/scripts/validate.sh"
+  request="$fixture_parent/timeout-safe-request.json"
+  evidence="$fixture_parent/evidence/timeout-safe"
+  write_validation_worker_profile_request "$request" safe "$fixture_repo" "$fixture_parent/bump-akk-stack-validation" "$evidence" 1
+
+  capture_run status output "$fixture_repo/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 1 ]] || return 1
+  result="$(cat "$evidence/result.json")"
+  assert_contains "$output" "timeout"
+  assert_contains "$result" '"category": "timeout"'
+}
+
 run_test "preflight defaults to validation" test_preflight_defaults_to_validation
 run_test "runtime proof defaults to gameplay" test_runtime_proof_defaults_to_gameplay
 run_test "explicit roles are accepted by wrappers" test_explicit_roles_are_accepted_by_wrappers
@@ -622,6 +717,9 @@ run_test "validation worker preflight reports listener port conflict category" t
 run_test "validation worker preflight reports missing Docker category" test_validation_worker_preflight_reports_missing_docker_category
 run_test "validation worker preflight reports missing stack category" test_validation_worker_preflight_reports_missing_stack_category
 run_test "validation worker preflight reports wrong checkout category" test_validation_worker_preflight_reports_wrong_checkout_category
+run_test "validation worker safe profile records command evidence" test_validation_worker_safe_profile_records_command_evidence
+run_test "validation worker tier3 profile records harness command" test_validation_worker_tier3_profile_records_harness_command
+run_test "validation worker profile failure and timeout categories" test_validation_worker_profile_failure_and_timeout_categories
 
 if [[ "$failures" -gt 0 ]]; then
   exit 1

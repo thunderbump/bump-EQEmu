@@ -47,6 +47,31 @@ json_bool() {
   esac
 }
 
+json_int() {
+  local value="$1" default_value="$2"
+  if [[ -z "$value" ]]; then
+    printf '%s\n' "$default_value"
+  elif [[ "$value" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$value"
+  else
+    printf 'error: expected integer value, got %s\n' "$value" >&2
+    exit 2
+  fi
+}
+
+iso_now() {
+  date -u +%Y-%m-%dT%H:%M:%SZ
+}
+
+profile_database_behavior() {
+  case "$1" in
+    preflight) printf 'no mutation expected\n' ;;
+    safe) printf 'read-mostly\n' ;;
+    tier3-harness) printf 'read-mostly/runtime fixture use\n' ;;
+    *) printf 'unknown\n' ;;
+  esac
+}
+
 json_host_ports_tsv() {
   local request="$1" kind="$2"
   python3 - "$request" "$kind" <<'PY'
@@ -108,7 +133,14 @@ done
 [[ -f "$request_file" ]] || { printf 'error: request file is missing: %s\n' "$request_file" >&2; exit 2; }
 
 profile="$(json_get "$request_file" profile)"
-[[ "$profile" == "preflight" ]] || { printf 'error: unsupported validation profile: %s\n' "${profile:-<empty>}" >&2; exit 2; }
+case "$profile" in
+  preflight|safe|tier3-harness)
+    ;;
+  *)
+    printf 'error: unsupported validation profile: %s\n' "${profile:-<empty>}" >&2
+    exit 2
+    ;;
+esac
 
 request_dir="$(cd "$(dirname "$request_file")" && pwd)"
 repo_root="$(json_get "$request_file" repo.path "$repo_default")"
@@ -129,11 +161,20 @@ if [[ "$docker_command" == */* && "$docker_command" != /* ]]; then
   docker_command="$request_dir/$docker_command"
 fi
 docker_cmd=("$docker_command")
+dry_run="$(json_bool "$(json_get "$request_file" dryRun)" false)"
+timeout_seconds="$(json_int "$(json_get "$request_file" timeoutSeconds)" 0)"
+lock_wait_seconds="$(json_int "$(json_get "$request_file" lockWaitSeconds)" 30)"
 
 mkdir -p "$evidence_dir/steps"
 steps_tsv="$evidence_dir/steps.tsv"
 : >"$steps_tsv"
 failures=0
+
+exec 9>"$evidence_dir/worker.lock"
+if ! flock -w "$lock_wait_seconds" 9; then
+  printf 'error: timed out waiting for validation worker lock: %s\n' "$evidence_dir/worker.lock" >&2
+  exit 75
+fi
 
 if [[ -n "$stack_path" ]]; then
   [[ "$stack_path" == /* ]] || stack_path="$request_dir/$stack_path"
@@ -142,19 +183,100 @@ else
   akkstack_init_routing "$repo_root" "$role"
 fi
 
+write_result() {
+  python3 - "$steps_tsv" "$evidence_dir/result.json" "$profile" "$repo_root" "$AKKSTACK_STACK_DIR" "$failures" "$(profile_database_behavior "$profile")" <<'PY'
+import json, sys
+steps_path, result_path, profile, repo, stack, failures, database_behavior = sys.argv[1:8]
+steps = []
+with open(steps_path, encoding="utf-8") as f:
+    for line in f:
+        name, status, category, reason, log_file, command, started_at, ended_at, exit_code = line.rstrip("\n").split("\t", 8)
+        steps.append({
+            "name": name,
+            "status": status,
+            "category": category,
+            "reason": reason,
+            "command": command,
+            "startedAt": started_at,
+            "endedAt": ended_at,
+            "exitCode": int(exit_code),
+            "log": log_file,
+        })
+result = {
+    "profile": profile,
+    "status": "pass" if int(failures) == 0 else "fail",
+    "failureCount": int(failures),
+    "repo": repo,
+    "stackPath": stack,
+    "metadata": {"databaseBehavior": database_behavior},
+    "steps": steps,
+}
+with open(result_path, "w", encoding="utf-8") as f:
+    json.dump(result, f, indent=2)
+    f.write("\n")
+PY
+}
+
 record_step() {
   local name="$1" status="$2" category="$3" reason="$4"
   local log_file="$evidence_dir/steps/$name.log"
+  local command="internal:$name" exit_code=0 started_at ended_at
   shift 4 || true
+  [[ "$status" != "fail" ]] || exit_code=1
+  started_at="$(iso_now)"
+  ended_at="$started_at"
   {
-    printf 'step: %s\nstatus: %s\ncategory: %s\nreason: %s\n' "$name" "$status" "$category" "$reason"
+    printf 'step: %s\nstatus: %s\ncategory: %s\nreason: %s\ncommand: %s\nexitCode: %s\nstartedAt: %s\nendedAt: %s\n' \
+      "$name" "$status" "$category" "$reason" "$command" "$exit_code" "$started_at" "$ended_at"
     if [[ "$#" -gt 0 ]]; then
       printf '%s\n' "$@"
     fi
   } >"$log_file"
-  printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$status" "$category" "$reason" "$log_file" >>"$steps_tsv"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$name" "$status" "$category" "$reason" "$log_file" "$command" "$started_at" "$ended_at" "$exit_code" >>"$steps_tsv"
   printf '%s: %s [%s] - %s\n' "$status" "$name" "$category" "$reason"
   [[ "$status" != "fail" ]] || failures=$((failures + 1))
+}
+
+record_command_step() {
+  local name="$1"
+  shift
+  local log_file="$evidence_dir/steps/$name.log"
+  local started_at ended_at status category reason exit_code command
+  printf -v command '%q ' "$@"
+  command="${command% }"
+  started_at="$(iso_now)"
+  set +e
+  if [[ "$timeout_seconds" -gt 0 ]]; then
+    timeout "$timeout_seconds" "$@" >"$log_file" 2>&1
+  else
+    "$@" >"$log_file" 2>&1
+  fi
+  exit_code=$?
+  set -e
+  ended_at="$(iso_now)"
+  if [[ "$exit_code" -eq 0 ]]; then
+    status=pass
+    category=ok
+    reason="command completed successfully"
+  elif [[ "$exit_code" -eq 124 ]]; then
+    status=fail
+    category=timeout
+    reason="command timed out after ${timeout_seconds}s"
+  else
+    status=fail
+    category=validation_failed
+    reason="command exited with status $exit_code"
+  fi
+  {
+    printf '\nstep: %s\nstatus: %s\ncategory: %s\nreason: %s\ncommand: %s\nexitCode: %s\nstartedAt: %s\nendedAt: %s\n' \
+      "$name" "$status" "$category" "$reason" "$command" "$exit_code" "$started_at" "$ended_at"
+  } >>"$log_file"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$name" "$status" "$category" "$reason" "$log_file" "$command" "$started_at" "$ended_at" "$exit_code" >>"$steps_tsv"
+  printf '%s: %s [%s] - %s\n' "$status" "$name" "$category" "$reason"
+  [[ "$status" != "fail" ]] || failures=$((failures + 1))
+  return "$exit_code"
 }
 
 compose_args() {
@@ -213,6 +335,29 @@ port_in_gameplay_list() {
 
   return 1
 }
+
+if [[ "$profile" != "preflight" ]]; then
+  validate_args=("$repo_root/scripts/validate.sh" --stack "$AKKSTACK_STACK_ROLE")
+  [[ "$dry_run" == "false" ]] || validate_args+=(--dry-run)
+  case "$profile" in
+    safe)
+      validate_args+=(safe)
+      record_command_step safe "${validate_args[@]}" || true
+      ;;
+    tier3-harness)
+      validate_args+=(tier3-harness)
+      record_command_step tier3_harness "${validate_args[@]}" || true
+      ;;
+  esac
+  write_result
+  printf 'result: %s\n' "$evidence_dir/result.json"
+  if [[ "$failures" -gt 0 ]]; then
+    printf '%s failed with %s issue(s).\n' "$profile" "$failures"
+    exit 1
+  fi
+  printf '%s passed.\n' "$profile"
+  exit 0
+fi
 
 selected_path="$AKKSTACK_STACK_DIR"
 record_step stack_selection pass ok "selected $AKKSTACK_STACK_ROLE stack" \
@@ -358,26 +503,7 @@ else
   record_step runtime_assets skip follow_up_profile "build/runtime asset check is deferred to the build validation profile"
 fi
 
-python3 - "$steps_tsv" "$evidence_dir/result.json" "$profile" "$repo_root" "$selected_path" "$failures" <<'PY'
-import json, sys
-steps_path, result_path, profile, repo, stack, failures = sys.argv[1:7]
-steps = []
-with open(steps_path, encoding="utf-8") as f:
-    for line in f:
-        name, status, category, reason, log_file = line.rstrip("\n").split("\t", 4)
-        steps.append({"name": name, "status": status, "category": category, "reason": reason, "log": log_file})
-result = {
-    "profile": profile,
-    "status": "pass" if int(failures) == 0 else "fail",
-    "failureCount": int(failures),
-    "repo": repo,
-    "stackPath": stack,
-    "steps": steps,
-}
-with open(result_path, "w", encoding="utf-8") as f:
-    json.dump(result, f, indent=2)
-    f.write("\n")
-PY
+write_result
 
 printf 'result: %s\n' "$evidence_dir/result.json"
 if [[ "$failures" -gt 0 ]]; then
