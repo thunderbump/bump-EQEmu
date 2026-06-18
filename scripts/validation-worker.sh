@@ -47,6 +47,32 @@ json_bool() {
   esac
 }
 
+json_host_ports_tsv() {
+  local request="$1" kind="$2"
+  python3 - "$request" "$kind" <<'PY'
+import json, sys
+
+path, kind = sys.argv[1:3]
+with open(path, encoding="utf-8") as f:
+    data = json.load(f)
+
+items = data.get("checks", {}).get("hostPorts", {}).get(kind, [])
+for item in items:
+    if isinstance(item, int):
+        print(f"{kind}_{item}\t{item}\t\t")
+        continue
+    if not isinstance(item, dict):
+        continue
+    name = str(item.get("name") or f"{kind}_{item.get('port', '')}")
+    port = item.get("port")
+    service = str(item.get("service") or "")
+    container_port = str(item.get("containerPort") or "")
+    if port is None:
+        continue
+    print(f"{name}\t{port}\t{service}\t{container_port}")
+PY
+}
+
 request_file=""
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]; then
   usage
@@ -97,6 +123,12 @@ expected_commit="$(json_get "$request_file" repo.commit)"
 docker_required="$(json_bool "$(json_get "$request_file" checks.dockerRequired)" true)"
 database_required="$(json_bool "$(json_get "$request_file" checks.databaseRequired)" false)"
 assets_required="$(json_bool "$(json_get "$request_file" checks.assetsRequired)" false)"
+database_content_required="$(json_bool "$(json_get "$request_file" checks.databaseContentRequired)" "$database_required")"
+docker_command="$(json_get "$request_file" tools.dockerCommand docker)"
+if [[ "$docker_command" == */* && "$docker_command" != /* ]]; then
+  docker_command="$request_dir/$docker_command"
+fi
+docker_cmd=("$docker_command")
 
 mkdir -p "$evidence_dir/steps"
 steps_tsv="$evidence_dir/steps.tsv"
@@ -127,6 +159,59 @@ record_step() {
 
 compose_args() {
   printf -- '-f\n%s/docker-compose.yml\n-f\n%s/docker-compose.dev.yml\n' "$AKKSTACK_STACK_DIR" "$AKKSTACK_STACK_DIR"
+}
+
+docker_command_available() {
+  command -v -- "${docker_cmd[0]}" >/dev/null 2>&1
+}
+
+run_docker() {
+  "${docker_cmd[@]}" "$@"
+}
+
+port_is_listening() {
+  local port="$1"
+  python3 - "$port" <<'PY'
+import socket, sys
+
+port = int(sys.argv[1])
+sock = socket.socket()
+sock.settimeout(0.25)
+try:
+    sys.exit(0 if sock.connect_ex(("127.0.0.1", port)) == 0 else 1)
+finally:
+    sock.close()
+PY
+}
+
+compose_port_matches() {
+  local service="$1" container_port="$2" expected_port="$3" line actual_port
+
+  [[ -n "$service" && -n "$container_port" ]] || return 1
+  docker_command_available || return 1
+
+  mapfile -t compose_flags < <(compose_args)
+  while IFS= read -r line; do
+    actual_port="${line##*:}"
+    if [[ "$actual_port" == "$expected_port" ]]; then
+      return 0
+    fi
+  done < <(run_docker compose "${compose_flags[@]}" port "$service" "$container_port" 2>/dev/null || true)
+
+  return 1
+}
+
+port_in_gameplay_list() {
+  local expected_port="$1" line _name port _service _container_port
+
+  while IFS=$'\t' read -r _name port _service _container_port; do
+    [[ -n "$port" ]] || continue
+    if [[ "$port" == "$expected_port" ]]; then
+      return 0
+    fi
+  done < <(json_host_ports_tsv "$request_file" gameplay)
+
+  return 1
 }
 
 selected_path="$AKKSTACK_STACK_DIR"
@@ -192,9 +277,9 @@ else
 fi
 
 if [[ "$docker_required" == "true" ]]; then
-  if command -v docker >/dev/null 2>&1; then
-    if docker info >/dev/null 2>&1; then
-      record_step docker pass ok "Docker CLI and daemon are available"
+  if docker_command_available; then
+    if run_docker info >/dev/null 2>&1; then
+      record_step docker pass ok "Docker CLI and daemon are available" "docker command: ${docker_cmd[0]}"
     else
       record_step docker fail missing_docker "Docker CLI exists but daemon is unavailable"
     fi
@@ -205,10 +290,38 @@ else
   record_step docker skip not_required "request marked Docker availability as not required"
 fi
 
+host_port_details=()
+host_port_conflicts=()
+while IFS=$'\t' read -r port_name host_port service container_port; do
+  [[ -n "$host_port" ]] || continue
+  if port_in_gameplay_list "$host_port"; then
+    host_port_conflicts+=("$port_name port $host_port conflicts with gameplay port $host_port")
+    continue
+  fi
+
+  if port_is_listening "$host_port"; then
+    if compose_port_matches "$service" "$container_port" "$host_port"; then
+      host_port_details+=("$port_name port $host_port is already owned by selected validation Compose service $service")
+    else
+      host_port_conflicts+=("$port_name port $host_port already has a listener outside the selected validation Compose service")
+    fi
+  else
+    host_port_details+=("$port_name port $host_port has no conflicting listener")
+  fi
+done < <(json_host_ports_tsv "$request_file" validation)
+
+if [[ "${#host_port_conflicts[@]}" -gt 0 ]]; then
+  record_step host_ports fail host_port_conflict "${host_port_conflicts[*]}" "${host_port_details[@]}"
+elif [[ "${#host_port_details[@]}" -gt 0 ]]; then
+  record_step host_ports pass ok "expected validation host ports have no conflicts" "${host_port_details[@]}"
+else
+  record_step host_ports skip not_requested "request did not define expected validation host ports"
+fi
+
 if [[ "$database_required" == "true" ]]; then
-  if command -v docker >/dev/null 2>&1 && [[ -f "$selected_path/docker-compose.yml" && -f "$selected_path/docker-compose.dev.yml" ]]; then
+  if docker_command_available && [[ -f "$selected_path/docker-compose.yml" && -f "$selected_path/docker-compose.dev.yml" ]]; then
     mapfile -t compose_flags < <(compose_args)
-    if (cd "$selected_path" && docker compose "${compose_flags[@]}" exec -T mariadb mysqladmin ping >/dev/null 2>&1); then
+    if (cd "$selected_path" && run_docker compose "${compose_flags[@]}" exec -T mariadb sh -lc 'MYSQL_PWD="${MYSQL_PASSWORD:-${MYSQL_ROOT_PASSWORD:-}}" mysqladmin -u"${MYSQL_USER:-root}" ping' >/dev/null 2>&1); then
       record_step mariadb pass ok "MariaDB responds to mysqladmin ping"
     else
       record_step mariadb fail db_unreachable "MariaDB is not reachable through the validation Compose project"
@@ -220,8 +333,23 @@ else
   record_step mariadb skip follow_up_profile "DB-backed readiness is deferred until a live validation stack is available"
 fi
 
+if [[ "$database_content_required" == "true" ]]; then
+  if docker_command_available && [[ -f "$selected_path/docker-compose.yml" && -f "$selected_path/docker-compose.dev.yml" ]]; then
+    mapfile -t compose_flags < <(compose_args)
+    if (cd "$selected_path" && run_docker compose "${compose_flags[@]}" exec -T mariadb sh -lc 'counts="$(MYSQL_PWD="${MYSQL_PASSWORD:-${MYSQL_ROOT_PASSWORD:-}}" mysql -u"${MYSQL_USER:-root}" "${MYSQL_DATABASE:-peq}" --batch --skip-column-names -e "SELECT (SELECT COUNT(*) FROM zone), (SELECT COUNT(*) FROM npc_types);")" && set -- $counts && [ "${1:-0}" -gt 0 ] && [ "${2:-0}" -gt 0 ]' >/dev/null 2>&1); then
+      record_step db_content pass ok "PEQ zone and npc_types tables contain rows"
+    else
+      record_step db_content fail missing_db_content "PEQ/content readiness query failed or returned empty core tables"
+    fi
+  else
+    record_step db_content fail missing_db_content "Docker or Compose files are unavailable for DB content check"
+  fi
+else
+  record_step db_content skip follow_up_profile "DB content readiness is deferred until a live validation stack is available"
+fi
+
 if [[ "$assets_required" == "true" ]]; then
-  if [[ -x "$repo_root/build/bin/world" || -x "$repo_root/build/world" ]]; then
+  if [[ -x "$repo_root/build/bin/world" || -x "$repo_root/build/world" || -x "$selected_path/server/bin/world" ]]; then
     record_step runtime_assets pass ok "required runtime binaries are present"
   else
     record_step runtime_assets fail missing_runtime_assets "runtime binaries are missing; run the build profile before DB-backed validation"

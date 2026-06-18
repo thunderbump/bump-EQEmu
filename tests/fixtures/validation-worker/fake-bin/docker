@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -n "${FAKE_DOCKER_LOG:-}" ]]; then
+  printf '%s\n' "$*" >>"$FAKE_DOCKER_LOG"
+fi
+
+if [[ "${1:-}" == "info" ]]; then
+  exit 0
+fi
+
+if [[ "${1:-}" == "compose" ]]; then
+  shift
+  args=" $* "
+  case "$args" in
+    *" exec -T mariadb "*mysqladmin*" ping"*)
+      printf 'mysqld is alive\n'
+      exit 0
+      ;;
+    *" exec -T mariadb "*mysql*"SELECT COUNT(*) FROM zone"*)
+      printf 'ready\n'
+      exit 0
+      ;;
+    *" port mariadb 3306 "*|*" port mariadb 3306")
+      printf '0.0.0.0:13306\n'
+      exit 0
+      ;;
+  esac
+fi
+
+printf 'unexpected fake docker invocation: %s\n' "$*" >&2
+exit 99

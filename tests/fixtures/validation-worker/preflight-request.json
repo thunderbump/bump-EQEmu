@@ -1,16 +1,31 @@
 {
   "profile": "preflight",
   "repo": {
-    "path": "../../.."
+    "path": "fake-checkout"
   },
   "stack": {
     "role": "validation",
     "path": "fake-akk-stack"
   },
   "evidenceDir": "../../../.case/validation-worker/fixture-preflight",
+  "tools": {
+    "dockerCommand": "fake-bin/docker"
+  },
   "checks": {
-    "dockerRequired": false,
-    "databaseRequired": false,
-    "assetsRequired": false
+    "dockerRequired": true,
+    "databaseRequired": true,
+    "databaseContentRequired": true,
+    "assetsRequired": true,
+    "hostPorts": {
+      "gameplay": [3306],
+      "validation": [
+        {
+          "name": "validation_mariadb",
+          "port": 13306,
+          "service": "mariadb",
+          "containerPort": 3306
+        }
+      ]
+    }
   }
 }

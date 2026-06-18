@@ -331,19 +331,77 @@ test_safe_dry_run_keeps_readonly_composition() {
 
 write_validation_worker_request() {
   local request_file="$1" repo_path="$2" stack_path="$3" evidence_dir="$4"
+  local checks_json="${5:-}"
+  local tools_json="${6:-}"
+
+  if [[ -z "$checks_json" ]]; then
+    checks_json='{
+    "dockerRequired": false,
+    "databaseRequired": false,
+    "assetsRequired": false
+  }'
+  fi
+  if [[ -z "$tools_json" ]]; then
+    tools_json='{}'
+  fi
+
   cat >"$request_file" <<EOF
 {
   "profile": "preflight",
   "repo": { "path": "$repo_path" },
   "stack": { "role": "validation", "path": "$stack_path" },
   "evidenceDir": "$evidence_dir",
-  "checks": {
-    "dockerRequired": false,
-    "databaseRequired": false,
-    "assetsRequired": false
-  }
+  "tools": $tools_json,
+  "checks": $checks_json
 }
 EOF
+}
+
+make_fake_docker() {
+  local fake_bin="$1"
+
+  mkdir -p "$fake_bin"
+  cat >"$fake_bin/docker" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf '%s\n' "$*" >>"${FAKE_DOCKER_LOG:?}"
+
+if [[ "${1:-}" == "info" ]]; then
+  exit 0
+fi
+
+if [[ "${1:-}" == "compose" ]]; then
+  shift
+  args=" $* "
+  case "$args" in
+    *" exec -T mariadb "*mysqladmin*" ping"*)
+      printf 'mysqld is alive\n'
+      exit 0
+      ;;
+    *" exec -T mariadb "*mysql*"SELECT COUNT(*) FROM zone"*)
+      printf 'ready\n'
+      exit 0
+      ;;
+    *" port mariadb 3306 "*|*" port mariadb 3306")
+      printf '0.0.0.0:13306\n'
+      exit 0
+      ;;
+  esac
+fi
+
+printf 'unexpected fake docker invocation: %s\n' "$*" >&2
+exit 99
+EOF
+  chmod +x "$fake_bin/docker"
+}
+
+make_runtime_assets() {
+  local checkout_dir="$1"
+
+  mkdir -p "$checkout_dir/build/bin"
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$checkout_dir/build/bin/world"
+  chmod +x "$checkout_dir/build/bin/world"
 }
 
 test_validation_worker_preflight_writes_structured_evidence() {
@@ -364,6 +422,147 @@ test_validation_worker_preflight_writes_structured_evidence() {
   assert_contains "$(cat "$evidence/result.json")" '"name": "env_file"'
   assert_not_contains "$output" "SUPER_SECRET_SHOULD_NOT_PRINT"
   assert_not_contains "$(cat "$evidence/steps/env_file.log")" "SUPER_SECRET_SHOULD_NOT_PRINT"
+}
+
+test_validation_worker_preflight_actively_checks_docker_db_ports_and_assets() {
+  local fixture_repo fixture_parent fake_bin docker_log request evidence status output result checks tools
+  make_fixture fixture_repo fixture_parent
+  make_runtime_assets "$fixture_repo"
+  fake_bin="$fixture_parent/fake-bin"
+  docker_log="$fixture_parent/fake-docker.log"
+  make_fake_docker "$fake_bin"
+  request="$fixture_parent/preflight-request.json"
+  evidence="$fixture_parent/evidence/preflight"
+  checks='{
+    "dockerRequired": true,
+    "databaseRequired": true,
+    "databaseContentRequired": true,
+    "assetsRequired": true,
+    "hostPorts": {
+      "gameplay": [3306],
+      "validation": [
+        { "name": "validation_mariadb", "port": 13306, "service": "mariadb", "containerPort": 3306 }
+      ]
+    }
+  }'
+  tools="{ \"dockerCommand\": \"$fake_bin/docker\" }"
+  write_validation_worker_request "$request" "$fixture_repo" "$fixture_parent/bump-akk-stack-validation" "$evidence" "$checks" "$tools"
+
+  capture_run status output env FAKE_DOCKER_LOG="$docker_log" "$fixture_repo/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 0 ]] || return 1
+  result="$(cat "$evidence/result.json")"
+  assert_contains "$output" "pass: docker"
+  assert_contains "$output" "pass: host_ports"
+  assert_contains "$output" "pass: mariadb"
+  assert_contains "$output" "pass: db_content"
+  assert_contains "$output" "pass: runtime_assets"
+  assert_contains "$result" '"name": "host_ports"'
+  assert_contains "$result" '"name": "db_content"'
+  assert_contains "$(cat "$docker_log")" "info"
+  assert_contains "$(cat "$docker_log")" "mysqladmin"
+  assert_contains "$(cat "$docker_log")" "SELECT COUNT(*) FROM zone"
+}
+
+test_validation_worker_preflight_reports_host_port_conflict_category() {
+  local fixture_repo fixture_parent request evidence status output result checks
+  make_fixture fixture_repo fixture_parent
+  request="$fixture_parent/preflight-request.json"
+  evidence="$fixture_parent/evidence/preflight"
+  checks='{
+    "dockerRequired": false,
+    "databaseRequired": false,
+    "assetsRequired": false,
+    "hostPorts": {
+      "gameplay": [3306],
+      "validation": [
+        { "name": "validation_mariadb", "port": 3306, "service": "mariadb", "containerPort": 3306 }
+      ]
+    }
+  }'
+  write_validation_worker_request "$request" "$fixture_repo" "$fixture_parent/bump-akk-stack-validation" "$evidence" "$checks"
+
+  capture_run status output "$fixture_repo/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 1 ]] || return 1
+  result="$(cat "$evidence/result.json")"
+  assert_contains "$output" "host_port_conflict"
+  assert_contains "$result" '"category": "host_port_conflict"'
+  assert_contains "$result" "conflicts with gameplay port"
+}
+
+test_validation_worker_preflight_reports_listener_port_conflict_category() {
+  local fixture_repo fixture_parent request evidence status output result checks port_file listener_pid port
+  make_fixture fixture_repo fixture_parent
+  port_file="$fixture_parent/listener.port"
+  python3 - "$port_file" <<'PY' &
+import socket
+import sys
+import time
+
+sock = socket.socket()
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+sock.bind(("127.0.0.1", 0))
+sock.listen(1)
+with open(sys.argv[1], "w", encoding="utf-8") as f:
+    f.write(str(sock.getsockname()[1]))
+    f.flush()
+try:
+    time.sleep(60)
+finally:
+    sock.close()
+PY
+  listener_pid=$!
+  for _ in {1..50}; do
+    [[ -s "$port_file" ]] && break
+    sleep 0.1
+  done
+  [[ -s "$port_file" ]] || return 1
+  port="$(cat "$port_file")"
+  request="$fixture_parent/preflight-request.json"
+  evidence="$fixture_parent/evidence/preflight"
+  checks="{
+    \"dockerRequired\": false,
+    \"databaseRequired\": false,
+    \"assetsRequired\": false,
+    \"hostPorts\": {
+      \"validation\": [
+        { \"name\": \"occupied_validation_port\", \"port\": $port }
+      ]
+    }
+  }"
+  write_validation_worker_request "$request" "$fixture_repo" "$fixture_parent/bump-akk-stack-validation" "$evidence" "$checks"
+
+  capture_run status output "$fixture_repo/scripts/validation-worker.sh" run --request "$request"
+  kill "$listener_pid" 2>/dev/null || true
+  wait "$listener_pid" 2>/dev/null || true
+
+  [[ "$status" -eq 1 ]] || return 1
+  result="$(cat "$evidence/result.json")"
+  assert_contains "$output" "host_port_conflict"
+  assert_contains "$result" '"category": "host_port_conflict"'
+  assert_contains "$result" "already has a listener"
+}
+
+test_validation_worker_preflight_reports_missing_docker_category() {
+  local fixture_repo fixture_parent request evidence status output result checks tools
+  make_fixture fixture_repo fixture_parent
+  request="$fixture_parent/preflight-request.json"
+  evidence="$fixture_parent/evidence/preflight"
+  checks='{
+    "dockerRequired": true,
+    "databaseRequired": false,
+    "assetsRequired": false
+  }'
+  tools="{ \"dockerCommand\": \"$fixture_parent/missing-docker\" }"
+  write_validation_worker_request "$request" "$fixture_repo" "$fixture_parent/bump-akk-stack-validation" "$evidence" "$checks" "$tools"
+
+  capture_run status output "$fixture_repo/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 1 ]] || return 1
+  result="$(cat "$evidence/result.json")"
+  assert_contains "$output" "missing_docker"
+  assert_contains "$result" '"category": "missing_docker"'
 }
 
 test_validation_worker_preflight_reports_missing_stack_category() {
@@ -417,6 +616,10 @@ run_test "dry-run prints route and skips Docker" test_dry_run_prints_route_and_s
 run_test "tier2-readonly dry-run describes one-off container" test_tier2_readonly_dry_run_describes_single_one_off_container
 run_test "safe dry-run keeps readonly composition" test_safe_dry_run_keeps_readonly_composition
 run_test "validation worker preflight writes structured evidence" test_validation_worker_preflight_writes_structured_evidence
+run_test "validation worker preflight actively checks Docker DB ports and assets" test_validation_worker_preflight_actively_checks_docker_db_ports_and_assets
+run_test "validation worker preflight reports host port conflict category" test_validation_worker_preflight_reports_host_port_conflict_category
+run_test "validation worker preflight reports listener port conflict category" test_validation_worker_preflight_reports_listener_port_conflict_category
+run_test "validation worker preflight reports missing Docker category" test_validation_worker_preflight_reports_missing_docker_category
 run_test "validation worker preflight reports missing stack category" test_validation_worker_preflight_reports_missing_stack_category
 run_test "validation worker preflight reports wrong checkout category" test_validation_worker_preflight_reports_wrong_checkout_category
 
