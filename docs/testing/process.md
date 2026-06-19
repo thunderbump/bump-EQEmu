@@ -73,6 +73,51 @@ If an alternate checkout is intentionally accepted for a specific validation pas
 EXPECTED_EQEMU_CHECKOUT=/path/to/accepted/bump-EQEmu ./scripts/check-akkstack-contract.sh
 ```
 
+## Validation Worker Automation Contract
+
+Automation should call the Validation Worker instead of calling AkkStack or Docker commands directly. The worker
+owns AkkStack path selection, database checks, checkout binding, profile execution, and evidence writing. A remote
+or containerized pipeline should first discover supported profiles:
+
+```sh
+./scripts/validation-worker.sh profiles --json
+```
+
+Then submit a request that identifies code by a fetchable repository URL plus a ref and/or commit. The request
+does not need to know local AkkStack paths; configure the worker host with its validation stack path, for example
+through `AKKSTACK_DIR`, or let the worker use its local validation default. Keep credentials out of tracked request
+files. If a fetch URL contains credentials, the worker records only a redacted URL in evidence.
+
+```json
+{
+  "profile": "tier1-tier3-harness",
+  "repo": {
+    "url": "https://github.com/thunderbump/bump-EQEmu.git",
+    "ref": "refs/heads/afk/central-lve-6-remote-validation-worker",
+    "commit": "<40-character-commit>"
+  },
+  "evidence_dir": ".afk/validation-worker/central-lve-6",
+  "dryRun": false,
+  "timeout_seconds": 3600
+}
+```
+
+For local development, use an explicit checkout path instead of a fetchable URL:
+
+```json
+{
+  "profile": "safe",
+  "repo": { "path": "/home/bump/Projects/bump-eqemu/bump-EQEmu" },
+  "evidence_dir": ".afk/validation-worker/local-safe",
+  "dryRun": true
+}
+```
+
+When `repo.commit` is provided, the worker verifies the final checked-out commit before running any profile command.
+The worker writes `result.json` under the requested `evidence_dir` and includes the resolved checkout path, requested
+ref/commit, and resolved commit. If no evidence directory is supplied, the default is under `.afk/validation-worker/`,
+not `.case/`.
+
 ## Tier 0: Static Sanity
 
 Use this for every change before running heavier checks.

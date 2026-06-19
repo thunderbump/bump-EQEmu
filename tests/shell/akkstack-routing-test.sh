@@ -448,6 +448,59 @@ test_validation_worker_preflight_writes_structured_evidence() {
   assert_not_contains "$(cat "$evidence/steps/env_file.log")" "SUPER_SECRET_SHOULD_NOT_PRINT"
 }
 
+test_validation_worker_profiles_json_lists_supported_profiles() {
+  local fixture_repo fixture_parent status output names descriptions
+  make_fixture fixture_repo fixture_parent
+
+  capture_run status output "$fixture_repo/scripts/validation-worker.sh" profiles --json
+
+  [[ "$status" -eq 0 ]] || return 1
+  names="$(python3 -c '
+import json
+import sys
+
+data = json.loads(sys.argv[1])
+print(" ".join(profile["name"] for profile in data["profiles"]))
+' "$output")"
+  descriptions="$(python3 -c '
+import json
+import sys
+
+data = json.loads(sys.argv[1])
+print("\n".join(profile.get("description", "") for profile in data["profiles"]))
+' "$output")"
+  [[ "$names" == "preflight safe tier3-harness tier1-tier3-harness" ]] || return 1
+  assert_contains "$descriptions" "validation stack"
+  assert_contains "$descriptions" "Tier 1"
+  assert_contains "$descriptions" "zone harness"
+}
+
+test_validation_worker_default_evidence_uses_afk_directory() {
+  local fixture_repo fixture_parent request evidence status output
+  make_fixture fixture_repo fixture_parent
+  request="$fixture_parent/default-evidence-request.json"
+  evidence="$fixture_repo/.afk/validation-worker/preflight"
+  cat >"$request" <<EOF
+{
+  "profile": "preflight",
+  "repo": { "path": "$fixture_repo" },
+  "stack": { "role": "validation", "path": "$fixture_parent/bump-akk-stack-validation" },
+  "checks": {
+    "dockerRequired": false,
+    "databaseRequired": false,
+    "assetsRequired": false
+  }
+}
+EOF
+
+  capture_run status output "$fixture_repo/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 0 ]] || return 1
+  [[ -f "$evidence/result.json" ]] || return 1
+  assert_contains "$output" "result: $evidence/result.json"
+  assert_not_contains "$output" ".case/validation-worker"
+}
+
 test_validation_worker_preflight_actively_checks_docker_db_ports_and_assets() {
   local fixture_repo fixture_parent fake_bin docker_log request evidence status output result checks tools
   make_fixture fixture_repo fixture_parent
@@ -847,6 +900,126 @@ EOF
   [[ "$(readlink "$stack_dir/code")" == "$fixture_repo" ]] || return 1
 }
 
+test_validation_worker_safe_profile_fetches_repo_url_and_records_checkout() {
+  local fixture_repo fixture_parent source_repo stack_dir request evidence status output result validation_log commit checkout_path checkout_remote_url
+  make_fixture fixture_repo fixture_parent
+  source_repo="$fixture_parent/source-EQEmu"
+  stack_dir="$fixture_parent/bump-akk-stack-validation"
+  request="$fixture_parent/remote-safe-request.json"
+  evidence="$fixture_parent/evidence/remote-safe"
+  validation_log="$fixture_parent/remote-validated-checkout.log"
+  mkdir -p "$source_repo/scripts"
+  cat >"$source_repo/scripts/validate.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_dir="$(cd "$script_dir/.." && pwd)"
+resolved_code="$(realpath -m "$VALIDATION_STACK_DIR/code")"
+{
+  printf 'repo=%s\n' "$repo_dir"
+  printf 'resolved_code=%s\n' "$resolved_code"
+  printf 'args=%s\n' "$*"
+} >"$VALIDATION_BINDING_LOG"
+[[ "$repo_dir" == "$VALIDATION_EVIDENCE_DIR"/checkouts/* ]]
+[[ "$resolved_code" == "$repo_dir" ]]
+EOF
+  chmod +x "$source_repo/scripts/validate.sh"
+  git -C "$source_repo" init -q
+  git -C "$source_repo" checkout -q -b remote-friendly-main
+  git -C "$source_repo" config user.email "validation-worker@example.invalid"
+  git -C "$source_repo" config user.name "Validation Worker Test"
+  git -C "$source_repo" add scripts
+  git -C "$source_repo" commit -q -m "remote validation fixture"
+  commit="$(git -C "$source_repo" rev-parse HEAD)"
+  cat >"$request" <<EOF
+{
+  "profile": "safe",
+  "repo": {
+    "url": "file://validation-user:SUPER_SECRET_REMOTE_TOKEN@$source_repo",
+    "ref": "refs/heads/remote-friendly-main",
+    "commit": "$commit"
+  },
+  "stack": { "role": "validation", "path": "$stack_dir" },
+  "evidence_dir": "$evidence",
+  "dryRun": true,
+  "timeout_seconds": 30,
+  "lockWaitSeconds": 30
+}
+EOF
+
+  capture_run status output env VALIDATION_STACK_DIR="$stack_dir" VALIDATION_BINDING_LOG="$validation_log" VALIDATION_EVIDENCE_DIR="$evidence" "$fixture_repo/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 0 ]] || return 1
+  result="$(cat "$evidence/result.json")"
+  checkout_path="$(python3 -c '
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as f:
+    print(json.load(f)["checkout"]["path"])
+' "$evidence/result.json")"
+  [[ "$checkout_path" == "$evidence/checkouts/"* ]] || return 1
+  assert_contains "$output" "pass: repo_commit"
+  assert_contains "$result" '"source": "fetch"'
+  assert_contains "$result" '"requestedRef": "refs/heads/remote-friendly-main"'
+  assert_contains "$result" '"resolvedCommit": "'"$commit"'"'
+  assert_contains "$(cat "$validation_log")" "repo=$checkout_path"
+  assert_contains "$(cat "$validation_log")" "resolved_code=$checkout_path"
+  checkout_remote_url="$(git -C "$checkout_path" remote get-url origin)"
+  assert_not_contains "$output" "SUPER_SECRET_REMOTE_TOKEN"
+  assert_not_contains "$result" "SUPER_SECRET_REMOTE_TOKEN"
+  assert_not_contains "$checkout_remote_url" "SUPER_SECRET_REMOTE_TOKEN"
+  [[ "$(readlink "$stack_dir/code")" == "$fixture_repo" ]] || return 1
+}
+
+test_validation_worker_profile_refuses_wrong_commit_before_validation() {
+  local fixture_repo fixture_parent stack_dir request evidence marker status output result commit wrong_commit
+  make_fixture fixture_repo fixture_parent
+  stack_dir="$fixture_parent/bump-akk-stack-validation"
+  request="$fixture_parent/wrong-commit-safe-request.json"
+  evidence="$fixture_parent/evidence/wrong-commit-safe"
+  marker="$fixture_parent/validate-ran"
+  git -C "$fixture_repo" init -q
+  git -C "$fixture_repo" config user.email "validation-worker@example.invalid"
+  git -C "$fixture_repo" config user.name "Validation Worker Test"
+  git -C "$fixture_repo" add scripts
+  git -C "$fixture_repo" commit -q -m "fixture checkout"
+  commit="$(git -C "$fixture_repo" rev-parse HEAD)"
+  wrong_commit="${commit%?}0"
+  if [[ "$wrong_commit" == "$commit" ]]; then
+    wrong_commit="${commit%?}1"
+  fi
+  cat >"$fixture_repo/scripts/validate.sh" <<EOF
+#!/usr/bin/env bash
+touch "$marker"
+EOF
+  chmod +x "$fixture_repo/scripts/validate.sh"
+  cat >"$request" <<EOF
+{
+  "profile": "safe",
+  "repo": {
+    "path": "$fixture_repo",
+    "commit": "$wrong_commit"
+  },
+  "stack": { "role": "validation", "path": "$stack_dir" },
+  "evidence_dir": "$evidence",
+  "dryRun": true,
+  "timeout_seconds": 30,
+  "lockWaitSeconds": 30
+}
+EOF
+
+  capture_run status output "$fixture_repo/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 1 ]] || return 1
+  result="$(cat "$evidence/result.json")"
+  assert_contains "$output" "wrong_commit"
+  assert_contains "$result" '"category": "wrong_commit"'
+  assert_not_contains "$result" '"name": "safe"'
+  [[ ! -e "$marker" ]] || return 1
+}
+
 test_validation_worker_profile_requests_use_stack_global_lock() {
   local fixture_repo fixture_parent stack_dir first_request second_request first_evidence second_evidence state_dir first_output first_pid first_status status output
   make_fixture fixture_repo fixture_parent
@@ -1070,6 +1243,8 @@ run_test "tier1 uses checkout build ccache dir" test_tier1_uses_checkout_build_c
 run_test "tier2-readonly dry-run describes one-off container" test_tier2_readonly_dry_run_describes_single_one_off_container
 run_test "safe dry-run keeps readonly composition" test_safe_dry_run_keeps_readonly_composition
 run_test "validation worker preflight writes structured evidence" test_validation_worker_preflight_writes_structured_evidence
+run_test "validation worker profiles JSON lists supported profiles" test_validation_worker_profiles_json_lists_supported_profiles
+run_test "validation worker default evidence uses afk directory" test_validation_worker_default_evidence_uses_afk_directory
 run_test "validation worker preflight actively checks Docker DB ports and assets" test_validation_worker_preflight_actively_checks_docker_db_ports_and_assets
 run_test "validation worker preflight reports host port conflict category" test_validation_worker_preflight_reports_host_port_conflict_category
 run_test "validation worker preflight reports listener port conflict category" test_validation_worker_preflight_reports_listener_port_conflict_category
@@ -1081,6 +1256,8 @@ run_test "validation worker safe profile records command evidence" test_validati
 run_test "validation worker safe profile binds requested checkout and restores stack code" test_validation_worker_safe_profile_binds_requested_checkout_and_restores_stack_code
 run_test "validation worker safe profile accepts automation schema and binds requested checkout" test_validation_worker_safe_profile_accepts_automation_schema_and_binds_requested_checkout
 run_test "validation worker profile uses AKKSTACK_DIR for automation worktree" test_validation_worker_profile_uses_akkstack_dir_for_automation_worktree
+run_test "validation worker safe profile fetches repo URL and records checkout" test_validation_worker_safe_profile_fetches_repo_url_and_records_checkout
+run_test "validation worker profile refuses wrong commit before validation" test_validation_worker_profile_refuses_wrong_commit_before_validation
 run_test "validation worker profile requests use stack global lock" test_validation_worker_profile_requests_use_stack_global_lock
 run_test "validation worker profile refuses non-symlink stack code" test_validation_worker_profile_refuses_non_symlink_stack_code
 run_test "validation worker tier3 profile records harness command" test_validation_worker_tier3_profile_records_harness_command
