@@ -83,10 +83,12 @@ or containerized pipeline should first discover supported profiles:
 ./scripts/validation-worker.sh profiles --json
 ```
 
-Then submit a request that identifies code by a fetchable repository URL plus a ref and/or commit. The request
-does not need to know local AkkStack paths; configure the worker host with its validation stack path, for example
-through `AKKSTACK_DIR`, or let the worker use its local validation default. Keep credentials out of tracked request
-files. If a fetch URL contains credentials, the worker records only a redacted URL in evidence.
+Then submit a request that identifies code by a fetchable repository URL plus a pinned commit. When a request also
+includes `repo.ref`, the worker verifies that the fetched ref resolves exactly to `repo.commit` before checking out
+or running a profile. The request does not need to know local AkkStack paths; configure the worker host with its
+validation stack path, for example through `AKKSTACK_DIR`, or let the worker use its local validation default. Keep
+credentials out of tracked request files. If a fetch URL contains credentials, the worker records only a redacted
+URL in evidence and sanitizes the worker-owned checkout remote.
 
 ```json
 {
@@ -113,10 +115,10 @@ For local development, use an explicit checkout path instead of a fetchable URL:
 }
 ```
 
-When `repo.commit` is provided, the worker verifies the final checked-out commit before running any profile command.
-The worker writes `result.json` under the requested `evidence_dir` and includes the resolved checkout path, requested
-ref/commit, and resolved commit. If no evidence directory is supplied, the default is under `.afk/validation-worker/`,
-not `.case/`.
+For `repo.url` requests, `repo.commit` is required before any validation profile runs, including `preflight`. The
+worker also verifies the final checked-out commit before running any profile command. The worker writes `result.json`
+under the requested `evidence_dir` and includes the resolved checkout path, requested ref/commit, and resolved commit.
+If no evidence directory is supplied, the default is under `.afk/validation-worker/`, not `.case/`.
 
 ## Tier 0: Static Sanity
 

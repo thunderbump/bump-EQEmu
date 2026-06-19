@@ -973,6 +973,170 @@ with open(sys.argv[1], encoding="utf-8") as f:
   [[ "$(readlink "$stack_dir/code")" == "$fixture_repo" ]] || return 1
 }
 
+test_validation_worker_repo_url_requires_commit_before_profile() {
+  local fixture_repo fixture_parent source_repo stack_dir request evidence marker status output result
+  make_fixture fixture_repo fixture_parent
+  source_repo="$fixture_parent/source-EQEmu"
+  stack_dir="$fixture_parent/bump-akk-stack-validation"
+  request="$fixture_parent/remote-unpinned-safe-request.json"
+  evidence="$fixture_parent/evidence/remote-unpinned-safe"
+  marker="$fixture_parent/remote-validate-ran"
+  mkdir -p "$source_repo/scripts"
+  cat >"$source_repo/scripts/validate.sh" <<EOF
+#!/usr/bin/env bash
+touch "$marker"
+EOF
+  chmod +x "$source_repo/scripts/validate.sh"
+  git -C "$source_repo" init -q
+  git -C "$source_repo" checkout -q -b remote-friendly-main
+  git -C "$source_repo" config user.email "validation-worker@example.invalid"
+  git -C "$source_repo" config user.name "Validation Worker Test"
+  git -C "$source_repo" add scripts
+  git -C "$source_repo" commit -q -m "remote validation fixture"
+  cat >"$request" <<EOF
+{
+  "profile": "safe",
+  "repo": {
+    "url": "file://$source_repo",
+    "ref": "refs/heads/remote-friendly-main"
+  },
+  "stack": { "role": "validation", "path": "$stack_dir" },
+  "evidence_dir": "$evidence",
+  "dryRun": true,
+  "timeout_seconds": 30,
+  "lockWaitSeconds": 30
+}
+EOF
+
+  capture_run status output "$fixture_repo/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 1 ]] || return 1
+  result="$(cat "$evidence/result.json")"
+  assert_contains "$output" "repo.commit"
+  assert_contains "$result" '"category": "unpinned_remote_checkout"'
+  assert_not_contains "$result" '"name": "safe"'
+  [[ ! -e "$marker" ]] || return 1
+}
+
+test_validation_worker_repo_url_requires_ref_to_match_commit() {
+  local fixture_repo fixture_parent source_repo stack_dir request evidence marker status output result commit_b
+  make_fixture fixture_repo fixture_parent
+  source_repo="$fixture_parent/source-EQEmu"
+  stack_dir="$fixture_parent/bump-akk-stack-validation"
+  request="$fixture_parent/remote-ref-mismatch-safe-request.json"
+  evidence="$fixture_parent/evidence/remote-ref-mismatch-safe"
+  marker="$fixture_parent/remote-validate-ran"
+  mkdir -p "$source_repo/scripts"
+  cat >"$source_repo/scripts/validate.sh" <<EOF
+#!/usr/bin/env bash
+touch "$marker"
+EOF
+  chmod +x "$source_repo/scripts/validate.sh"
+  git -C "$source_repo" init -q
+  git -C "$source_repo" checkout -q -b remote-friendly-main
+  git -C "$source_repo" config user.email "validation-worker@example.invalid"
+  git -C "$source_repo" config user.name "Validation Worker Test"
+  git -C "$source_repo" add scripts
+  git -C "$source_repo" commit -q -m "remote validation fixture A"
+  git -C "$source_repo" checkout -q --orphan unrelated-branch
+  git -C "$source_repo" rm -qr --cached .
+  git -C "$source_repo" add scripts
+  git -C "$source_repo" commit -q -m "remote validation fixture B"
+  commit_b="$(git -C "$source_repo" rev-parse HEAD)"
+  git -C "$source_repo" checkout -q remote-friendly-main
+  cat >"$request" <<EOF
+{
+  "profile": "safe",
+  "repo": {
+    "url": "file://$source_repo",
+    "ref": "refs/heads/remote-friendly-main",
+    "commit": "$commit_b"
+  },
+  "stack": { "role": "validation", "path": "$stack_dir" },
+  "evidence_dir": "$evidence",
+  "dryRun": true,
+  "timeout_seconds": 30,
+  "lockWaitSeconds": 30
+}
+EOF
+
+  capture_run status output "$fixture_repo/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 1 ]] || return 1
+  result="$(cat "$evidence/result.json")"
+  assert_contains "$output" "ref_commit_mismatch"
+  assert_contains "$result" '"category": "ref_commit_mismatch"'
+  assert_not_contains "$result" '"resolvedRef": "refs/heads/remote-friendly-main"'
+  assert_not_contains "$result" '"name": "safe"'
+  [[ ! -e "$marker" ]] || return 1
+}
+
+test_validation_worker_repo_url_sanitizes_remote_on_interrupted_clone() {
+  local fixture_repo fixture_parent source_repo stack_dir request evidence fake_bin real_git marker status output commit checkout_path checkout_remote_url
+  make_fixture fixture_repo fixture_parent
+  source_repo="$fixture_parent/source-EQEmu"
+  stack_dir="$fixture_parent/bump-akk-stack-validation"
+  request="$fixture_parent/remote-interrupted-safe-request.json"
+  evidence="$fixture_parent/evidence/remote-interrupted-safe"
+  fake_bin="$fixture_parent/fake-bin"
+  marker="$fixture_parent/interrupted-after-clone"
+  real_git="$(command -v git)"
+  mkdir -p "$source_repo/scripts" "$fake_bin"
+  cat >"$source_repo/scripts/validate.sh" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+  chmod +x "$source_repo/scripts/validate.sh"
+  git -C "$source_repo" init -q
+  git -C "$source_repo" checkout -q -b remote-friendly-main
+  git -C "$source_repo" config user.email "validation-worker@example.invalid"
+  git -C "$source_repo" config user.name "Validation Worker Test"
+  git -C "$source_repo" add scripts
+  git -C "$source_repo" commit -q -m "remote validation fixture"
+  commit="$(git -C "$source_repo" rev-parse HEAD)"
+  cat >"$fake_bin/git" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "\${1:-}" == "clone" ]]; then
+  "$real_git" "\$@"
+  touch "$marker"
+  kill -TERM "\$PPID" 2>/dev/null || true
+  sleep 1
+  exit 0
+fi
+
+exec "$real_git" "\$@"
+EOF
+  chmod +x "$fake_bin/git"
+  cat >"$request" <<EOF
+{
+  "profile": "safe",
+  "repo": {
+    "url": "file://validation-user:SUPER_SECRET_REMOTE_TOKEN@$source_repo",
+    "ref": "refs/heads/remote-friendly-main",
+    "commit": "$commit"
+  },
+  "stack": { "role": "validation", "path": "$stack_dir" },
+  "evidence_dir": "$evidence",
+  "dryRun": true,
+  "timeout_seconds": 30,
+  "lockWaitSeconds": 30
+}
+EOF
+
+  capture_run status output env PATH="$fake_bin:$PATH" "$fixture_repo/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -ne 0 ]] || return 1
+  [[ -e "$marker" ]] || return 1
+  checkout_path="$(find "$evidence/checkouts" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+  [[ -n "$checkout_path" ]] || return 1
+  checkout_remote_url="$("$real_git" -C "$checkout_path" remote get-url origin)"
+  assert_not_contains "$output" "SUPER_SECRET_REMOTE_TOKEN"
+  assert_not_contains "$checkout_remote_url" "SUPER_SECRET_REMOTE_TOKEN"
+  assert_contains "$checkout_remote_url" "<redacted>@"
+}
+
 test_validation_worker_profile_refuses_wrong_commit_before_validation() {
   local fixture_repo fixture_parent stack_dir request evidence marker status output result commit wrong_commit
   make_fixture fixture_repo fixture_parent
@@ -1257,6 +1421,9 @@ run_test "validation worker safe profile binds requested checkout and restores s
 run_test "validation worker safe profile accepts automation schema and binds requested checkout" test_validation_worker_safe_profile_accepts_automation_schema_and_binds_requested_checkout
 run_test "validation worker profile uses AKKSTACK_DIR for automation worktree" test_validation_worker_profile_uses_akkstack_dir_for_automation_worktree
 run_test "validation worker safe profile fetches repo URL and records checkout" test_validation_worker_safe_profile_fetches_repo_url_and_records_checkout
+run_test "validation worker repo URL requires commit before profile" test_validation_worker_repo_url_requires_commit_before_profile
+run_test "validation worker repo URL requires ref to match commit" test_validation_worker_repo_url_requires_ref_to_match_commit
+run_test "validation worker repo URL sanitizes remote on interrupted clone" test_validation_worker_repo_url_sanitizes_remote_on_interrupted_clone
 run_test "validation worker profile refuses wrong commit before validation" test_validation_worker_profile_refuses_wrong_commit_before_validation
 run_test "validation worker profile requests use stack global lock" test_validation_worker_profile_requests_use_stack_global_lock
 run_test "validation worker profile refuses non-symlink stack code" test_validation_worker_profile_refuses_non_symlink_stack_code

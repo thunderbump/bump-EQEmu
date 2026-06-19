@@ -335,6 +335,22 @@ validation_worker_sanitize_remote_config() {
   fi
 }
 
+validation_worker_remote_checkout_cleanup() {
+  local status=$?
+
+  trap - EXIT INT TERM
+  validation_worker_sanitize_remote_config
+  exit "$status"
+}
+
+validation_worker_enable_remote_checkout_cleanup() {
+  trap validation_worker_remote_checkout_cleanup EXIT INT TERM
+}
+
+validation_worker_disable_remote_checkout_cleanup() {
+  trap - EXIT INT TERM
+}
+
 validation_worker_git_commit() {
   git -C "$1" rev-parse HEAD 2>/dev/null || true
 }
@@ -349,9 +365,6 @@ validation_worker_refresh_checkout_metadata() {
   checkout_path="$repo_root"
   checkout_resolved_commit="$(validation_worker_git_commit "$repo_root")"
   checkout_resolved_ref="$(validation_worker_git_ref "$repo_root")"
-  if [[ "$checkout_resolved_ref" == "HEAD" && -n "$requested_repo_ref" ]]; then
-    checkout_resolved_ref="$requested_repo_ref"
-  fi
 }
 
 validation_worker_prepare_local_checkout() {
@@ -364,7 +377,7 @@ validation_worker_prepare_local_checkout() {
 }
 
 validation_worker_prepare_remote_checkout() {
-  local checkout_root checkout_key checkout_target
+  local checkout_root checkout_key checkout_target fetched_ref_commit
 
   checkout_source="fetch"
   checkout_url_redacted="$(validation_worker_redact_url "$requested_repo_url")"
@@ -372,6 +385,7 @@ validation_worker_prepare_remote_checkout() {
   checkout_key="$(validation_worker_checkout_key "$requested_repo_url" "$requested_repo_ref" "$expected_commit")"
   repo_root="$checkout_root/$checkout_key"
   checkout_path="$repo_root"
+  validation_worker_enable_remote_checkout_cleanup
 
   mkdir -p "$checkout_root"
   if [[ -e "$repo_root" && ! -d "$repo_root/.git" ]]; then
@@ -379,12 +393,7 @@ validation_worker_prepare_remote_checkout() {
   fi
 
   if [[ -d "$repo_root/.git" ]]; then
-    if ! GIT_TERMINAL_PROMPT=0 git -C "$repo_root" remote set-url origin "$requested_repo_url" >/dev/null 2>&1; then
-      validation_worker_sanitize_remote_config
-      record_step repo_checkout fail checkout_fetch_failed "failed to configure repository remote" \
-        "repo url: $checkout_url_redacted" "checkout path: $repo_root"
-      return 1
-    fi
+    validation_worker_sanitize_remote_config
   else
     if ! GIT_TERMINAL_PROMPT=0 git clone --quiet --no-checkout "$requested_repo_url" "$repo_root" >/dev/null 2>&1; then
       validation_worker_sanitize_remote_config
@@ -392,19 +401,31 @@ validation_worker_prepare_remote_checkout() {
         "repo url: $checkout_url_redacted" "checkout path: $repo_root"
       return 1
     fi
+    validation_worker_sanitize_remote_config
   fi
 
   if [[ -n "$requested_repo_ref" ]]; then
-    if ! GIT_TERMINAL_PROMPT=0 git -C "$repo_root" fetch --quiet origin "$requested_repo_ref" >/dev/null 2>&1; then
+    if ! GIT_TERMINAL_PROMPT=0 git -C "$repo_root" fetch --quiet "$requested_repo_url" "$requested_repo_ref" >/dev/null 2>&1; then
       validation_worker_sanitize_remote_config
       record_step repo_checkout fail checkout_fetch_failed "failed to fetch requested ref" \
         "repo url: $checkout_url_redacted" "requested ref: $requested_repo_ref" "checkout path: $repo_root"
       return 1
     fi
+    fetched_ref_commit="$(git -C "$repo_root" rev-parse FETCH_HEAD^{commit} 2>/dev/null || true)"
+    if [[ -z "$fetched_ref_commit" || "$fetched_ref_commit" != "$expected_commit" ]]; then
+      validation_worker_sanitize_remote_config
+      record_step repo_checkout fail ref_commit_mismatch "requested ref does not resolve to repo.commit" \
+        "repo url: $checkout_url_redacted" \
+        "requested ref: $requested_repo_ref" \
+        "ref commit: ${fetched_ref_commit:-unknown}" \
+        "requested commit: $expected_commit" \
+        "checkout path: $repo_root"
+      return 1
+    fi
     checkout_target="FETCH_HEAD"
   elif [[ -n "$expected_commit" ]]; then
-    if ! GIT_TERMINAL_PROMPT=0 git -C "$repo_root" fetch --quiet origin "$expected_commit" >/dev/null 2>&1; then
-      if ! GIT_TERMINAL_PROMPT=0 git -C "$repo_root" fetch --quiet origin >/dev/null 2>&1; then
+    if ! GIT_TERMINAL_PROMPT=0 git -C "$repo_root" fetch --quiet "$requested_repo_url" "$expected_commit" >/dev/null 2>&1; then
+      if ! GIT_TERMINAL_PROMPT=0 git -C "$repo_root" fetch --quiet "$requested_repo_url" >/dev/null 2>&1; then
         validation_worker_sanitize_remote_config
         record_step repo_checkout fail checkout_fetch_failed "failed to fetch requested commit" \
           "repo url: $checkout_url_redacted" "requested commit: $expected_commit" "checkout path: $repo_root"
@@ -413,7 +434,7 @@ validation_worker_prepare_remote_checkout() {
     fi
     checkout_target="$expected_commit"
   else
-    if ! GIT_TERMINAL_PROMPT=0 git -C "$repo_root" fetch --quiet origin >/dev/null 2>&1; then
+    if ! GIT_TERMINAL_PROMPT=0 git -C "$repo_root" fetch --quiet "$requested_repo_url" >/dev/null 2>&1; then
       validation_worker_sanitize_remote_config
       record_step repo_checkout fail checkout_fetch_failed "failed to fetch repository default ref" \
         "repo url: $checkout_url_redacted" "checkout path: $repo_root"
@@ -434,7 +455,11 @@ validation_worker_prepare_remote_checkout() {
   fi
 
   validation_worker_refresh_checkout_metadata
+  if [[ -n "$requested_repo_ref" && -n "$fetched_ref_commit" && "$fetched_ref_commit" == "$checkout_resolved_commit" ]]; then
+    checkout_resolved_ref="$requested_repo_ref"
+  fi
   validation_worker_sanitize_remote_config
+  validation_worker_disable_remote_checkout_cleanup
   record_step repo_checkout pass ok "fetched requested repository checkout" \
     "repo url: $checkout_url_redacted" \
     "requested ref: ${requested_repo_ref:-<default>}" \
@@ -450,6 +475,10 @@ validation_worker_prepare_repo_checkout() {
   fi
 
   if [[ -n "$requested_repo_url" ]]; then
+    if [[ -z "$expected_commit" ]]; then
+      record_step repo_checkout fail unpinned_remote_checkout "repo.url requests must include repo.commit before validation profiles run"
+      return 1
+    fi
     validation_worker_prepare_remote_checkout
   else
     validation_worker_prepare_local_checkout
