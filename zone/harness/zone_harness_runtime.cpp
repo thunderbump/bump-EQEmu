@@ -447,9 +447,7 @@ OwnedBotPressureHealingScenarioResult ZoneHarnessRuntime::RunOwnedBotPressureHea
 		}
 
 		if (result.sleep_ms > 0) {
-			lock.unlock();
 			std::this_thread::sleep_for(std::chrono::milliseconds(result.sleep_ms));
-			lock.lock();
 		}
 	}
 
