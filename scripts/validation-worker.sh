@@ -9,7 +9,9 @@ source "$script_dir/lib/validation-worker-stack.sh"
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/validation-worker.sh run --request <request.json>
+Usage:
+  scripts/validation-worker.sh profiles --json
+  scripts/validation-worker.sh run --request <request.json>
 
 Runs a local Validation Worker request and writes structured evidence. The first
 implemented profile is preflight, which checks whether the selected validation
@@ -31,10 +33,62 @@ profile_database_behavior() {
   esac
 }
 
+profile_description() {
+  case "$1" in
+    preflight) printf 'Check validation stack routing, checkout, Docker, database, ports, and runtime asset readiness.\n' ;;
+    safe) printf 'Run the safe validation profile, including preflight, Tier 1 build/unit validation, and read-mostly DB checks.\n' ;;
+    tier3-harness) printf 'Run the Tier 3 zone harness smoke validation profile.\n' ;;
+    tier1-tier3-harness) printf 'Run Tier 1 build/unit validation, then the Tier 3 zone harness smoke profile.\n' ;;
+    *) printf 'unknown validation profile\n' ;;
+  esac
+}
+
+emit_profiles_json() {
+  python3 - "$(
+    profile_description preflight
+  )" "$(
+    profile_description safe
+  )" "$(
+    profile_description tier3-harness
+  )" "$(
+    profile_description tier1-tier3-harness
+  )" <<'PY'
+import json
+import sys
+
+names = ["preflight", "safe", "tier3-harness", "tier1-tier3-harness"]
+profiles = []
+for name, description in zip(names, sys.argv[1:]):
+    profiles.append({
+        "name": name,
+        "description": description,
+        "databaseBehavior": {
+            "preflight": "no mutation expected",
+            "safe": "read-mostly",
+            "tier3-harness": "read-mostly/runtime fixture use",
+            "tier1-tier3-harness": "read-mostly/runtime fixture use",
+        }[name],
+    })
+
+json.dump({"profiles": profiles}, sys.stdout, indent=2)
+sys.stdout.write("\n")
+PY
+}
+
 request_file=""
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]; then
   usage
   exit 0
+fi
+
+if [[ "${1:-}" == "profiles" ]]; then
+  shift
+  if [[ "$#" -eq 1 && "${1:-}" == "--json" ]]; then
+    emit_profiles_json
+    exit 0
+  fi
+  usage >&2
+  exit 2
 fi
 
 [[ "${1:-}" == "run" ]] || { usage >&2; exit 2; }
@@ -76,15 +130,23 @@ case "$profile" in
 esac
 
 request_dir="$(cd "$(dirname "$request_file")" && pwd)"
-repo_root="$(json_get_first "$request_file" "$repo_default" repo.path target_worktree_checkout target_checkout_path)"
-[[ "$repo_root" == /* ]] || repo_root="$request_dir/$repo_root"
-repo_root="$(akkstack_resolve_path "$repo_root")"
+requested_repo_path="$(json_get_first "$request_file" "" repo.path target_worktree_checkout target_checkout_path)"
+requested_repo_url="$(json_get "$request_file" repo.url)"
+requested_repo_ref="$(json_get "$request_file" repo.ref)"
+expected_commit="$(json_get_first "$request_file" "" repo.commit commit)"
+repo_root="$repo_default"
+checkout_source="local"
+checkout_path="$repo_default"
+checkout_url_redacted=""
+checkout_requested_ref="$requested_repo_ref"
+checkout_requested_commit="$expected_commit"
+checkout_resolved_ref=""
+checkout_resolved_commit=""
 role="$(json_get "$request_file" stack.role validation)"
 stack_path="$(json_get "$request_file" stack.path)"
-evidence_dir="$(json_get_first "$request_file" "$repo_root/.case/validation-worker/preflight" evidenceDir evidence_dir)"
+evidence_dir="$(json_get_first "$request_file" "$repo_default/.afk/validation-worker/$profile" evidence_dir evidenceDir)"
 [[ "$evidence_dir" == /* ]] || evidence_dir="$request_dir/$evidence_dir"
 evidence_dir="$(akkstack_resolve_path "$evidence_dir")"
-expected_commit="$(json_get_first "$request_file" "" repo.commit commit)"
 docker_required="$(json_bool "$(json_get "$request_file" checks.dockerRequired)" true)"
 database_required="$(json_bool "$(json_get "$request_file" checks.databaseRequired)" false)"
 assets_required="$(json_bool "$(json_get "$request_file" checks.assetsRequired)" false)"
@@ -97,25 +159,33 @@ docker_cmd=("$docker_command")
 dry_run="$(json_bool "$(json_get "$request_file" dryRun)" false)"
 timeout_seconds="$(json_int "$(json_get_first "$request_file" 0 timeoutSeconds timeout_seconds)" 0)"
 lock_wait_seconds="$(json_int "$(json_get "$request_file" lockWaitSeconds)" 30)"
+AKKSTACK_STACK_DIR=""
+AKKSTACK_STACK_ROLE="$role"
 
 mkdir -p "$evidence_dir/steps"
 steps_tsv="$evidence_dir/steps.tsv"
 : >"$steps_tsv"
 failures=0
 
-if [[ -n "$stack_path" ]]; then
-  [[ "$stack_path" == /* ]] || stack_path="$request_dir/$stack_path"
-  AKKSTACK_DIR="$stack_path" akkstack_init_routing "$repo_root" "$role"
-else
-  akkstack_init_routing "$repo_root" "$role"
-fi
-
-validation_worker_acquire_stack_lock "$AKKSTACK_STACK_DIR" "$lock_wait_seconds" || exit "$?"
-
 write_result() {
-  python3 - "$steps_tsv" "$evidence_dir/result.json" "$profile" "$repo_root" "$AKKSTACK_STACK_DIR" "$failures" "$(profile_database_behavior "$profile")" <<'PY'
+  python3 - "$steps_tsv" "$evidence_dir/result.json" "$profile" "$repo_root" "$AKKSTACK_STACK_DIR" "$failures" "$(profile_database_behavior "$profile")" "$checkout_source" "$checkout_path" "$checkout_url_redacted" "$checkout_requested_ref" "$checkout_requested_commit" "$checkout_resolved_ref" "$checkout_resolved_commit" <<'PY'
 import json, sys
-steps_path, result_path, profile, repo, stack, failures, database_behavior = sys.argv[1:8]
+(
+    steps_path,
+    result_path,
+    profile,
+    repo,
+    stack,
+    failures,
+    database_behavior,
+    checkout_source,
+    checkout_path,
+    checkout_url,
+    checkout_requested_ref,
+    checkout_requested_commit,
+    checkout_resolved_ref,
+    checkout_resolved_commit,
+) = sys.argv[1:15]
 steps = []
 with open(steps_path, encoding="utf-8") as f:
     for line in f:
@@ -137,6 +207,15 @@ result = {
     "failureCount": int(failures),
     "repo": repo,
     "stackPath": stack,
+    "checkout": {
+        "source": checkout_source,
+        "path": checkout_path,
+        "url": checkout_url,
+        "requestedRef": checkout_requested_ref,
+        "requestedCommit": checkout_requested_commit,
+        "resolvedRef": checkout_resolved_ref,
+        "resolvedCommit": checkout_resolved_commit,
+    },
     "metadata": {"databaseBehavior": database_behavior},
     "steps": steps,
 }
@@ -208,6 +287,224 @@ record_command_step() {
   return "$exit_code"
 }
 
+validation_worker_redact_url() {
+  python3 - "$1" <<'PY'
+from urllib.parse import urlsplit, urlunsplit
+import sys
+
+url = sys.argv[1]
+try:
+    parsed = urlsplit(url)
+except Exception:
+    print(url.split("?", 1)[0])
+    raise SystemExit(0)
+
+if parsed.scheme and parsed.netloc:
+    host = parsed.hostname or ""
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
+    if port:
+        host = f"{host}:{port}"
+    if parsed.username or parsed.password:
+        host = f"<redacted>@{host}"
+    print(urlunsplit((parsed.scheme, host, parsed.path, "", "")))
+elif "@" in url:
+    print(f"<redacted>@{url.split('@', 1)[1].split('?', 1)[0]}")
+else:
+    print(url.split("?", 1)[0])
+PY
+}
+
+validation_worker_checkout_key() {
+  python3 - "$1" "$2" "$3" <<'PY'
+import hashlib
+import sys
+
+material = "\0".join(sys.argv[1:4]).encode("utf-8", "surrogateescape")
+print(hashlib.sha256(material).hexdigest()[:20])
+PY
+}
+
+validation_worker_sanitize_remote_config() {
+  if [[ -d "$repo_root/.git" && -n "$checkout_url_redacted" ]]; then
+    git -C "$repo_root" remote set-url origin "$checkout_url_redacted" >/dev/null 2>&1 || true
+  fi
+}
+
+validation_worker_remote_checkout_cleanup() {
+  local status=$?
+
+  trap - EXIT INT TERM
+  validation_worker_sanitize_remote_config
+  exit "$status"
+}
+
+validation_worker_enable_remote_checkout_cleanup() {
+  trap validation_worker_remote_checkout_cleanup EXIT INT TERM
+}
+
+validation_worker_disable_remote_checkout_cleanup() {
+  trap - EXIT INT TERM
+}
+
+validation_worker_git_commit() {
+  git -C "$1" rev-parse HEAD 2>/dev/null || true
+}
+
+validation_worker_git_ref() {
+  git -C "$1" symbolic-ref --quiet --short HEAD 2>/dev/null \
+    || git -C "$1" describe --tags --exact-match HEAD 2>/dev/null \
+    || printf 'HEAD\n'
+}
+
+validation_worker_refresh_checkout_metadata() {
+  checkout_path="$repo_root"
+  checkout_resolved_commit="$(validation_worker_git_commit "$repo_root")"
+  checkout_resolved_ref="$(validation_worker_git_ref "$repo_root")"
+}
+
+validation_worker_prepare_local_checkout() {
+  repo_root="${requested_repo_path:-$repo_default}"
+  [[ "$repo_root" == /* ]] || repo_root="$request_dir/$repo_root"
+  repo_root="$(akkstack_resolve_path "$repo_root")"
+  checkout_source="local"
+  checkout_url_redacted=""
+  validation_worker_refresh_checkout_metadata
+}
+
+validation_worker_prepare_remote_checkout() {
+  local checkout_root checkout_key checkout_target fetched_ref_commit
+
+  checkout_source="fetch"
+  checkout_url_redacted="$(validation_worker_redact_url "$requested_repo_url")"
+  checkout_root="$evidence_dir/checkouts"
+  checkout_key="$(validation_worker_checkout_key "$requested_repo_url" "$requested_repo_ref" "$expected_commit")"
+  repo_root="$checkout_root/$checkout_key"
+  checkout_path="$repo_root"
+  validation_worker_enable_remote_checkout_cleanup
+
+  mkdir -p "$checkout_root"
+  if [[ -e "$repo_root" && ! -d "$repo_root/.git" ]]; then
+    rm -rf -- "$repo_root"
+  fi
+
+  if [[ -d "$repo_root/.git" ]]; then
+    validation_worker_sanitize_remote_config
+  else
+    if ! GIT_TERMINAL_PROMPT=0 git clone --quiet --no-checkout "$requested_repo_url" "$repo_root" >/dev/null 2>&1; then
+      validation_worker_sanitize_remote_config
+      record_step repo_checkout fail checkout_fetch_failed "failed to fetch requested repository" \
+        "repo url: $checkout_url_redacted" "checkout path: $repo_root"
+      return 1
+    fi
+    validation_worker_sanitize_remote_config
+  fi
+
+  if [[ -n "$requested_repo_ref" ]]; then
+    if ! GIT_TERMINAL_PROMPT=0 git -C "$repo_root" fetch --quiet "$requested_repo_url" "$requested_repo_ref" >/dev/null 2>&1; then
+      validation_worker_sanitize_remote_config
+      record_step repo_checkout fail checkout_fetch_failed "failed to fetch requested ref" \
+        "repo url: $checkout_url_redacted" "requested ref: $requested_repo_ref" "checkout path: $repo_root"
+      return 1
+    fi
+    fetched_ref_commit="$(git -C "$repo_root" rev-parse FETCH_HEAD^{commit} 2>/dev/null || true)"
+    if [[ -z "$fetched_ref_commit" || "$fetched_ref_commit" != "$expected_commit" ]]; then
+      validation_worker_sanitize_remote_config
+      record_step repo_checkout fail ref_commit_mismatch "requested ref does not resolve to repo.commit" \
+        "repo url: $checkout_url_redacted" \
+        "requested ref: $requested_repo_ref" \
+        "ref commit: ${fetched_ref_commit:-unknown}" \
+        "requested commit: $expected_commit" \
+        "checkout path: $repo_root"
+      return 1
+    fi
+    checkout_target="FETCH_HEAD"
+  elif [[ -n "$expected_commit" ]]; then
+    if ! GIT_TERMINAL_PROMPT=0 git -C "$repo_root" fetch --quiet "$requested_repo_url" "$expected_commit" >/dev/null 2>&1; then
+      if ! GIT_TERMINAL_PROMPT=0 git -C "$repo_root" fetch --quiet "$requested_repo_url" >/dev/null 2>&1; then
+        validation_worker_sanitize_remote_config
+        record_step repo_checkout fail checkout_fetch_failed "failed to fetch requested commit" \
+          "repo url: $checkout_url_redacted" "requested commit: $expected_commit" "checkout path: $repo_root"
+        return 1
+      fi
+    fi
+    checkout_target="$expected_commit"
+  else
+    if ! GIT_TERMINAL_PROMPT=0 git -C "$repo_root" fetch --quiet "$requested_repo_url" >/dev/null 2>&1; then
+      validation_worker_sanitize_remote_config
+      record_step repo_checkout fail checkout_fetch_failed "failed to fetch repository default ref" \
+        "repo url: $checkout_url_redacted" "checkout path: $repo_root"
+      return 1
+    fi
+    git -C "$repo_root" remote set-head origin --auto >/dev/null 2>&1 || true
+    checkout_target="origin/HEAD"
+  fi
+
+  if [[ -n "$expected_commit" ]]; then
+    checkout_target="$expected_commit"
+  fi
+  if ! git -C "$repo_root" checkout --quiet --detach "$checkout_target" >/dev/null 2>&1; then
+    validation_worker_sanitize_remote_config
+    record_step repo_checkout fail checkout_ref_missing "requested ref or commit is not available after fetch" \
+      "repo url: $checkout_url_redacted" "requested ref: $requested_repo_ref" "requested commit: $expected_commit" "checkout path: $repo_root"
+    return 1
+  fi
+
+  validation_worker_refresh_checkout_metadata
+  if [[ -n "$requested_repo_ref" && -n "$fetched_ref_commit" && "$fetched_ref_commit" == "$checkout_resolved_commit" ]]; then
+    checkout_resolved_ref="$requested_repo_ref"
+  fi
+  validation_worker_sanitize_remote_config
+  validation_worker_disable_remote_checkout_cleanup
+  record_step repo_checkout pass ok "fetched requested repository checkout" \
+    "repo url: $checkout_url_redacted" \
+    "requested ref: ${requested_repo_ref:-<default>}" \
+    "requested commit: ${expected_commit:-<none>}" \
+    "resolved commit: ${checkout_resolved_commit:-unknown}" \
+    "checkout path: $repo_root"
+}
+
+validation_worker_prepare_repo_checkout() {
+  if [[ -n "$requested_repo_path" && -n "$requested_repo_url" ]]; then
+    record_step repo_checkout fail invalid_request "request must specify either repo.path or repo.url, not both"
+    return 1
+  fi
+
+  if [[ -n "$requested_repo_url" ]]; then
+    if [[ -z "$expected_commit" ]]; then
+      record_step repo_checkout fail unpinned_remote_checkout "repo.url requests must include repo.commit before validation profiles run"
+      return 1
+    fi
+    validation_worker_prepare_remote_checkout
+  else
+    validation_worker_prepare_local_checkout
+  fi
+}
+
+validation_worker_verify_requested_commit() {
+  local actual_commit
+
+  if [[ -z "$expected_commit" ]]; then
+    record_step repo_commit skip not_requested "request did not pin a commit"
+    return 0
+  fi
+
+  actual_commit="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || true)"
+  checkout_resolved_commit="$actual_commit"
+  if [[ "$actual_commit" == "$expected_commit" ]]; then
+    record_step repo_commit pass ok "requested commit is checked out" "commit: $actual_commit"
+    return 0
+  fi
+
+  record_step repo_commit fail wrong_commit "requested commit is not checked out" \
+    "actual: ${actual_commit:-unknown}" "expected: $expected_commit"
+  return 1
+}
+
 compose_args() {
   printf -- '-f\n%s/docker-compose.yml\n-f\n%s/docker-compose.dev.yml\n' "$AKKSTACK_STACK_DIR" "$AKKSTACK_STACK_DIR"
 }
@@ -264,6 +561,29 @@ port_in_gameplay_list() {
 
   return 1
 }
+
+if ! validation_worker_prepare_repo_checkout; then
+  write_result
+  printf 'result: %s\n' "$evidence_dir/result.json"
+  printf '%s failed with %s issue(s).\n' "$profile" "$failures"
+  exit 1
+fi
+
+if [[ -n "$stack_path" ]]; then
+  [[ "$stack_path" == /* ]] || stack_path="$request_dir/$stack_path"
+  AKKSTACK_DIR="$stack_path" akkstack_init_routing "$repo_root" "$role"
+else
+  akkstack_init_routing "$repo_root" "$role"
+fi
+
+validation_worker_acquire_stack_lock "$AKKSTACK_STACK_DIR" "$lock_wait_seconds" || exit "$?"
+
+if ! validation_worker_verify_requested_commit; then
+  write_result
+  printf 'result: %s\n' "$evidence_dir/result.json"
+  printf '%s failed with %s issue(s).\n' "$profile" "$failures"
+  exit 1
+fi
 
 if [[ "$profile" != "preflight" ]]; then
   if ! validation_worker_bind_stack_code; then
@@ -349,18 +669,6 @@ if [[ -e "$code_path" ]]; then
   fi
 else
   record_step checkout fail wrong_checkout "AkkStack code path is missing"
-fi
-
-if [[ -n "$expected_commit" ]]; then
-  actual_commit="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || true)"
-  if [[ "$actual_commit" == "$expected_commit" ]]; then
-    record_step repo_commit pass ok "requested commit is checked out" "commit: $actual_commit"
-  else
-    record_step repo_commit fail wrong_commit "requested commit is not checked out" \
-      "actual: ${actual_commit:-unknown}" "expected: $expected_commit"
-  fi
-else
-  record_step repo_commit skip not_requested "request did not pin a commit"
 fi
 
 if [[ "$docker_required" == "true" ]]; then

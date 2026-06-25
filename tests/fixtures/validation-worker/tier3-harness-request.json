@@ -7,7 +7,7 @@
     "role": "validation",
     "path": "fake-akk-stack"
   },
-  "evidenceDir": "../../../.case/validation-worker/fixture-tier3-harness",
+  "evidence_dir": "../../../.afk/validation-worker/fixture-tier3-harness",
   "dryRun": true,
   "timeoutSeconds": 30
 }

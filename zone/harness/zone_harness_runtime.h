@@ -72,6 +72,35 @@ struct BotSlowMaintenanceScenarioResult {
 	RuntimeSnapshot runtime;
 };
 
+struct OwnedBotPressureHealingScenarioResult {
+	bool observed = false;
+	std::string reason;
+	std::string scenario;
+	uint32_t max_ticks = 0;
+	uint32_t sleep_ms = 0;
+	uint32_t ticks_processed = 0;
+	uint32_t elapsed_ms = 0;
+	std::string database_mutation;
+	ActorEventEntity owner;
+	ActorEventEntity bot;
+	ActorEventEntity heal_target;
+	ActorEventEntity hostile;
+	uint16_t requested_spell_type = 0;
+	std::string requested_spell_type_name;
+	uint16_t expected_spell_type = 0;
+	std::string expected_spell_type_name;
+	uint16_t expected_spell_id = 0;
+	std::string expected_spell_name;
+	uint16_t observed_spell_id = 0;
+	std::string observed_spell_name;
+	uint8_t heal_target_hp_percent = 0;
+	int64_t pressure_damage = 0;
+	uint32_t pressure_sample_ms = 0;
+	uint32_t emergency_projection_ms = 0;
+	std::vector<ActorEvent> events;
+	RuntimeSnapshot runtime;
+};
+
 enum class BotSlowMaintenanceScenarioKind {
 	CurrentTarget,
 	Fallback,
@@ -92,6 +121,10 @@ public:
 	BotSlowMaintenanceScenarioResult RunBotSlowMaintenanceCurrentTarget(uint32_t max_ticks = 160, uint32_t sleep_ms = 25);
 	BotSlowMaintenanceScenarioResult RunBotSlowMaintenanceFallback(uint32_t max_ticks = 160, uint32_t sleep_ms = 25);
 	BotSlowMaintenanceScenarioResult RunBotSlowMaintenanceMezzed(uint32_t max_ticks = 160, uint32_t sleep_ms = 25);
+	OwnedBotPressureHealingScenarioResult RunOwnedBotPressureHealingModeratePressureFastHeal(
+		uint32_t max_ticks = 160,
+		uint32_t sleep_ms = 0
+	);
 	void RequestShutdown();
 	void Shutdown();
 

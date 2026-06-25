@@ -73,6 +73,53 @@ If an alternate checkout is intentionally accepted for a specific validation pas
 EXPECTED_EQEMU_CHECKOUT=/path/to/accepted/bump-EQEmu ./scripts/check-akkstack-contract.sh
 ```
 
+## Validation Worker Automation Contract
+
+Automation should call the Validation Worker instead of calling AkkStack or Docker commands directly. The worker
+owns AkkStack path selection, database checks, checkout binding, profile execution, and evidence writing. A remote
+or containerized pipeline should first discover supported profiles:
+
+```sh
+./scripts/validation-worker.sh profiles --json
+```
+
+Then submit a request that identifies code by a fetchable repository URL plus a pinned commit. When a request also
+includes `repo.ref`, the worker verifies that the fetched ref resolves exactly to `repo.commit` before checking out
+or running a profile. The request does not need to know local AkkStack paths; configure the worker host with its
+validation stack path, for example through `AKKSTACK_DIR`, or let the worker use its local validation default. Keep
+credentials out of tracked request files. If a fetch URL contains credentials, the worker records only a redacted
+URL in evidence and sanitizes the worker-owned checkout remote.
+
+```json
+{
+  "profile": "tier1-tier3-harness",
+  "repo": {
+    "url": "https://github.com/thunderbump/bump-EQEmu.git",
+    "ref": "refs/heads/afk/central-lve-6-remote-validation-worker",
+    "commit": "<40-character-commit>"
+  },
+  "evidence_dir": ".afk/validation-worker/central-lve-6",
+  "dryRun": false,
+  "timeout_seconds": 3600
+}
+```
+
+For local development, use an explicit checkout path instead of a fetchable URL:
+
+```json
+{
+  "profile": "safe",
+  "repo": { "path": "/home/bump/Projects/bump-eqemu/bump-EQEmu" },
+  "evidence_dir": ".afk/validation-worker/local-safe",
+  "dryRun": true
+}
+```
+
+For `repo.url` requests, `repo.commit` is required before any validation profile runs, including `preflight`. The
+worker also verifies the final checked-out commit before running any profile command. The worker writes `result.json`
+under the requested `evidence_dir` and includes the resolved checkout path, requested ref/commit, and resolved commit.
+If no evidence directory is supplied, the default is under `.afk/validation-worker/`, not `.case/`.
+
 ## Tier 0: Static Sanity
 
 Use this for every change before running heavier checks.
@@ -374,6 +421,9 @@ the same container, and checks:
   **Engaged Hostile** after the current target is already slowed.
 - `POST /api/v1/harness/scenarios/bot-slow-maintenance/mezzed` proves the bot skips a mezzed hostile and slows
   another eligible hostile.
+- `POST /api/v1/harness/scenarios/owned-bot-healing/moderate-pressure-fast-heal` proves one representative
+  pressure-aware owned-bot healing path by observing a normal heal cast-start event for a synthetic owned target
+  under in-memory combat pressure.
 - `POST /api/v1/harness/shutdown` requests clean shutdown.
 
 Expected validation result: the wrapper exits `0` with no scenario payload printed. On failure it prints either
@@ -388,6 +438,9 @@ Fixture and database expectations:
   gate. Schema-mutating scenarios always require the backup gate.
 - The default bot slow maintenance scenarios report `database_mutation` beginning with `none:` and should not
   leave persistent database changes.
+- The default owned-bot pressure-aware healing scenario also reports `database_mutation` beginning with `none:`.
+  It uses in-process rule overrides that are restored before the scenario returns and does not persist gameplay
+  state, bot rows, or rule values.
 
 Processing expectations:
 
@@ -404,6 +457,12 @@ Their primary pass condition is that a normal `spell_cast_started` Actor Event i
 current target. The fallback scenario expects another unslowed engaged hostile after the current target is already
 slowed. The mezzed scenario expects the mezzed hostile to remain untargeted while a different eligible hostile is
 slowed.
+
+The owned-bot pressure-aware healing harness scenario stays narrow on purpose. It uses one synthetic owner, one
+healer bot, one owned heal target bot, and one hostile NPC in ordinary zone processing. Fixture setup applies
+in-memory HP, combat, and incoming-pressure shortcuts up front, then waits for a normal `spell_cast_started`
+Actor Event. The representative path is a `RegularHeal` request that pressure-aware selection escalates to
+`FastHeals`; broad pressure and heal-category matrices remain in deterministic unit coverage.
 
 For AFK agents, use `./scripts/smoke-zone-harness.sh` after Tier 1 when a task touches harness-covered runtime
 gameplay. If a validation wrapper is requested, wire it to this smoke script rather than duplicating the long

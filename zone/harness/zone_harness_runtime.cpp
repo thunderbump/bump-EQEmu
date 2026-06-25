@@ -10,8 +10,13 @@
 
 #include "zone_harness_runtime.h"
 
+#include "common/pressure_aware_healing.h"
+#include "common/regular_heal_efficiency.h"
+#include "common/rulesys.h"
 #include "common/spdat.h"
 #include "common/timer.h"
+#include "zone/bot.h"
+#include "zone/bot_heal_selection.h"
 #include "zone/entity.h"
 #include "zone/npc.h"
 #include "zone/harness/owned_bot_actor_fixture.h"
@@ -126,6 +131,36 @@ std::vector<ActorEvent> ZoneHarnessRuntime::EventsSince(uint64_t since_id, size_
 
 namespace {
 
+constexpr uint32_t kHarnessClericBotSpellListID = 3002;
+
+struct ScopedRuleValue {
+	ScopedRuleValue(const std::string &name, const std::string &value)
+	: rule_name(name)
+	{
+		had_original_value = RuleManager::Instance()->GetRule(rule_name, original_value);
+		applied = RuleManager::Instance()->SetRule(rule_name, value, nullptr, false, true);
+	}
+
+	~ScopedRuleValue()
+	{
+		if (!applied || !had_original_value) {
+			return;
+		}
+
+		RuleManager::Instance()->SetRule(rule_name, original_value, nullptr, false, true);
+	}
+
+	bool ok() const
+	{
+		return applied;
+	}
+
+	std::string rule_name;
+	std::string original_value;
+	bool had_original_value = false;
+	bool applied = false;
+};
+
 std::string ScenarioName(BotSlowMaintenanceScenarioKind scenario)
 {
 	switch (scenario) {
@@ -138,6 +173,20 @@ std::string ScenarioName(BotSlowMaintenanceScenarioKind scenario)
 	}
 
 	return "unknown";
+}
+
+std::string SpellTypeName(uint16_t spell_type)
+{
+	return Bot::GetSpellTypeNameByID(spell_type);
+}
+
+bool IsExpectedHealCast(const ActorEvent &event, uint16_t caster_id, uint16_t target_id, uint16_t spell_id)
+{
+	return event.type == "spell_cast_started" &&
+		event.caster.entity_id == caster_id &&
+		event.target.has_value() &&
+		event.target->entity_id == target_id &&
+		event.spell.id == spell_id;
 }
 
 }
@@ -212,6 +261,205 @@ BotSlowMaintenanceScenarioResult ZoneHarnessRuntime::RunBotSlowMaintenanceFallba
 BotSlowMaintenanceScenarioResult ZoneHarnessRuntime::RunBotSlowMaintenanceMezzed(uint32_t max_ticks, uint32_t sleep_ms)
 {
 	return RunBotSlowMaintenanceScenario(BotSlowMaintenanceScenarioKind::Mezzed, max_ticks, sleep_ms);
+}
+
+OwnedBotPressureHealingScenarioResult ZoneHarnessRuntime::RunOwnedBotPressureHealingModeratePressureFastHeal(
+	uint32_t max_ticks,
+	uint32_t sleep_ms
+)
+{
+	std::unique_lock lock(mutex);
+
+	OwnedBotPressureHealingScenarioResult result{
+		.reason = "not_run",
+		.scenario = "moderate-pressure-fast-heal",
+		.max_ticks = std::clamp<uint32_t>(max_ticks, 1, 1000),
+		.sleep_ms = std::min<uint32_t>(sleep_ms, 250),
+		.database_mutation =
+			"none: synthetic owner, healer bot, heal target bot, hostile NPC, group, HP, combat state, and incoming pressure are in-memory only; rules are restored without DB persistence",
+		.requested_spell_type = BotSpellTypes::RegularHeal,
+		.requested_spell_type_name = SpellTypeName(BotSpellTypes::RegularHeal),
+	};
+
+	if (!booted || !zone || !is_zone_loaded) {
+		result.reason = "zone_not_booted";
+		result.runtime = RuntimeLocked();
+		return result;
+	}
+
+	ScopedRuleValue pressure_enabled("Bots:PressureAwareHealingEnabled", "true");
+	ScopedRuleValue pressure_sample_ms("Bots:PressureAwareHealingPressureSampleMS", "10000");
+	ScopedRuleValue emergency_projection_ms("Bots:PressureAwareHealingEmergencyProjectionMS", "2000");
+	ScopedRuleValue efficient_regular_heals("Bots:PreferEfficientRegularHeals", "false");
+	if (!pressure_enabled.ok() || !pressure_sample_ms.ok() || !emergency_projection_ms.ok() || !efficient_regular_heals.ok()) {
+		result.reason = "rule_override_failed";
+		result.runtime = RuntimeLocked();
+		return result;
+	}
+
+	const auto pressure_settings = PressureAwareHealing::LoadSettingsFromRules();
+	const auto efficiency_settings = RegularHealEfficiency::LoadSettingsFromRules();
+	result.pressure_sample_ms = pressure_settings.pressure_sample_ms;
+	result.emergency_projection_ms = pressure_settings.emergency_projection_ms;
+
+	OwnedBotActorFixture fixture;
+	result.database_mutation = fixture.DatabaseMutationSummary() +
+		"; plus a synthetic heal target bot, in-memory HP/pressure setup, and temporary in-process rule overrides restored before return";
+
+	if (!fixture.SetUpOwnedBotGroup({
+		.owner_name = "HarnessHealOwner",
+		.bot_name = "HarnessHealCleric",
+		.race = Race::HighElf,
+		.bot_class = Class::Cleric,
+		.gender = Gender::Female,
+		.bot_spell_list_id = kHarnessClericBotSpellListID,
+	})) {
+		result.reason = "healer_spell_list_unavailable";
+		result.owner = fixture.OwnerEntity();
+		result.bot = fixture.OwnedBotEntity();
+		result.runtime = RuntimeLocked();
+		return result;
+	}
+
+	auto *healer = fixture.OwnedBot();
+	if (!healer) {
+		result.reason = "healer_bot_unavailable";
+		result.owner = fixture.OwnerEntity();
+		result.bot = fixture.OwnedBotEntity();
+		result.runtime = RuntimeLocked();
+		return result;
+	}
+
+	for (uint16 spell_type = BotSpellTypes::START; spell_type <= BotSpellTypes::END; ++spell_type) {
+		healer->SetSpellTypePriority(
+			spell_type,
+			BotPriorityCategories::Engaged,
+			spell_type == BotSpellTypes::RegularHeal ? 1 : 0
+		);
+	}
+	healer->SetSpellTypeAggroCheck(BotSpellTypes::RegularHeal, false);
+
+	auto *heal_target = fixture.AddOwnedGroupBot({
+		.bot_name = "HarnessHealTarget",
+		.race = Race::Barbarian,
+		.bot_class = Class::Warrior,
+		.gender = Gender::Male,
+		.bot_spell_list_id = 3001,
+	}, glm::vec4(4.0f, 0.0f, 0.0f, 0.0f));
+	if (!heal_target) {
+		result.reason = "heal_target_unavailable";
+		result.owner = fixture.OwnerEntity();
+		result.bot = fixture.OwnedBotEntity();
+		result.runtime = RuntimeLocked();
+		return result;
+	}
+
+	auto *hostile = fixture.AddHostileNPC({
+		.name = "HarnessHealHostile",
+		.position = glm::vec4(12.0f, 0.0f, 0.0f, 0.0f),
+	});
+	if (!hostile) {
+		result.reason = "npc_type_unavailable";
+		result.owner = fixture.OwnerEntity();
+		result.bot = fixture.OwnedBotEntity();
+		result.heal_target = fixture.Describe(heal_target);
+		result.runtime = RuntimeLocked();
+		return result;
+	}
+
+	fixture.OwnerTargets(hostile);
+	fixture.BotTargets(hostile);
+	heal_target->SetTarget(hostile);
+	fixture.EngageHostileWithOwnerGroup(hostile, 100, 25);
+	fixture.EngageHostileWithGroupMember(hostile, heal_target, 200);
+	fixture.GroupMemberEngages(heal_target, hostile, 100);
+	fixture.RefreshOwnedBotPerception();
+
+	result.owner = fixture.OwnerEntity();
+	result.bot = fixture.OwnedBotEntity();
+	result.heal_target = fixture.Describe(heal_target);
+	result.hostile = fixture.Describe(hostile);
+
+	constexpr uint8_t kModeratePressureHealTargetHPPercent = 30;
+	constexpr int64_t kModeratePressureDamage = 2500;
+	if (!fixture.SetCurrentHPPercent(heal_target, kModeratePressureHealTargetHPPercent)) {
+		result.reason = "unable_to_prepare_heal_target_hp";
+		result.runtime = RuntimeLocked();
+		return result;
+	}
+	result.heal_target_hp_percent = kModeratePressureHealTargetHPPercent;
+	result.pressure_damage = kModeratePressureDamage;
+
+	const uint32_t sample_time_ms = ::Timer::GetCurrentTime();
+	if (!fixture.RecordIncomingDamagePressure(heal_target, kModeratePressureDamage, sample_time_ms)) {
+		result.reason = "unable_to_prepare_incoming_damage_pressure";
+		result.runtime = RuntimeLocked();
+		return result;
+	}
+
+	const auto expected_selection = BotHealSelection::Select(
+		*healer,
+		*heal_target,
+		BotSpellTypes::RegularHeal,
+		pressure_settings,
+		efficiency_settings
+	);
+	if (!expected_selection.found || expected_selection.selected_spell_type != BotSpellTypes::FastHeals || !IsValidSpell(expected_selection.spell.SpellId)) {
+		result.reason = "fixed_moderate_pressure_case_did_not_select_fast_heal";
+		result.runtime = RuntimeLocked();
+		return result;
+	}
+
+	result.expected_spell_type = expected_selection.selected_spell_type;
+	result.expected_spell_type_name = SpellTypeName(expected_selection.selected_spell_type);
+	result.expected_spell_id = expected_selection.spell.SpellId;
+	result.expected_spell_name = GetSpellName(expected_selection.spell.SpellId);
+
+	const uint64_t since_event_id = events.MaxEventID();
+	const uint16_t healer_id = healer->GetID();
+	const uint16_t heal_target_id = heal_target->GetID();
+	const auto started = std::chrono::steady_clock::now();
+
+	for (uint32_t tick = 0; tick < result.max_ticks; ++tick) {
+		if (!booted || !zone || !is_zone_loaded || shutdown_requested) {
+			result.reason = "zone_unavailable_during_scenario";
+			break;
+		}
+
+		ProcessOneTick();
+		++process_ticks;
+		++result.ticks_processed;
+
+		result.events = events.Since(since_event_id, 100);
+		const auto observed = std::find_if(
+			result.events.begin(),
+			result.events.end(),
+			[healer_id, heal_target_id, &result](const ActorEvent &event) {
+				return IsExpectedHealCast(event, healer_id, heal_target_id, result.expected_spell_id);
+			}
+		);
+		if (observed != result.events.end()) {
+			result.observed = true;
+			result.reason = "observed_expected_pressure_aware_heal_cast_start";
+			result.observed_spell_id = observed->spell.id;
+			result.observed_spell_name = observed->spell.name;
+			break;
+		}
+
+		if (result.sleep_ms > 0) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(result.sleep_ms));
+		}
+	}
+
+	result.elapsed_ms = static_cast<uint32_t>(
+		std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count()
+	);
+	if (!result.observed && result.reason == "not_run") {
+		result.reason = "expected_pressure_aware_heal_cast_start_not_observed_within_bounds";
+		result.events = events.Since(since_event_id, 100);
+	}
+	result.runtime = RuntimeLocked();
+	return result;
 }
 
 BotSlowMaintenanceScenarioResult ZoneHarnessRuntime::RunBotSlowMaintenanceScenario(
