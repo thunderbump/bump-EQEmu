@@ -288,7 +288,7 @@ OwnedBotPressureHealingScenarioResult ZoneHarnessRuntime::RunOwnedBotPressureHea
 	}
 
 	ScopedRuleValue pressure_enabled("Bots:PressureAwareHealingEnabled", "true");
-	ScopedRuleValue pressure_sample_ms("Bots:PressureAwareHealingPressureSampleMS", "3000");
+	ScopedRuleValue pressure_sample_ms("Bots:PressureAwareHealingPressureSampleMS", "10000");
 	ScopedRuleValue emergency_projection_ms("Bots:PressureAwareHealingEmergencyProjectionMS", "2000");
 	ScopedRuleValue efficient_regular_heals("Bots:PreferEfficientRegularHeals", "false");
 	if (!pressure_enabled.ok() || !pressure_sample_ms.ok() || !emergency_projection_ms.ok() || !efficient_regular_heals.ok()) {
@@ -380,38 +380,32 @@ OwnedBotPressureHealingScenarioResult ZoneHarnessRuntime::RunOwnedBotPressureHea
 	result.heal_target = fixture.Describe(heal_target);
 	result.hostile = fixture.Describe(hostile);
 
-	BotHealSelection::Result expected_selection{};
-	for (uint8_t hp_percent = 40; hp_percent >= 26 && !expected_selection.found; --hp_percent) {
-		if (!fixture.SetCurrentHPPercent(heal_target, hp_percent)) {
-			continue;
-		}
+	constexpr uint8_t kModeratePressureHealTargetHPPercent = 30;
+	constexpr int64_t kModeratePressureDamage = 2500;
+	if (!fixture.SetCurrentHPPercent(heal_target, kModeratePressureHealTargetHPPercent)) {
+		result.reason = "unable_to_prepare_heal_target_hp";
+		result.runtime = RuntimeLocked();
+		return result;
+	}
+	result.heal_target_hp_percent = kModeratePressureHealTargetHPPercent;
+	result.pressure_damage = kModeratePressureDamage;
 
-		for (int64_t damage = 50; damage <= 5000; damage += 50) {
-			const uint32_t sample_time_ms = ::Timer::GetCurrentTime();
-			if (!fixture.RecordIncomingDamagePressure(heal_target, damage, sample_time_ms)) {
-				continue;
-			}
-
-			const auto selection = BotHealSelection::Select(
-				*healer,
-				*heal_target,
-				BotSpellTypes::RegularHeal,
-				pressure_settings,
-				efficiency_settings
-			);
-			if (!selection.found || selection.selected_spell_type != BotSpellTypes::FastHeals || !IsValidSpell(selection.spell.SpellId)) {
-				continue;
-			}
-
-			expected_selection = selection;
-			result.heal_target_hp_percent = hp_percent;
-			result.pressure_damage = damage;
-			break;
-		}
+	const uint32_t sample_time_ms = ::Timer::GetCurrentTime();
+	if (!fixture.RecordIncomingDamagePressure(heal_target, kModeratePressureDamage, sample_time_ms)) {
+		result.reason = "unable_to_prepare_incoming_damage_pressure";
+		result.runtime = RuntimeLocked();
+		return result;
 	}
 
-	if (!expected_selection.found) {
-		result.reason = "unable_to_prepare_fast_heal_pressure_case";
+	const auto expected_selection = BotHealSelection::Select(
+		*healer,
+		*heal_target,
+		BotSpellTypes::RegularHeal,
+		pressure_settings,
+		efficiency_settings
+	);
+	if (!expected_selection.found || expected_selection.selected_spell_type != BotSpellTypes::FastHeals || !IsValidSpell(expected_selection.spell.SpellId)) {
+		result.reason = "fixed_moderate_pressure_case_did_not_select_fast_heal";
 		result.runtime = RuntimeLocked();
 		return result;
 	}

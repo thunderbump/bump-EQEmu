@@ -123,7 +123,7 @@ public:
 	BotSlowMaintenanceScenarioResult RunBotSlowMaintenanceMezzed(uint32_t max_ticks = 160, uint32_t sleep_ms = 25);
 	OwnedBotPressureHealingScenarioResult RunOwnedBotPressureHealingModeratePressureFastHeal(
 		uint32_t max_ticks = 160,
-		uint32_t sleep_ms = 25
+		uint32_t sleep_ms = 0
 	);
 	void RequestShutdown();
 	void Shutdown();

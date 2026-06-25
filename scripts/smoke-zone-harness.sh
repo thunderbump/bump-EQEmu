@@ -210,6 +210,10 @@ if int(payload.get("expected_spell_id", 0)) <= 0:
     fail("expected heal spell id was not prepared")
 if int(payload.get("heal_target_hp_percent", 0)) <= 0 or int(payload.get("pressure_damage", 0)) <= 0:
     fail("pressure setup details missing")
+if int(payload.get("heal_target_hp_percent", 0)) != 30 or int(payload.get("pressure_damage", 0)) != 2500:
+    fail("unexpected fixed pressure setup")
+if int(payload.get("pressure_sample_ms", 0)) < 10000:
+    fail("pressure sample window is too short for bounded runtime")
 if int(payload.get("ticks_processed", 0)) <= 0 or int(payload.get("max_ticks", 0)) <= 0:
     fail("runtime bounds missing")
 
