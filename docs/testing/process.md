@@ -407,6 +407,9 @@ the same container, and checks:
   **Engaged Hostile** after the current target is already slowed.
 - `POST /api/v1/harness/scenarios/bot-slow-maintenance/mezzed` proves the bot skips a mezzed hostile and slows
   another eligible hostile.
+- `POST /api/v1/harness/scenarios/owned-bot-healing/moderate-pressure-fast-heal` proves one representative
+  pressure-aware owned-bot healing path by observing a normal heal cast-start event for a synthetic owned target
+  under in-memory combat pressure.
 - `POST /api/v1/harness/scenarios/autonomous-actor-loop` proves one owned spawned bot can act as a bounded
   **Autonomous Actor** harness primitive by enqueueing target and say actions, processing a small tick budget,
   observing actor-scoped perception, and verifying cursor-based `target_changed` and `speech_emitted`
@@ -428,6 +431,9 @@ Fixture and database expectations:
   gate. Schema-mutating scenarios always require the backup gate.
 - The default bot slow maintenance scenarios report `database_mutation` beginning with `none:` and should not
   leave persistent database changes.
+- The default owned-bot pressure-aware healing scenario also reports `database_mutation` beginning with `none:`.
+  It uses in-process rule overrides that are restored before the scenario returns and does not persist gameplay
+  state, bot rows, or rule values.
 - The default headless-client target scenario reports `database_mutation` beginning with `none:` and should leave
   no unreported `target_changed` cleanup events after its returned `event_cursor_end`.
 
@@ -446,6 +452,12 @@ Their primary pass condition is that a normal `spell_cast_started` Actor Event i
 current target. The fallback scenario expects another unslowed engaged hostile after the current target is already
 slowed. The mezzed scenario expects the mezzed hostile to remain untargeted while a different eligible hostile is
 slowed.
+
+The owned-bot pressure-aware healing harness scenario stays narrow on purpose. It uses one synthetic owner, one
+healer bot, one owned heal target bot, and one hostile NPC in ordinary zone processing. Fixture setup applies
+in-memory HP, combat, and incoming-pressure shortcuts up front, then waits for a normal `spell_cast_started`
+Actor Event. The representative path is a `RegularHeal` request that pressure-aware selection escalates to
+`FastHeals`; broad pressure and heal-category matrices remain in deterministic unit coverage.
 
 The autonomous actor loop harness scenario is intentionally narrower. It uses the same non-persistent owned-bot
 fixture to prove a first perception-action-event loop: enqueue bounded target and say actions for one owned bot,

@@ -500,6 +500,56 @@ if not any(
 PY
 }
 
+assert_pressure_heal_scenario() {
+  local payload=\"\$1\"
+
+  SCENARIO_PAYLOAD=\"\$payload\" python3 - <<'PY'
+import json
+import os
+import sys
+
+payload = json.loads(os.environ["SCENARIO_PAYLOAD"])
+
+def fail(message):
+    print(json.dumps({"error": message, "payload": payload}, separators=(",", ":")), file=sys.stderr)
+    sys.exit(1)
+
+if payload.get("scenario") != "moderate-pressure-fast-heal":
+    fail("unexpected scenario")
+if payload.get("observed") is not True:
+    fail("expected pressure-aware heal cast start was not observed")
+if not str(payload.get("database_mutation", "")).startswith("none:"):
+    fail("scenario reported database mutation")
+if payload.get("requested_spell_type_name") != "RegularHeal":
+    fail("unexpected requested heal category")
+if payload.get("expected_spell_type_name") != "FastHeals":
+    fail("unexpected selected heal category")
+if int(payload.get("expected_spell_id", 0)) <= 0:
+    fail("expected heal spell id was not prepared")
+if int(payload.get("heal_target_hp_percent", 0)) <= 0 or int(payload.get("pressure_damage", 0)) <= 0:
+    fail("pressure setup details missing")
+if int(payload.get("ticks_processed", 0)) <= 0 or int(payload.get("max_ticks", 0)) <= 0:
+    fail("runtime bounds missing")
+
+owner = payload.get("owner") or {}
+bot = payload.get("bot") or {}
+heal_target = payload.get("heal_target") or {}
+if not owner.get("name") or not bot.get("name") or not heal_target.get("name"):
+    fail("scenario fixture identities missing")
+
+events = payload.get("events") or []
+matching = [
+    event for event in events
+    if event.get("type") == "spell_cast_started"
+    and event.get("caster", {}).get("entity_id") == bot.get("entity_id")
+    and event.get("target", {}).get("entity_id") == heal_target.get("entity_id")
+    and event.get("spell", {}).get("id") == payload.get("expected_spell_id")
+]
+if not matching:
+    fail("expected pressure-aware heal cast-start event was not present")
+PY
+}
+
 scenario=\$(curl -fsS -X POST -H 'Content-Type: application/json' --data '{\"spell_id\":200}' \"http://127.0.0.1:${port}/api/v1/harness/scenarios/spell-cast-start\")
 [[ \"\$scenario\" == *'\"started\":true'* ]] || { printf '%s\n' \"\$scenario\" >&2; exit 1; }
 
@@ -553,6 +603,9 @@ assert_slow_scenario \"\$fallback_scenario\" fallback HarnessSlowFallbackHostile
 
 mezzed_scenario=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/bot-slow-maintenance/mezzed\")
 assert_slow_scenario \"\$mezzed_scenario\" mezzed HarnessSlowSecondaryHostile false true
+
+pressure_heal_scenario=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/owned-bot-healing/moderate-pressure-fast-heal\")
+assert_pressure_heal_scenario \"\$pressure_heal_scenario\"
 
 	actor_loop=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/autonomous-actor-loop\")
 	assert_autonomous_actor_loop \"\$actor_loop\"
