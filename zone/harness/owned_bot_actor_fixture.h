@@ -58,10 +58,15 @@ public:
 
 	// Zone Harness setup/reset shortcuts.
 	bool SetUpOwnedBotGroup(const OwnedBotActorConfig &config = {});
+	Bot *AddOwnedGroupBot(const OwnedBotActorConfig &config, const glm::vec4 &position);
 	NPC *AddHostileNPC(const HostileNpcConfig &config);
 	void EngageHostileWithOwnerGroup(NPC *hostile, int32_t owner_hate = 25, int32_t bot_hate = 25);
+	void EngageHostileWithGroupMember(NPC *hostile, Mob *member, int32_t hate = 25);
 	void OwnedBotEngages(Mob *hostile, int32_t hate = 100);
+	void GroupMemberEngages(Mob *member, Mob *hostile, int32_t hate = 100);
 	void RefreshOwnedBotPerception();
+	bool SetCurrentHPPercent(Mob *mob, uint8_t hp_percent);
+	bool RecordIncomingDamagePressure(Mob *mob, int64_t damage, uint32_t current_time_ms);
 	void Reset();
 
 	// Actor Actions.
@@ -84,6 +89,7 @@ public:
 	std::string DatabaseMutationSummary() const;
 
 private:
+	Bot *CreateOwnedBot(const OwnedBotActorConfig &config, const glm::vec4 &position);
 	void RememberMob(Mob *mob);
 
 	Client *owner = nullptr;

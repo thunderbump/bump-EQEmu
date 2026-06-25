@@ -205,6 +205,43 @@ nlohmann::json ToJson(const BotSlowMaintenanceScenarioResult &result)
 	};
 }
 
+nlohmann::json ToJson(const OwnedBotPressureHealingScenarioResult &result)
+{
+	nlohmann::json events = nlohmann::json::array();
+	for (const auto &event: result.events) {
+		events.push_back(ToJson(event));
+	}
+
+	return {
+		{"observed", result.observed},
+		{"reason", result.reason},
+		{"scenario", result.scenario},
+		{"max_ticks", result.max_ticks},
+		{"sleep_ms", result.sleep_ms},
+		{"ticks_processed", result.ticks_processed},
+		{"elapsed_ms", result.elapsed_ms},
+		{"database_mutation", result.database_mutation},
+		{"owner", ToJson(result.owner)},
+		{"bot", ToJson(result.bot)},
+		{"heal_target", ToJson(result.heal_target)},
+		{"hostile", ToJson(result.hostile)},
+		{"requested_spell_type", result.requested_spell_type},
+		{"requested_spell_type_name", result.requested_spell_type_name},
+		{"expected_spell_type", result.expected_spell_type},
+		{"expected_spell_type_name", result.expected_spell_type_name},
+		{"expected_spell_id", result.expected_spell_id},
+		{"expected_spell_name", result.expected_spell_name},
+		{"observed_spell_id", result.observed_spell_id},
+		{"observed_spell_name", result.observed_spell_name},
+		{"heal_target_hp_percent", result.heal_target_hp_percent},
+		{"pressure_damage", result.pressure_damage},
+		{"pressure_sample_ms", result.pressure_sample_ms},
+		{"emergency_projection_ms", result.emergency_projection_ms},
+		{"events", events},
+		{"runtime", ToJson(result.runtime)},
+	};
+}
+
 void SetJson(httplib::Response &res, const nlohmann::json &payload)
 {
 	res.set_content(payload.dump(), "application/json");
@@ -365,6 +402,10 @@ bool ServeHttp(const HttpServerOptions &options)
 
 	api.Post("/api/v1/harness/scenarios/bot-slow-maintenance/mezzed", [&runtime](const auto &, auto &res) {
 		SetJson(res, ToJson(runtime.RunBotSlowMaintenanceMezzed()));
+	});
+
+	api.Post("/api/v1/harness/scenarios/owned-bot-healing/moderate-pressure-fast-heal", [&runtime](const auto &, auto &res) {
+		SetJson(res, ToJson(runtime.RunOwnedBotPressureHealingModeratePressureFastHeal()));
 	});
 
 	api.Post("/api/v1/harness/shutdown", [&runtime, &api](const auto &, auto &res) {

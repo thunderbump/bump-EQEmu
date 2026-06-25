@@ -18,6 +18,8 @@
 #include "zone/npc.h"
 #include "zone/zonedb.h"
 
+#include <algorithm>
+
 extern EntityList entity_list;
 
 namespace EQ::ZoneHarness {
@@ -69,38 +71,13 @@ bool OwnedBotActorFixture::SetUpOwnedBotGroup(const OwnedBotActorConfig &config)
 	entity_list.AddClient(owner);
 	RememberMob(owner);
 
-	auto *bot_type = Bot::CreateDefaultNPCTypeStructForBot(
-		config.bot_name,
-		"",
-		config.level,
-		config.race,
-		config.bot_class,
-		config.gender
-	);
-	bot_type->npc_spells_id = config.bot_spell_list_id;
-	bot_type->Mana = 6000;
-	bot_type->max_hp = 5000;
-	bot_type->current_hp = 5000;
-
-	bot = new Bot(bot_type, owner);
-	bot->GMMove(2.0f, 0.0f, 0.0f, 0.0f);
-	bot->SetMana(bot->GetMaxMana());
-	bot->SetHP(bot->GetMaxHP());
-	bot->SetBotSpellID(config.bot_spell_list_id);
-	bot->LoadDefaultBotSettings();
+	bot = CreateOwnedBot(config, glm::vec4(2.0f, 0.0f, 0.0f, 0.0f));
+	if (!bot) {
+		return false;
+	}
 	for (uint16 spell_type = BotSpellTypes::START; spell_type <= BotSpellTypes::END; ++spell_type) {
 		bot->SetSpellTypePriority(spell_type, BotPriorityCategories::Engaged, spell_type == BotSpellTypes::Slow ? 1 : 0);
 	}
-
-	if (!bot->AI_AddBotSpells(config.bot_spell_list_id)) {
-		delete bot;
-		bot = nullptr;
-		return false;
-	}
-
-	entity_list.AddBot(bot, false, true);
-	RememberMob(bot);
-	bot->AI_Bot_Start();
 
 	group = new Group(owner);
 	group->AddMember(bot);
@@ -108,6 +85,25 @@ bool OwnedBotActorFixture::SetUpOwnedBotGroup(const OwnedBotActorConfig &config)
 	entity_list.AddGroup(group, group_id);
 
 	return true;
+}
+
+Bot *OwnedBotActorFixture::AddOwnedGroupBot(const OwnedBotActorConfig &config, const glm::vec4 &position)
+{
+	if (!owner || !group) {
+		return nullptr;
+	}
+
+	auto *added_bot = CreateOwnedBot(config, position);
+	if (!added_bot) {
+		return nullptr;
+	}
+
+	if (!group->AddMember(added_bot)) {
+		entity_list.RemoveMob(added_bot->GetID());
+		return nullptr;
+	}
+
+	return added_bot;
 }
 
 NPC *OwnedBotActorFixture::AddHostileNPC(const HostileNpcConfig &config)
@@ -139,10 +135,24 @@ void OwnedBotActorFixture::EngageHostileWithOwnerGroup(NPC *hostile, int32_t own
 	}
 }
 
+void OwnedBotActorFixture::EngageHostileWithGroupMember(NPC *hostile, Mob *member, int32_t hate)
+{
+	if (hostile && member && hate > 0) {
+		hostile->AddToHateList(member, hate, 1, false);
+	}
+}
+
 void OwnedBotActorFixture::OwnedBotEngages(Mob *hostile, int32_t hate)
 {
 	if (bot && hostile && hate > 0) {
 		bot->AddToHateList(hostile, hate, 1, false);
+	}
+}
+
+void OwnedBotActorFixture::GroupMemberEngages(Mob *member, Mob *hostile, int32_t hate)
+{
+	if (member && hostile && hate > 0) {
+		member->AddToHateList(hostile, hate, 1, false);
 	}
 }
 
@@ -151,6 +161,28 @@ void OwnedBotActorFixture::RefreshOwnedBotPerception()
 	if (bot) {
 		entity_list.ScanCloseMobs(bot);
 	}
+}
+
+bool OwnedBotActorFixture::SetCurrentHPPercent(Mob *mob, uint8_t hp_percent)
+{
+	if (!mob || hp_percent == 0 || hp_percent > 100) {
+		return false;
+	}
+
+	const int64_t new_hp = std::max<int64_t>(1, (mob->GetMaxHP() * hp_percent) / 100);
+	mob->SetHP(new_hp);
+	return mob->GetHP() == new_hp;
+}
+
+bool OwnedBotActorFixture::RecordIncomingDamagePressure(Mob *mob, int64_t damage, uint32_t current_time_ms)
+{
+	if (!mob || damage <= 0) {
+		return false;
+	}
+
+	mob->RecordIncomingDamagePressure(damage, current_time_ms);
+	return mob->GetIncomingDamagePressure().damage == damage &&
+		mob->GetIncomingDamagePressure().updated_at_ms == current_time_ms;
 }
 
 void OwnedBotActorFixture::Reset()
@@ -249,6 +281,39 @@ ActorEventEntity OwnedBotActorFixture::OwnedBotEntity() const
 std::string OwnedBotActorFixture::DatabaseMutationSummary() const
 {
 	return "none: synthetic owner, owned bot, group, NPCs, hate, and target state are in-memory only";
+}
+
+Bot *OwnedBotActorFixture::CreateOwnedBot(const OwnedBotActorConfig &config, const glm::vec4 &position)
+{
+	auto *bot_type = Bot::CreateDefaultNPCTypeStructForBot(
+		config.bot_name,
+		"",
+		config.level,
+		config.race,
+		config.bot_class,
+		config.gender
+	);
+	bot_type->npc_spells_id = config.bot_spell_list_id;
+	bot_type->Mana = 6000;
+	bot_type->max_hp = 5000;
+	bot_type->current_hp = 5000;
+
+	auto *created_bot = new Bot(bot_type, owner);
+	created_bot->GMMove(position.x, position.y, position.z, position.w);
+	created_bot->SetMana(created_bot->GetMaxMana());
+	created_bot->SetHP(created_bot->GetMaxHP());
+	created_bot->SetBotSpellID(config.bot_spell_list_id);
+	created_bot->LoadDefaultBotSettings();
+
+	if (!created_bot->AI_AddBotSpells(config.bot_spell_list_id)) {
+		delete created_bot;
+		return nullptr;
+	}
+
+	entity_list.AddBot(created_bot, false, true);
+	RememberMob(created_bot);
+	created_bot->AI_Bot_Start();
+	return created_bot;
 }
 
 void OwnedBotActorFixture::RememberMob(Mob *mob)
