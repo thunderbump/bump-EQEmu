@@ -75,6 +75,11 @@ if [[ "${VALIDATION_WORKER_TEST_ASSERT_STACK_BINDING:-0}" == "1" ]]; then
     exit 1
   }
 fi
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ "${VALIDATION_WORKER_TEST_ASSERT_SUBMODULE:-0}" == "1" && ! -f "$repo_dir/vendor/submodule-fixture/marker.txt" ]]; then
+  printf 'submodule marker missing\n' >&2
+  exit 1
+fi
 printf 'fake validate: %s\n' "$*"
 SCRIPT
   chmod +x "$source_ref/scripts/validate.sh"
@@ -83,6 +88,23 @@ SCRIPT
   git -C "$source_ref" config user.name 'Worker Test'
   git -C "$source_ref" add scripts/validate.sh
   git -C "$source_ref" commit -m 'add fake validate' >/dev/null 2>&1
+}
+
+make_source_repo_with_submodule() {
+  local -n source_ref="$1"
+  local base_source submodule_repo
+  make_source_repo base_source
+  source_ref="$base_source"
+  submodule_repo="$tmp_root/submodule-repo"
+  mkdir -p "$submodule_repo"
+  git -C "$submodule_repo" init >/dev/null 2>&1
+  git -C "$submodule_repo" config user.email worker-test@example.com
+  git -C "$submodule_repo" config user.name 'Worker Test'
+  printf 'submodule fixture\n' >"$submodule_repo/marker.txt"
+  git -C "$submodule_repo" add marker.txt
+  git -C "$submodule_repo" commit -m 'add marker' >/dev/null 2>&1
+  git -C "$source_ref" -c protocol.file.allow=always submodule add "$submodule_repo" vendor/submodule-fixture >/dev/null 2>&1
+  git -C "$source_ref" commit -m 'add submodule fixture' >/dev/null 2>&1
 }
 
 write_request() {
@@ -147,6 +169,73 @@ test_fetch_checkout_and_evidence() {
   [[ -f "$evidence/logs/validation.log" ]] || return 1
   assert_json_equals "$evidence/result.json" .status passed
   assert_json_equals "$evidence/result.json" .head_commit "$head"
+}
+
+test_fetch_checkout_initializes_submodules_before_validation() {
+  local source request evidence status output head
+  make_source_repo_with_submodule source
+  head="$(git -C "$source" rev-parse HEAD)"
+  evidence="$tmp_root/evidence-submodule"
+  request="$tmp_root/submodule.json"
+  write_request "$request" "$source" "$evidence" HEAD "$head"
+
+  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TEST_ASSERT_SUBMODULE=1 "$repo_root/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 0 ]] || return 1
+  [[ -f "$evidence/logs/submodule.log" ]] || return 1
+  assert_json_equals "$evidence/result.json" .status passed
+}
+
+test_submodule_timeout_is_categorized() {
+  local source request evidence status output head fake_bin real_git
+  make_source_repo_with_submodule source
+  head="$(git -C "$source" rev-parse HEAD)"
+  evidence="$tmp_root/evidence-submodule-timeout"
+  request="$tmp_root/submodule-timeout.json"
+  write_request "$request" "$source" "$evidence" HEAD "$head" 0 1
+  fake_bin="$tmp_root/fake-bin"
+  real_git="$(command -v git)"
+  mkdir -p "$fake_bin"
+  cat >"$fake_bin/git" <<SCRIPT
+#!/usr/bin/env bash
+for arg in "\$@"; do
+  if [[ "\$arg" == "submodule" ]]; then
+    sleep 2
+    exit 0
+  fi
+done
+exec "$real_git" "\$@"
+SCRIPT
+  chmod +x "$fake_bin/git"
+
+  capture_run status output env PATH="$fake_bin:$PATH" VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 "$repo_root/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 1 ]] || return 1
+  assert_json_equals "$evidence/result.json" .category timeout
+  assert_contains "$(cat "$evidence/result.json")" "submodule initialization timed out"
+  [[ -f "$evidence/logs/submodule.log" ]] || return 1
+}
+
+test_stack_lock_is_not_held_during_submodule_initialization() {
+  local source request evidence status output head stack other_checkout stack_lock
+  make_source_repo_with_submodule source
+  head="$(git -C "$source" rev-parse HEAD)"
+  evidence="$tmp_root/evidence-submodule-before-stack-lock"
+  request="$tmp_root/submodule-before-stack-lock.json"
+  stack="$tmp_root/validation-stack-before-lock"
+  other_checkout="$tmp_root/other-checkout-before-lock"
+  mkdir -p "$stack" "$other_checkout"
+  printf 'ENV=development\n' >"$stack/.env"
+  ln -s "$other_checkout" "$stack/code"
+  write_request "$request" "$source" "$evidence" HEAD "$head" 0 10 "$stack"
+  stack_lock="$stack/.validation-worker-code.lock"
+  mkdir "$stack_lock"
+
+  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 "$repo_root/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 1 ]] || return 1
+  assert_json_equals "$evidence/result.json" .category stack_busy
+  [[ -f "$tmp_root/worker-home/checkouts/run-$(basename "$evidence")/vendor/submodule-fixture/marker.txt" ]] || return 1
 }
 
 test_commit_mismatch() {
@@ -300,6 +389,9 @@ test_akkstack_dir_real_code_directory_fails_fast() {
 run_test "validation worker help mentions request contract" test_help
 run_test "invalid request writes structured evidence" test_invalid_request_writes_evidence
 run_test "fake repo fetch checkout writes evidence" test_fetch_checkout_and_evidence
+run_test "fetched checkout initializes submodules before validation" test_fetch_checkout_initializes_submodules_before_validation
+run_test "submodule timeout is categorized" test_submodule_timeout_is_categorized
+run_test "stack lock is not held during submodule initialization" test_stack_lock_is_not_held_during_submodule_initialization
 run_test "commit mismatch is categorized" test_commit_mismatch
 run_test "fetch failure is categorized" test_fetch_failure
 run_test "lock contention is worker_busy" test_lock_contention
