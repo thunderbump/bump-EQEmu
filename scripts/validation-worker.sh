@@ -56,6 +56,7 @@ ensure_log_files() {
   : >"$evidence_dir/logs/fetch.log"
   : >"$evidence_dir/logs/lock.log"
   : >"$evidence_dir/logs/stack.log"
+  : >"$evidence_dir/logs/submodule.log"
   : >"$evidence_dir/logs/validation.log"
 }
 
@@ -323,14 +324,6 @@ run_request() {
   fi
   trap 'restore_validation_stack "$evidence_dir"; release_lock "${stack_lock:-}"; release_lock "${lock_dir:-}"' RETURN
 
-  if [[ -n "$stack_path" ]]; then
-    stack_lock_dir="$stack_path/.validation-worker-code.lock"
-    if ! stack_lock="$(acquire_named_lock "$evidence_dir" "$lock_wait_seconds" "$stack_lock_dir" stack)"; then
-      write_result "$evidence_dir" failed stack_busy 1 "validation stack is busy" "$checkout_dir"
-      return 1
-    fi
-  fi
-
   rm -rf "$checkout_dir"
   mkdir -p "$checkout_dir"
 
@@ -346,6 +339,28 @@ run_request() {
   if [[ -n "$commit" && "$head_commit" != "$commit" ]]; then
     write_result "$evidence_dir" failed commit_mismatch 1 "checked out HEAD does not match requested commit" "$checkout_dir" "$head_commit"
     return 1
+  fi
+
+  set +e
+  env GIT_TERMINAL_PROMPT=0 GIT_ASKPASS= SSH_ASKPASS= timeout "$timeout_seconds" git -C "$checkout_dir" -c protocol.file.allow=always submodule update --init --recursive >>"$evidence_dir/logs/submodule.log" 2>&1
+  submodule_status=$?
+  set -e
+
+  if [[ "$submodule_status" -eq 124 ]]; then
+    write_result "$evidence_dir" failed timeout 1 "submodule initialization timed out" "$checkout_dir" "$head_commit"
+    return 1
+  fi
+  if [[ "$submodule_status" -ne 0 ]]; then
+    write_result "$evidence_dir" failed submodule_failed 1 "failed to initialize checkout submodules" "$checkout_dir" "$head_commit"
+    return 1
+  fi
+
+  if [[ -n "$stack_path" ]]; then
+    stack_lock_dir="$stack_path/.validation-worker-code.lock"
+    if ! stack_lock="$(acquire_named_lock "$evidence_dir" "$lock_wait_seconds" "$stack_lock_dir" stack)"; then
+      write_result "$evidence_dir" failed stack_busy 1 "validation stack is busy" "$checkout_dir" "$head_commit"
+      return 1
+    fi
   fi
 
   if ! bind_validation_stack "$evidence_dir" "$stack_path" "$checkout_dir" "$stack_source"; then
