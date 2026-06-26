@@ -67,6 +67,16 @@ set -euo pipefail
 if [[ "${VALIDATION_WORKER_TEST_SLEEP:-0}" != "0" ]]; then
   sleep "$VALIDATION_WORKER_TEST_SLEEP"
 fi
+if [[ "${VALIDATION_WORKER_TEST_SLEEP_TIER1:-0}" != "0" && " $* " == *" tier1"* ]]; then
+  sleep "$VALIDATION_WORKER_TEST_SLEEP_TIER1"
+fi
+if [[ "${VALIDATION_WORKER_TEST_SLEEP_TIER3:-0}" != "0" && " $* " == *" tier3-harness"* ]]; then
+  sleep "$VALIDATION_WORKER_TEST_SLEEP_TIER3"
+fi
+if [[ "${VALIDATION_WORKER_TEST_FAIL_TIER1:-0}" == "1" && " $* " == *" tier1"* ]]; then
+  printf 'tier1 requested failure\n' >&2
+  exit 1
+fi
 if [[ "${VALIDATION_WORKER_TEST_ASSERT_STACK_BINDING:-0}" == "1" ]]; then
   [[ -n "${AKKSTACK_DIR:-}" ]] || { printf 'missing AKKSTACK_DIR\n' >&2; exit 1; }
   [[ -n "${EXPECTED_EQEMU_CHECKOUT:-}" ]] || { printf 'missing EXPECTED_EQEMU_CHECKOUT\n' >&2; exit 1; }
@@ -178,6 +188,10 @@ worker_env() {
   env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 "$@"
 }
 
+reset_worker_home() {
+  rm -rf "$tmp_root/worker-home"
+}
+
 test_help() {
   local status output
   capture_run status output "$repo_root/scripts/validation-worker.sh" --help
@@ -185,6 +199,7 @@ test_help() {
   assert_contains "$output" "run --request <path>"
   assert_contains "$output" "evidence_dir"
   assert_contains "$output" "lock_wait_seconds"
+  assert_contains "$output" "tier1-tier3-harness"
 }
 
 test_invalid_request_writes_evidence() {
@@ -205,6 +220,7 @@ test_invalid_request_writes_evidence() {
 test_fetch_checkout_and_evidence() {
   local source request evidence status output head
   make_source_repo source
+  reset_worker_home
   head="$(git -C "$source" rev-parse HEAD)"
   evidence="$tmp_root/evidence-fetch"
   request="$tmp_root/fetch.json"
@@ -224,6 +240,7 @@ test_fetch_checkout_and_evidence() {
 test_fetch_checkout_initializes_submodules_before_validation() {
   local source request evidence status output head
   make_source_repo_with_submodule source
+  reset_worker_home
   head="$(git -C "$source" rev-parse HEAD)"
   evidence="$tmp_root/evidence-submodule"
   request="$tmp_root/submodule.json"
@@ -239,6 +256,7 @@ test_fetch_checkout_initializes_submodules_before_validation() {
 test_submodule_timeout_is_categorized() {
   local source request evidence status output head fake_bin real_git
   make_source_repo_with_submodule source
+  reset_worker_home
   head="$(git -C "$source" rev-parse HEAD)"
   evidence="$tmp_root/evidence-submodule-timeout"
   request="$tmp_root/submodule-timeout.json"
@@ -269,6 +287,7 @@ SCRIPT
 test_stack_lock_is_not_held_during_submodule_initialization() {
   local source request evidence status output head stack other_checkout stack_lock
   make_source_repo_with_submodule source
+  reset_worker_home
   head="$(git -C "$source" rev-parse HEAD)"
   evidence="$tmp_root/evidence-submodule-before-stack-lock"
   request="$tmp_root/submodule-before-stack-lock.json"
@@ -291,6 +310,7 @@ test_stack_lock_is_not_held_during_submodule_initialization() {
 test_commit_mismatch() {
   local source request evidence status output
   make_source_repo source
+  reset_worker_home
   evidence="$tmp_root/evidence-mismatch"
   request="$tmp_root/mismatch.json"
   write_request "$request" "$source" "$evidence" HEAD "0000000000000000000000000000000000000000"
@@ -303,6 +323,7 @@ test_commit_mismatch() {
 
 test_fetch_failure() {
   local request evidence status output
+  reset_worker_home
   evidence="$tmp_root/evidence-fetch-failure"
   request="$tmp_root/fetch-failure.json"
   write_request "$request" "$tmp_root/no-such-repo" "$evidence" HEAD
@@ -316,6 +337,7 @@ test_fetch_failure() {
 test_lock_contention() {
   local source request evidence status output lock_dir existing_checkout
   make_source_repo source
+  reset_worker_home
   evidence="$tmp_root/evidence-busy"
   request="$tmp_root/busy.json"
   write_request "$request" "$source" "$evidence" HEAD "" 0
@@ -331,11 +353,13 @@ test_lock_contention() {
   assert_json_equals "$evidence/result.json" .category worker_busy
   [[ -f "$evidence/logs/lock.log" ]] || return 1
   [[ -f "$existing_checkout/marker" ]] || return 1
+  rm -rf "$lock_dir"
 }
 
 test_timeout() {
   local source request evidence status output
   make_source_repo source
+  reset_worker_home
   evidence="$tmp_root/evidence-timeout"
   request="$tmp_root/timeout.json"
   rm -rf "$tmp_root/worker-home/locks/validation-slot.lock"
@@ -350,6 +374,7 @@ test_timeout() {
 test_tier3_harness_failure_is_categorized_with_logs() {
   local source request evidence status output stack other_checkout fake_bin
   make_source_repo_with_real_validation_scripts source
+  reset_worker_home
   evidence="$tmp_root/evidence-tier3-prebuild-failure"
   request="$tmp_root/tier3-prebuild-failure.json"
   stack="$tmp_root/tier3-validation-stack"
@@ -370,9 +395,81 @@ test_tier3_harness_failure_is_categorized_with_logs() {
   assert_contains "$(cat "$evidence/logs/validation.log")" "missing executable ./bin/zone"
 }
 
+test_tier1_tier3_harness_profile_runs_tier1_before_tier3() {
+  local source request evidence status output validation_log first_tier1 first_tier3
+  make_source_repo source
+  reset_worker_home
+  evidence="$tmp_root/evidence-tier1-tier3"
+  request="$tmp_root/tier1-tier3.json"
+  write_request "$request" "$source" "$evidence" HEAD "" 0 10 "" tier1-tier3-harness
+
+  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 "$repo_root/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 0 ]] || return 1
+  assert_json_equals "$evidence/result.json" .status passed
+  validation_log="$evidence/logs/validation.log"
+  first_tier1="$(grep -n 'fake validate: --stack validation --dry-run tier1' "$validation_log" | head -n1 | cut -d: -f1)"
+  first_tier3="$(grep -n 'fake validate: --stack validation --dry-run tier3-harness' "$validation_log" | head -n1 | cut -d: -f1)"
+  [[ -n "$first_tier1" && -n "$first_tier3" ]] || return 1
+  [[ "$first_tier1" -lt "$first_tier3" ]] || return 1
+  assert_contains "$(cat "$validation_log")" "fake validate: --stack validation --dry-run tier1"
+  assert_contains "$(cat "$validation_log")" "fake validate: --stack validation --dry-run tier3-harness"
+}
+
+test_tier1_tier3_harness_profile_uses_one_timeout_budget() {
+  local source request evidence status output validation_log start_ns end_ns elapsed_ms
+  make_source_repo source
+  reset_worker_home
+  evidence="$tmp_root/evidence-tier1-tier3-timeout"
+  request="$tmp_root/tier1-tier3-timeout.json"
+  write_request "$request" "$source" "$evidence" HEAD "" 0 2 "" tier1-tier3-harness
+
+  start_ns="$(date +%s%N)"
+  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TEST_SLEEP_TIER1=1.2 VALIDATION_WORKER_TEST_SLEEP_TIER3=3 "$repo_root/scripts/validation-worker.sh" run --request "$request"
+  end_ns="$(date +%s%N)"
+  elapsed_ms=$(( (end_ns - start_ns) / 1000000 ))
+
+  [[ "$status" -eq 1 ]] || return 1
+  assert_json_equals "$evidence/result.json" .status failed
+  assert_json_equals "$evidence/result.json" .category timeout
+  [[ "$elapsed_ms" -lt 3000 ]] || {
+    printf 'Expected composite timeout to stay under 3000ms, got %sms\n' "$elapsed_ms" >&2
+    return 1
+  }
+  validation_log="$evidence/logs/validation.log"
+  assert_contains "$(cat "$validation_log")" "fake validate: --stack validation --dry-run tier1"
+}
+
+test_tier1_tier3_harness_profile_stops_after_tier1_failure_and_releases_lock() {
+  local source request evidence status output validation_log lock_dir
+  make_source_repo source
+  reset_worker_home
+  evidence="$tmp_root/evidence-tier1-tier3-tier1-failure"
+  request="$tmp_root/tier1-tier3-tier1-failure.json"
+  write_request "$request" "$source" "$evidence" HEAD "" 0 10 "" tier1-tier3-harness
+
+  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TEST_FAIL_TIER1=1 "$repo_root/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 1 ]] || return 1
+  assert_json_equals "$evidence/result.json" .status failed
+  assert_json_equals "$evidence/result.json" .category validation_failed
+  validation_log="$evidence/logs/validation.log"
+  assert_contains "$(cat "$validation_log")" "tier1 requested failure"
+  if grep -q 'fake validate: --stack validation --dry-run tier3-harness' "$validation_log"; then
+    printf 'tier3-harness should not run after tier1 failure\n' >&2
+    return 1
+  fi
+  lock_dir="$tmp_root/worker-home/locks/validation-slot.lock"
+  [[ ! -e "$lock_dir" ]] || {
+    printf 'validation lock was not released: %s\n' "$lock_dir" >&2
+    return 1
+  }
+}
+
 test_validation_worker_binds_requested_validation_stack_to_worker_checkout() {
   local source request evidence status output stack other_checkout
   make_source_repo source
+  reset_worker_home
   evidence="$tmp_root/evidence-stack-binding"
   request="$tmp_root/stack-binding.json"
   stack="$tmp_root/validation-stack"
@@ -396,6 +493,7 @@ test_validation_worker_binds_requested_validation_stack_to_worker_checkout() {
 test_validation_worker_binds_stack_from_akkstack_dir_environment() {
   local source request evidence status output stack other_checkout
   make_source_repo source
+  reset_worker_home
   evidence="$tmp_root/evidence-env-stack-binding"
   request="$tmp_root/env-stack-binding.json"
   stack="$tmp_root/env-validation-stack"
@@ -419,6 +517,7 @@ test_validation_worker_binds_stack_from_akkstack_dir_environment() {
 test_stack_lock_blocks_distinct_worker_homes_on_same_stack() {
   local source request_a request_b evidence_a evidence_b status_b output_b stack other_checkout stack_lock
   make_source_repo source
+  reset_worker_home
   stack="$tmp_root/shared-validation-stack"
   other_checkout="$tmp_root/shared-other-checkout"
   mkdir -p "$stack" "$other_checkout"
@@ -444,6 +543,7 @@ test_stack_lock_blocks_distinct_worker_homes_on_same_stack() {
 test_akkstack_dir_real_code_directory_fails_fast() {
   local source request evidence status output stack
   make_source_repo source
+  reset_worker_home
   evidence="$tmp_root/evidence-env-real-code"
   request="$tmp_root/env-real-code.json"
   stack="$tmp_root/env-real-code-stack"
@@ -470,6 +570,9 @@ run_test "fetch failure is categorized" test_fetch_failure
 run_test "lock contention is worker_busy" test_lock_contention
 run_test "validation timeout is categorized" test_timeout
 run_test "tier3 harness failure is categorized with logs" test_tier3_harness_failure_is_categorized_with_logs
+run_test "tier1 plus tier3 harness profile runs tier1 before tier3" test_tier1_tier3_harness_profile_runs_tier1_before_tier3
+run_test "tier1 plus tier3 harness profile uses one timeout budget" test_tier1_tier3_harness_profile_uses_one_timeout_budget
+run_test "tier1 plus tier3 harness profile stops after tier1 failure and releases lock" test_tier1_tier3_harness_profile_stops_after_tier1_failure_and_releases_lock
 run_test "validation worker binds requested validation stack to worker checkout" test_validation_worker_binds_requested_validation_stack_to_worker_checkout
 run_test "validation worker binds validation stack from AKKSTACK_DIR" test_validation_worker_binds_stack_from_akkstack_dir_environment
 run_test "stack lock blocks distinct worker homes on same stack" test_stack_lock_blocks_distinct_worker_homes_on_same_stack
