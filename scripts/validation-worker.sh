@@ -20,7 +20,7 @@ Request JSON fields:
   repo               Required fetchable Git repository URL or path.
   ref                Required fetchable Git ref, branch, tag, or commit.
   commit             Optional expected commit SHA. HEAD must match after checkout.
-  profile            Required validation profile: preflight, tier1, tier2-readonly, tier3-harness, or safe.
+  profile            Required validation profile: preflight, tier1, tier2-readonly, tier3-harness, tier1-tier3-harness, or safe.
   run_id             Required stable run identifier used for worker-owned checkout storage.
   evidence_dir       Required directory where request.json, result.json, and logs are written.
   timeout_seconds    Optional validation timeout in seconds. Defaults to 3600.
@@ -117,7 +117,7 @@ validate_request() {
   [[ -n "$repo" ]] || { printf 'missing repo\n'; return 1; }
   [[ -n "$ref" ]] || { printf 'missing ref\n'; return 1; }
   [[ -z "$commit" || "$commit" =~ ^[0-9a-fA-F]{7,40}$ ]] || { printf 'invalid commit\n'; return 1; }
-  case "$profile" in preflight|tier1|tier2-readonly|tier3-harness|safe) ;; *) printf 'invalid or missing profile\n'; return 1 ;; esac
+  case "$profile" in preflight|tier1|tier2-readonly|tier3-harness|tier1-tier3-harness|safe) ;; *) printf 'invalid or missing profile\n'; return 1 ;; esac
   [[ -n "$run_id" ]] || { printf 'missing run_id\n'; return 1; }
   sanitize_run_id "$run_id" || { printf 'run_id may contain only letters, digits, dot, underscore, and dash\n'; return 1; }
   [[ -n "$evidence_dir" ]] || { printf 'missing evidence_dir\n'; return 1; }
@@ -372,27 +372,72 @@ run_request() {
   if [[ "${VALIDATION_WORKER_VALIDATE_DRY_RUN:-0}" == "1" ]]; then
     validation_cmd+=(--dry-run)
   fi
-  validation_cmd+=("$profile")
 
-  set +e
-  if [[ -n "$stack_path" && -n "${STACK_BINDING_STATUS:-}" ]]; then
-    AKKSTACK_DIR="$stack_path" EXPECTED_EQEMU_CHECKOUT="$checkout_dir" timeout "$timeout_seconds" "${validation_cmd[@]}" >>"$evidence_dir/logs/validation.log" 2>&1
-  elif [[ -n "$stack_path" ]]; then
-    AKKSTACK_DIR="$stack_path" timeout "$timeout_seconds" "${validation_cmd[@]}" >>"$evidence_dir/logs/validation.log" 2>&1
-  else
-    timeout "$timeout_seconds" "${validation_cmd[@]}" >>"$evidence_dir/logs/validation.log" 2>&1
-  fi
-  validation_status=$?
-  set -e
+  validation_started_at_ns="$(date +%s%N)"
+  run_validation() {
+    local profile_name="$1" exit_code elapsed_ns remaining_ns remaining_ms remaining_duration
 
-  if [[ "$validation_status" -eq 124 ]]; then
-    write_result "$evidence_dir" failed timeout 1 "validation timed out" "$checkout_dir" "$head_commit"
-    return 1
-  fi
-  if [[ "$validation_status" -ne 0 ]]; then
-    write_result "$evidence_dir" failed validation_failed 1 "validation profile failed" "$checkout_dir" "$head_commit"
-    return 1
-  fi
+    elapsed_ns=$(( $(date +%s%N) - validation_started_at_ns ))
+    remaining_ns=$(( (timeout_seconds * 1000000000) - elapsed_ns ))
+    remaining_ms=$(( remaining_ns / 1000000 ))
+    if [[ "$remaining_ms" -le 0 ]]; then
+      return 124
+    fi
+    printf -v remaining_duration '%d.%03ds' "$(( remaining_ms / 1000 ))" "$(( remaining_ms % 1000 ))"
+
+    set +e
+    if [[ -n "$stack_path" && -n "${STACK_BINDING_STATUS:-}" ]]; then
+      AKKSTACK_DIR="$stack_path" EXPECTED_EQEMU_CHECKOUT="$checkout_dir" timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$evidence_dir/logs/validation.log" 2>&1
+    elif [[ -n "$stack_path" ]]; then
+      AKKSTACK_DIR="$stack_path" timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$evidence_dir/logs/validation.log" 2>&1
+    else
+      timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$evidence_dir/logs/validation.log" 2>&1
+    fi
+    exit_code=$?
+    set -e
+
+    return "$exit_code"
+  }
+
+  case "$profile" in
+    tier1-tier3-harness)
+      if run_validation tier1; then
+        :
+      else
+        validation_status=$?
+        if [[ "$validation_status" -eq 124 ]]; then
+          write_result "$evidence_dir" failed timeout 1 "validation timed out" "$checkout_dir" "$head_commit"
+          return 1
+        fi
+        write_result "$evidence_dir" failed validation_failed 1 "validation profile failed" "$checkout_dir" "$head_commit"
+        return 1
+      fi
+      if run_validation tier3-harness; then
+        :
+      else
+        validation_status=$?
+        if [[ "$validation_status" -eq 124 ]]; then
+          write_result "$evidence_dir" failed timeout 1 "validation timed out" "$checkout_dir" "$head_commit"
+          return 1
+        fi
+        write_result "$evidence_dir" failed validation_failed 1 "validation profile failed" "$checkout_dir" "$head_commit"
+        return 1
+      fi
+      ;;
+    *)
+      if run_validation "$profile"; then
+        :
+      else
+        validation_status=$?
+        if [[ "$validation_status" -eq 124 ]]; then
+          write_result "$evidence_dir" failed timeout 1 "validation timed out" "$checkout_dir" "$head_commit"
+          return 1
+        fi
+        write_result "$evidence_dir" failed validation_failed 1 "validation profile failed" "$checkout_dir" "$head_commit"
+        return 1
+      fi
+      ;;
+  esac
 
   write_result "$evidence_dir" passed ok 0 "validation passed" "$checkout_dir" "$head_commit"
   return 0
