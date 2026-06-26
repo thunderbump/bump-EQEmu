@@ -72,6 +72,47 @@ make_fixture() {
   make_stack "$fixture_parent_ref/bump-akk-stack" "$fixture_repo_ref"
 }
 
+make_fake_smoke_execute_bin() {
+  local fake_bin="$1"
+  local capture_file="$2"
+
+  mkdir -p "$fake_bin"
+
+  cat >"$fake_bin/mysqladmin" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+  chmod +x "$fake_bin/mysqladmin"
+
+  cat >"$fake_bin/docker-compose" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ " \$* " == *" up "* ]]; then
+  exit 0
+fi
+
+printf '%s\n' "\$*" >"$capture_file"
+payload=""
+previous=""
+for arg in "\$@"; do
+  if [[ "\$previous" == "-lc" ]]; then
+    payload="\$arg"
+    break
+  fi
+  previous="\$arg"
+done
+
+if [[ -z "\$payload" ]]; then
+  printf 'missing bash -lc payload\n' >&2
+  exit 1
+fi
+
+EQEMU_DB_PASSWORD=fixture bash -lc "\$payload"
+EOF
+  chmod +x "$fake_bin/docker-compose"
+}
+
 run_test() {
   local name="$1"
   shift
@@ -240,6 +281,36 @@ test_zone_harness_dry_run_describes_stable_db_and_portless_server() {
   assert_contains "$output" "only eqemu-server host ports disabled"
 }
 
+test_zone_harness_command_checks_build_artifacts_before_zone_launch() {
+  local fixture_repo fixture_parent fake_bin capture_file status output command_text
+  make_fixture fixture_repo fixture_parent
+  fake_bin="$(mktemp -d "$tmp_root/fake-smoke-bin.XXXXXX")"
+  capture_file="$tmp_root/smoke-zone-harness.command"
+  make_fake_smoke_execute_bin "$fake_bin" "$capture_file"
+
+  capture_run status output env PATH="$fake_bin:$PATH" "$fixture_repo/scripts/smoke-zone-harness.sh" --stack validation
+
+  [[ "$status" -eq 1 ]] || return 1
+  [[ -f "$capture_file" ]] || return 1
+  command_text="$(cat "$capture_file")"
+  assert_contains "$command_text" "require_runtime_binary ./bin/zone"
+  assert_contains "$command_text" "require_runtime_binary ./bin/shared_memory"
+  assert_contains "$command_text" "tier3-harness requires a prior Tier 1 build or a combined build+harness profile"
+  assert_contains "$command_text" "./bin/zone tests:serve-http"
+  assert_contains "$output" "tier3-harness requires a prior Tier 1 build"
+  assert_contains "$output" "missing executable ./bin/zone"
+  python3 - "$capture_file" <<'PY'
+from pathlib import Path
+import sys
+
+text = Path(sys.argv[1]).read_text()
+shared_memory_check = text.find("require_runtime_binary ./bin/shared_memory")
+zone_launch = text.find("./bin/zone tests:serve-http")
+if shared_memory_check == -1 or zone_launch == -1 or shared_memory_check > zone_launch:
+    sys.exit(1)
+PY
+}
+
 test_validate_tier3_harness_delegates_to_smoke_script() {
   local fixture_repo fixture_parent calls status output
   make_fixture fixture_repo fixture_parent
@@ -338,6 +409,7 @@ run_test "missing default validation fails clearly" test_missing_default_validat
 run_test "default role paths are distinct" test_default_roles_must_not_resolve_to_same_directory
 run_test "validation commands warn on gameplay stack" test_validation_commands_warn_on_gameplay_stack
 run_test "zone harness dry-run describes stable DB and portless server" test_zone_harness_dry_run_describes_stable_db_and_portless_server
+run_test "zone harness command checks build artifacts before launch" test_zone_harness_command_checks_build_artifacts_before_zone_launch
 run_test "validate tier3-harness delegates to smoke script" test_validate_tier3_harness_delegates_to_smoke_script
 run_test "help mentions stack and dry-run" test_help_mentions_stack_and_dry_run
 run_test "dry-run prints route and skips Docker" test_dry_run_prints_route_and_skips_docker

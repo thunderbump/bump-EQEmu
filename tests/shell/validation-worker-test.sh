@@ -90,6 +90,56 @@ SCRIPT
   git -C "$source_ref" commit -m 'add fake validate' >/dev/null 2>&1
 }
 
+make_source_repo_with_real_validation_scripts() {
+  local -n source_ref="$1"
+  source_ref="$tmp_root/source-repo-real-validation"
+  mkdir -p "$source_ref"
+  cp -R "$repo_root/scripts" "$source_ref/"
+  git -C "$source_ref" init >/dev/null 2>&1
+  git -C "$source_ref" config user.email worker-test@example.com
+  git -C "$source_ref" config user.name 'Worker Test'
+  git -C "$source_ref" add scripts
+  git -C "$source_ref" commit -m 'add real validation scripts' >/dev/null 2>&1
+}
+
+make_fake_tier3_bin() {
+  local fake_bin="$1"
+  mkdir -p "$fake_bin"
+
+  cat >"$fake_bin/mysqladmin" <<'SCRIPT'
+#!/usr/bin/env bash
+exit 0
+SCRIPT
+  chmod +x "$fake_bin/mysqladmin"
+
+  cat >"$fake_bin/docker-compose" <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ " $* " == *" up "* ]]; then
+  exit 0
+fi
+
+payload=""
+previous=""
+for arg in "$@"; do
+  if [[ "$previous" == "-lc" ]]; then
+    payload="$arg"
+    break
+  fi
+  previous="$arg"
+done
+
+if [[ -z "$payload" ]]; then
+  printf 'missing bash -lc payload\n' >&2
+  exit 1
+fi
+
+EQEMU_DB_PASSWORD=fixture bash -lc "$payload"
+SCRIPT
+  chmod +x "$fake_bin/docker-compose"
+}
+
 make_source_repo_with_submodule() {
   local -n source_ref="$1"
   local base_source submodule_repo
@@ -108,13 +158,13 @@ make_source_repo_with_submodule() {
 }
 
 write_request() {
-  local path="$1" source_repo="$2" evidence_dir="$3" ref="${4:-HEAD}" commit="${5:-}" lock_wait="${6:-0}" timeout="${7:-10}" stack_path="${8:-}"
+  local path="$1" source_repo="$2" evidence_dir="$3" ref="${4:-HEAD}" commit="${5:-}" lock_wait="${6:-0}" timeout="${7:-10}" stack_path="${8:-}" profile="${9:-preflight}"
   jq -n \
     --arg project bump-eqemu \
     --arg repo "$source_repo" \
     --arg ref "$ref" \
     --arg commit "$commit" \
-    --arg profile preflight \
+    --arg profile "$profile" \
     --arg run_id "run-$(basename "$evidence_dir")" \
     --arg evidence_dir "$evidence_dir" \
     --arg stack_path "$stack_path" \
@@ -297,6 +347,29 @@ test_timeout() {
   assert_json_equals "$evidence/result.json" .category timeout
 }
 
+test_tier3_harness_failure_is_categorized_with_logs() {
+  local source request evidence status output stack other_checkout fake_bin
+  make_source_repo_with_real_validation_scripts source
+  evidence="$tmp_root/evidence-tier3-prebuild-failure"
+  request="$tmp_root/tier3-prebuild-failure.json"
+  stack="$tmp_root/tier3-validation-stack"
+  other_checkout="$tmp_root/tier3-other-checkout"
+  fake_bin="$tmp_root/tier3-fake-bin"
+  mkdir -p "$stack" "$other_checkout"
+  printf 'ENV=development\n' >"$stack/.env"
+  ln -s "$other_checkout" "$stack/code"
+  make_fake_tier3_bin "$fake_bin"
+  write_request "$request" "$source" "$evidence" HEAD "" 0 10 "$stack" tier3-harness
+
+  capture_run status output env PATH="$fake_bin:$PATH" VALIDATION_WORKER_HOME="$tmp_root/worker-home" "$repo_root/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 1 ]] || return 1
+  [[ -f "$evidence/logs/validation.log" ]] || return 1
+  assert_json_equals "$evidence/result.json" .category validation_failed
+  assert_contains "$(cat "$evidence/logs/validation.log")" "tier3-harness requires a prior Tier 1 build"
+  assert_contains "$(cat "$evidence/logs/validation.log")" "missing executable ./bin/zone"
+}
+
 test_validation_worker_binds_requested_validation_stack_to_worker_checkout() {
   local source request evidence status output stack other_checkout
   make_source_repo source
@@ -396,6 +469,7 @@ run_test "commit mismatch is categorized" test_commit_mismatch
 run_test "fetch failure is categorized" test_fetch_failure
 run_test "lock contention is worker_busy" test_lock_contention
 run_test "validation timeout is categorized" test_timeout
+run_test "tier3 harness failure is categorized with logs" test_tier3_harness_failure_is_categorized_with_logs
 run_test "validation worker binds requested validation stack to worker checkout" test_validation_worker_binds_requested_validation_stack_to_worker_checkout
 run_test "validation worker binds validation stack from AKKSTACK_DIR" test_validation_worker_binds_stack_from_akkstack_dir_environment
 run_test "stack lock blocks distinct worker homes on same stack" test_stack_lock_blocks_distinct_worker_homes_on_same_stack
