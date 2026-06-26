@@ -21,6 +21,7 @@ struct HttpServerOptions {
 	int port = 9099;
 	std::string bearer_token;
 	uint32_t max_runtime_seconds = 0;
+	bool enable_autonomous_actor_prototype = false;
 };
 
 bool ServeHttp(const HttpServerOptions &options);

@@ -64,6 +64,15 @@ bool ZoneHarnessRuntime::Boot(const std::string &zone_short_name, uint32_t insta
 	return true;
 }
 
+void ZoneHarnessRuntime::EnableAutonomousActorPrototype(bool enabled)
+{
+	std::lock_guard lock(mutex);
+	autonomous_actor_prototype.enabled = enabled;
+	if (!enabled) {
+		StopAutonomousActorPrototypeSessionLocked();
+	}
+}
+
 HealthSnapshot ZoneHarnessRuntime::Health()
 {
 	std::lock_guard lock(mutex);
@@ -219,6 +228,30 @@ bool HasSpeechEvent(const std::vector<ActorEvent> &events, uint16_t actor_id, co
 	);
 }
 
+bool ExecuteAutonomousActorAction(Bot *actor, Mob *target, const std::string &kind, const std::string &detail, std::string &reason)
+{
+	if (!actor) {
+		reason = "actor_missing";
+		return false;
+	}
+
+	if (kind == "target") {
+		actor->SetTarget(target);
+		const bool accepted = actor->GetTarget() == target;
+		reason = accepted ? "target_set" : "target_not_set";
+		return accepted;
+	}
+
+	if (kind == "say") {
+		actor->Say("%s", detail.c_str());
+		reason = "say_emitted";
+		return true;
+	}
+
+	reason = "unsupported_action_kind";
+	return false;
+}
+
 class ScopedRuleOverride {
 public:
 	ScopedRuleOverride(const std::string &rule_name, const std::string &rule_value) : rule_name(rule_name)
@@ -239,81 +272,6 @@ private:
 	std::string rule_name;
 	std::string original_value;
 	bool changed = false;
-};
-
-class AutonomousActorActionQueue {
-public:
-	bool EnqueueTarget(const std::string &target_name)
-	{
-		return Enqueue({
-			.kind = "target",
-			.detail = target_name,
-		});
-	}
-
-	bool EnqueueSay(const std::string &message)
-	{
-		return Enqueue({
-			.kind = "say",
-			.detail = message,
-		});
-	}
-
-	const std::vector<AutonomousActorActionResult> &Actions() const
-	{
-		return actions;
-	}
-
-	bool HasPending() const
-	{
-		return next_action < actions.size();
-	}
-
-	bool ExecuteNext(Bot *actor, Mob *target, AutonomousActorActionResult &result)
-	{
-		if (!HasPending()) {
-			return false;
-		}
-
-		const auto queued_action = actions[next_action++];
-		result = queued_action;
-		if (!actor) {
-			result.reason = "actor_missing";
-			return true;
-		}
-
-		if (result.kind == "target") {
-			actor->SetTarget(target);
-			result.accepted = actor->GetTarget() == target;
-			result.reason = result.accepted ? "target_set" : "target_not_set";
-			return true;
-		}
-
-		if (result.kind == "say") {
-			actor->Say("%s", result.detail.c_str());
-			result.accepted = true;
-			result.reason = "say_emitted";
-			return true;
-		}
-
-		result.reason = "unknown_action_kind";
-		return true;
-	}
-
-private:
-	bool Enqueue(const AutonomousActorActionResult &action)
-	{
-		if (actions.size() >= max_actions) {
-			return false;
-		}
-
-		actions.push_back(action);
-		return true;
-	}
-
-	static constexpr size_t max_actions = 8;
-	std::vector<AutonomousActorActionResult> actions;
-	size_t next_action = 0;
 };
 
 }
@@ -616,15 +574,10 @@ AutonomousActorLoopScenarioResult ZoneHarnessRuntime::RunAutonomousActorLoop(uin
 	ScopedRuleOverride dialogue_window_rule("Chat:QuestDialogueUsesDialogueWindow", "false");
 	ScopedRuleOverride saylink_rule("Chat:AutoInjectSaylinksToSay", "false");
 
-	AutonomousActorActionQueue action_queue;
-	if (!action_queue.EnqueueTarget(fixture.primary_target->GetCleanName()) ||
-		!action_queue.EnqueueSay("Harness autonomous actor ready.")) {
-		result.reason = "autonomous_actor_action_queue_full";
-		result.runtime = RuntimeLocked();
-		fixture.Cleanup();
-		return result;
-	}
-	result.actions = action_queue.Actions();
+	result.actions = {
+		{.kind = "target", .detail = fixture.primary_target->GetCleanName()},
+		{.kind = "say", .detail = "Harness autonomous actor ready."},
+	};
 
 	const uint16_t actor_id = fixture.actor->GetID();
 	const uint16_t target_id = fixture.primary_target->GetID();
@@ -637,12 +590,16 @@ AutonomousActorLoopScenarioResult ZoneHarnessRuntime::RunAutonomousActorLoop(uin
 			break;
 		}
 
-		if (action_queue.HasPending()) {
-			for (auto &action: result.actions) {
-				if (!action.accepted && action.reason.empty()) {
-					action_queue.ExecuteNext(fixture.actor, fixture.primary_target, action);
-					break;
-				}
+		for (auto &action: result.actions) {
+			if (!action.accepted && action.reason.empty()) {
+				action.accepted = ExecuteAutonomousActorAction(
+					fixture.actor,
+					fixture.primary_target,
+					action.kind,
+					action.detail,
+					action.reason
+				);
+				break;
 			}
 		}
 
@@ -715,6 +672,140 @@ AutonomousActorLoopScenarioResult ZoneHarnessRuntime::RunAutonomousActorLoop(uin
 	return result;
 }
 
+AutonomousActorPrototypeSessionSnapshot ZoneHarnessRuntime::StartAutonomousActorPrototypeSession()
+{
+	std::lock_guard scenario_lock(scenario_mutex);
+	std::lock_guard lock(mutex);
+
+	if (!autonomous_actor_prototype.enabled) {
+		return {
+			.enabled = false,
+			.active = false,
+			.reason = "autonomous_actor_prototype_disabled",
+			.runtime = RuntimeLocked(),
+		};
+	}
+
+	if (!booted || !zone || !is_zone_loaded) {
+		return {
+			.enabled = true,
+			.active = false,
+			.reason = "zone_not_booted",
+			.runtime = RuntimeLocked(),
+		};
+	}
+
+	StopAutonomousActorPrototypeSessionLocked();
+
+	auto &prototype = autonomous_actor_prototype;
+	if (!prototype.fixture.Create({
+		.owner_name = "HarnessPrototypeOwner",
+		.actor_name = "HarnessPrototypeBot",
+		.primary_target_name = "HarnessPrototypePrimaryTarget",
+		.secondary_target_name = "HarnessPrototypeSecondaryTarget",
+	})) {
+		return {
+			.enabled = true,
+			.active = false,
+			.reason = prototype.fixture.failure_reason,
+			.runtime = RuntimeLocked(),
+		};
+	}
+
+	prototype.active = true;
+	prototype.pending_actions.clear();
+	prototype.database_mutation = prototype.fixture.database_mutation;
+	prototype.last_event_cursor = events.MaxEventID();
+	prototype.session_id = "session-" + std::to_string(prototype.next_session_id++);
+	return AutonomousActorPrototypeSessionLocked();
+}
+
+AutonomousActorPrototypeSessionSnapshot ZoneHarnessRuntime::AutonomousActorPrototypeSession()
+{
+	std::lock_guard lock(mutex);
+	return AutonomousActorPrototypeSessionLocked();
+}
+
+AutonomousActorPrototypeActionAck ZoneHarnessRuntime::EnqueueAutonomousActorPrototypeAction(
+	const std::string &kind,
+	const std::string &detail
+)
+{
+	std::lock_guard scenario_lock(scenario_mutex);
+	std::lock_guard lock(mutex);
+
+	AutonomousActorPrototypeActionAck ack{
+		.session_id = autonomous_actor_prototype.session_id,
+		.kind = kind,
+		.detail = detail,
+		.max_queue_depth = AutonomousActorPrototypeState::max_pending_actions,
+		.process_ticks_hint = 2,
+		.poll_after_ms = 50,
+		.event_limit_hint = 32,
+	};
+
+	if (!autonomous_actor_prototype.enabled) {
+		ack.reason = "autonomous_actor_prototype_disabled";
+		return ack;
+	}
+
+	auto &prototype = autonomous_actor_prototype;
+	if (!prototype.active || !prototype.fixture.actor) {
+		ack.reason = "session_not_active";
+		return ack;
+	}
+
+	if (kind != "target" && kind != "say") {
+		ack.reason = "unsupported_action_kind";
+		return ack;
+	}
+
+	if (kind == "target") {
+		if (!prototype.fixture.primary_target) {
+			ack.reason = "target_not_available";
+			return ack;
+		}
+
+		const auto target_name = prototype.fixture.primary_target->GetCleanName();
+		if (!(detail.empty() || detail == "primary_target" || detail == target_name)) {
+			ack.reason = "unknown_target";
+			return ack;
+		}
+	}
+
+	if (kind == "say" && (detail.empty() || detail.size() > 120)) {
+		ack.reason = detail.empty() ? "say_detail_required" : "say_detail_too_long";
+		return ack;
+	}
+
+	if (prototype.pending_actions.size() >= AutonomousActorPrototypeState::max_pending_actions) {
+		ack.reason = "queue_full";
+		ack.queue_depth = static_cast<uint32_t>(prototype.pending_actions.size());
+		return ack;
+	}
+
+	ack.accepted = true;
+	ack.reason = "queued";
+	ack.request_id = prototype.next_request_id++;
+	ack.event_cursor_start = events.MaxEventID();
+	prototype.pending_actions.push_back({
+		.request_id = ack.request_id,
+		.kind = kind,
+		.detail = detail,
+		.event_cursor_start = ack.event_cursor_start,
+	});
+	ack.queue_depth = static_cast<uint32_t>(prototype.pending_actions.size());
+	return ack;
+}
+
+AutonomousActorPrototypeSessionSnapshot ZoneHarnessRuntime::StopAutonomousActorPrototypeSession()
+{
+	std::lock_guard scenario_lock(scenario_mutex);
+	std::lock_guard lock(mutex);
+	StopAutonomousActorPrototypeSessionLocked();
+	return AutonomousActorPrototypeSessionLocked();
+}
+
 void ZoneHarnessRuntime::RequestShutdown()
 {
 	std::lock_guard lock(mutex);
@@ -726,6 +817,7 @@ void ZoneHarnessRuntime::Shutdown()
 	std::lock_guard lock(mutex);
 	shutdown_requested = true;
 	ActorEventRecorder::ClearActiveRecorder(&events);
+	StopAutonomousActorPrototypeSessionLocked();
 
 	entity_list.Clear();
 	entity_list.RemoveAllEncounters();
@@ -735,6 +827,80 @@ void ZoneHarnessRuntime::Shutdown()
 		zone->Shutdown(true);
 		zone = nullptr;
 	}
+}
+
+AutonomousActorPrototypeSessionSnapshot ZoneHarnessRuntime::AutonomousActorPrototypeSessionLocked() const
+{
+	AutonomousActorPrototypeSessionSnapshot snapshot{
+		.enabled = autonomous_actor_prototype.enabled,
+		.active = autonomous_actor_prototype.active,
+		.reason = autonomous_actor_prototype.enabled ? "ok" : "autonomous_actor_prototype_disabled",
+		.session_id = autonomous_actor_prototype.session_id,
+		.database_mutation = autonomous_actor_prototype.database_mutation,
+		.queue_depth = static_cast<uint32_t>(autonomous_actor_prototype.pending_actions.size()),
+		.max_queue_depth = AutonomousActorPrototypeState::max_pending_actions,
+		.last_event_cursor = autonomous_actor_prototype.last_event_cursor,
+		.runtime = RuntimeLocked(),
+	};
+
+	if (!autonomous_actor_prototype.active) {
+		if (autonomous_actor_prototype.enabled) {
+			snapshot.reason = "session_not_active";
+		}
+		return snapshot;
+	}
+
+	snapshot.owner = DescribeMobEntity(autonomous_actor_prototype.fixture.owner);
+	snapshot.actor = DescribeMobEntity(autonomous_actor_prototype.fixture.actor);
+	snapshot.target = DescribeMobEntity(autonomous_actor_prototype.fixture.primary_target);
+	snapshot.status = StatusFor(autonomous_actor_prototype.fixture.actor, autonomous_actor_prototype.fixture.owner);
+	snapshot.perception = snapshots.PerceptionFor(
+		autonomous_actor_prototype.fixture.actor,
+		autonomous_actor_prototype.fixture.owner
+	);
+	return snapshot;
+}
+
+void ZoneHarnessRuntime::StopAutonomousActorPrototypeSessionLocked()
+{
+	auto &prototype = autonomous_actor_prototype;
+	if (prototype.active) {
+		prototype.fixture.Cleanup();
+	}
+
+	prototype.active = false;
+	prototype.session_id.clear();
+	prototype.database_mutation.clear();
+	prototype.pending_actions.clear();
+	prototype.last_event_cursor = events.MaxEventID();
+}
+
+void ZoneHarnessRuntime::ProcessAutonomousActorPrototypeActionLocked()
+{
+	auto &prototype = autonomous_actor_prototype;
+	if (!prototype.enabled || !prototype.active || prototype.pending_actions.empty()) {
+		return;
+	}
+
+	if (!prototype.fixture.actor || !prototype.fixture.primary_target) {
+		StopAutonomousActorPrototypeSessionLocked();
+		return;
+	}
+
+	const auto action = prototype.pending_actions.front();
+	std::string reason;
+	const bool accepted = ExecuteAutonomousActorAction(
+		prototype.fixture.actor,
+		prototype.fixture.primary_target,
+		action.kind,
+		action.kind == "target" ? prototype.fixture.primary_target->GetCleanName() : action.detail,
+		reason
+	);
+	if (accepted) {
+		prototype.last_event_cursor = events.MaxEventID();
+	}
+
+	prototype.pending_actions.erase(prototype.pending_actions.begin());
 }
 
 RuntimeSnapshot ZoneHarnessRuntime::RuntimeLocked() const
@@ -756,6 +922,7 @@ RuntimeSnapshot ZoneHarnessRuntime::RuntimeLocked() const
 
 void ZoneHarnessRuntime::ProcessOneTick()
 {
+	ProcessAutonomousActorPrototypeActionLocked();
 	::Timer::SetCurrentTime();
 	worldserver.Process();
 

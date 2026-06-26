@@ -339,6 +339,44 @@ nlohmann::json ToJson(const AutonomousActorLoopScenarioResult &result)
 	};
 }
 
+nlohmann::json ToJson(const AutonomousActorPrototypeSessionSnapshot &snapshot)
+{
+	return {
+		{"enabled", snapshot.enabled},
+		{"active", snapshot.active},
+		{"reason", snapshot.reason},
+		{"session_id", snapshot.session_id},
+		{"database_mutation", snapshot.database_mutation},
+		{"queue_depth", snapshot.queue_depth},
+		{"max_queue_depth", snapshot.max_queue_depth},
+		{"last_event_cursor", snapshot.last_event_cursor},
+		{"owner", ToJson(snapshot.owner)},
+		{"actor", ToJson(snapshot.actor)},
+		{"target", ToJson(snapshot.target)},
+		{"status", ToJson(snapshot.status)},
+		{"perception", ToJson(snapshot.perception)},
+		{"runtime", ToJson(snapshot.runtime)},
+	};
+}
+
+nlohmann::json ToJson(const AutonomousActorPrototypeActionAck &ack)
+{
+	return {
+		{"session_id", ack.session_id},
+		{"request_id", ack.request_id},
+		{"kind", ack.kind},
+		{"detail", ack.detail},
+		{"accepted", ack.accepted},
+		{"reason", ack.reason},
+		{"queue_depth", ack.queue_depth},
+		{"max_queue_depth", ack.max_queue_depth},
+		{"event_cursor_start", ack.event_cursor_start},
+		{"process_ticks_hint", ack.process_ticks_hint},
+		{"poll_after_ms", ack.poll_after_ms},
+		{"event_limit_hint", ack.event_limit_hint},
+	};
+}
+
 void SetJson(httplib::Response &res, const nlohmann::json &payload)
 {
 	res.set_content(payload.dump(), "application/json");
@@ -390,6 +428,29 @@ uint16_t ParseSpellID(const httplib::Request &req)
 	return 200;
 }
 
+std::string ParseActionStringField(const httplib::Request &req, const std::string &field_name)
+{
+	if (req.has_param(field_name)) {
+		return req.get_param_value(field_name);
+	}
+
+	if (req.body.empty()) {
+		return {};
+	}
+
+	try {
+		const auto payload = nlohmann::json::parse(req.body);
+		if (payload.contains(field_name) && payload[field_name].is_string()) {
+			return payload[field_name].get<std::string>();
+		}
+	}
+	catch (const std::exception &) {
+		return {};
+	}
+
+	return {};
+}
+
 bool IsAuthorized(const httplib::Request &req, const std::string &bearer_token)
 {
 	if (bearer_token.empty()) {
@@ -415,6 +476,7 @@ bool ServeHttp(const HttpServerOptions &options)
 		LogError("Zone Harness failed to boot zone [{}]", options.zone_short_name);
 		return false;
 	}
+	runtime.EnableAutonomousActorPrototype(options.enable_autonomous_actor_prototype);
 
 	httplib::Server api;
 	std::mutex finished_mutex;
@@ -508,6 +570,32 @@ bool ServeHttp(const HttpServerOptions &options)
 	api.Post("/api/v1/harness/scenarios/autonomous-actor-loop", [&runtime](const auto &, auto &res) {
 		SetJson(res, ToJson(runtime.RunAutonomousActorLoop()));
 	});
+
+	if (options.enable_autonomous_actor_prototype) {
+		api.Get("/api/v1/harness/autonomous-actors/prototype/session", [&runtime](const auto &, auto &res) {
+			SetJson(res, ToJson(runtime.AutonomousActorPrototypeSession()));
+		});
+
+		api.Post("/api/v1/harness/autonomous-actors/prototype/session/start", [&runtime](const auto &, auto &res) {
+			SetJson(res, ToJson(runtime.StartAutonomousActorPrototypeSession()));
+		});
+
+		api.Post("/api/v1/harness/autonomous-actors/prototype/actions", [&runtime](const auto &req, auto &res) {
+			SetJson(
+				res,
+				ToJson(
+					runtime.EnqueueAutonomousActorPrototypeAction(
+						ParseActionStringField(req, "kind"),
+						ParseActionStringField(req, "detail")
+					)
+				)
+			);
+		});
+
+		api.Post("/api/v1/harness/autonomous-actors/prototype/session/stop", [&runtime](const auto &, auto &res) {
+			SetJson(res, ToJson(runtime.StopAutonomousActorPrototypeSession()));
+		});
+	}
 
 	api.Post("/api/v1/harness/shutdown", [&runtime, &api](const auto &, auto &res) {
 		runtime.RequestShutdown();

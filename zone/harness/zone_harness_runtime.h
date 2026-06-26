@@ -12,6 +12,7 @@
 
 #include "zone/harness/actor_event_recorder.h"
 #include "zone/harness/harness_snapshot_service.h"
+#include "zone/harness/owned_bot_actor_fixture.h"
 
 #include <chrono>
 #include <cstdint>
@@ -126,6 +127,38 @@ struct AutonomousActorLoopScenarioResult {
 	RuntimeSnapshot runtime;
 };
 
+struct AutonomousActorPrototypeSessionSnapshot {
+	bool enabled = false;
+	bool active = false;
+	std::string reason;
+	std::string session_id;
+	std::string database_mutation;
+	uint32_t queue_depth = 0;
+	uint32_t max_queue_depth = 0;
+	uint64_t last_event_cursor = 0;
+	ActorEventEntity owner;
+	ActorEventEntity actor;
+	ActorEventEntity target;
+	AutonomousActorStatusSnapshot status;
+	ActorPerceptionSnapshot perception;
+	RuntimeSnapshot runtime;
+};
+
+struct AutonomousActorPrototypeActionAck {
+	std::string session_id;
+	uint64_t request_id = 0;
+	std::string kind;
+	std::string detail;
+	bool accepted = false;
+	std::string reason;
+	uint32_t queue_depth = 0;
+	uint32_t max_queue_depth = 0;
+	uint64_t event_cursor_start = 0;
+	uint32_t process_ticks_hint = 0;
+	uint32_t poll_after_ms = 0;
+	uint32_t event_limit_hint = 0;
+};
+
 enum class BotSlowMaintenanceScenarioKind {
 	CurrentTarget,
 	Fallback,
@@ -135,6 +168,7 @@ enum class BotSlowMaintenanceScenarioKind {
 class ZoneHarnessRuntime {
 public:
 	bool Boot(const std::string &zone_short_name, uint32_t instance_id = 0);
+	void EnableAutonomousActorPrototype(bool enabled);
 	HealthSnapshot Health();
 	RuntimeSnapshot Runtime();
 	ZoneIdentitySnapshot ZoneIdentity();
@@ -148,15 +182,45 @@ public:
 	BotSlowMaintenanceScenarioResult RunBotSlowMaintenanceFallback(uint32_t max_ticks = 160, uint32_t sleep_ms = 25);
 	BotSlowMaintenanceScenarioResult RunBotSlowMaintenanceMezzed(uint32_t max_ticks = 160, uint32_t sleep_ms = 25);
 	AutonomousActorLoopScenarioResult RunAutonomousActorLoop(uint32_t tick_budget = 24, uint32_t sleep_ms = 25);
+	AutonomousActorPrototypeSessionSnapshot StartAutonomousActorPrototypeSession();
+	AutonomousActorPrototypeSessionSnapshot AutonomousActorPrototypeSession();
+	AutonomousActorPrototypeActionAck EnqueueAutonomousActorPrototypeAction(
+		const std::string &kind,
+		const std::string &detail
+	);
+	AutonomousActorPrototypeSessionSnapshot StopAutonomousActorPrototypeSession();
 	void RequestShutdown();
 	void Shutdown();
 
 private:
+	struct AutonomousActorPrototypeAction {
+		uint64_t request_id = 0;
+		std::string kind;
+		std::string detail;
+		uint64_t event_cursor_start = 0;
+	};
+
+	struct AutonomousActorPrototypeState {
+		bool enabled = false;
+		bool active = false;
+		uint64_t next_session_id = 1;
+		uint64_t next_request_id = 1;
+		uint64_t last_event_cursor = 0;
+		std::string session_id;
+		OwnedBotActorFixture fixture;
+		std::vector<AutonomousActorPrototypeAction> pending_actions;
+		std::string database_mutation;
+		static constexpr uint32_t max_pending_actions = 4;
+	};
+
 	BotSlowMaintenanceScenarioResult RunBotSlowMaintenanceScenario(
 		BotSlowMaintenanceScenarioKind scenario,
 		uint32_t max_ticks,
 		uint32_t sleep_ms
 	);
+	AutonomousActorPrototypeSessionSnapshot AutonomousActorPrototypeSessionLocked() const;
+	void StopAutonomousActorPrototypeSessionLocked();
+	void ProcessAutonomousActorPrototypeActionLocked();
 	RuntimeSnapshot RuntimeLocked() const;
 	void ProcessOneTick();
 
@@ -164,6 +228,7 @@ private:
 	std::mutex scenario_mutex;
 	HarnessSnapshotService snapshots;
 	ActorEventRecorder events;
+	AutonomousActorPrototypeState autonomous_actor_prototype;
 	std::chrono::steady_clock::time_point started_at;
 	bool booted = false;
 	bool shutdown_requested = false;

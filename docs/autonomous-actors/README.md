@@ -4,3 +4,5 @@
   - `central-lhy.5` spike on whether a synthetic headless `Client` can safely perform a bounded player-like action in the **Zone Harness** without an `EQStream` session or normal login lifecycle.
 - `actor-event-perception-expansion-spike.md`
   - `central-lhy.6` spike on expanding harness **Actor Event** and **Actor Perception** coverage for bounded **Autonomous Actor** validation.
+- `actor-action-event-control-plane-spike.md`
+  - `central-lhy.4` spike on a lowest-impact async **Actor Action** request/ack and cursor-based **Actor Event** control plane, starting from harness HTTP and owned-bot fixtures rather than a headless `Client`.

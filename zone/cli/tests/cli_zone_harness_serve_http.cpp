@@ -41,6 +41,10 @@ void ZoneCLI::TestServeHttp(int argc, char **argv, argh::parser &cmd, std::strin
 		options.max_runtime_seconds = Strings::ToUnsignedInt(cmd("--max-runtime-seconds").str());
 	}
 
+	if (cmd["--enable-autonomous-actor-prototype"]) {
+		options.enable_autonomous_actor_prototype = true;
+	}
+
 	if (!EQ::ZoneHarness::ServeHttp(options)) {
 		std::exit(1);
 	}
