@@ -52,6 +52,22 @@ struct SpellCastStartScenarioResult {
 	RuntimeSnapshot runtime;
 };
 
+struct HeadlessClientTargetScenarioResult {
+	bool completed = false;
+	bool observed = false;
+	std::string reason;
+	std::string action = "set_target";
+	std::string database_mutation;
+	bool eqstream_backed = false;
+	bool completed_connect = false;
+	uint64_t event_cursor_start = 0;
+	uint64_t event_cursor_end = 0;
+	ActorEventEntity actor;
+	ActorEventEntity target;
+	std::vector<ActorEvent> events;
+	RuntimeSnapshot runtime;
+};
+
 struct BotSlowMaintenanceScenarioResult {
 	bool observed = false;
 	std::string reason;
@@ -127,6 +143,7 @@ public:
 	std::vector<ActorEvent> DrainEvents();
 	std::vector<ActorEvent> EventsSince(uint64_t since_id, size_t limit);
 	SpellCastStartScenarioResult StartKnownSpellCast(uint16_t spell_id = 200);
+	HeadlessClientTargetScenarioResult RunHeadlessClientTarget();
 	BotSlowMaintenanceScenarioResult RunBotSlowMaintenanceCurrentTarget(uint32_t max_ticks = 160, uint32_t sleep_ms = 25);
 	BotSlowMaintenanceScenarioResult RunBotSlowMaintenanceFallback(uint32_t max_ticks = 160, uint32_t sleep_ms = 25);
 	BotSlowMaintenanceScenarioResult RunBotSlowMaintenanceMezzed(uint32_t max_ticks = 160, uint32_t sleep_ms = 25);
