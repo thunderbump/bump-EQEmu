@@ -125,6 +125,15 @@ nlohmann::json ToJson(const ActorEventCast &cast)
 	};
 }
 
+nlohmann::json ToJson(const ActorEventSpeech &speech)
+{
+	return {
+		{"channel", speech.channel},
+		{"text", speech.text},
+		{"audible_radius", speech.audible_radius},
+	};
+}
+
 nlohmann::json ToJson(const HealthSnapshot &snapshot)
 {
 	return {
@@ -150,10 +159,19 @@ nlohmann::json ToJson(const ActorEvent &event)
 		{"time_ms", event.time_ms},
 		{"type", event.type},
 		{"message", event.message},
+		{"actor", ToJson(event.caster)},
 		{"caster", ToJson(event.caster)},
 		{"spell", ToJson(event.spell)},
 		{"cast", ToJson(event.cast)},
+		{"speech", ToJson(event.speech)},
 	};
+
+	if (event.previous_target.has_value()) {
+		payload["previous_target"] = ToJson(*event.previous_target);
+	}
+	else {
+		payload["previous_target"] = nullptr;
+	}
 
 	if (event.target.has_value()) {
 		payload["target"] = ToJson(*event.target);
@@ -200,6 +218,98 @@ nlohmann::json ToJson(const BotSlowMaintenanceScenarioResult &result)
 		{"slow_spell_id", result.slow_spell_id},
 		{"current_target_slowed", result.current_target_slowed},
 		{"mezzed_hostile_mezzed", result.mezzed_hostile_mezzed},
+		{"events", events},
+		{"runtime", ToJson(result.runtime)},
+	};
+}
+
+nlohmann::json ToJson(const PerceivedEntitySnapshot &snapshot)
+{
+	return {
+		{"entity", ToJson(snapshot.entity)},
+		{"relation_tags", snapshot.relation_tags},
+		{"distance_bucket", snapshot.distance_bucket},
+		{"alive", snapshot.alive},
+		{"hp_percent", snapshot.hp_percent},
+	};
+}
+
+nlohmann::json ToJson(const ActorPerceptionSnapshot &snapshot)
+{
+	nlohmann::json nearby_entities = nlohmann::json::array();
+	for (const auto &entity: snapshot.nearby_entities) {
+		nearby_entities.push_back(ToJson(entity));
+	}
+
+	auto payload = nlohmann::json{
+		{"available", snapshot.available},
+		{"reason", snapshot.reason},
+		{"self", ToJson(snapshot.self)},
+		{"nearby_entities", nearby_entities},
+	};
+
+	if (snapshot.current_target.has_value()) {
+		payload["current_target"] = ToJson(*snapshot.current_target);
+	}
+	else {
+		payload["current_target"] = nullptr;
+	}
+
+	return payload;
+}
+
+nlohmann::json ToJson(const AutonomousActorStatusSnapshot &snapshot)
+{
+	return {
+		{"actor", ToJson(snapshot.actor)},
+		{"owner", ToJson(snapshot.owner)},
+		{"alive", snapshot.alive},
+		{"hp_percent", snapshot.hp_percent},
+		{"mana_percent", snapshot.mana_percent},
+		{"has_target", snapshot.has_target},
+		{"current_target_id", snapshot.current_target_id},
+	};
+}
+
+nlohmann::json ToJson(const AutonomousActorActionResult &result)
+{
+	return {
+		{"kind", result.kind},
+		{"detail", result.detail},
+		{"accepted", result.accepted},
+		{"observed", result.observed},
+		{"reason", result.reason},
+	};
+}
+
+nlohmann::json ToJson(const AutonomousActorLoopScenarioResult &result)
+{
+	nlohmann::json actions = nlohmann::json::array();
+	for (const auto &action: result.actions) {
+		actions.push_back(ToJson(action));
+	}
+
+	nlohmann::json events = nlohmann::json::array();
+	for (const auto &event: result.events) {
+		events.push_back(ToJson(event));
+	}
+
+	return {
+		{"completed", result.completed},
+		{"reason", result.reason},
+		{"failure_output", result.failure_output},
+		{"database_mutation", result.database_mutation},
+		{"persistent_actor", result.persistent_actor},
+		{"tick_budget", result.tick_budget},
+		{"ticks_processed", result.ticks_processed},
+		{"event_cursor_start", result.event_cursor_start},
+		{"event_cursor_end", result.event_cursor_end},
+		{"owner", ToJson(result.owner)},
+		{"actor", ToJson(result.actor)},
+		{"target", ToJson(result.target)},
+		{"status", ToJson(result.status)},
+		{"perception", ToJson(result.perception)},
+		{"actions", actions},
 		{"events", events},
 		{"runtime", ToJson(result.runtime)},
 	};
@@ -365,6 +475,10 @@ bool ServeHttp(const HttpServerOptions &options)
 
 	api.Post("/api/v1/harness/scenarios/bot-slow-maintenance/mezzed", [&runtime](const auto &, auto &res) {
 		SetJson(res, ToJson(runtime.RunBotSlowMaintenanceMezzed()));
+	});
+
+	api.Post("/api/v1/harness/scenarios/autonomous-actor-loop", [&runtime](const auto &, auto &res) {
+		SetJson(res, ToJson(runtime.RunAutonomousActorLoop()));
 	});
 
 	api.Post("/api/v1/harness/shutdown", [&runtime, &api](const auto &, auto &res) {

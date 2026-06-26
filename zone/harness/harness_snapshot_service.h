@@ -10,9 +10,14 @@
 
 #pragma once
 
+#include "zone/harness/actor_event_recorder.h"
+
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
+
+class Mob;
 
 namespace EQ::ZoneHarness {
 
@@ -53,10 +58,27 @@ struct EntitySnapshot {
 	std::vector<EntitySummary> sample;
 };
 
+struct PerceivedEntitySnapshot {
+	ActorEventEntity entity;
+	std::vector<std::string> relation_tags;
+	std::string distance_bucket;
+	bool alive = false;
+	uint8_t hp_percent = 0;
+};
+
+struct ActorPerceptionSnapshot {
+	bool available = false;
+	std::string reason;
+	ActorEventEntity self;
+	std::optional<ActorEventEntity> current_target;
+	std::vector<PerceivedEntitySnapshot> nearby_entities;
+};
+
 class HarnessSnapshotService {
 public:
 	ZoneIdentitySnapshot ZoneIdentity() const;
 	EntitySnapshot Entities(uint32_t sample_limit = 25) const;
+	ActorPerceptionSnapshot PerceptionFor(Mob *actor, Mob *owner = nullptr, uint32_t nearby_limit = 12) const;
 };
 
 }

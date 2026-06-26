@@ -182,6 +182,80 @@ if require_mezzed == "true" and any(
 PY
 }
 
+assert_autonomous_actor_loop() {
+  local payload=\"\$1\"
+
+  ACTOR_LOOP_PAYLOAD=\"\$payload\" python3 - <<'PY'
+import json
+import os
+import sys
+
+payload = json.loads(os.environ["ACTOR_LOOP_PAYLOAD"])
+
+def fail(message):
+    print(json.dumps({"error": message, "payload": payload}, separators=(",", ":")), file=sys.stderr)
+    sys.exit(1)
+
+if payload.get("completed") is not True:
+    fail("autonomous actor loop did not complete")
+if payload.get("persistent_actor") is not False:
+    fail("autonomous actor loop reported persistence")
+if not str(payload.get("database_mutation", "")).startswith("none:"):
+    fail("autonomous actor loop reported database mutation")
+
+actor = payload.get("actor") or {}
+owner = payload.get("owner") or {}
+status = payload.get("status") or {}
+perception = payload.get("perception") or {}
+current_target = perception.get("current_target") or {}
+actions = payload.get("actions") or []
+events = payload.get("events") or []
+
+if not actor.get("entity_id") or not owner.get("entity_id"):
+    fail("actor or owner identity missing")
+if status.get("actor", {}).get("entity_id") != actor.get("entity_id"):
+    fail("status actor identity mismatch")
+if status.get("owner", {}).get("entity_id") != owner.get("entity_id"):
+    fail("status owner identity mismatch")
+if current_target.get("name") != "HarnessActorPrimaryTarget":
+    fail("unexpected perception current target")
+
+if payload.get("tick_budget", 0) <= 0 or payload.get("ticks_processed", 0) <= 0:
+    fail("tick budget was not processed")
+if payload.get("event_cursor_end", 0) <= payload.get("event_cursor_start", 0):
+    fail("event cursor did not advance")
+
+action_kinds = [action.get("kind") for action in actions]
+if action_kinds[:2] != ["target", "say"]:
+    fail("unexpected autonomous actor action order")
+if any(action.get("observed") is not True for action in actions[:2]):
+    fail("expected autonomous actor actions were not observed")
+
+nearby_names = {entity.get("entity", {}).get("name") for entity in perception.get("nearby_entities") or []}
+if "HarnessActorPrimaryTarget" not in nearby_names:
+    fail("perception did not include the primary target")
+
+target_events = [
+    event for event in events
+    if event.get("type") == "target_changed"
+    and event.get("actor", {}).get("entity_id") == actor.get("entity_id")
+    and event.get("target", {}).get("name") == "HarnessActorPrimaryTarget"
+]
+if not target_events:
+    fail("target_changed event for actor target action was not observed")
+
+speech_events = [
+    event for event in events
+    if event.get("type") == "speech_emitted"
+    and event.get("actor", {}).get("entity_id") == actor.get("entity_id")
+    and event.get("speech", {}).get("channel") == "say"
+    and event.get("speech", {}).get("text") == "Harness autonomous actor ready."
+]
+if not speech_events:
+    fail("speech_emitted event for actor say action was not observed")
+PY
+}
+
 scenario=\$(curl -fsS -X POST -H 'Content-Type: application/json' --data '{\"spell_id\":200}' \"http://127.0.0.1:${port}/api/v1/harness/scenarios/spell-cast-start\")
 [[ \"\$scenario\" == *'\"started\":true'* ]] || { printf '%s\n' \"\$scenario\" >&2; exit 1; }
 
@@ -218,7 +292,12 @@ assert_slow_scenario \"\$fallback_scenario\" fallback HarnessSlowFallbackHostile
 mezzed_scenario=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/bot-slow-maintenance/mezzed\")
 assert_slow_scenario \"\$mezzed_scenario\" mezzed HarnessSlowSecondaryHostile false true
 
-shutdown=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/shutdown\")
+	actor_loop=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/autonomous-actor-loop\")
+	assert_autonomous_actor_loop \"\$actor_loop\"
+	actor_loop_repeat=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/autonomous-actor-loop\")
+	assert_autonomous_actor_loop \"\$actor_loop_repeat\"
+
+	shutdown=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/shutdown\")
 [[ \"\$shutdown\" == *'\"shutdown_requested\":true'* ]] || { printf '%s\n' \"\$shutdown\" >&2; exit 1; }
 
 wait \"\$harness_pid\"

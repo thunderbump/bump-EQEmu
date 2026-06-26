@@ -72,6 +72,44 @@ struct BotSlowMaintenanceScenarioResult {
 	RuntimeSnapshot runtime;
 };
 
+struct AutonomousActorStatusSnapshot {
+	ActorEventEntity actor;
+	ActorEventEntity owner;
+	bool alive = false;
+	uint8_t hp_percent = 0;
+	uint8_t mana_percent = 0;
+	bool has_target = false;
+	uint16_t current_target_id = 0;
+};
+
+struct AutonomousActorActionResult {
+	std::string kind;
+	std::string detail;
+	bool accepted = false;
+	bool observed = false;
+	std::string reason;
+};
+
+struct AutonomousActorLoopScenarioResult {
+	bool completed = false;
+	std::string reason;
+	std::string failure_output;
+	std::string database_mutation;
+	bool persistent_actor = false;
+	uint32_t tick_budget = 0;
+	uint32_t ticks_processed = 0;
+	uint64_t event_cursor_start = 0;
+	uint64_t event_cursor_end = 0;
+	ActorEventEntity owner;
+	ActorEventEntity actor;
+	ActorEventEntity target;
+	AutonomousActorStatusSnapshot status;
+	ActorPerceptionSnapshot perception;
+	std::vector<AutonomousActorActionResult> actions;
+	std::vector<ActorEvent> events;
+	RuntimeSnapshot runtime;
+};
+
 enum class BotSlowMaintenanceScenarioKind {
 	CurrentTarget,
 	Fallback,
@@ -92,6 +130,7 @@ public:
 	BotSlowMaintenanceScenarioResult RunBotSlowMaintenanceCurrentTarget(uint32_t max_ticks = 160, uint32_t sleep_ms = 25);
 	BotSlowMaintenanceScenarioResult RunBotSlowMaintenanceFallback(uint32_t max_ticks = 160, uint32_t sleep_ms = 25);
 	BotSlowMaintenanceScenarioResult RunBotSlowMaintenanceMezzed(uint32_t max_ticks = 160, uint32_t sleep_ms = 25);
+	AutonomousActorLoopScenarioResult RunAutonomousActorLoop(uint32_t tick_budget = 24, uint32_t sleep_ms = 25);
 	void RequestShutdown();
 	void Shutdown();
 
@@ -105,6 +144,7 @@ private:
 	void ProcessOneTick();
 
 	mutable std::mutex mutex;
+	std::mutex scenario_mutex;
 	HarnessSnapshotService snapshots;
 	ActorEventRecorder events;
 	std::chrono::steady_clock::time_point started_at;
