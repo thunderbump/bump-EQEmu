@@ -97,6 +97,18 @@ dump_harness_log() {
 }
 trap dump_harness_log EXIT
 
+require_runtime_binary() {
+  local path=\"\$1\"
+
+  if [[ ! -x \"\$path\" ]]; then
+    printf 'error: tier3-harness requires a prior Tier 1 build or a combined build+harness profile; missing executable %s\n' \"\$path\" >&2
+    exit 1
+  fi
+}
+
+require_runtime_binary ./bin/zone
+require_runtime_binary ./bin/shared_memory
+
 ./bin/zone tests:serve-http --zone qrg --port ${port} --max-runtime-seconds 30 > logs/zone_harness.out 2>&1 &
 harness_pid=\$!
 trap 'kill -TERM \"\$harness_pid\" 2>/dev/null || true; dump_harness_log' EXIT
