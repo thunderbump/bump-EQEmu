@@ -24,10 +24,9 @@ The next slice should keep the recorder ephemeral and add only low-cardinality, 
 Purpose:
 Capture actor-visible `say` and `emote` output without replaying channel traffic or private tells.
 
-Primary hook points:
+Primary hook boundary:
 
-- `Mob::Say(...)` in `zone/mob.cpp`
-- `Mob::Emote(...)` in `zone/mob.cpp`
+- final local `say`/`emote` broadcast branches such as `entity_list.MessageCloseString(...)` in `zone/mob.cpp`
 
 Payload additions:
 
@@ -38,6 +37,8 @@ Payload additions:
 Bounds:
 
 - Store only the final rendered local speech/emote text.
+- Do not emit `speech_emitted` from dialogue-window delivery branches that return before local speech broadcast.
+- Capture text after saylink or other ordinary broadcast-time transformations, not raw method-entry text.
 - Truncate `text` to 160 bytes.
 - Do not capture shouts, tells, guild, raid, auction, or OOC as part of this slice.
 
@@ -66,11 +67,10 @@ Bounds:
 Purpose:
 Capture bounded movement intent without per-frame path spam.
 
-Primary hook points:
+Primary hook boundary:
 
-- `MobMovementManager::PushMoveTo(...)`
-- `MobMovementManager::PushSwimTo(...)`
-- `MobMovementManager::PushTeleportTo(...)` only if later needed
+- high-level navigation request entry points such as `NavigateTo(...)` and path-update callers before they expand into queued path nodes
+- optional later explicit teleport request sources, not low-level teleport/move queue commands
 
 Payload additions:
 
@@ -80,22 +80,23 @@ Payload additions:
 
 Bounds:
 
-- Emit one event when a new destination command is queued.
-- Do not emit path node details, heading corrections, or every packet update.
-- Ignore repeated `NavigateTo(...)` recalculations that point to the same coarse destination.
+- Emit one event per actor movement intent, before the request is expanded into internal path nodes.
+- Do not hook raw `PushMoveTo(...)` / `PushSwimTo(...)` queue insertion without source-level deduping; those calls are used for path-node construction and replans.
+- Do not emit path node details, heading corrections, rotate/stop commands, or every packet update.
+- Ignore repeated path recalculations that point to the same coarse destination.
 
 ### 4. `movement_completed`
 
 Purpose:
 Capture that bounded movement intent finished.
 
-Primary hook point:
+Primary hook boundary:
 
-- `MobMovementManager::Process()` when the front movement command returns complete and is popped
+- the high-level navigation request lifecycle, when the actor-level request reaches its coarse destination, is cancelled, or is abandoned
 
 Notes:
 
-- This is feasible for `MoveToCommand` and `SwimToCommand` because the manager already owns command completion.
+- Queue-command completion alone is too low-level because one navigation request may produce many `MoveToCommand` or `SwimToCommand` path-node completions.
 - It is safer than polling raw coordinates from the harness.
 
 Payload additions:
@@ -106,7 +107,8 @@ Payload additions:
 
 Bounds:
 
-- Emit once per completed queued movement command.
+- Emit once per completed high-level actor movement request.
+- Suppress internal path-node completion events.
 - Do not attempt sub-step progress percentages.
 
 ### 5. `damage_taken`
@@ -189,12 +191,13 @@ Capture bounded, actor-relevant failures where the actor attempted a normal acti
 Feasible first slice:
 
 - blocked spell casts caused by `zone->IsSpellBlocked(...)`
-- bot attack/cast rejection paths that already surface `"I cannot attack [...]"`
+- existing bot attack rejection paths that already surface `"I cannot attack [...]"` to the owner
 
 Non-goals for the first slice:
 
 - every failure-to-act branch in combat, pathing, or quest logic
 - omniscient reasons such as hidden internal validation state
+- blocked bot spell-cast internals that only log and return `false` without an owner-visible/public reason
 
 Payload additions:
 
@@ -207,6 +210,7 @@ Bounds:
 
 - Start with a small allowlist of well-understood blocked-action reasons.
 - Do not try to normalize every `false` return from `CastSpell()` in this spike.
+- Require a public or owner-visible rejection message before recording bot spell-block events.
 
 ## Recommended payload shape changes
 
@@ -276,6 +280,9 @@ The first **Actor Perception** slice should stay intentionally incomplete.
   - no invisible entities unless the actor can see invis
   - no full-zone entity dump
   - no quest/global/script internals
+  - no GM, admin, guide, or operator-only flags
+  - no account identifiers, account status, or account-level metadata
+  - no ownership metadata beyond ordinary gameplay-visible relations such as pet owner or group member
 
 ## Cost controls
 
