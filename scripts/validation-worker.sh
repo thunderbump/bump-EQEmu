@@ -25,12 +25,14 @@ Request JSON fields:
   evidence_dir       Required directory where request.json, result.json, and logs are written.
   timeout_seconds    Optional validation timeout in seconds. Defaults to 3600.
   lock_wait_seconds  Optional bounded wait for the exclusive worker-local validation slot. Defaults to 0.
+  stack.role         Optional stack role. If present, must be "validation".
+  stack.path         Optional validation AkkStack path to bind while validation runs.
 
 The worker fetches into VALIDATION_WORKER_HOME (default: .validation-worker),
 acquires one local validation slot, delegates to scripts/validate.sh in the
 fetched checkout, and returns a normal process exit code. Set
 VALIDATION_WORKER_VALIDATE_DRY_RUN=1 to delegate with --dry-run for local
-contract tests.
+contract tests. If stack.path is omitted, AKKSTACK_DIR remains a path override.
 USAGE
 }
 
@@ -53,6 +55,7 @@ ensure_log_files() {
   : >"$evidence_dir/logs/request.log"
   : >"$evidence_dir/logs/fetch.log"
   : >"$evidence_dir/logs/lock.log"
+  : >"$evidence_dir/logs/stack.log"
   : >"$evidence_dir/logs/validation.log"
 }
 
@@ -106,6 +109,8 @@ validate_request() {
   evidence_dir="$(json_get '.evidence_dir | strings' "$request_path")"
   timeout_seconds="$(json_get '.timeout_seconds // 3600 | numbers' "$request_path")"
   lock_wait_seconds="$(json_get '.lock_wait_seconds // 0 | numbers' "$request_path")"
+  stack_role="$(json_get '.stack.role // "validation" | strings' "$request_path")"
+  stack_path="$(json_get '.stack.path | strings' "$request_path")"
 
   [[ "$project" == "bump-eqemu" || "$project" == "bump-EQEmu" ]] || { printf 'invalid or missing project\n'; return 1; }
   [[ -n "$repo" ]] || { printf 'missing repo\n'; return 1; }
@@ -117,6 +122,8 @@ validate_request() {
   [[ -n "$evidence_dir" ]] || { printf 'missing evidence_dir\n'; return 1; }
   [[ "$timeout_seconds" =~ ^[0-9]+$ && "$timeout_seconds" -gt 0 ]] || { printf 'invalid timeout_seconds\n'; return 1; }
   [[ "$lock_wait_seconds" =~ ^[0-9]+$ ]] || { printf 'invalid lock_wait_seconds\n'; return 1; }
+  [[ "$stack_role" == "validation" ]] || { printf 'validation worker stack.role must be validation\n'; return 1; }
+  [[ -z "$stack_path" || -d "$stack_path" ]] || { printf 'stack.path is not a directory\n'; return 1; }
 }
 
 acquire_lock() {
@@ -138,14 +145,149 @@ acquire_lock() {
   done
 }
 
+acquire_named_lock() {
+  local evidence_dir="$1" wait_seconds="$2" lock_dir="$3" label="$4" start now
+  start="$(date +%s)"
+  while true; do
+    if mkdir "$lock_dir" 2>/dev/null; then
+      printf '%s acquired %s lock %s\n' "$(now_utc)" "$label" "$lock_dir" >>"$evidence_dir/logs/lock.log"
+      printf '%s' "$lock_dir"
+      return 0
+    fi
+    now="$(date +%s)"
+    if (( now - start >= wait_seconds )); then
+      printf '%s busy after %ss waiting for %s lock %s\n' "$(now_utc)" "$wait_seconds" "$label" "$lock_dir" >>"$evidence_dir/logs/lock.log"
+      return 1
+    fi
+    sleep 1
+  done
+}
+
 release_lock() {
   local lock_dir="${1:-}"
   [[ -n "$lock_dir" ]] && rm -rf "$lock_dir"
+  return 0
+}
+
+resolve_path() {
+  local path="$1"
+  if command -v realpath >/dev/null 2>&1; then
+    realpath "$path"
+  elif command -v readlink >/dev/null 2>&1 && [[ -e "$path" ]]; then
+    readlink -f "$path"
+  else
+    (
+      cd "$(dirname "$path")"
+      printf '%s/%s\n' "$(pwd -P)" "$(basename "$path")"
+    )
+  fi
+}
+
+write_stack_binding() {
+  local evidence_dir="$1" status="$2" role="$3" source="$4" stack_dir="$5" code_path="$6" target="$7" previous_kind="$8" previous_target="$9" restore_status="${10}" message="${11}"
+  jq -n \
+    --arg status "$status" \
+    --arg role "$role" \
+    --arg source "$source" \
+    --arg stack_dir "$stack_dir" \
+    --arg code_path "$code_path" \
+    --arg target "$target" \
+    --arg previous_kind "$previous_kind" \
+    --arg previous_target "$previous_target" \
+    --arg restore_status "$restore_status" \
+    --arg message "$message" \
+    --arg completed_at "$(now_utc)" \
+    '{status:$status, role:$role, source:$source, stack_dir:$stack_dir, code_path:$code_path, target:$target, previous_kind:$previous_kind, previous_target:$previous_target, restore_status:$restore_status, message:$message, completed_at:$completed_at}' \
+    >"$evidence_dir/stack-binding.json"
+}
+
+bind_validation_stack() {
+  local evidence_dir="$1" stack_dir="$2" checkout_dir="$3" source="$4" code_path resolved_target current_target previous_kind previous_target
+
+  [[ -n "$stack_dir" ]] || return 0
+
+  code_path="$stack_dir/code"
+  resolved_target="$(resolve_path "$checkout_dir")"
+  printf '%s binding validation stack %s code to %s\n' "$(now_utc)" "$stack_dir" "$resolved_target" >>"$evidence_dir/logs/stack.log"
+
+  if [[ ! -f "$stack_dir/.env" ]]; then
+    write_stack_binding "$evidence_dir" failed validation "$source" "$stack_dir" "$code_path" "$resolved_target" "" "" not-needed "stack .env is missing"
+    printf 'stack .env is missing: %s/.env\n' "$stack_dir" >>"$evidence_dir/logs/stack.log"
+    return 1
+  fi
+
+  if [[ -L "$code_path" ]]; then
+    previous_kind=symlink
+    previous_target="$(readlink "$code_path")"
+  elif [[ ! -e "$code_path" ]]; then
+    previous_kind=missing
+    previous_target=""
+  else
+    if [[ -d "$code_path" ]]; then
+      write_stack_binding "$evidence_dir" failed validation "$source" "$stack_dir" "$code_path" "$resolved_target" directory "$code_path" not-needed "stack code path is a real directory; refusing to replace it"
+      printf 'refusing to replace real directory: %s\n' "$code_path" >>"$evidence_dir/logs/stack.log"
+      return 1
+    fi
+    write_stack_binding "$evidence_dir" failed validation "$source" "$stack_dir" "$code_path" "$resolved_target" other "$code_path" not-needed "stack code path is not a symlink or directory"
+    printf 'refusing to replace non-symlink code path: %s\n' "$code_path" >>"$evidence_dir/logs/stack.log"
+    return 1
+  fi
+
+  current_target="$(resolve_path "$code_path" 2>/dev/null || true)"
+  if [[ -L "$code_path" && "$current_target" == "$resolved_target" ]]; then
+    STACK_BINDING_STATUS=already-bound
+    STACK_BINDING_SOURCE="$source"
+    STACK_BINDING_STACK_DIR="$stack_dir"
+    STACK_BINDING_CODE_PATH="$code_path"
+    STACK_BINDING_TARGET="$resolved_target"
+    STACK_BINDING_PREVIOUS_KIND="$previous_kind"
+    STACK_BINDING_PREVIOUS_TARGET="$previous_target"
+    STACK_BINDING_RESTORE_NEEDED=0
+    write_stack_binding "$evidence_dir" already-bound validation "$source" "$stack_dir" "$code_path" "$resolved_target" "$previous_kind" "$previous_target" not-needed "stack code already pointed at worker checkout"
+    printf 'stack code already pointed at worker checkout\n' >>"$evidence_dir/logs/stack.log"
+    return 0
+  fi
+
+  ln -sfn "$resolved_target" "$code_path"
+  STACK_BINDING_STATUS=rebound
+  STACK_BINDING_SOURCE="$source"
+  STACK_BINDING_STACK_DIR="$stack_dir"
+  STACK_BINDING_CODE_PATH="$code_path"
+  STACK_BINDING_TARGET="$resolved_target"
+  STACK_BINDING_PREVIOUS_KIND="$previous_kind"
+  STACK_BINDING_PREVIOUS_TARGET="$previous_target"
+  STACK_BINDING_RESTORE_NEEDED=1
+  write_stack_binding "$evidence_dir" rebound validation "$source" "$stack_dir" "$code_path" "$resolved_target" "$previous_kind" "$previous_target" pending "stack code symlink rebound to worker checkout"
+}
+
+restore_validation_stack() {
+  local evidence_dir="$1" restore_status=not-needed
+
+  [[ -n "${STACK_BINDING_STATUS:-}" ]] || return 0
+
+  if [[ "${STACK_BINDING_RESTORE_NEEDED:-0}" == "1" ]]; then
+    case "$STACK_BINDING_PREVIOUS_KIND" in
+      symlink)
+        ln -sfn "$STACK_BINDING_PREVIOUS_TARGET" "$STACK_BINDING_CODE_PATH"
+        restore_status=restored
+        ;;
+      missing)
+        rm -f "$STACK_BINDING_CODE_PATH"
+        restore_status=removed
+        ;;
+      *)
+        restore_status=not-needed
+        ;;
+    esac
+  fi
+
+  write_stack_binding "$evidence_dir" "$STACK_BINDING_STATUS" validation "$STACK_BINDING_SOURCE" "$STACK_BINDING_STACK_DIR" "$STACK_BINDING_CODE_PATH" "$STACK_BINDING_TARGET" "$STACK_BINDING_PREVIOUS_KIND" "$STACK_BINDING_PREVIOUS_TARGET" "$restore_status" "stack code binding cleanup complete"
 }
 
 run_request() {
-  local request_path="$1" validation_status lock_dir checkout_dir head_commit
-  project= repo= ref= commit= profile= run_id= evidence_dir= timeout_seconds= lock_wait_seconds=
+  local request_path="$1" validation_status lock_dir stack_lock_dir stack_lock checkout_dir head_commit
+  project= repo= ref= commit= profile= run_id= evidence_dir= timeout_seconds= lock_wait_seconds= stack_role= stack_path= stack_source=
+  STACK_BINDING_STATUS= STACK_BINDING_SOURCE= STACK_BINDING_STACK_DIR= STACK_BINDING_CODE_PATH= STACK_BINDING_TARGET= STACK_BINDING_PREVIOUS_KIND= STACK_BINDING_PREVIOUS_TARGET= STACK_BINDING_RESTORE_NEEDED=0
 
   if ! validate_request "$request_path" >/tmp/validation-worker-request-error.$$ 2>&1; then
     evidence_dir="$(json_get '.evidence_dir | strings' "$request_path")"
@@ -162,7 +304,33 @@ run_request() {
   ensure_log_files "$evidence_dir"
   copy_request_evidence "$request_path" "$evidence_dir" || true
 
+  if [[ -n "$stack_path" ]]; then
+    stack_source=request.stack.path
+  elif [[ -n "${AKKSTACK_DIR:-}" ]]; then
+    stack_path="$AKKSTACK_DIR"
+    stack_source=AKKSTACK_DIR
+    if [[ ! -d "$stack_path" ]]; then
+      write_result "$evidence_dir" failed invalid_request 2 "AKKSTACK_DIR is not a directory"
+      return 2
+    fi
+  fi
+
   checkout_dir="$worker_home/checkouts/$run_id"
+
+  if ! lock_dir="$(acquire_lock "$evidence_dir" "$lock_wait_seconds")"; then
+    write_result "$evidence_dir" failed worker_busy 1 "exclusive validation slot is busy" "$checkout_dir"
+    return 1
+  fi
+  trap 'restore_validation_stack "$evidence_dir"; release_lock "${stack_lock:-}"; release_lock "${lock_dir:-}"' RETURN
+
+  if [[ -n "$stack_path" ]]; then
+    stack_lock_dir="$stack_path/.validation-worker-code.lock"
+    if ! stack_lock="$(acquire_named_lock "$evidence_dir" "$lock_wait_seconds" "$stack_lock_dir" stack)"; then
+      write_result "$evidence_dir" failed stack_busy 1 "validation stack is busy" "$checkout_dir"
+      return 1
+    fi
+  fi
+
   rm -rf "$checkout_dir"
   mkdir -p "$checkout_dir"
 
@@ -180,11 +348,10 @@ run_request() {
     return 1
   fi
 
-  if ! lock_dir="$(acquire_lock "$evidence_dir" "$lock_wait_seconds")"; then
-    write_result "$evidence_dir" failed worker_busy 1 "exclusive validation slot is busy" "$checkout_dir" "$head_commit"
+  if ! bind_validation_stack "$evidence_dir" "$stack_path" "$checkout_dir" "$stack_source"; then
+    write_result "$evidence_dir" failed stack_binding_failed 1 "failed to bind validation stack to worker checkout" "$checkout_dir" "$head_commit"
     return 1
   fi
-  trap 'release_lock "${lock_dir:-}"' RETURN
 
   validation_cmd=("$checkout_dir/scripts/validate.sh" --stack validation)
   if [[ "${VALIDATION_WORKER_VALIDATE_DRY_RUN:-0}" == "1" ]]; then
@@ -193,7 +360,13 @@ run_request() {
   validation_cmd+=("$profile")
 
   set +e
-  timeout "$timeout_seconds" "${validation_cmd[@]}" >>"$evidence_dir/logs/validation.log" 2>&1
+  if [[ -n "$stack_path" && -n "${STACK_BINDING_STATUS:-}" ]]; then
+    AKKSTACK_DIR="$stack_path" EXPECTED_EQEMU_CHECKOUT="$checkout_dir" timeout "$timeout_seconds" "${validation_cmd[@]}" >>"$evidence_dir/logs/validation.log" 2>&1
+  elif [[ -n "$stack_path" ]]; then
+    AKKSTACK_DIR="$stack_path" timeout "$timeout_seconds" "${validation_cmd[@]}" >>"$evidence_dir/logs/validation.log" 2>&1
+  else
+    timeout "$timeout_seconds" "${validation_cmd[@]}" >>"$evidence_dir/logs/validation.log" 2>&1
+  fi
   validation_status=$?
   set -e
 
