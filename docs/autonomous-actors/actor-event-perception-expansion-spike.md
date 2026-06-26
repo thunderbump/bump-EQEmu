@@ -103,11 +103,11 @@ Payload additions:
 
 - `movement.kind`
 - `movement.destination`
-- `movement.completed`: `true`
+- `movement.terminal_status`: `completed`, `cancelled`, or `abandoned`
 
 Bounds:
 
-- Emit once per completed high-level actor movement request.
+- Emit once per terminal high-level actor movement request.
 - Suppress internal path-node completion events.
 - Do not attempt sub-step progress percentages.
 
