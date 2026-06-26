@@ -14,6 +14,8 @@
 #include "zone/mob.h"
 #include "zone/zone.h"
 
+#include <algorithm>
+
 extern EntityList entity_list;
 extern Zone *zone;
 extern volatile bool is_zone_loaded;
@@ -89,6 +91,101 @@ EntitySnapshot HarnessSnapshotService::Entities(uint32_t sample_limit) const
 	}
 
 	return snapshot;
+}
+
+namespace {
+
+uint8_t Percent(int64_t current, int64_t maximum)
+{
+	if (maximum <= 0) {
+		return 0;
+	}
+
+	return static_cast<uint8_t>(std::clamp<int64_t>((current * 100) / maximum, 0, 100));
+}
+
+std::string DistanceBucket(float distance_squared)
+{
+	if (distance_squared <= (15.0f * 15.0f)) {
+		return "melee";
+	}
+
+	if (distance_squared <= (60.0f * 60.0f)) {
+		return "near";
+	}
+
+	return "far";
+}
+
+}
+
+ActorPerceptionSnapshot HarnessSnapshotService::PerceptionFor(Mob *actor, Mob *owner, uint32_t nearby_limit) const
+{
+	if (!actor) {
+		return {
+			.available = false,
+			.reason = "actor_not_found",
+		};
+	}
+
+	ActorPerceptionSnapshot perception{
+		.available = true,
+		.reason = "ok",
+		.self = DescribeMobEntity(actor),
+	};
+
+	if (actor->GetTarget()) {
+		perception.current_target = DescribeMobEntity(actor->GetTarget());
+	}
+
+	struct Candidate {
+		float distance_squared = 0.0f;
+		PerceivedEntitySnapshot snapshot;
+	};
+
+	std::vector<Candidate> candidates;
+	for (const auto &[entity_id, mob]: entity_list.GetMobList()) {
+		if (!mob || mob == actor) {
+			continue;
+		}
+
+		Candidate candidate;
+		candidate.distance_squared = DistanceSquared(actor->GetPosition(), mob->GetPosition());
+		candidate.snapshot.entity = DescribeMobEntity(mob);
+		candidate.snapshot.distance_bucket = DistanceBucket(candidate.distance_squared);
+		candidate.snapshot.alive = !mob->HasDied();
+		candidate.snapshot.hp_percent = Percent(mob->GetHP(), mob->GetMaxHP());
+
+		if (mob == owner) {
+			candidate.snapshot.relation_tags.push_back("owner");
+		}
+		if (actor->IsInGroupOrRaid(mob)) {
+			candidate.snapshot.relation_tags.push_back("group");
+		}
+		if (actor->GetTarget() == mob) {
+			candidate.snapshot.relation_tags.push_back("current_target");
+		}
+		if (actor->CheckAggro(mob) || mob->CheckAggro(actor)) {
+			candidate.snapshot.relation_tags.push_back("hostile");
+		}
+
+		candidates.push_back(std::move(candidate));
+	}
+
+	std::sort(
+		candidates.begin(),
+		candidates.end(),
+		[](const Candidate &lhs, const Candidate &rhs) {
+			return lhs.distance_squared < rhs.distance_squared;
+		}
+	);
+
+	const auto bounded_limit = std::clamp<uint32_t>(nearby_limit, 1, 25);
+	for (size_t i = 0; i < candidates.size() && perception.nearby_entities.size() < bounded_limit; ++i) {
+		perception.nearby_entities.push_back(std::move(candidates[i].snapshot));
+	}
+
+	return perception;
 }
 
 }

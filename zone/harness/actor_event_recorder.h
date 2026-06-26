@@ -42,16 +42,26 @@ struct ActorEventCast {
 	int32_t original_cast_time_ms = 0;
 };
 
+struct ActorEventSpeech {
+	std::string channel;
+	std::string text;
+	uint32_t audible_radius = 0;
+};
+
 struct ActorEvent {
 	uint64_t id = 0;
 	uint64_t time_ms = 0;
 	std::string type;
 	std::string message;
 	ActorEventEntity caster;
+	std::optional<ActorEventEntity> previous_target;
 	std::optional<ActorEventEntity> target;
 	ActorEventSpell spell;
 	ActorEventCast cast;
+	ActorEventSpeech speech;
 };
+
+ActorEventEntity DescribeMobEntity(Mob *mob);
 
 class ActorEventRecorder {
 public:
@@ -65,6 +75,8 @@ public:
 		int32_t cast_time_ms,
 		int32_t original_cast_time_ms
 	);
+	static void ObserveTargetChanged(Mob *actor, Mob *previous_target, Mob *target);
+	static void ObserveSpeechEmitted(Mob *actor, const std::string &channel, const std::string &text, uint32_t audible_radius);
 
 	void Record(const std::string &type, const std::string &message);
 	void RecordSpellCastStarted(
@@ -75,6 +87,8 @@ public:
 		int32_t cast_time_ms,
 		int32_t original_cast_time_ms
 	);
+	void RecordTargetChanged(Mob *actor, Mob *previous_target, Mob *target);
+	void RecordSpeechEmitted(Mob *actor, const std::string &channel, const std::string &text, uint32_t audible_radius);
 	std::vector<ActorEvent> Drain();
 	std::vector<ActorEvent> Since(uint64_t since_id, size_t limit) const;
 	uint64_t PendingCount() const;

@@ -26,6 +26,7 @@
 #include "common/strings.h"
 #include "zone/bot.h"
 #include "zone/dialogue_window.h"
+#include "zone/harness/actor_event_recorder.h"
 #include "zone/mob_movement_manager.h"
 #include "zone/quest_parser_collection.h"
 #include "zone/string_ids.h"
@@ -5066,23 +5067,25 @@ void Mob::Say(const char *format, ...)
 			if (client->GetTarget() && client->GetTarget()->IsMob() && client->GetTarget()->CastToMob() == talker) {
 				std::string window_markdown = buf;
 				DialogueWindow::Render(client, window_markdown);
+				}
 			}
-		}
 
-		return;
-	}
+			return;
+		}
 	else if (RuleB(Chat, AutoInjectSaylinksToSay)) {
 		std::string new_message = EQ::SayLinkEngine::InjectSaylinksIfNotExist(buf);
 		entity_list.MessageCloseString(
 			talker, false, distance, Chat::NPCQuestSay,
 			GENERIC_SAY, GetCleanName(), new_message.c_str()
 		);
+		EQ::ZoneHarness::ActorEventRecorder::ObserveSpeechEmitted(talker, "say", new_message, distance);
 	}
 	else {
 		entity_list.MessageCloseString(
 			talker, false, distance, Chat::NPCQuestSay,
 			GENERIC_SAY, GetCleanName(), buf
 		);
+		EQ::ZoneHarness::ActorEventRecorder::ObserveSpeechEmitted(talker, "say", buf, distance);
 	}
 }
 
@@ -5161,6 +5164,7 @@ void Mob::Emote(const char *format, ...)
 		this, false, 200, 10,
 		GENERIC_EMOTE, GetCleanName(), buf
 	);
+	EQ::ZoneHarness::ActorEventRecorder::ObserveSpeechEmitted(this, "emote", buf, 200);
 }
 
 void Mob::QuestJournalledSay(Client *QuestInitiator, const char *str, Journal::Options &opts)
@@ -5538,7 +5542,9 @@ void Mob::SetTarget(Mob *mob)
 		return;
 	}
 
+	Mob *previous_target = target;
 	target = mob;
+	EQ::ZoneHarness::ActorEventRecorder::ObserveTargetChanged(this, previous_target, mob);
 	entity_list.UpdateHoTT(this);
 
 	if (IsClient() && CastToClient()->admin > AccountStatus::GMMgmt) {

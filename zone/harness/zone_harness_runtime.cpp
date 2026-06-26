@@ -10,13 +10,12 @@
 
 #include "zone_harness_runtime.h"
 
-#include "common/classes.h"
-#include "common/races.h"
+#include "common/rulesys.h"
 #include "common/timer.h"
 #include "zone/bot.h"
 #include "zone/client.h"
 #include "zone/entity.h"
-#include "zone/groups.h"
+#include "zone/harness/owned_bot_actor_fixture.h"
 #include "zone/npc.h"
 #include "zone/questmgr.h"
 #include "zone/worldserver.h"
@@ -98,6 +97,7 @@ EntitySnapshot ZoneHarnessRuntime::Entities(uint32_t sample_limit)
 
 ProcessResult ZoneHarnessRuntime::ProcessWorld(uint32_t ticks)
 {
+	std::lock_guard scenario_lock(scenario_mutex);
 	std::lock_guard lock(mutex);
 
 	const uint32_t bounded_ticks = std::min<uint32_t>(std::max<uint32_t>(ticks, 1), 1000);
@@ -129,8 +129,6 @@ std::vector<ActorEvent> ZoneHarnessRuntime::EventsSince(uint64_t since_id, size_
 
 namespace {
 
-constexpr uint32_t kHarnessShamanBotSpellListID = 3010;
-
 std::string ScenarioName(BotSlowMaintenanceScenarioKind scenario)
 {
 	switch (scenario) {
@@ -143,31 +141,6 @@ std::string ScenarioName(BotSlowMaintenanceScenarioKind scenario)
 	}
 
 	return "unknown";
-}
-
-ActorEventEntity ScenarioEntityFor(Mob *mob)
-{
-	if (!mob) {
-		return {};
-	}
-
-	std::string kind = "mob";
-	if (mob->IsClient()) {
-		kind = "client";
-	}
-	else if (mob->IsBot()) {
-		kind = "bot";
-	}
-	else if (mob->IsNPC()) {
-		kind = "npc";
-	}
-
-	return {
-		.entity_id = mob->GetID(),
-		.entity_ref = "mob:" + std::to_string(mob->GetID()),
-		.name = mob->GetCleanName(),
-		.kind = kind,
-	};
 }
 
 bool IsExpectedSlowCast(const ActorEvent &event, uint16_t bot_id, uint16_t target_id)
@@ -196,10 +169,158 @@ uint16_t FindPreparedSingleTargetSlowSpell(Bot *bot, Mob *target)
 	return 0;
 }
 
+uint8_t Percent(int64_t current, int64_t maximum)
+{
+	if (maximum <= 0) {
+		return 0;
+	}
+
+	return static_cast<uint8_t>(std::clamp<int64_t>((current * 100) / maximum, 0, 100));
+}
+
+AutonomousActorStatusSnapshot StatusFor(Bot *actor, Client *owner)
+{
+	AutonomousActorStatusSnapshot status;
+	status.actor = DescribeMobEntity(actor);
+	status.owner = DescribeMobEntity(owner);
+	status.alive = actor && !actor->HasDied();
+	status.hp_percent = actor ? Percent(actor->GetHP(), actor->GetMaxHP()) : 0;
+	status.mana_percent = actor ? Percent(actor->GetMana(), actor->GetMaxMana()) : 0;
+	status.has_target = actor && actor->GetTarget();
+	status.current_target_id = actor && actor->GetTarget() ? actor->GetTarget()->GetID() : 0;
+	return status;
+}
+
+bool HasTargetChangedEvent(const std::vector<ActorEvent> &events, uint16_t actor_id, uint16_t target_id)
+{
+	return std::any_of(
+		events.begin(),
+		events.end(),
+		[actor_id, target_id](const ActorEvent &event) {
+			return event.type == "target_changed" &&
+				event.caster.entity_id == actor_id &&
+				event.target.has_value() &&
+				event.target->entity_id == target_id;
+		}
+	);
+}
+
+bool HasSpeechEvent(const std::vector<ActorEvent> &events, uint16_t actor_id, const std::string &text)
+{
+	return std::any_of(
+		events.begin(),
+		events.end(),
+		[actor_id, &text](const ActorEvent &event) {
+			return event.type == "speech_emitted" &&
+				event.caster.entity_id == actor_id &&
+				event.speech.channel == "say" &&
+				event.speech.text == text;
+		}
+	);
+}
+
+class ScopedRuleOverride {
+public:
+	ScopedRuleOverride(const std::string &rule_name, const std::string &rule_value) : rule_name(rule_name)
+	{
+		if (RuleManager::Instance()->GetRule(rule_name, original_value)) {
+			changed = RuleManager::Instance()->SetRule(rule_name, rule_value, nullptr, false, false);
+		}
+	}
+
+	~ScopedRuleOverride()
+	{
+		if (changed) {
+			RuleManager::Instance()->SetRule(rule_name, original_value, nullptr, false, false);
+		}
+	}
+
+private:
+	std::string rule_name;
+	std::string original_value;
+	bool changed = false;
+};
+
+class AutonomousActorActionQueue {
+public:
+	bool EnqueueTarget(const std::string &target_name)
+	{
+		return Enqueue({
+			.kind = "target",
+			.detail = target_name,
+		});
+	}
+
+	bool EnqueueSay(const std::string &message)
+	{
+		return Enqueue({
+			.kind = "say",
+			.detail = message,
+		});
+	}
+
+	const std::vector<AutonomousActorActionResult> &Actions() const
+	{
+		return actions;
+	}
+
+	bool HasPending() const
+	{
+		return next_action < actions.size();
+	}
+
+	bool ExecuteNext(Bot *actor, Mob *target, AutonomousActorActionResult &result)
+	{
+		if (!HasPending()) {
+			return false;
+		}
+
+		const auto queued_action = actions[next_action++];
+		result = queued_action;
+		if (!actor) {
+			result.reason = "actor_missing";
+			return true;
+		}
+
+		if (result.kind == "target") {
+			actor->SetTarget(target);
+			result.accepted = actor->GetTarget() == target;
+			result.reason = result.accepted ? "target_set" : "target_not_set";
+			return true;
+		}
+
+		if (result.kind == "say") {
+			actor->Say("%s", result.detail.c_str());
+			result.accepted = true;
+			result.reason = "say_emitted";
+			return true;
+		}
+
+		result.reason = "unknown_action_kind";
+		return true;
+	}
+
+private:
+	bool Enqueue(const AutonomousActorActionResult &action)
+	{
+		if (actions.size() >= max_actions) {
+			return false;
+		}
+
+		actions.push_back(action);
+		return true;
+	}
+
+	static constexpr size_t max_actions = 8;
+	std::vector<AutonomousActorActionResult> actions;
+	size_t next_action = 0;
+};
+
 }
 
 SpellCastStartScenarioResult ZoneHarnessRuntime::StartKnownSpellCast(uint16_t spell_id)
 {
+	std::lock_guard scenario_lock(scenario_mutex);
 	std::lock_guard lock(mutex);
 
 	if (!booted || !zone || !is_zone_loaded) {
@@ -276,6 +397,7 @@ BotSlowMaintenanceScenarioResult ZoneHarnessRuntime::RunBotSlowMaintenanceScenar
 	uint32_t sleep_ms
 )
 {
+	std::lock_guard scenario_lock(scenario_mutex);
 	std::unique_lock lock(mutex);
 
 	BotSlowMaintenanceScenarioResult result{
@@ -290,98 +412,39 @@ BotSlowMaintenanceScenarioResult ZoneHarnessRuntime::RunBotSlowMaintenanceScenar
 		return result;
 	}
 
-	auto *owner = new Client();
-	owner->TempName("HarnessSlowOwner");
-	owner->Mob::SetLevel(60);
-	owner->SetHP(10000);
-	owner->SetMana(10000);
-	owner->GMMove(0.0f, 0.0f, 0.0f, 0.0f);
-	entity_list.AddClient(owner);
-
-	auto *bot_type = Bot::CreateDefaultNPCTypeStructForBot(
-		"HarnessSlowBot",
-		"",
-		60,
-		Race::Barbarian,
-		Class::Shaman,
-		Gender::Male
-	);
-	bot_type->npc_spells_id = kHarnessShamanBotSpellListID;
-	bot_type->Mana = 6000;
-	bot_type->max_hp = 5000;
-	bot_type->current_hp = 5000;
-
-	auto *bot = new Bot(bot_type, owner);
-	bot->GMMove(2.0f, 0.0f, 0.0f, 0.0f);
-	bot->SetMana(bot->GetMaxMana());
-	bot->SetHP(bot->GetMaxHP());
-	bot->SetBotSpellID(kHarnessShamanBotSpellListID);
-	bot->LoadDefaultBotSettings();
-	for (uint16 spell_type = BotSpellTypes::START; spell_type <= BotSpellTypes::END; ++spell_type) {
-		bot->SetSpellTypePriority(spell_type, BotPriorityCategories::Engaged, spell_type == BotSpellTypes::Slow ? 1 : 0);
-	}
-
-	if (!bot->AI_AddBotSpells(kHarnessShamanBotSpellListID)) {
-		result.reason = "bot_spell_list_unavailable";
-		result.owner = ScenarioEntityFor(owner);
-		result.bot = ScenarioEntityFor(bot);
-
-		delete bot;
-		entity_list.RemoveMob(owner->GetID());
-
-		result.runtime = RuntimeLocked();
-		return result;
-	}
-
-	entity_list.AddBot(bot, false, true);
-	bot->AI_Bot_Start();
-
-	auto *group = new Group(owner);
-	group->AddMember(bot);
-	entity_list.AddGroup(group, 900001);
-
-	auto *target_type = content_db.LoadNPCTypesData(754008);
-	if (!target_type) {
-		result.reason = "npc_type_unavailable";
-		result.owner = ScenarioEntityFor(owner);
-		result.bot = ScenarioEntityFor(bot);
-		result.runtime = RuntimeLocked();
-		bot->Depop();
-		return result;
-	}
-
-	auto *current_target = new NPC(target_type, nullptr, glm::vec4(12, 0, 0, 0), GravityBehavior::Water);
-	auto *secondary_hostile = new NPC(target_type, nullptr, glm::vec4(18, 0, 0, 0), GravityBehavior::Water);
-	current_target->TempName(
-		scenario == BotSlowMaintenanceScenarioKind::Mezzed ?
+	OwnedBotActorFixture fixture;
+	if (!fixture.Create({
+		.owner_name = "HarnessSlowOwner",
+		.actor_name = "HarnessSlowBot",
+		.primary_target_name = scenario == BotSlowMaintenanceScenarioKind::Mezzed ?
 			"HarnessSlowMezzedCurrentTarget" :
-			"HarnessSlowCurrentTarget"
-	);
-	secondary_hostile->TempName(
-		scenario == BotSlowMaintenanceScenarioKind::Fallback ?
+			"HarnessSlowCurrentTarget",
+		.secondary_target_name = scenario == BotSlowMaintenanceScenarioKind::Fallback ?
 			"HarnessSlowFallbackHostile" :
-			"HarnessSlowSecondaryHostile"
-	);
-	entity_list.AddNPC(current_target, false, true);
-	entity_list.AddNPC(secondary_hostile, false, true);
+			"HarnessSlowSecondaryHostile",
+	})) {
+		result.reason = fixture.failure_reason;
+		result.runtime = RuntimeLocked();
+		return result;
+	}
 
-	owner->SetTarget(current_target);
-	bot->SetTarget(current_target);
-	current_target->AddToHateList(owner, 100, 1, false);
-	current_target->AddToHateList(bot, 25, 1, false);
-	secondary_hostile->AddToHateList(owner, 25, 1, false);
-	secondary_hostile->AddToHateList(bot, 25, 1, false);
-	bot->AddToHateList(current_target, 100, 1, false);
-	entity_list.ScanCloseMobs(bot);
+	fixture.PrimeOwnedBotEngagement(true);
+	result.database_mutation = fixture.database_mutation;
+
+	auto *owner = fixture.owner;
+	auto *bot = fixture.actor;
+	auto *current_target = fixture.primary_target;
+	auto *secondary_hostile = fixture.secondary_target;
 
 	result.slow_spell_id = FindPreparedSingleTargetSlowSpell(bot, current_target);
 	if (!result.slow_spell_id) {
 		result.reason = "single_target_slow_spell_unavailable";
-		result.owner = ScenarioEntityFor(owner);
-		result.bot = ScenarioEntityFor(bot);
-		result.current_target = ScenarioEntityFor(current_target);
-		result.secondary_hostile = ScenarioEntityFor(secondary_hostile);
+		result.owner = DescribeMobEntity(owner);
+		result.bot = DescribeMobEntity(bot);
+		result.current_target = DescribeMobEntity(current_target);
+		result.secondary_hostile = DescribeMobEntity(secondary_hostile);
 		result.runtime = RuntimeLocked();
+		fixture.Cleanup();
 		return result;
 	}
 
@@ -394,15 +457,15 @@ BotSlowMaintenanceScenarioResult ZoneHarnessRuntime::RunBotSlowMaintenanceScenar
 	else if (scenario == BotSlowMaintenanceScenarioKind::Mezzed) {
 		current_target->Mesmerize();
 		result.mezzed_hostile_mezzed = current_target->IsMezzed();
-		result.mezzed_hostile = ScenarioEntityFor(current_target);
+		result.mezzed_hostile = DescribeMobEntity(current_target);
 		expected_target = secondary_hostile;
 	}
 
-	result.owner = ScenarioEntityFor(owner);
-	result.bot = ScenarioEntityFor(bot);
-	result.current_target = ScenarioEntityFor(current_target);
-	result.expected_target = ScenarioEntityFor(expected_target);
-	result.secondary_hostile = ScenarioEntityFor(secondary_hostile);
+	result.owner = DescribeMobEntity(owner);
+	result.bot = DescribeMobEntity(bot);
+	result.current_target = DescribeMobEntity(current_target);
+	result.expected_target = DescribeMobEntity(expected_target);
+	result.secondary_hostile = DescribeMobEntity(secondary_hostile);
 
 	const uint64_t since_event_id = events.MaxEventID();
 	const uint16_t bot_id = bot->GetID();
@@ -451,6 +514,144 @@ BotSlowMaintenanceScenarioResult ZoneHarnessRuntime::RunBotSlowMaintenanceScenar
 		result.events = events.Since(since_event_id, 100);
 	}
 	result.runtime = RuntimeLocked();
+	fixture.Cleanup();
+	return result;
+}
+
+AutonomousActorLoopScenarioResult ZoneHarnessRuntime::RunAutonomousActorLoop(uint32_t tick_budget, uint32_t sleep_ms)
+{
+	std::lock_guard scenario_lock(scenario_mutex);
+	std::unique_lock lock(mutex);
+
+	AutonomousActorLoopScenarioResult result{
+		.reason = "not_run",
+		.persistent_actor = false,
+		.tick_budget = std::clamp<uint32_t>(tick_budget, 1, 1000),
+	};
+
+	if (!booted || !zone || !is_zone_loaded) {
+		result.reason = "zone_not_booted";
+		result.runtime = RuntimeLocked();
+		return result;
+	}
+
+	OwnedBotActorFixture fixture;
+	if (!fixture.Create({
+		.owner_name = "HarnessActorOwner",
+		.actor_name = "HarnessActorBot",
+		.primary_target_name = "HarnessActorPrimaryTarget",
+		.secondary_target_name = "HarnessActorSecondaryTarget",
+	})) {
+		result.reason = fixture.failure_reason;
+		result.runtime = RuntimeLocked();
+		return result;
+	}
+
+	result.database_mutation = fixture.database_mutation;
+	result.owner = DescribeMobEntity(fixture.owner);
+	result.actor = DescribeMobEntity(fixture.actor);
+	result.target = DescribeMobEntity(fixture.primary_target);
+	result.event_cursor_start = events.MaxEventID();
+
+	ScopedRuleOverride dialogue_window_rule("Chat:QuestDialogueUsesDialogueWindow", "false");
+	ScopedRuleOverride saylink_rule("Chat:AutoInjectSaylinksToSay", "false");
+
+	AutonomousActorActionQueue action_queue;
+	if (!action_queue.EnqueueTarget(fixture.primary_target->GetCleanName()) ||
+		!action_queue.EnqueueSay("Harness autonomous actor ready.")) {
+		result.reason = "autonomous_actor_action_queue_full";
+		result.runtime = RuntimeLocked();
+		fixture.Cleanup();
+		return result;
+	}
+	result.actions = action_queue.Actions();
+
+	const uint16_t actor_id = fixture.actor->GetID();
+	const uint16_t target_id = fixture.primary_target->GetID();
+	const auto started = std::chrono::steady_clock::now();
+	const uint32_t bounded_sleep_ms = std::min<uint32_t>(sleep_ms, 250);
+
+	for (uint32_t tick = 0; tick < result.tick_budget; ++tick) {
+		if (!booted || !zone || !is_zone_loaded || shutdown_requested) {
+			result.reason = "zone_unavailable_during_scenario";
+			break;
+		}
+
+		if (action_queue.HasPending()) {
+			for (auto &action: result.actions) {
+				if (!action.accepted && action.reason.empty()) {
+					action_queue.ExecuteNext(fixture.actor, fixture.primary_target, action);
+					break;
+				}
+			}
+		}
+
+		ProcessOneTick();
+		++process_ticks;
+		++result.ticks_processed;
+
+		result.events = events.Since(result.event_cursor_start, 100);
+		for (auto &action: result.actions) {
+			if (action.kind == "target" && !action.observed) {
+				action.observed = HasTargetChangedEvent(result.events, actor_id, target_id);
+				if (action.observed) {
+					action.reason = "observed_target_changed";
+				}
+			}
+			else if (action.kind == "say" && !action.observed) {
+				action.observed = HasSpeechEvent(result.events, actor_id, action.detail);
+				if (action.observed) {
+					action.reason = "observed_speech_emitted";
+				}
+			}
+		}
+
+		result.completed = std::all_of(
+			result.actions.begin(),
+			result.actions.end(),
+			[](const AutonomousActorActionResult &action) {
+				return action.accepted && action.observed;
+			}
+		);
+		if (result.completed) {
+			result.reason = "observed_bounded_target_and_say_actions";
+			break;
+		}
+
+		if (bounded_sleep_ms > 0) {
+			lock.unlock();
+			std::this_thread::sleep_for(std::chrono::milliseconds(bounded_sleep_ms));
+			lock.lock();
+		}
+	}
+
+	result.event_cursor_end = events.MaxEventID();
+	result.status = StatusFor(fixture.actor, fixture.owner);
+	result.perception = snapshots.PerceptionFor(fixture.actor, fixture.owner);
+	result.runtime = RuntimeLocked();
+	if (!result.completed && result.reason == "not_run") {
+		result.reason = "autonomous_actor_actions_not_observed_within_bounds";
+	}
+	if (!result.completed) {
+		const auto event_count = result.events.size();
+		const auto last_action = std::find_if(
+			result.actions.begin(),
+			result.actions.end(),
+			[](const AutonomousActorActionResult &action) {
+				return !(action.accepted && action.observed);
+			}
+		);
+		result.failure_output =
+			"actor=" + result.actor.name +
+			" owner=" + result.owner.name +
+			" action=" + (last_action != result.actions.end() ? last_action->kind : "unknown") +
+			" tick_budget=" + std::to_string(result.tick_budget) +
+			" observed_events=" + std::to_string(event_count) +
+			" persistence=" + (result.persistent_actor ? "persistent" : "ephemeral") +
+			" database_mutation=" + result.database_mutation;
+	}
+
+	fixture.Cleanup();
 	return result;
 }
 

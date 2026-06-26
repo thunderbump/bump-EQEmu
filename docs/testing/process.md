@@ -369,6 +369,10 @@ the same container, and checks:
   **Engaged Hostile** after the current target is already slowed.
 - `POST /api/v1/harness/scenarios/bot-slow-maintenance/mezzed` proves the bot skips a mezzed hostile and slows
   another eligible hostile.
+- `POST /api/v1/harness/scenarios/autonomous-actor-loop` proves one owned spawned bot can act as a bounded
+  **Autonomous Actor** harness primitive by enqueueing target and say actions, processing a small tick budget,
+  observing actor-scoped perception, and verifying cursor-based `target_changed` and `speech_emitted`
+  **Actor Events** without default persistent DB mutation.
 - `POST /api/v1/harness/shutdown` requests clean shutdown.
 
 Expected validation result: the wrapper exits `0` with no scenario payload printed. On failure it prints either
@@ -399,6 +403,13 @@ Their primary pass condition is that a normal `spell_cast_started` Actor Event i
 current target. The fallback scenario expects another unslowed engaged hostile after the current target is already
 slowed. The mezzed scenario expects the mezzed hostile to remain untargeted while a different eligible hostile is
 slowed.
+
+The autonomous actor loop harness scenario is intentionally narrower. It uses the same non-persistent owned-bot
+fixture to prove a first perception-action-event loop: enqueue bounded target and say actions for one owned bot,
+process a small tick budget through normal zone processing, read cursor-bounded `Actor Events`, and observe the
+actor's current target and nearby entities through actor-scoped perception. The failure payload should identify
+the actor, owner, pending action, tick budget, observed event count, and persistence/database-mutation
+classification.
 
 For AFK agents, use `./scripts/smoke-zone-harness.sh` after Tier 1 when a task touches harness-covered runtime
 gameplay. If a validation wrapper is requested, wire it to this smoke script rather than duplicating the long

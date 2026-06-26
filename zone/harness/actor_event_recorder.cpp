@@ -49,6 +49,15 @@ std::string MobKind(Mob *mob)
 	return "mob";
 }
 
+std::string TruncateText(const std::string &text, size_t max_length)
+{
+	if (text.size() <= max_length) {
+		return text;
+	}
+
+	return text.substr(0, max_length);
+}
+
 ActorEventEntity EntityFor(Mob *mob)
 {
 	if (!mob) {
@@ -143,6 +152,11 @@ std::string CastingSlotName(uint32_t slot)
 
 }
 
+ActorEventEntity DescribeMobEntity(Mob *mob)
+{
+	return EntityFor(mob);
+}
+
 void ActorEventRecorder::RegisterActiveRecorder(ActorEventRecorder *recorder)
 {
 	std::lock_guard lock(active_recorder_mutex);
@@ -172,6 +186,27 @@ void ActorEventRecorder::ObserveSpellCastStarted(
 	}
 }
 
+void ActorEventRecorder::ObserveTargetChanged(Mob *actor, Mob *previous_target, Mob *target)
+{
+	std::lock_guard lock(active_recorder_mutex);
+	if (active_recorder) {
+		active_recorder->RecordTargetChanged(actor, previous_target, target);
+	}
+}
+
+void ActorEventRecorder::ObserveSpeechEmitted(
+	Mob *actor,
+	const std::string &channel,
+	const std::string &text,
+	uint32_t audible_radius
+)
+{
+	std::lock_guard lock(active_recorder_mutex);
+	if (active_recorder) {
+		active_recorder->RecordSpeechEmitted(actor, channel, text, audible_radius);
+	}
+}
+
 void ActorEventRecorder::Record(const std::string &type, const std::string &message)
 {
 	std::lock_guard lock(state_mutex);
@@ -182,6 +217,58 @@ void ActorEventRecorder::Record(const std::string &type, const std::string &mess
 		.message = message,
 	});
 
+	if (events.size() > max_events) {
+		events.erase(events.begin(), events.begin() + static_cast<std::ptrdiff_t>(events.size() - max_events));
+	}
+}
+
+void ActorEventRecorder::RecordTargetChanged(Mob *actor, Mob *previous_target, Mob *target)
+{
+	std::lock_guard lock(state_mutex);
+	ActorEvent event{
+		.id = next_sequence++,
+		.time_ms = ::Timer::GetCurrentTime(),
+		.type = "target_changed",
+		.message = target ? "target_set" : "target_cleared",
+		.caster = EntityFor(actor),
+	};
+
+	if (previous_target) {
+		event.previous_target = EntityFor(previous_target);
+	}
+
+	if (target) {
+		event.target = EntityFor(target);
+	}
+
+	events.push_back(event);
+	if (events.size() > max_events) {
+		events.erase(events.begin(), events.begin() + static_cast<std::ptrdiff_t>(events.size() - max_events));
+	}
+}
+
+void ActorEventRecorder::RecordSpeechEmitted(
+	Mob *actor,
+	const std::string &channel,
+	const std::string &text,
+	uint32_t audible_radius
+)
+{
+	std::lock_guard lock(state_mutex);
+	ActorEvent event{
+		.id = next_sequence++,
+		.time_ms = ::Timer::GetCurrentTime(),
+		.type = "speech_emitted",
+		.message = TruncateText(text, 160),
+		.caster = EntityFor(actor),
+		.speech = {
+			.channel = channel,
+			.text = TruncateText(text, 160),
+			.audible_radius = audible_radius,
+		},
+	};
+
+	events.push_back(event);
 	if (events.size() > max_events) {
 		events.erase(events.begin(), events.begin() + static_cast<std::ptrdiff_t>(events.size() - max_events));
 	}
