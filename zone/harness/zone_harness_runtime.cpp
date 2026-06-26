@@ -376,6 +376,66 @@ SpellCastStartScenarioResult ZoneHarnessRuntime::StartKnownSpellCast(uint16_t sp
 	};
 }
 
+HeadlessClientTargetScenarioResult ZoneHarnessRuntime::RunHeadlessClientTarget()
+{
+	std::lock_guard scenario_lock(scenario_mutex);
+	std::lock_guard lock(mutex);
+
+	HeadlessClientTargetScenarioResult result{
+		.reason = "not_run",
+		.database_mutation = "none: synthetic headless client and NPC target are in-memory only",
+	};
+
+	if (!booted || !zone || !is_zone_loaded) {
+		result.reason = "zone_not_booted";
+		result.runtime = RuntimeLocked();
+		return result;
+	}
+
+	auto *target_type = content_db.LoadNPCTypesData(754008);
+	if (!target_type) {
+		result.reason = "npc_type_unavailable";
+		result.runtime = RuntimeLocked();
+		return result;
+	}
+
+	auto *actor = new Client();
+	actor->TempName("HarnessHeadlessClient");
+	actor->Mob::SetLevel(60);
+	actor->SetHP(10000);
+	actor->SetMana(10000);
+	actor->GMMove(0.0f, 0.0f, 0.0f, 0.0f);
+	entity_list.AddClient(actor);
+	result.eqstream_backed = actor->Connection() != nullptr;
+	result.completed_connect = actor->Connected();
+
+	auto *target = new NPC(target_type, nullptr, glm::vec4(12, 0, 0, 0), GravityBehavior::Water);
+	target->TempName("HarnessHeadlessClientTarget");
+	entity_list.AddNPC(target, false, true);
+
+	result.actor = DescribeMobEntity(actor);
+	result.target = DescribeMobEntity(target);
+	const uint16_t actor_id = actor->GetID();
+	const uint16_t target_id = target->GetID();
+	result.event_cursor_start = events.MaxEventID();
+
+	actor->SetTarget(target);
+
+	result.completed = actor->GetTarget() == target;
+
+	actor->SetTarget(nullptr);
+	entity_list.RemoveMob(target_id);
+	entity_list.RemoveMob(actor_id);
+	result.events = events.Since(result.event_cursor_start, 10);
+	result.observed = HasTargetChangedEvent(result.events, actor_id, target_id);
+	result.event_cursor_end = events.MaxEventID();
+	result.reason = result.completed && result.observed ?
+		"observed_headless_client_target_changed_without_eqstream" :
+		(result.completed ? "target_set_without_observed_event" : "target_not_set");
+	result.runtime = RuntimeLocked();
+	return result;
+}
+
 BotSlowMaintenanceScenarioResult ZoneHarnessRuntime::RunBotSlowMaintenanceCurrentTarget(uint32_t max_ticks, uint32_t sleep_ms)
 {
 	return RunBotSlowMaintenanceScenario(BotSlowMaintenanceScenarioKind::CurrentTarget, max_ticks, sleep_ms);

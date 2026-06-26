@@ -195,6 +195,30 @@ nlohmann::json ToJson(const SpellCastStartScenarioResult &result)
 	};
 }
 
+nlohmann::json ToJson(const HeadlessClientTargetScenarioResult &result)
+{
+	nlohmann::json events = nlohmann::json::array();
+	for (const auto &event: result.events) {
+		events.push_back(ToJson(event));
+	}
+
+	return {
+		{"completed", result.completed},
+		{"observed", result.observed},
+		{"reason", result.reason},
+		{"action", result.action},
+		{"database_mutation", result.database_mutation},
+		{"eqstream_backed", result.eqstream_backed},
+		{"completed_connect", result.completed_connect},
+		{"event_cursor_start", result.event_cursor_start},
+		{"event_cursor_end", result.event_cursor_end},
+		{"actor", ToJson(result.actor)},
+		{"target", ToJson(result.target)},
+		{"events", events},
+		{"runtime", ToJson(result.runtime)},
+	};
+}
+
 nlohmann::json ToJson(const BotSlowMaintenanceScenarioResult &result)
 {
 	nlohmann::json events = nlohmann::json::array();
@@ -463,6 +487,10 @@ bool ServeHttp(const HttpServerOptions &options)
 
 	api.Post("/api/v1/harness/scenarios/spell-cast-start", [&runtime](const auto &req, auto &res) {
 		SetJson(res, ToJson(runtime.StartKnownSpellCast(ParseSpellID(req))));
+	});
+
+	api.Post("/api/v1/harness/scenarios/headless-client/target", [&runtime](const auto &, auto &res) {
+		SetJson(res, ToJson(runtime.RunHeadlessClientTarget()));
 	});
 
 	api.Post("/api/v1/harness/scenarios/bot-slow-maintenance/current-target", [&runtime](const auto &, auto &res) {
