@@ -7271,6 +7271,34 @@ ALTER TABLE `actor_status`
 )",
 		.content_schema_update = false
 	},
+	ManifestEntry{
+		.version = 9332,
+		.description = "2026_06_27_actor_events.sql",
+		.check = "SHOW TABLES LIKE 'actor_events'",
+		.condition = "empty",
+		.match = "",
+		.sql = R"(
+CREATE TABLE `actor_events` (
+	`event_id` BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+	`actor_id` INT(10) UNSIGNED NOT NULL,
+	`bot_id` INT(10) UNSIGNED NULL DEFAULT NULL,
+	`owner_character_id` INT(10) UNSIGNED NULL DEFAULT NULL,
+	`zone_id` INT(10) UNSIGNED NULL DEFAULT NULL,
+	`instance_id` INT(10) UNSIGNED NULL DEFAULT NULL,
+	`entity_id` INT(10) UNSIGNED NULL DEFAULT NULL,
+	`event_type` VARCHAR(64) NOT NULL COLLATE 'utf8mb4_general_ci',
+	`event_json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL CHECK (json_valid(`event_json`) AND char_length(`event_json`) <= 16384),
+	`created_at` DATETIME NOT NULL,
+	PRIMARY KEY (`event_id`) USING BTREE,
+	INDEX `idx_actor_events_actor_cursor` (`actor_id`, `event_id`) USING BTREE,
+	INDEX `idx_actor_events_zone_created` (`zone_id`, `instance_id`, `created_at`) USING BTREE
+)
+COLLATE='utf8mb4_general_ci'
+ENGINE=InnoDB
+AUTO_INCREMENT=1;
+)",
+		.content_schema_update = false
+	},
 // -- template; copy/paste this when you need to create a new entry
 //	ManifestEntry{
 //		.version = 9228,
