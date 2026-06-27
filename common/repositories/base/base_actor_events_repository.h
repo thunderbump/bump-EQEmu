@@ -237,6 +237,43 @@ public:
 		return NewEntity();
 	}
 
+	static int InsertMany(
+		Database& db,
+		const std::vector<ActorEvents> &entries
+	)
+	{
+		std::vector<std::string> insert_chunks;
+
+		for (auto &e: entries) {
+			std::vector<std::string> v;
+
+			v.push_back(std::to_string(e.event_id));
+			v.push_back(std::to_string(e.actor_id));
+			v.push_back(NullableUintSql(e.bot_id));
+			v.push_back(NullableUintSql(e.owner_character_id));
+			v.push_back(NullableUintSql(e.zone_id));
+			v.push_back(NullableUintSql(e.instance_id));
+			v.push_back(NullableUintSql(e.entity_id));
+			v.push_back("'" + Strings::Escape(e.event_type) + "'");
+			v.push_back("'" + Strings::Escape(e.event_json) + "'");
+			v.push_back("FROM_UNIXTIME(" + (e.created_at > 0 ? std::to_string(e.created_at) : "null") + ")");
+
+			insert_chunks.push_back("(" + Strings::Implode(",", v) + ")");
+		}
+
+		std::vector<std::string> v;
+
+		auto results = db.QueryDatabase(
+			fmt::format(
+				"{} VALUES {}",
+				BaseInsert(),
+				Strings::Implode(",", insert_chunks)
+			)
+		);
+
+		return (results.Success() ? results.RowsAffected() : 0);
+	}
+
 	static std::vector<ActorEvents> All(Database &db)
 	{
 		std::vector<ActorEvents> all_entries;

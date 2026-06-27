@@ -66,6 +66,7 @@ bool ZoneHarnessRuntime::Boot(const std::string &zone_short_name, uint32_t insta
 	booted = true;
 	shutdown_requested = false;
 	process_ticks = 0;
+	events.SetPersistenceSink(&actor_event_persistence_sink);
 	ActorEventRecorder::RegisterActiveRecorder(&events);
 	return true;
 }
@@ -1311,6 +1312,7 @@ void ZoneHarnessRuntime::Shutdown()
 	std::lock_guard lock(mutex);
 	shutdown_requested = true;
 	ActorEventRecorder::ClearActiveRecorder(&events);
+	events.SetPersistenceSink(nullptr);
 	StopAutonomousActorPrototypeSessionLocked();
 
 	entity_list.Clear();

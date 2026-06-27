@@ -82,6 +82,7 @@ public:
 
 	// Zone Harness setup/reset shortcuts.
 	bool Create(const OwnedBotActorFixtureNames &names);
+	bool SetUpOwnedBotSolo(const OwnedBotActorConfig &config = {});
 	bool SetUpOwnedBotGroup(const OwnedBotActorConfig &config = {});
 	bool SetUpOwnedBotParty(const OwnedBotPartyConfig &config = {});
 	NPC *AddHostileNPC(const HostileNpcConfig &config);
@@ -92,6 +93,7 @@ public:
 	void RefreshOwnedBotPerception();
 	void RefreshPerception(Bot *bot);
 	void RefreshPartyPerception();
+	void AssignBotID(Bot *bot, uint32_t bot_id);
 	bool RemoveMob(Mob *mob);
 	void Reset();
 	void Cleanup() { Reset(); }

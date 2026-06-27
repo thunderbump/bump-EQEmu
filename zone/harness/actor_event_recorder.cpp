@@ -9,6 +9,7 @@
 */
 
 #include "actor_event_recorder.h"
+#include "actor_event_persistence_sink.h"
 
 #include "common/spdat.h"
 #include "common/timer.h"
@@ -180,17 +181,27 @@ void ActorEventRecorder::ObserveSpellCastStarted(
 	int32_t original_cast_time_ms
 )
 {
-	std::lock_guard lock(active_recorder_mutex);
-	if (active_recorder) {
-		active_recorder->RecordSpellCastStarted(caster, target, spell_id, slot, cast_time_ms, original_cast_time_ms);
+	ActorEventRecorder *recorder = nullptr;
+	{
+		std::lock_guard lock(active_recorder_mutex);
+		recorder = active_recorder;
+	}
+
+	if (recorder) {
+		recorder->RecordSpellCastStarted(caster, target, spell_id, slot, cast_time_ms, original_cast_time_ms);
 	}
 }
 
 void ActorEventRecorder::ObserveTargetChanged(Mob *actor, Mob *previous_target, Mob *target)
 {
-	std::lock_guard lock(active_recorder_mutex);
-	if (active_recorder) {
-		active_recorder->RecordTargetChanged(actor, previous_target, target);
+	ActorEventRecorder *recorder = nullptr;
+	{
+		std::lock_guard lock(active_recorder_mutex);
+		recorder = active_recorder;
+	}
+
+	if (recorder) {
+		recorder->RecordTargetChanged(actor, previous_target, target);
 	}
 }
 
@@ -201,10 +212,21 @@ void ActorEventRecorder::ObserveSpeechEmitted(
 	uint32_t audible_radius
 )
 {
-	std::lock_guard lock(active_recorder_mutex);
-	if (active_recorder) {
-		active_recorder->RecordSpeechEmitted(actor, channel, text, audible_radius);
+	ActorEventRecorder *recorder = nullptr;
+	{
+		std::lock_guard lock(active_recorder_mutex);
+		recorder = active_recorder;
 	}
+
+	if (recorder) {
+		recorder->RecordSpeechEmitted(actor, channel, text, audible_radius);
+	}
+}
+
+void ActorEventRecorder::SetPersistenceSink(ActorEventPersistenceSink *sink)
+{
+	std::lock_guard lock(state_mutex);
+	persistence_sink = sink;
 }
 
 void ActorEventRecorder::Record(const std::string &type, const std::string &message)
@@ -254,9 +276,7 @@ void ActorEventRecorder::RecordSpeechEmitted(
 	uint32_t audible_radius
 )
 {
-	std::lock_guard lock(state_mutex);
 	ActorEvent event{
-		.id = next_sequence++,
 		.time_ms = ::Timer::GetCurrentTime(),
 		.type = "speech_emitted",
 		.message = TruncateText(text, 160),
@@ -268,9 +288,19 @@ void ActorEventRecorder::RecordSpeechEmitted(
 		},
 	};
 
-	events.push_back(event);
-	if (events.size() > max_events) {
-		events.erase(events.begin(), events.begin() + static_cast<std::ptrdiff_t>(events.size() - max_events));
+	ActorEventPersistenceSink *sink = nullptr;
+	{
+		std::lock_guard lock(state_mutex);
+		event.id = next_sequence++;
+		events.push_back(event);
+		if (events.size() > max_events) {
+			events.erase(events.begin(), events.begin() + static_cast<std::ptrdiff_t>(events.size() - max_events));
+		}
+		sink = persistence_sink;
+	}
+
+	if (sink) {
+		sink->PersistSpeechEmitted(actor, event);
 	}
 }
 

@@ -22,6 +22,7 @@
 #include "common/repositories/actor_events_repository.h"
 #include "common/repositories/actor_profiles_repository.h"
 #include "common/repositories/player_event_logs_repository.h"
+#include "common/strings.h"
 #include "world/worlddb.h"
 
 #include <chrono>
@@ -85,6 +86,22 @@ Json::Value ParseJson(const std::string &document)
 
 	Expect(ok, "actor event payload should be valid JSON: " + errors);
 	return root;
+}
+
+int64_t CountPlayerEventLogRowsWithMarker(Database &database, const std::string &marker)
+{
+	auto results = database.QueryDatabase(
+		fmt::format(
+			"SELECT COUNT(*) FROM player_event_logs WHERE event_data LIKE '%{}%'",
+			Strings::Escape(marker)
+		)
+	);
+
+	if (!results.Success() || results.RowCount() != 1 || !results.begin()[0]) {
+		return -1;
+	}
+
+	return strtoll(results.begin()[0], nullptr, 10);
 }
 
 class ActorEventPersistenceCleanup {
@@ -257,10 +274,18 @@ void WorldserverCLI::TestActorEvents(int argc, char **argv, argh::parser &cmd, s
 		ExpectEqual(actor_a_limited[0].event_id, first_event.event_id, "limited cursor should return the earliest matching actor event first");
 		ExpectEqual(actor_a_limited[1].event_id, second_event.event_id, "limited cursor should stop at the requested boundary");
 
+		const auto actor_a_zero_limit = ActorEventsRepository::ReadCursor(database, actor_a.actor_id, 0, 0);
+		ExpectEqual(actor_a_zero_limit.size(), static_cast<size_t>(0), "actor cursor limit=0 should return an empty page");
+
 		const auto actor_a_after_second = ActorEventsRepository::ReadCursor(database, actor_a.actor_id, second_event.event_id, 10);
 		ExpectEqual(actor_a_after_second.size(), static_cast<size_t>(1), "actor cursor should resume after a prior event_id");
 		ExpectEqual(actor_a_after_second[0].event_id, fourth_event.event_id, "actor cursor should resume from the next actor-scoped event");
 
+		ExpectEqual(
+			CountPlayerEventLogRowsWithMarker(database, fmt::format("actor-events-{}", run_nonce)),
+			int64_t(0),
+			"persisting actor events should not write marker rows to player_event_logs"
+		);
 		ExpectEqual(
 			PlayerEventLogsRepository::Count(database),
 			player_event_log_count_before,

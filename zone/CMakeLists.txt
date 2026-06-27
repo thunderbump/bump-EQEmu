@@ -20,6 +20,7 @@ set(zone_sources
     cheat_manager.cpp
     cli/cli_benchmark_databuckets.cpp
     cli/cli_sidecar_serve_http.cpp
+    cli/tests/cli_actor_events.cpp
     cli/tests/cli_databuckets.cpp
     cli/tests/cli_npc_handins.cpp
     cli/tests/cli_npc_handins_multiquest.cpp
@@ -53,6 +54,7 @@ set(zone_sources
     groups.cpp
     guild.cpp
     guild_mgr.cpp
+    harness/actor_event_persistence_sink.cpp
     harness/actor_event_recorder.cpp
     harness/harness_snapshot_service.cpp
     harness/owned_bot_actor_fixture.cpp

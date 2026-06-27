@@ -38,6 +38,10 @@ constexpr uint32 MAG_EPIC_1_0 = 28034;
 
 extern WorldServer worldserver;
 
+namespace EQ::ZoneHarness {
+	class OwnedBotActorFixture;
+}
+
 namespace RegularHealEfficiency {
 	struct Settings;
 }
@@ -1262,6 +1266,7 @@ private:
 	int32 GenerateBaseHitPoints();
 	int32 GenerateBaseManaPoints();
 	void GenerateSpecialAttacks();
+	friend class EQ::ZoneHarness::OwnedBotActorFixture;
 	void SetBotID(uint32 botID);
 	void SetCombatRoundForAlerts(bool flag = true) { m_combat_round_alert_flag = flag; }
 	void SetAttackingFlag(bool flag = true) { m_attacking_flag = flag; }

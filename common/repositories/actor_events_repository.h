@@ -69,6 +69,10 @@ public:
 
 	static std::vector<ActorEventRecord> ReadCursor(Database &db, uint32_t actor_id, uint64_t after_event_id, size_t limit)
 	{
+		if (limit == 0) {
+			return {};
+		}
+
 		const auto bounded_limit = std::clamp<size_t>(limit, 1, 1000);
 		auto results = db.QueryDatabase(
 			fmt::format(

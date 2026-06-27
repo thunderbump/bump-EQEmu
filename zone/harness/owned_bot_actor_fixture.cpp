@@ -90,6 +90,31 @@ bool OwnedBotActorFixture::Create(const OwnedBotActorFixtureNames &names)
 	return true;
 }
 
+bool OwnedBotActorFixture::SetUpOwnedBotSolo(const OwnedBotActorConfig &config)
+{
+	Reset();
+
+	owner = new Client();
+	owner->TempName(config.owner_name.c_str());
+	owner->Mob::SetLevel(config.level);
+	owner->SetHP(10000);
+	owner->SetMana(10000);
+	owner->GMMove(0.0f, 0.0f, 0.0f, 0.0f);
+	entity_list.AddClient(owner);
+	RememberMob(owner);
+
+	bot = CreateOwnedBot(config);
+	if (!bot) {
+		failure_reason = "bot_spell_list_unavailable";
+		Reset();
+		return false;
+	}
+	actor = bot;
+
+	bot->GMMove(2.0f, 0.0f, 0.0f, 0.0f);
+	return true;
+}
+
 Bot *OwnedBotActorFixture::CreateOwnedBot(const OwnedBotActorConfig &config)
 {
 	auto *bot_type = Bot::CreateDefaultNPCTypeStructForBot(
@@ -349,6 +374,13 @@ void OwnedBotActorFixture::RefreshPartyPerception()
 	RefreshOwnedBotPerception();
 	for (auto *follower : followers) {
 		RefreshPerception(follower);
+	}
+}
+
+void OwnedBotActorFixture::AssignBotID(Bot *assigned_bot, uint32_t bot_id)
+{
+	if (assigned_bot && bot_id > 0) {
+		assigned_bot->SetBotID(bot_id);
 	}
 }
 
