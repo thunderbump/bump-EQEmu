@@ -247,6 +247,52 @@ nlohmann::json ToJson(const BotSlowMaintenanceScenarioResult &result)
 	};
 }
 
+nlohmann::json ToJson(const ActorLedBotPartyScenarioResult &result)
+{
+	nlohmann::json followers = nlohmann::json::array();
+	for (const auto &follower : result.followers) {
+		followers.push_back(ToJson(follower));
+	}
+
+	nlohmann::json owner_target_events = nlohmann::json::array();
+	for (const auto &event : result.owner_target_events) {
+		owner_target_events.push_back(ToJson(event));
+	}
+
+	nlohmann::json actor_target_events = nlohmann::json::array();
+	for (const auto &event : result.actor_target_events) {
+		actor_target_events.push_back(ToJson(event));
+	}
+
+	return {
+		{"proved", result.proved},
+		{"reason", result.reason},
+		{"follower_count_requested", result.follower_count_requested},
+		{"follower_count_created", result.follower_count_created},
+		{"ticks_processed", result.ticks_processed},
+		{"elapsed_ms", result.elapsed_ms},
+		{"database_mutation", result.database_mutation},
+		{"owner", ToJson(result.owner)},
+		{"group_leader", ToJson(result.group_leader)},
+		{"actor_leader", ToJson(result.actor_leader)},
+		{"followers", followers},
+		{"all_bots_share_owner", result.all_bots_share_owner},
+		{"group_leader_change_to_actor_rejected", result.group_leader_change_to_actor_rejected},
+		{"followers_follow_actor_leader", result.followers_follow_actor_leader},
+		{"owner_target_command_observed", result.owner_target_command_observed},
+		{"actor_target_command_blocked", result.actor_target_command_blocked},
+		{"owner_nearby_control_kept_combat_target", result.owner_nearby_control_kept_combat_target},
+		{"owner_leash_blocks_actor_led_combat", result.owner_leash_blocks_actor_led_combat},
+		{"slow_spell_id", result.slow_spell_id},
+		{"owner_target_reason", result.owner_target_reason},
+		{"actor_target_reason", result.actor_target_reason},
+		{"leash_reason", result.leash_reason},
+		{"owner_target_events", owner_target_events},
+		{"actor_target_events", actor_target_events},
+		{"runtime", ToJson(result.runtime)},
+	};
+}
+
 nlohmann::json ToJson(const PerceivedEntitySnapshot &snapshot)
 {
 	return {
@@ -428,6 +474,29 @@ uint16_t ParseSpellID(const httplib::Request &req)
 	return 200;
 }
 
+uint8_t ParseFollowerCount(const httplib::Request &req)
+{
+	if (req.has_param("follower_count")) {
+		return static_cast<uint8_t>(Strings::ToUnsignedInt(req.get_param_value("follower_count")));
+	}
+
+	if (req.body.empty()) {
+		return 3;
+	}
+
+	try {
+		const auto payload = nlohmann::json::parse(req.body);
+		if (payload.contains("follower_count") && payload["follower_count"].is_number()) {
+			return payload["follower_count"].get<uint8_t>();
+		}
+	}
+	catch (const std::exception &) {
+		return 3;
+	}
+
+	return 3;
+}
+
 std::string ParseActionStringField(const httplib::Request &req, const std::string &field_name)
 {
 	if (req.has_param(field_name)) {
@@ -482,6 +551,7 @@ bool ServeHttp(const HttpServerOptions &options)
 	std::mutex finished_mutex;
 	std::condition_variable finished_cv;
 	bool finished = false;
+	bool stop_requested = false;
 
 	api.set_pre_routing_handler(
 		[&options](const auto &req, auto &res) {
@@ -567,6 +637,10 @@ bool ServeHttp(const HttpServerOptions &options)
 		SetJson(res, ToJson(runtime.RunBotSlowMaintenanceMezzed()));
 	});
 
+	api.Post("/api/v1/harness/scenarios/actor-led-bot-party", [&runtime](const auto &req, auto &res) {
+		SetJson(res, ToJson(runtime.RunActorLedBotPartyProof(ParseFollowerCount(req))));
+	});
+
 	api.Post("/api/v1/harness/scenarios/autonomous-actor-loop", [&runtime](const auto &, auto &res) {
 		SetJson(res, ToJson(runtime.RunAutonomousActorLoop()));
 	});
@@ -597,10 +671,23 @@ bool ServeHttp(const HttpServerOptions &options)
 		});
 	}
 
-	api.Post("/api/v1/harness/shutdown", [&runtime, &api](const auto &, auto &res) {
+	api.Post("/api/v1/harness/shutdown", [&runtime, &finished_mutex, &finished_cv, &stop_requested](const auto &, auto &res) {
 		runtime.RequestShutdown();
 		SetJson(res, {{"shutdown_requested", true}});
-		std::thread([&api]() { api.stop(); }).detach();
+		{
+			std::lock_guard lock(finished_mutex);
+			stop_requested = true;
+		}
+		finished_cv.notify_all();
+	});
+
+	std::thread stop_thread([&]() {
+		std::unique_lock lock(finished_mutex);
+		finished_cv.wait(lock, [&]() { return stop_requested || finished; });
+		if (stop_requested) {
+			lock.unlock();
+			api.stop();
+		}
 	});
 
 	std::thread watchdog;
@@ -628,6 +715,9 @@ bool ServeHttp(const HttpServerOptions &options)
 		finished = true;
 	}
 	finished_cv.notify_all();
+	if (stop_thread.joinable()) {
+		stop_thread.join();
+	}
 	if (watchdog.joinable()) {
 		watchdog.join();
 	}
