@@ -296,9 +296,10 @@ required_flags = [
     "group_leader_change_to_actor_rejected",
     "followers_follow_actor_leader",
     "owner_target_command_observed",
-    "actor_target_command_blocked",
+    "actor_target_command_observed",
     "owner_nearby_control_kept_combat_target",
-    "owner_leash_blocks_actor_led_combat",
+    "owner_leash_default_observed",
+    "actor_leash_source_kept_combat_target",
 ]
 for flag in required_flags:
     if payload.get(flag) is not True:
@@ -316,8 +317,9 @@ if payload.get("group_leader", {}).get("kind") != "client":
 owner_events = payload.get("owner_target_events") or []
 if not any(event.get("type") == "spell_cast_started" for event in owner_events):
     fail("owner target did not produce follower spell event evidence")
-if payload.get("actor_target_events"):
-    fail("actor target unexpectedly produced follower event evidence")
+actor_events = payload.get("actor_target_events") or []
+if not any(event.get("type") == "spell_cast_started" for event in actor_events):
+    fail("actor target did not produce follower spell event evidence")
 PY
 }
 

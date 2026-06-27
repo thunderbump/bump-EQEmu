@@ -2156,24 +2156,13 @@ void Bot::AI_Process()
 		return;
 	}
 
-	Client* leash_owner = bot_owner;
+	Mob* leash_owner = GetLeashSource(bot_owner, bot_group, raid, r_group);
 
 	if (!leash_owner) {
 		return;
 	}
 
-	Mob* follow_mob = nullptr;
-
-	if (!GetFollowID()) {
-		follow_mob = leash_owner;
-	}
-	else {
-		follow_mob = entity_list.GetMob(GetFollowID());
-
-		if (!follow_mob || !IsInGroupOrRaid(follow_mob)) {
-			follow_mob = leash_owner;
-		}
-	}
+	Mob* follow_mob = SetFollowMob(leash_owner);
 
 	SetFollowID(follow_mob->GetID());
 
@@ -3152,7 +3141,7 @@ CombatRangeOutput Bot::EvaluateCombatRange(const CombatRangeInput& input) {
 
 bool Bot::IsValidTarget(
 	Client* bot_owner,
-	Client* leash_owner,
+	Mob* leash_owner,
 	float lo_distance,
 	float leash_distance,
 	Mob* tar,
@@ -3467,10 +3456,20 @@ void Bot::SetBerserkState() {// Berserk updates should occur if primary AI crite
 	}
 }
 
-Mob* Bot::SetFollowMob(Client* leash_owner) {
+void Bot::SetCommandTargetSource(Mob* source)
+{
+	_commandTargetSourceID = source ? source->GetID() : 0;
+}
+
+void Bot::SetLeashSource(Mob* source)
+{
+	_leashSourceID = source ? source->GetID() : 0;
+}
+
+Mob* Bot::SetFollowMob(Mob* leash_owner) {
 	Mob* follow_mob = entity_list.GetMob(GetFollowID());
 
-	if (!follow_mob) {
+	if (!follow_mob || !IsInGroupOrRaid(follow_mob)) {
 		follow_mob = leash_owner;
 		SetFollowID(leash_owner->GetID());
 	}
@@ -3478,8 +3477,15 @@ Mob* Bot::SetFollowMob(Client* leash_owner) {
 	return follow_mob;
 }
 
-Client* Bot::SetLeashOwner(Client* bot_owner, Group* bot_group, Raid* raid, uint32 r_group) const {
-	Client* leash_owner = nullptr;
+Mob* Bot::GetLeashSource(Client* bot_owner, Group* bot_group, Raid* raid, uint32 r_group) {
+	if (_leashSourceID) {
+		auto* leash_source = entity_list.GetMob(_leashSourceID);
+		if (leash_source && leash_source->GetAppearance() != eaDead && leash_source->GetHP() >= 0 && IsInGroupOrRaid(leash_source)) {
+			return leash_source;
+		}
+	}
+
+	Mob* leash_owner = nullptr;
 
 	if (raid && r_group < MAX_RAID_GROUPS && raid->GetGroupLeader(r_group)) {
 		leash_owner =
@@ -3495,6 +3501,24 @@ Client* Bot::SetLeashOwner(Client* bot_owner, Group* bot_group, Raid* raid, uint
 	return leash_owner;
 }
 
+Mob* Bot::GetCommandTargetSource(Client* bot_owner)
+{
+	if (_commandTargetSourceID) {
+		auto* command_source = entity_list.GetMob(_commandTargetSourceID);
+		if (command_source && command_source->GetAppearance() != eaDead && command_source->GetHP() >= 0 && IsInGroupOrRaid(command_source)) {
+			return command_source;
+		}
+	}
+
+	return bot_owner;
+}
+
+Mob* Bot::GetCommandTarget(Client* bot_owner)
+{
+	auto* command_source = GetCommandTargetSource(bot_owner);
+	return command_source ? command_source->GetTarget() : nullptr;
+}
+
 void Bot::SetOwnerTarget(Client* bot_owner) {
 	if (GetPet() && (PULLING_BOT || RETURNING_BOT)) {
 		GetPet()->SetPetOrder(PetOrder::Follow);
@@ -3508,7 +3532,7 @@ void Bot::SetOwnerTarget(Client* bot_owner) {
 	bot_owner->SetBotPulling(false);
 
 	if (NOT_HOLDING && NOT_PASSIVE) {
-		auto attack_target = bot_owner->GetTarget();
+		auto attack_target = GetCommandTarget(bot_owner);
 
 		if (attack_target && HasBotAttackFlag(attack_target)) {
 			InterruptSpell();
@@ -3541,7 +3565,7 @@ void Bot::BotPullerProcess(Client* bot_owner, Raid* raid) {
 	}
 
 	if (NOT_HOLDING && NOT_PASSIVE) {
-		auto pull_target = bot_owner->GetTarget();
+		auto pull_target = GetCommandTarget(bot_owner);
 
 		if (pull_target) {
 			RaidGroupSay(

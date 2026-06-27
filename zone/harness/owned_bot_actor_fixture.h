@@ -99,6 +99,8 @@ public:
 	void OwnerTargets(Mob *target);
 	void BotTargets(Mob *target);
 	void BotTargets(Bot *actor, Mob *target);
+	void SetBotCommandTargetSource(Bot *actor, Mob *source);
+	void SetBotLeashSource(Bot *actor, Mob *source);
 	void SetBotFollowTarget(Bot *actor, Mob *target);
 	void SetFollowersFollowActorLeader();
 	void SetBotAttackFlag(Bot *actor, bool enabled = true);

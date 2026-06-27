@@ -397,6 +397,20 @@ void OwnedBotActorFixture::BotTargets(Bot *actor, Mob *target)
 	}
 }
 
+void OwnedBotActorFixture::SetBotCommandTargetSource(Bot *actor, Mob *source)
+{
+	if (actor) {
+		actor->SetCommandTargetSource(source);
+	}
+}
+
+void OwnedBotActorFixture::SetBotLeashSource(Bot *actor, Mob *source)
+{
+	if (actor) {
+		actor->SetLeashSource(source);
+	}
+}
+
 void OwnedBotActorFixture::SetBotFollowTarget(Bot *actor, Mob *target)
 {
 	if (actor && target) {

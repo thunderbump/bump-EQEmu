@@ -796,6 +796,10 @@ public:
 	uint32 GetBotOwnerCharacterID() const { return _botOwnerCharacterID; }
 	uint32 GetBotSpellID() const { return npc_spells_id; }
 	Mob* GetBotOwner() { return this->_botOwner; }
+	void SetCommandTargetSource(Mob* source);
+	void SetLeashSource(Mob* source);
+	void ClearCommandTargetSource() { _commandTargetSourceID = 0; }
+	void ClearLeashSource() { _leashSourceID = 0; }
 	uint32 GetBotRangedValue();
 	EQ::ItemInstance* GetBotItem(uint16 slot_id);
 	bool GetSpawnStatus() { return _spawnStatus; }
@@ -1073,14 +1077,16 @@ public:
 	bool CheckIfIncapacitated();
 	bool IsAIProcessValid(const Client* bot_owner, const Group* bot_group, const Raid* raid);
 
-	Client* SetLeashOwner(Client* bot_owner, Group* bot_group, Raid* raid, uint32 r_group) const;
-	Mob* SetFollowMob(Client* leash_owner);
+	Mob* GetLeashSource(Client* bot_owner, Group* bot_group, Raid* raid, uint32 r_group);
+	Mob* SetFollowMob(Mob* leash_source);
 
 	Mob* GetBotTarget(Client* bot_owner);
+	Mob* GetCommandTarget(Client* bot_owner);
+	Mob* GetCommandTargetSource(Client* bot_owner);
 	void SetOwnerTarget(Client* bot_owner);
 	bool IsValidTarget(
 		Client* bot_owner,
-		Client* leash_owner,
+		Mob* leash_source,
 		float lo_distance,
 		float leash_distance,
 		Mob* tar,
@@ -1151,6 +1157,8 @@ private:
 	uint32 _botOwnerCharacterID;
 	bool _spawnStatus;
 	Mob* _botOwner;
+	uint16 _commandTargetSourceID = 0;
+	uint16 _leashSourceID = 0;
 	bool _botCharmer;
 	uint8 _petChooserID;
 	bool berserk;
