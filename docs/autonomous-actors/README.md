@@ -10,3 +10,5 @@
   - `central-lhy.9` spike on proving the owned-bot actor-leader party shape and identifying target/leash command-source blockers.
 - `actor-command-source-seam.md`
   - `central-lhy.10` implementation note for the narrow **ActorCommandSource** seam that keeps owner authority intact while allowing actor-sourced target and leash intent in bot AI.
+- `actor-persistence-event-schema-spike.md`
+  - `central-lhy.3` spike on reusing bot/social persistence where it fits while adding actor-specific profile, status, action queue, and event tables before persistent actor planning/reporting.
