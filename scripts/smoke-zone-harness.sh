@@ -262,6 +262,27 @@ if event_ids[-1] != end:
 PY
 }
 
+assert_headless_target_cursor_progression() {
+  local first_payload=\"\$1\"
+  local second_payload=\"\$2\"
+
+  HEADLESS_TARGET_FIRST=\"\$first_payload\" HEADLESS_TARGET_SECOND=\"\$second_payload\" python3 - <<'PY'
+import json
+import os
+import sys
+
+first = json.loads(os.environ["HEADLESS_TARGET_FIRST"])
+second = json.loads(os.environ["HEADLESS_TARGET_SECOND"])
+
+def fail(message):
+    print(json.dumps({"error": message, "first": first, "second": second}, separators=(",", ":")), file=sys.stderr)
+    sys.exit(1)
+
+if second.get("event_cursor_start", 0) < first.get("event_cursor_end", 0):
+    fail("second headless target scenario started before the first scenario cleanup cursor")
+PY
+}
+
 assert_empty_event_payload() {
   local payload=\"\$1\"
   local description=\"\$2\"
@@ -465,22 +486,7 @@ assert_empty_event_payload \"\$headless_cleanup_events\" "headless target scenar
 
 headless_target_second=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/headless-client/target\")
 assert_headless_target_scenario \"\$headless_target_second\"
-
-HEADLESS_TARGET_FIRST=\"\$headless_target_first\" HEADLESS_TARGET_SECOND=\"\$headless_target_second\" python3 - <<'PY'
-import json
-import os
-import sys
-
-first = json.loads(os.environ["HEADLESS_TARGET_FIRST"])
-second = json.loads(os.environ["HEADLESS_TARGET_SECOND"])
-
-def fail(message):
-    print(json.dumps({"error": message, "first": first, "second": second}, separators=(",", ":")), file=sys.stderr)
-    sys.exit(1)
-
-if second.get("event_cursor_start", 0) < first.get("event_cursor_end", 0):
-    fail("second headless target scenario started before the first scenario cleanup cursor")
-PY
+assert_headless_target_cursor_progression \"\$headless_target_first\" \"\$headless_target_second\"
 
 slow_scenario=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/bot-slow-maintenance/current-target\")
 assert_slow_scenario \"\$slow_scenario\" current-target HarnessSlowCurrentTarget

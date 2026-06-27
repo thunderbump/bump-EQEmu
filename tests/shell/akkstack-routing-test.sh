@@ -48,6 +48,137 @@ capture_run() {
   set -e
 }
 
+extract_embedded_python_heredoc() {
+  local source_file="$1"
+  local function_name="$2"
+
+  python3 - "$source_file" "$function_name" <<'PY'
+from pathlib import Path
+import sys
+
+source_path = Path(sys.argv[1])
+function_name = sys.argv[2]
+lines = source_path.read_text().splitlines()
+inside_function = False
+inside_python = False
+capture = []
+
+for line in lines:
+    if not inside_function and line == f"{function_name}() {{":
+        inside_function = True
+        continue
+    if inside_function and not inside_python and "<<'PY'" in line:
+        inside_python = True
+        continue
+    if inside_python:
+        if line == "PY":
+            break
+        capture.append(line)
+
+if not capture:
+    sys.exit(1)
+
+sys.stdout.write("\n".join(capture) + "\n")
+PY
+}
+
+assert_command_helpers_execute() {
+  local script_file="$1"
+  local headless_script="$tmp_root/assert-headless-target.py"
+  local cursor_script="$tmp_root/assert-headless-cursor.py"
+  local empty_script="$tmp_root/assert-empty-events.py"
+
+  extract_embedded_python_heredoc "$script_file" assert_headless_target_scenario >"$headless_script"
+  extract_embedded_python_heredoc "$script_file" assert_headless_target_cursor_progression >"$cursor_script"
+  extract_embedded_python_heredoc "$script_file" assert_empty_event_payload >"$empty_script"
+
+  headless_target_first="$(python3 - <<'PY'
+import json
+
+payload = {
+    "completed": True,
+    "observed": True,
+    "database_mutation": "none:headless-target",
+    "eqstream_backed": False,
+    "completed_connect": False,
+    "actor": {"kind": "client", "entity_id": 101},
+    "target": {"kind": "npc", "entity_id": 202},
+    "event_cursor_start": 10,
+    "event_cursor_end": 12,
+    "events": [
+        {
+            "id": 11,
+            "type": "target_changed",
+            "actor": {"entity_id": 101},
+            "message": "target_set",
+            "target": {"entity_id": 202},
+        },
+        {
+            "id": 12,
+            "type": "target_changed",
+            "actor": {"entity_id": 101},
+            "message": "target_cleared",
+            "target": None,
+            "previous_target": {"entity_id": 202},
+        },
+    ],
+}
+print(json.dumps(payload, separators=(",", ":")))
+PY
+)"
+  headless_target_second="$(python3 - <<'PY'
+import json
+
+payload = {
+    "completed": True,
+    "observed": True,
+    "database_mutation": "none:headless-target",
+    "eqstream_backed": False,
+    "completed_connect": False,
+    "actor": {"kind": "client", "entity_id": 303},
+    "target": {"kind": "npc", "entity_id": 404},
+    "event_cursor_start": 12,
+    "event_cursor_end": 14,
+    "events": [
+        {
+            "id": 13,
+            "type": "target_changed",
+            "actor": {"entity_id": 303},
+            "message": "target_set",
+            "target": {"entity_id": 404},
+        },
+        {
+            "id": 14,
+            "type": "target_changed",
+            "actor": {"entity_id": 303},
+            "message": "target_cleared",
+            "target": None,
+            "previous_target": {"entity_id": 404},
+        },
+    ],
+}
+print(json.dumps(payload, separators=(",", ":")))
+PY
+)"
+
+  HEADLESS_TARGET_PAYLOAD="$headless_target_first" python3 "$headless_script"
+  HEADLESS_TARGET_PAYLOAD="$headless_target_second" python3 "$headless_script"
+  EVENT_PAYLOAD='{"events":[]}' python3 "$empty_script" "headless target cleanup left unexpected events"
+  HEADLESS_TARGET_FIRST="$headless_target_first" HEADLESS_TARGET_SECOND="$headless_target_second" python3 "$cursor_script"
+
+  if HEADLESS_TARGET_PAYLOAD='{"completed":true,"observed":true,"database_mutation":"none:headless-target","eqstream_backed":false,"completed_connect":false,"actor":{"kind":"client","entity_id":1},"target":{"kind":"npc","entity_id":2},"event_cursor_start":20,"event_cursor_end":20,"events":[]}' python3 "$headless_script" >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if EVENT_PAYLOAD='{"events":[{"id":99}]}' python3 "$empty_script" "expected failure" >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if HEADLESS_TARGET_FIRST="$headless_target_first" HEADLESS_TARGET_SECOND='{"event_cursor_start":11,"event_cursor_end":15}' python3 "$cursor_script" >/dev/null 2>&1; then
+    return 1
+  fi
+}
+
 make_stack() {
   local stack_dir="$1"
   local checkout_dir="$2"
@@ -75,6 +206,7 @@ make_fixture() {
 make_fake_smoke_execute_bin() {
   local fake_bin="$1"
   local capture_file="$2"
+  local payload_file="$3"
 
   mkdir -p "$fake_bin"
 
@@ -108,6 +240,7 @@ if [[ -z "\$payload" ]]; then
   exit 1
 fi
 
+printf '%s\n' "\$payload" >"$payload_file"
 EQEMU_DB_PASSWORD=fixture bash -lc "\$payload"
 EOF
   chmod +x "$fake_bin/docker-compose"
@@ -282,11 +415,12 @@ test_zone_harness_dry_run_describes_stable_db_and_portless_server() {
 }
 
 test_zone_harness_command_checks_build_artifacts_before_zone_launch() {
-  local fixture_repo fixture_parent fake_bin capture_file status output command_text
+  local fixture_repo fixture_parent fake_bin capture_file payload_file status output command_text
   make_fixture fixture_repo fixture_parent
   fake_bin="$(mktemp -d "$tmp_root/fake-smoke-bin.XXXXXX")"
   capture_file="$tmp_root/smoke-zone-harness.command"
-  make_fake_smoke_execute_bin "$fake_bin" "$capture_file"
+  payload_file="$tmp_root/smoke-zone-harness.payload"
+  make_fake_smoke_execute_bin "$fake_bin" "$capture_file" "$payload_file"
 
   capture_run status output env PATH="$fake_bin:$PATH" "$fixture_repo/scripts/smoke-zone-harness.sh" --stack validation
 
@@ -312,18 +446,21 @@ PY
 }
 
 test_zone_harness_command_exercises_headless_target_twice_with_cursor_cleanup_checks() {
-  local fixture_repo fixture_parent fake_bin capture_file status output command_text
+  local fixture_repo fixture_parent fake_bin capture_file payload_file status output command_text
   make_fixture fixture_repo fixture_parent
   fake_bin="$(mktemp -d "$tmp_root/fake-smoke-headless-bin.XXXXXX")"
   capture_file="$tmp_root/smoke-zone-harness-headless.command"
-  make_fake_smoke_execute_bin "$fake_bin" "$capture_file"
+  payload_file="$tmp_root/smoke-zone-harness-headless.payload"
+  make_fake_smoke_execute_bin "$fake_bin" "$capture_file" "$payload_file"
 
   capture_run status output env PATH="$fake_bin:$PATH" "$fixture_repo/scripts/smoke-zone-harness.sh" --stack validation
 
   [[ "$status" -eq 1 ]] || return 1
   [[ -f "$capture_file" ]] || return 1
+  [[ -f "$payload_file" ]] || return 1
   command_text="$(cat "$capture_file")"
   assert_contains "$command_text" "assert_headless_target_scenario()"
+  assert_contains "$command_text" "assert_headless_target_cursor_progression()"
   assert_contains "$command_text" "/api/v1/harness/scenarios/headless-client/target"
   assert_contains "$command_text" "headless_target_first="
   assert_contains "$command_text" "headless_target_second="
@@ -331,8 +468,8 @@ test_zone_harness_command_exercises_headless_target_twice_with_cursor_cleanup_ch
   assert_contains "$command_text" 'assert_headless_target_scenario "$headless_target_second"'
   assert_contains "$command_text" 'headless_cleanup_events=$(curl -fsS "http://127.0.0.1:9099/api/v1/harness/events?since=${headless_target_first_end}&limit=10")'
   assert_contains "$command_text" 'assert_empty_event_payload "$headless_cleanup_events"'
-  assert_contains "$command_text" 'HEADLESS_TARGET_FIRST="$headless_target_first" HEADLESS_TARGET_SECOND="$headless_target_second" python3 - <<'"'"'PY'"'"''
-  assert_contains "$command_text" "if second.get(event_cursor_start, 0) < first.get(event_cursor_end, 0):"
+  assert_contains "$command_text" 'assert_headless_target_cursor_progression "$headless_target_first" "$headless_target_second"'
+  assert_command_helpers_execute "$fixture_repo/scripts/smoke-zone-harness.sh"
 }
 
 test_validate_tier3_harness_delegates_to_smoke_script() {
