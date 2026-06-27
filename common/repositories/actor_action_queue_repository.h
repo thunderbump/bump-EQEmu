@@ -404,7 +404,12 @@ private:
 
 	static bool IsValidJson(const std::string &document, size_t max_length)
 	{
-		if (document.empty() || CountUtf8CodePoints(document) > max_length) {
+		size_t utf8_code_points = 0;
+		if (
+			document.empty() ||
+			!TryCountUtf8CodePoints(document, utf8_code_points) ||
+			utf8_code_points > max_length
+		) {
 			return false;
 		}
 
@@ -420,17 +425,65 @@ private:
 		);
 	}
 
-	static size_t CountUtf8CodePoints(const std::string &document)
+	static bool TryCountUtf8CodePoints(const std::string &document, size_t &count)
 	{
-		size_t count = 0;
+		count = 0;
 
-		for (const unsigned char byte: document) {
-			if ((byte & 0xc0) != 0x80) {
-				++count;
+		for (size_t i = 0; i < document.size();) {
+			const auto lead = static_cast<unsigned char>(document[i]);
+			size_t sequence_length = 0;
+
+			if ((lead & 0x80) == 0x00) {
+				sequence_length = 1;
 			}
+			else if ((lead & 0xe0) == 0xc0) {
+				if (lead < 0xc2) {
+					return false;
+				}
+				sequence_length = 2;
+			}
+			else if ((lead & 0xf0) == 0xe0) {
+				sequence_length = 3;
+			}
+			else if ((lead & 0xf8) == 0xf0) {
+				if (lead > 0xf4) {
+					return false;
+				}
+				sequence_length = 4;
+			}
+			else {
+				return false;
+			}
+
+			if (i + sequence_length > document.size()) {
+				return false;
+			}
+
+			if (sequence_length == 3) {
+				const auto second = static_cast<unsigned char>(document[i + 1]);
+				if ((lead == 0xe0 && second < 0xa0) || (lead == 0xed && second >= 0xa0)) {
+					return false;
+				}
+			}
+			else if (sequence_length == 4) {
+				const auto second = static_cast<unsigned char>(document[i + 1]);
+				if ((lead == 0xf0 && second < 0x90) || (lead == 0xf4 && second > 0x8f)) {
+					return false;
+				}
+			}
+
+			for (size_t offset = 1; offset < sequence_length; ++offset) {
+				const auto continuation = static_cast<unsigned char>(document[i + offset]);
+				if ((continuation & 0xc0) != 0x80) {
+					return false;
+				}
+			}
+
+			++count;
+			i += sequence_length;
 		}
 
-		return count;
+		return true;
 	}
 
 	static std::optional<ActorActionRecord> UpdateClaimedTerminalState(
@@ -446,7 +499,7 @@ private:
 		}
 
 		const auto updated = FindOne(db, action_id);
-		if (!updated.action_id || updated.state != expected_state) {
+		if (!updated.action_id || (updated.state != expected_state && updated.state != "expired")) {
 			return std::nullopt;
 		}
 

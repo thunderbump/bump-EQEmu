@@ -40,5 +40,6 @@ owning zone process. It is intentionally a bounded queue for fresh intent, not a
   exists.
 - `ClaimNextPending()` claims at most one due, non-expired row and stamps `claimed_by` plus `claimed_at`.
 - `MarkCompleted()` and `MarkFailed()` only succeed from fresh `claimed` rows; if the claim has already passed
-  `expires_at`, the attempted terminal transition atomically converts the row to `expired` instead.
+  `expires_at`, the attempted terminal transition atomically converts the row to `expired` instead and returns that
+  expired terminal row to the caller.
 - `ExpireDue()` only affects `pending` or `claimed` rows whose `expires_at` has passed.

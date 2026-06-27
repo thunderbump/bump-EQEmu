@@ -170,6 +170,14 @@ std::string BuildUtf8BoundaryJson(size_t total_character_length)
 	return std::string(prefix) + payload + suffix;
 }
 
+std::string BuildInvalidUtf8Json()
+{
+	std::string document = R"({"text":")";
+	document.push_back(static_cast<char>(0xc3));
+	document += R"("})";
+	return document;
+}
+
 } // namespace
 
 void WorldserverCLI::TestActorActionQueue(int argc, char **argv, argh::parser &cmd, std::string &description)
@@ -346,6 +354,42 @@ void WorldserverCLI::TestActorActionQueue(int argc, char **argv, argh::parser &c
 			}
 		);
 		ExpectEqual(invalid_json_enqueue.action_id, uint64_t(0), "invalid action JSON should be rejected before insert");
+
+		const auto invalid_utf8_json = BuildInvalidUtf8Json();
+		const auto invalid_utf8_enqueue = ActorActionQueueRepository::Enqueue(
+			database,
+			{
+				.actor_id = actor_a.actor_id,
+				.source = "planner",
+				.action_type = "say",
+				.action_json = invalid_utf8_json,
+				.idempotency_key = fmt::format("actor-action-queue-{}-invalid-utf8-json", run_nonce),
+				.created_at = created_at,
+			}
+		);
+		ExpectEqual(
+			invalid_utf8_enqueue.action_id,
+			uint64_t(0),
+			"invalid utf8 action JSON should be rejected before insert"
+		);
+
+		const auto invalid_utf8_metadata_enqueue = ActorActionQueueRepository::Enqueue(
+			database,
+			{
+				.actor_id = actor_a.actor_id,
+				.source = "planner",
+				.source_metadata_json = invalid_utf8_json,
+				.action_type = "say",
+				.action_json = R"({"text":"valid"})",
+				.idempotency_key = fmt::format("actor-action-queue-{}-invalid-utf8-metadata", run_nonce),
+				.created_at = created_at,
+			}
+		);
+		ExpectEqual(
+			invalid_utf8_metadata_enqueue.action_id,
+			uint64_t(0),
+			"invalid utf8 metadata JSON should be rejected before insert"
+		);
 
 		const auto oversized_json_enqueue = ActorActionQueueRepository::Enqueue(
 			database,
@@ -563,29 +607,21 @@ void WorldserverCLI::TestActorActionQueue(int argc, char **argv, argh::parser &c
 			}
 		);
 		Expect(
-			!stale_completed_action.has_value(),
-			"completion should reject claimed rows whose expires_at has already passed"
-		);
-		const auto atomically_expired_completion = ActorActionQueueRepository::FindByActionId(
-			database,
-			claimed_stale_complete->action_id
-		);
-		Expect(
-			atomically_expired_completion.has_value(),
-			"stale completion attempts should leave the row queryable"
+			stale_completed_action.has_value(),
+			"completion should expose the expired row when a claimed action goes stale"
 		);
 		ExpectEqual(
-			atomically_expired_completion->state,
+			stale_completed_action->state,
 			std::string("expired"),
-			"stale completion attempts should atomically expire the claimed row"
+			"stale completion attempts should return the expired terminal row"
 		);
-		ExpectOptionalEqual(
-			atomically_expired_completion->completed_at,
+		ExpectEqual(
+			stale_completed_action->completed_at,
 			std::optional<time_t>(stale_complete_attempt_at),
 			"stale completion attempts should stamp the terminal time when expiring the row"
 		);
 		Expect(
-			!atomically_expired_completion->result_json.has_value(),
+			!stale_completed_action->result_json.has_value(),
 			"stale completion attempts should not persist result JSON"
 		);
 
@@ -620,29 +656,21 @@ void WorldserverCLI::TestActorActionQueue(int argc, char **argv, argh::parser &c
 			}
 		);
 		Expect(
-			!stale_failed_action.has_value(),
-			"failure should reject claimed rows whose expires_at has already passed"
-		);
-		const auto atomically_expired_failure = ActorActionQueueRepository::FindByActionId(
-			database,
-			claimed_stale_fail->action_id
-		);
-		Expect(
-			atomically_expired_failure.has_value(),
-			"stale failure attempts should leave the row queryable"
+			stale_failed_action.has_value(),
+			"failure should expose the expired row when a claimed action goes stale"
 		);
 		ExpectEqual(
-			atomically_expired_failure->state,
+			stale_failed_action->state,
 			std::string("expired"),
-			"stale failure attempts should atomically expire the claimed row"
+			"stale failure attempts should return the expired terminal row"
 		);
 		ExpectOptionalEqual(
-			atomically_expired_failure->completed_at,
+			stale_failed_action->completed_at,
 			std::optional<time_t>(stale_fail_attempt_at),
 			"stale failure attempts should stamp the terminal time when expiring the row"
 		);
 		Expect(
-			!atomically_expired_failure->failure_reason.has_value(),
+			!stale_failed_action->failure_reason.has_value(),
 			"stale failure attempts should not persist failure metadata"
 		);
 
@@ -695,6 +723,43 @@ void WorldserverCLI::TestActorActionQueue(int argc, char **argv, argh::parser &c
 			completed_utf8_result->result_json,
 			std::optional<std::string>(utf8_boundary_result_json),
 			"completion should persist unicode result JSON at the character limit"
+		);
+
+		const auto invalid_utf8_result_action = enqueue_action(
+			actor_c.actor_id,
+			"invalid-utf8-result",
+			fmt::format("actor-action-queue-{}-invalid-utf8-result", run_nonce),
+			first_not_before - 3,
+			first_expires_at
+		);
+		const auto claimed_invalid_utf8_result = ActorActionQueueRepository::ClaimNextPending(
+			database,
+			{
+				.actor_id = actor_c.actor_id,
+				.claimed_by = "zone-c",
+				.now = claim_now,
+			}
+		);
+		Expect(
+			claimed_invalid_utf8_result.has_value(),
+			"claim should support invalid utf8 result-json coverage rows"
+		);
+		ExpectEqual(
+			claimed_invalid_utf8_result->action_id,
+			invalid_utf8_result_action.action_id,
+			"claim should select the invalid utf8 result-json row first when it is oldest"
+		);
+		const auto invalid_utf8_result = ActorActionQueueRepository::MarkCompleted(
+			database,
+			{
+				.action_id = claimed_invalid_utf8_result->action_id,
+				.result_json = invalid_utf8_json,
+				.completed_at = completed_at - 6,
+			}
+		);
+		Expect(
+			!invalid_utf8_result.has_value(),
+			"invalid utf8 result JSON should be rejected before completion update"
 		);
 
 		const auto fail_pending_action = ActorActionQueueRepository::MarkFailed(

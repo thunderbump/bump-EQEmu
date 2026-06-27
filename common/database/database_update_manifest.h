@@ -7373,9 +7373,37 @@ AUTO_INCREMENT=1;
 	ManifestEntry{
 		.version = 9335,
 		.description = "2026_06_27_actor_action_queue_schema_convergence.sql",
-		.check = "SHOW CREATE TABLE `actor_action_queue`",
+		.check = R"SQL(
+SELECT IF(
+	(
+		SELECT COUNT(*)
+		FROM information_schema.statistics
+		WHERE table_schema = DATABASE()
+		  AND table_name = 'actor_action_queue'
+		  AND index_name IN (
+			'idx_actor_action_queue_actor_idempotency',
+			'idx_actor_action_queue_claim_path',
+			'idx_actor_action_queue_actor_state'
+		  )
+	) = 3
+	AND (
+		SELECT COUNT(*)
+		FROM information_schema.table_constraints
+		WHERE table_schema = DATABASE()
+		  AND table_name = 'actor_action_queue'
+		  AND constraint_type = 'CHECK'
+		  AND constraint_name IN (
+			'chk_actor_action_queue_source_metadata_json_bounded',
+			'chk_actor_action_queue_action_json_bounded',
+			'chk_actor_action_queue_result_json_bounded'
+		  )
+	) = 3,
+	'actor_action_queue_schema_converged',
+	'actor_action_queue_schema_incomplete'
+);
+)SQL",
 		.condition = "missing",
-		.match = "chk_actor_action_queue_result_json_bounded",
+		.match = "actor_action_queue_schema_converged",
 		.sql = R"(
 ALTER TABLE `actor_action_queue`
 	ADD COLUMN IF NOT EXISTS `actor_id` INT(10) UNSIGNED NOT NULL AFTER `action_id`,
@@ -7416,13 +7444,58 @@ ALTER TABLE `actor_action_queue`
 	DROP INDEX IF EXISTS `idx_actor_action_queue_actor_state`,
 	ADD UNIQUE INDEX `idx_actor_action_queue_actor_idempotency` (`actor_id`, `idempotency_key`) USING BTREE,
 	ADD INDEX `idx_actor_action_queue_claim_path` (`state`, `not_before`, `expires_at`, `action_id`) USING BTREE,
-	ADD INDEX `idx_actor_action_queue_actor_state` (`actor_id`, `state`, `not_before`, `action_id`) USING BTREE,
-	ADD CONSTRAINT `chk_actor_action_queue_source_metadata_json_bounded`
-	CHECK (`source_metadata_json` IS NULL OR (json_valid(`source_metadata_json`) AND char_length(`source_metadata_json`) <= 4096)),
-	ADD CONSTRAINT `chk_actor_action_queue_action_json_bounded`
-	CHECK (json_valid(`action_json`) AND char_length(`action_json`) <= 16384),
-	ADD CONSTRAINT `chk_actor_action_queue_result_json_bounded`
-	CHECK (`result_json` IS NULL OR (json_valid(`result_json`) AND char_length(`result_json`) <= 16384));
+	ADD INDEX `idx_actor_action_queue_actor_state` (`actor_id`, `state`, `not_before`, `action_id`) USING BTREE;
+
+SET @have_chk_actor_action_queue_source_metadata_json_bounded = (
+	SELECT COUNT(*)
+	FROM information_schema.table_constraints
+	WHERE table_schema = DATABASE()
+	  AND table_name = 'actor_action_queue'
+	  AND constraint_type = 'CHECK'
+	  AND constraint_name = 'chk_actor_action_queue_source_metadata_json_bounded'
+);
+SET @actor_action_queue_source_metadata_json_bounded_sql = IF(
+	@have_chk_actor_action_queue_source_metadata_json_bounded = 0,
+	'ALTER TABLE `actor_action_queue` ADD CONSTRAINT `chk_actor_action_queue_source_metadata_json_bounded` CHECK (`source_metadata_json` IS NULL OR (json_valid(`source_metadata_json`) AND char_length(`source_metadata_json`) <= 4096))',
+	'SELECT 1'
+);
+PREPARE stmt FROM @actor_action_queue_source_metadata_json_bounded_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @have_chk_actor_action_queue_action_json_bounded = (
+	SELECT COUNT(*)
+	FROM information_schema.table_constraints
+	WHERE table_schema = DATABASE()
+	  AND table_name = 'actor_action_queue'
+	  AND constraint_type = 'CHECK'
+	  AND constraint_name = 'chk_actor_action_queue_action_json_bounded'
+);
+SET @actor_action_queue_action_json_bounded_sql = IF(
+	@have_chk_actor_action_queue_action_json_bounded = 0,
+	'ALTER TABLE `actor_action_queue` ADD CONSTRAINT `chk_actor_action_queue_action_json_bounded` CHECK (json_valid(`action_json`) AND char_length(`action_json`) <= 16384)',
+	'SELECT 1'
+);
+PREPARE stmt FROM @actor_action_queue_action_json_bounded_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @have_chk_actor_action_queue_result_json_bounded = (
+	SELECT COUNT(*)
+	FROM information_schema.table_constraints
+	WHERE table_schema = DATABASE()
+	  AND table_name = 'actor_action_queue'
+	  AND constraint_type = 'CHECK'
+	  AND constraint_name = 'chk_actor_action_queue_result_json_bounded'
+);
+SET @actor_action_queue_result_json_bounded_sql = IF(
+	@have_chk_actor_action_queue_result_json_bounded = 0,
+	'ALTER TABLE `actor_action_queue` ADD CONSTRAINT `chk_actor_action_queue_result_json_bounded` CHECK (`result_json` IS NULL OR (json_valid(`result_json`) AND char_length(`result_json`) <= 16384))',
+	'SELECT 1'
+);
+PREPARE stmt FROM @actor_action_queue_result_json_bounded_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 )",
 		.content_schema_update = false
 	},
