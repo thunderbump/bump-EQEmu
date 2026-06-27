@@ -7271,6 +7271,69 @@ ALTER TABLE `actor_status`
 )",
 		.content_schema_update = false
 	},
+	ManifestEntry{
+		.version = 9332,
+		.description = "2026_06_27_actor_events.sql",
+		.check = "SHOW TABLES LIKE 'actor_events'",
+		.condition = "empty",
+		.match = "",
+		.sql = R"(
+CREATE TABLE `actor_events` (
+	`event_id` BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+	`actor_id` INT(10) UNSIGNED NOT NULL,
+	`bot_id` INT(10) UNSIGNED NULL DEFAULT NULL,
+	`owner_character_id` INT(10) UNSIGNED NULL DEFAULT NULL,
+	`zone_id` INT(10) UNSIGNED NULL DEFAULT NULL,
+	`instance_id` INT(10) UNSIGNED NULL DEFAULT NULL,
+	`entity_id` INT(10) UNSIGNED NULL DEFAULT NULL,
+	`event_type` VARCHAR(64) NOT NULL COLLATE 'utf8mb4_general_ci',
+	`event_json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL CHECK (json_valid(`event_json`) AND char_length(`event_json`) <= 16384),
+	`created_at` DATETIME NOT NULL,
+	PRIMARY KEY (`event_id`) USING BTREE,
+	INDEX `idx_actor_events_actor_cursor` (`actor_id`, `event_id`) USING BTREE,
+	INDEX `idx_actor_events_zone_created` (`zone_id`, `instance_id`, `created_at`) USING BTREE
+)
+COLLATE='utf8mb4_general_ci'
+ENGINE=InnoDB
+AUTO_INCREMENT=1;
+)",
+		.content_schema_update = false
+	},
+	ManifestEntry{
+		.version = 9333,
+		.description = "2026_06_27_actor_events_schema_convergence.sql",
+		.check = "SHOW CREATE TABLE `actor_events`",
+		.condition = "missing",
+		.match = "chk_actor_events_event_json_bounded",
+		.sql = R"(
+ALTER TABLE `actor_events`
+	ADD COLUMN IF NOT EXISTS `bot_id` INT(10) UNSIGNED NULL DEFAULT NULL AFTER `actor_id`,
+	ADD COLUMN IF NOT EXISTS `owner_character_id` INT(10) UNSIGNED NULL DEFAULT NULL AFTER `bot_id`,
+	ADD COLUMN IF NOT EXISTS `zone_id` INT(10) UNSIGNED NULL DEFAULT NULL AFTER `owner_character_id`,
+	ADD COLUMN IF NOT EXISTS `instance_id` INT(10) UNSIGNED NULL DEFAULT NULL AFTER `zone_id`,
+	ADD COLUMN IF NOT EXISTS `entity_id` INT(10) UNSIGNED NULL DEFAULT NULL AFTER `instance_id`,
+	ADD COLUMN IF NOT EXISTS `event_type` VARCHAR(64) NOT NULL COLLATE 'utf8mb4_general_ci' AFTER `entity_id`,
+	ADD COLUMN IF NOT EXISTS `event_json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL AFTER `event_type`,
+	ADD COLUMN IF NOT EXISTS `created_at` DATETIME NOT NULL AFTER `event_json`,
+	MODIFY COLUMN `event_id` BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+	MODIFY COLUMN `actor_id` INT(10) UNSIGNED NOT NULL,
+	MODIFY COLUMN `bot_id` INT(10) UNSIGNED NULL DEFAULT NULL AFTER `actor_id`,
+	MODIFY COLUMN `owner_character_id` INT(10) UNSIGNED NULL DEFAULT NULL AFTER `bot_id`,
+	MODIFY COLUMN `zone_id` INT(10) UNSIGNED NULL DEFAULT NULL AFTER `owner_character_id`,
+	MODIFY COLUMN `instance_id` INT(10) UNSIGNED NULL DEFAULT NULL AFTER `zone_id`,
+	MODIFY COLUMN `entity_id` INT(10) UNSIGNED NULL DEFAULT NULL AFTER `instance_id`,
+	MODIFY COLUMN `event_type` VARCHAR(64) NOT NULL COLLATE 'utf8mb4_general_ci' AFTER `entity_id`,
+	MODIFY COLUMN `event_json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL AFTER `event_type`,
+	MODIFY COLUMN `created_at` DATETIME NOT NULL AFTER `event_json`,
+	DROP INDEX IF EXISTS `idx_actor_events_actor_cursor`,
+	DROP INDEX IF EXISTS `idx_actor_events_zone_created`,
+	ADD INDEX `idx_actor_events_actor_cursor` (`actor_id`, `event_id`) USING BTREE,
+	ADD INDEX `idx_actor_events_zone_created` (`zone_id`, `instance_id`, `created_at`) USING BTREE,
+	ADD CONSTRAINT `chk_actor_events_event_json_bounded`
+	CHECK (json_valid(`event_json`) AND char_length(`event_json`) <= 16384);
+)",
+		.content_schema_update = false
+	},
 // -- template; copy/paste this when you need to create a new entry
 //	ManifestEntry{
 //		.version = 9228,

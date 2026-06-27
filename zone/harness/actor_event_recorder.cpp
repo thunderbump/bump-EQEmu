@@ -9,13 +9,16 @@
 */
 
 #include "actor_event_recorder.h"
+#include "actor_event_persistence_sink.h"
 
 #include "common/spdat.h"
 #include "common/timer.h"
 #include "zone/mob.h"
 
 #include <algorithm>
+#include <condition_variable>
 #include <mutex>
+#include <unordered_map>
 
 namespace EQ::ZoneHarness {
 
@@ -23,6 +26,87 @@ namespace {
 
 std::mutex active_recorder_mutex;
 ActorEventRecorder *active_recorder = nullptr;
+std::unordered_map<ActorEventRecorder *, size_t> active_recorder_callback_counts;
+std::condition_variable active_recorder_callbacks_drained;
+
+size_t ActiveRecorderCallbackCount(ActorEventRecorder *recorder)
+{
+	const auto it = active_recorder_callback_counts.find(recorder);
+	return it != active_recorder_callback_counts.end() ? it->second : 0;
+}
+
+class ActiveRecorderCallbackLease {
+public:
+	explicit ActiveRecorderCallbackLease(ActorEventRecorder *recorder)
+	: recorder_(recorder)
+	{
+	}
+
+	ActiveRecorderCallbackLease(const ActiveRecorderCallbackLease &) = delete;
+	ActiveRecorderCallbackLease &operator=(const ActiveRecorderCallbackLease &) = delete;
+
+	ActiveRecorderCallbackLease(ActiveRecorderCallbackLease &&other) noexcept
+	: recorder_(other.recorder_)
+	{
+		other.recorder_ = nullptr;
+	}
+
+	ActiveRecorderCallbackLease &operator=(ActiveRecorderCallbackLease &&other) noexcept
+	{
+		if (this == &other) {
+			return *this;
+		}
+
+		Release();
+		recorder_ = other.recorder_;
+		other.recorder_ = nullptr;
+		return *this;
+	}
+
+	~ActiveRecorderCallbackLease()
+	{
+		Release();
+	}
+
+	ActorEventRecorder *Get() const
+	{
+		return recorder_;
+	}
+
+private:
+	void Release()
+	{
+		if (!recorder_) {
+			return;
+		}
+
+		std::lock_guard lock(active_recorder_mutex);
+		auto it = active_recorder_callback_counts.find(recorder_);
+		if (it != active_recorder_callback_counts.end()) {
+			--it->second;
+			if (it->second == 0) {
+				active_recorder_callback_counts.erase(it);
+			}
+		}
+		if (ActiveRecorderCallbackCount(recorder_) == 0) {
+			active_recorder_callbacks_drained.notify_all();
+		}
+		recorder_ = nullptr;
+	}
+
+	ActorEventRecorder *recorder_ = nullptr;
+};
+
+ActiveRecorderCallbackLease AcquireActiveRecorderCallbackLease()
+{
+	std::lock_guard lock(active_recorder_mutex);
+	if (!active_recorder) {
+		return ActiveRecorderCallbackLease(nullptr);
+	}
+
+	++active_recorder_callback_counts[active_recorder];
+	return ActiveRecorderCallbackLease(active_recorder);
+}
 
 std::string MobKind(Mob *mob)
 {
@@ -165,9 +249,13 @@ void ActorEventRecorder::RegisterActiveRecorder(ActorEventRecorder *recorder)
 
 void ActorEventRecorder::ClearActiveRecorder(ActorEventRecorder *recorder)
 {
-	std::lock_guard lock(active_recorder_mutex);
+	std::unique_lock lock(active_recorder_mutex);
 	if (active_recorder == recorder) {
 		active_recorder = nullptr;
+		// Observe* only holds the active-recorder mutex long enough to take a callback lease.
+		// ClearActiveRecorder nulls the global pointer first, then waits for prior leases to drain
+		// so recorder-owned state and sinks cannot be torn down while callbacks are still running.
+		active_recorder_callbacks_drained.wait(lock, [recorder]() { return ActiveRecorderCallbackCount(recorder) == 0; });
 	}
 }
 
@@ -180,17 +268,17 @@ void ActorEventRecorder::ObserveSpellCastStarted(
 	int32_t original_cast_time_ms
 )
 {
-	std::lock_guard lock(active_recorder_mutex);
-	if (active_recorder) {
-		active_recorder->RecordSpellCastStarted(caster, target, spell_id, slot, cast_time_ms, original_cast_time_ms);
+	auto recorder_lease = AcquireActiveRecorderCallbackLease();
+	if (auto *recorder = recorder_lease.Get()) {
+		recorder->RecordSpellCastStarted(caster, target, spell_id, slot, cast_time_ms, original_cast_time_ms);
 	}
 }
 
 void ActorEventRecorder::ObserveTargetChanged(Mob *actor, Mob *previous_target, Mob *target)
 {
-	std::lock_guard lock(active_recorder_mutex);
-	if (active_recorder) {
-		active_recorder->RecordTargetChanged(actor, previous_target, target);
+	auto recorder_lease = AcquireActiveRecorderCallbackLease();
+	if (auto *recorder = recorder_lease.Get()) {
+		recorder->RecordTargetChanged(actor, previous_target, target);
 	}
 }
 
@@ -201,10 +289,16 @@ void ActorEventRecorder::ObserveSpeechEmitted(
 	uint32_t audible_radius
 )
 {
-	std::lock_guard lock(active_recorder_mutex);
-	if (active_recorder) {
-		active_recorder->RecordSpeechEmitted(actor, channel, text, audible_radius);
+	auto recorder_lease = AcquireActiveRecorderCallbackLease();
+	if (auto *recorder = recorder_lease.Get()) {
+		recorder->RecordSpeechEmitted(actor, channel, text, audible_radius);
 	}
+}
+
+void ActorEventRecorder::SetPersistenceSink(ActorEventPersistenceSink *sink)
+{
+	std::lock_guard lock(state_mutex);
+	persistence_sink = sink;
 }
 
 void ActorEventRecorder::Record(const std::string &type, const std::string &message)
@@ -254,9 +348,7 @@ void ActorEventRecorder::RecordSpeechEmitted(
 	uint32_t audible_radius
 )
 {
-	std::lock_guard lock(state_mutex);
 	ActorEvent event{
-		.id = next_sequence++,
 		.time_ms = ::Timer::GetCurrentTime(),
 		.type = "speech_emitted",
 		.message = TruncateText(text, 160),
@@ -268,9 +360,19 @@ void ActorEventRecorder::RecordSpeechEmitted(
 		},
 	};
 
-	events.push_back(event);
-	if (events.size() > max_events) {
-		events.erase(events.begin(), events.begin() + static_cast<std::ptrdiff_t>(events.size() - max_events));
+	ActorEventPersistenceSink *sink = nullptr;
+	{
+		std::lock_guard lock(state_mutex);
+		event.id = next_sequence++;
+		events.push_back(event);
+		if (events.size() > max_events) {
+			events.erase(events.begin(), events.begin() + static_cast<std::ptrdiff_t>(events.size() - max_events));
+		}
+		sink = persistence_sink;
+	}
+
+	if (sink) {
+		sink->PersistSpeechEmitted(actor, event);
 	}
 }
 

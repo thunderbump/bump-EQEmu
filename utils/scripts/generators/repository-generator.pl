@@ -203,7 +203,7 @@ foreach my $table_to_generate (@tables) {
         my $data_type             = $row[2];
         my $column_type           = $row[3];
         my $is_nullable           = ($row[7] && $row[7] eq "YES") ? 1 : 0;
-        my $use_nullable_optional = $is_nullable && ($table_to_generate eq "actor_profiles" || $table_to_generate eq "actor_status");
+        my $use_nullable_optional = $is_nullable && ($table_to_generate eq "actor_events" || $table_to_generate eq "actor_profiles" || $table_to_generate eq "actor_status");
 
         if ($longest_column_length < length($column_name_formatted)) {
             $longest_column_length = length($column_name_formatted);
@@ -246,7 +246,7 @@ foreach my $table_to_generate (@tables) {
         my $column_default        = ($row[6] ? $row[6] : "");
         my $is_nullable           = ($row[7] && $row[7] eq "YES") ? 1 : 0;
         my $extra                 = ($row[8] ? $row[8] : "");
-        my $use_nullable_optional = $is_nullable && ($table_to_generate eq "actor_profiles" || $table_to_generate eq "actor_status");
+        my $use_nullable_optional = $is_nullable && ($table_to_generate eq "actor_events" || $table_to_generate eq "actor_profiles" || $table_to_generate eq "actor_status");
 
         if (!$table_primary_key{$table_name}) {
             if (($column_key eq "PRI" && $data_type =~ /int/) || ($ordinal_position == 0 && $column_name =~ /id/i)) {

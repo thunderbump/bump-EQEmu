@@ -21,6 +21,8 @@ class Mob;
 
 namespace EQ::ZoneHarness {
 
+class ActorEventPersistenceSink;
+
 struct ActorEventEntity {
 	uint16_t entity_id = 0;
 	std::string entity_ref;
@@ -78,6 +80,7 @@ public:
 	static void ObserveTargetChanged(Mob *actor, Mob *previous_target, Mob *target);
 	static void ObserveSpeechEmitted(Mob *actor, const std::string &channel, const std::string &text, uint32_t audible_radius);
 
+	void SetPersistenceSink(ActorEventPersistenceSink *sink);
 	void Record(const std::string &type, const std::string &message);
 	void RecordSpellCastStarted(
 		Mob *caster,
@@ -96,6 +99,7 @@ public:
 
 private:
 	mutable std::mutex state_mutex;
+	ActorEventPersistenceSink *persistence_sink = nullptr;
 	uint64_t next_sequence = 1;
 	std::vector<ActorEvent> events;
 	size_t max_events = 512;

@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include "zone/harness/actor_event_persistence_sink.h"
 #include "zone/harness/actor_event_recorder.h"
 #include "zone/harness/harness_snapshot_service.h"
 #include "zone/harness/owned_bot_actor_fixture.h"
@@ -268,6 +269,7 @@ private:
 	mutable std::mutex mutex;
 	std::mutex scenario_mutex;
 	HarnessSnapshotService snapshots;
+	ActorEventRepositoryPersistenceSink actor_event_persistence_sink;
 	ActorEventRecorder events;
 	AutonomousActorPrototypeState autonomous_actor_prototype;
 	std::chrono::steady_clock::time_point started_at;
