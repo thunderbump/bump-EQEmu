@@ -7376,7 +7376,7 @@ AUTO_INCREMENT=1;
 		.check = R"SQL(
 SELECT IF(
 	(
-		SELECT COUNT(*)
+		SELECT COUNT(DISTINCT index_name)
 		FROM information_schema.statistics
 		WHERE table_schema = DATABASE()
 		  AND table_name = 'actor_action_queue'
