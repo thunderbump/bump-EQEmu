@@ -14,3 +14,4 @@
   - `central-lhy.7` spike on keeping high-level **Autonomous Actor** planning out of zone ticks, recommending a same-container helper-process MVP that can later promote to a dedicated sidecar container.
 - `actor-persistence-event-schema-spike.md`
   - `central-lhy.3` spike on reusing bot/social persistence where it fits while adding actor-specific profile, status, action queue, and event tables before persistent actor planning/reporting.
+  - Durable actor identity stays split across `actor_id` for actor-facing persistence, `bot_id` for the live bot substrate row, and `owner_character_id` for the current character authority path that existing bot ownership still depends on.

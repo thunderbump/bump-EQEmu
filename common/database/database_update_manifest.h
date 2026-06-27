@@ -7207,6 +7207,57 @@ ALTER TABLE `character_parcels_containers`
 )",
 		.content_schema_update = false
 	},
+	ManifestEntry{
+		.version = 9329,
+		.description = "2026_06_27_actor_profiles.sql",
+		.check = "SHOW TABLES LIKE 'actor_profiles'",
+		.condition = "empty",
+		.match = "",
+		.sql = R"(
+CREATE TABLE `actor_profiles` (
+	`actor_id` INT(10) UNSIGNED NOT NULL AUTO_INCREMENT,
+	`actor_type` VARCHAR(32) NOT NULL COLLATE 'utf8mb4_general_ci',
+	`actor_substrate` VARCHAR(32) NOT NULL COLLATE 'utf8mb4_general_ci',
+	`bot_id` INT(10) UNSIGNED NULL DEFAULT NULL,
+	`owner_character_id` INT(10) UNSIGNED NULL DEFAULT NULL,
+	`enabled` TINYINT(1) UNSIGNED NOT NULL DEFAULT '1',
+	`created_at` DATETIME NOT NULL,
+	`updated_at` DATETIME NOT NULL,
+	PRIMARY KEY (`actor_id`) USING BTREE,
+	UNIQUE INDEX `idx_actor_profiles_bot_id` (`bot_id`) USING BTREE,
+	INDEX `idx_actor_profiles_owner_character_id` (`owner_character_id`) USING BTREE
+)
+COLLATE='utf8mb4_general_ci'
+ENGINE=InnoDB
+AUTO_INCREMENT=1;
+)",
+		.content_schema_update = false
+	},
+	ManifestEntry{
+		.version = 9330,
+		.description = "2026_06_27_actor_status.sql",
+		.check = "SHOW TABLES LIKE 'actor_status'",
+		.condition = "empty",
+		.match = "",
+		.sql = R"(
+CREATE TABLE `actor_status` (
+	`actor_id` INT(10) UNSIGNED NOT NULL,
+	`zone_id` INT(10) UNSIGNED NULL DEFAULT NULL,
+	`instance_id` INT(10) UNSIGNED NULL DEFAULT NULL,
+	`entity_id` INT(10) UNSIGNED NULL DEFAULT NULL,
+	`state` VARCHAR(32) NOT NULL COLLATE 'utf8mb4_general_ci',
+	`status_json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL DEFAULT NULL CHECK (`status_json` IS NULL OR (json_valid(`status_json`) AND char_length(`status_json`) <= 4096)),
+	`heartbeat_at` DATETIME NULL DEFAULT NULL,
+	`updated_at` DATETIME NOT NULL,
+	PRIMARY KEY (`actor_id`) USING BTREE,
+	INDEX `idx_actor_status_zone_binding` (`zone_id`, `instance_id`, `entity_id`) USING BTREE,
+	INDEX `idx_actor_status_state_heartbeat` (`state`, `heartbeat_at`) USING BTREE
+)
+COLLATE='utf8mb4_general_ci'
+ENGINE=InnoDB;
+)",
+		.content_schema_update = false
+	},
 // -- template; copy/paste this when you need to create a new entry
 //	ManifestEntry{
 //		.version = 9228,

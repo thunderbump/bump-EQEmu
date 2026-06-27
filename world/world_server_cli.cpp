@@ -41,6 +41,7 @@ void WorldserverCLI::CommandHandler(int argc, char **argv)
 	function_map["database:dump"]               = &WorldserverCLI::DatabaseDump;
 	function_map["database:updates"]            = &WorldserverCLI::DatabaseUpdates;
 	function_map["test:test"]                   = &WorldserverCLI::TestCommand;
+	function_map["test:actor-persistence"]      = &WorldserverCLI::TestActorPersistence;
 	function_map["test:colors"]                 = &WorldserverCLI::TestColors;
 	function_map["test:expansion"]              = &WorldserverCLI::ExpansionTestCommand;
 	function_map["test:repository"]             = &WorldserverCLI::TestRepository;

@@ -158,6 +158,8 @@ set(repositories
     repositories/base/base_adventure_template_entry_flavor_repository.h
     repositories/base/base_adventure_template_entry_repository.h
     repositories/base/base_adventure_template_repository.h
+    repositories/base/base_actor_profiles_repository.h
+    repositories/base/base_actor_status_repository.h
     repositories/base/base_alternate_currency_repository.h
     repositories/base/base_auras_repository.h
     repositories/base/base_base_data_repository.h
@@ -356,6 +358,8 @@ set(repositories
     repositories/adventure_template_entry_flavor_repository.h
     repositories/adventure_template_entry_repository.h
     repositories/adventure_template_repository.h
+    repositories/actor_profiles_repository.h
+    repositories/actor_status_repository.h
     repositories/alternate_currency_repository.h
     repositories/auras_repository.h
     repositories/base_data_repository.h
