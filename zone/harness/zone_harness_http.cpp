@@ -548,11 +548,10 @@ bool ServeHttp(const HttpServerOptions &options)
 	runtime.EnableAutonomousActorPrototype(options.enable_autonomous_actor_prototype);
 
 	httplib::Server api;
-	std::thread stop_thread;
-	std::once_flag stop_once;
 	std::mutex finished_mutex;
 	std::condition_variable finished_cv;
 	bool finished = false;
+	bool stop_requested = false;
 
 	api.set_pre_routing_handler(
 		[&options](const auto &req, auto &res) {
@@ -672,12 +671,23 @@ bool ServeHttp(const HttpServerOptions &options)
 		});
 	}
 
-	api.Post("/api/v1/harness/shutdown", [&runtime, &api, &stop_thread, &stop_once](const auto &, auto &res) {
+	api.Post("/api/v1/harness/shutdown", [&runtime, &finished_mutex, &finished_cv, &stop_requested](const auto &, auto &res) {
 		runtime.RequestShutdown();
 		SetJson(res, {{"shutdown_requested", true}});
-		std::call_once(stop_once, [&api, &stop_thread]() {
-			stop_thread = std::thread([&api]() { api.stop(); });
-		});
+		{
+			std::lock_guard lock(finished_mutex);
+			stop_requested = true;
+		}
+		finished_cv.notify_all();
+	});
+
+	std::thread stop_thread([&]() {
+		std::unique_lock lock(finished_mutex);
+		finished_cv.wait(lock, [&]() { return stop_requested || finished; });
+		if (stop_requested) {
+			lock.unlock();
+			api.stop();
+		}
 	});
 
 	std::thread watchdog;
@@ -705,11 +715,11 @@ bool ServeHttp(const HttpServerOptions &options)
 		finished = true;
 	}
 	finished_cv.notify_all();
-	if (watchdog.joinable()) {
-		watchdog.join();
-	}
 	if (stop_thread.joinable()) {
 		stop_thread.join();
+	}
+	if (watchdog.joinable()) {
+		watchdog.join();
 	}
 
 	runtime.Shutdown();
