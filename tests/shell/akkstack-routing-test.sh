@@ -311,6 +311,30 @@ if shared_memory_check == -1 or zone_launch == -1 or shared_memory_check > zone_
 PY
 }
 
+test_zone_harness_command_exercises_headless_target_twice_with_cursor_cleanup_checks() {
+  local fixture_repo fixture_parent fake_bin capture_file status output command_text
+  make_fixture fixture_repo fixture_parent
+  fake_bin="$(mktemp -d "$tmp_root/fake-smoke-headless-bin.XXXXXX")"
+  capture_file="$tmp_root/smoke-zone-harness-headless.command"
+  make_fake_smoke_execute_bin "$fake_bin" "$capture_file"
+
+  capture_run status output env PATH="$fake_bin:$PATH" "$fixture_repo/scripts/smoke-zone-harness.sh" --stack validation
+
+  [[ "$status" -eq 1 ]] || return 1
+  [[ -f "$capture_file" ]] || return 1
+  command_text="$(cat "$capture_file")"
+  assert_contains "$command_text" "assert_headless_target_scenario()"
+  assert_contains "$command_text" "/api/v1/harness/scenarios/headless-client/target"
+  assert_contains "$command_text" "headless_target_first="
+  assert_contains "$command_text" "headless_target_second="
+  assert_contains "$command_text" 'assert_headless_target_scenario "$headless_target_first"'
+  assert_contains "$command_text" 'assert_headless_target_scenario "$headless_target_second"'
+  assert_contains "$command_text" 'headless_cleanup_events=$(curl -fsS "http://127.0.0.1:9099/api/v1/harness/events?since=${headless_target_first_end}&limit=10")'
+  assert_contains "$command_text" 'assert_empty_event_payload "$headless_cleanup_events"'
+  assert_contains "$command_text" 'HEADLESS_TARGET_FIRST="$headless_target_first" HEADLESS_TARGET_SECOND="$headless_target_second" python3 - <<'"'"'PY'"'"''
+  assert_contains "$command_text" "if second.get(event_cursor_start, 0) < first.get(event_cursor_end, 0):"
+}
+
 test_validate_tier3_harness_delegates_to_smoke_script() {
   local fixture_repo fixture_parent calls status output
   make_fixture fixture_repo fixture_parent
@@ -410,6 +434,7 @@ run_test "default role paths are distinct" test_default_roles_must_not_resolve_t
 run_test "validation commands warn on gameplay stack" test_validation_commands_warn_on_gameplay_stack
 run_test "zone harness dry-run describes stable DB and portless server" test_zone_harness_dry_run_describes_stable_db_and_portless_server
 run_test "zone harness command checks build artifacts before launch" test_zone_harness_command_checks_build_artifacts_before_zone_launch
+run_test "zone harness command exercises headless target twice with cursor cleanup checks" test_zone_harness_command_exercises_headless_target_twice_with_cursor_cleanup_checks
 run_test "validate tier3-harness delegates to smoke script" test_validate_tier3_harness_delegates_to_smoke_script
 run_test "help mentions stack and dry-run" test_help_mentions_stack_and_dry_run
 run_test "dry-run prints route and skips Docker" test_dry_run_prints_route_and_skips_docker
