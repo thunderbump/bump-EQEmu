@@ -297,6 +297,7 @@ namespace DatabaseSchema {
 	static std::vector<std::string> GetStateTables()
 	{
 		return {
+			"actor_action_queue",
 			"actor_events",
 			"actor_profiles",
 			"actor_status",

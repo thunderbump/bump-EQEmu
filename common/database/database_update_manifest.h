@@ -7334,6 +7334,42 @@ ALTER TABLE `actor_events`
 )",
 		.content_schema_update = false
 	},
+	ManifestEntry{
+		.version = 9334,
+		.description = "2026_06_27_actor_action_queue.sql",
+		.check = "SHOW TABLES LIKE 'actor_action_queue'",
+		.condition = "empty",
+		.match = "",
+		.sql = R"(
+CREATE TABLE `actor_action_queue` (
+	`action_id` BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+	`actor_id` INT(10) UNSIGNED NOT NULL,
+	`source` VARCHAR(64) NOT NULL COLLATE 'utf8mb4_general_ci',
+	`source_metadata_json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL DEFAULT NULL CHECK (`source_metadata_json` IS NULL OR (json_valid(`source_metadata_json`) AND char_length(`source_metadata_json`) <= 4096)),
+	`action_type` VARCHAR(64) NOT NULL COLLATE 'utf8mb4_general_ci',
+	`action_json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL CHECK (json_valid(`action_json`) AND char_length(`action_json`) <= 16384),
+	`idempotency_key` VARCHAR(128) NOT NULL COLLATE 'utf8mb4_general_ci',
+	`state` VARCHAR(32) NOT NULL COLLATE 'utf8mb4_general_ci',
+	`not_before` DATETIME NULL DEFAULT NULL,
+	`expires_at` DATETIME NULL DEFAULT NULL,
+	`claimed_by` VARCHAR(128) NULL DEFAULT NULL COLLATE 'utf8mb4_general_ci',
+	`claimed_at` DATETIME NULL DEFAULT NULL,
+	`completed_at` DATETIME NULL DEFAULT NULL,
+	`failure_reason` VARCHAR(255) NULL DEFAULT NULL COLLATE 'utf8mb4_general_ci',
+	`result_json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL DEFAULT NULL CHECK (`result_json` IS NULL OR (json_valid(`result_json`) AND char_length(`result_json`) <= 16384)),
+	`created_at` DATETIME NOT NULL,
+	`updated_at` DATETIME NOT NULL,
+	PRIMARY KEY (`action_id`) USING BTREE,
+	UNIQUE INDEX `idx_actor_action_queue_actor_idempotency` (`actor_id`, `idempotency_key`) USING BTREE,
+	INDEX `idx_actor_action_queue_claim_path` (`state`, `not_before`, `expires_at`, `action_id`) USING BTREE,
+	INDEX `idx_actor_action_queue_actor_state` (`actor_id`, `state`, `not_before`, `action_id`) USING BTREE
+)
+COLLATE='utf8mb4_general_ci'
+ENGINE=InnoDB
+AUTO_INCREMENT=1;
+)",
+		.content_schema_update = false
+	},
 // -- template; copy/paste this when you need to create a new entry
 //	ManifestEntry{
 //		.version = 9228,
