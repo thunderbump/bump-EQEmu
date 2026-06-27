@@ -205,6 +205,51 @@ nlohmann::json ToJson(const BotSlowMaintenanceScenarioResult &result)
 	};
 }
 
+nlohmann::json ToJson(const ActorLedBotPartyScenarioResult &result)
+{
+	nlohmann::json followers = nlohmann::json::array();
+	for (const auto &follower : result.followers) {
+		followers.push_back(ToJson(follower));
+	}
+
+	nlohmann::json owner_target_events = nlohmann::json::array();
+	for (const auto &event : result.owner_target_events) {
+		owner_target_events.push_back(ToJson(event));
+	}
+
+	nlohmann::json actor_target_events = nlohmann::json::array();
+	for (const auto &event : result.actor_target_events) {
+		actor_target_events.push_back(ToJson(event));
+	}
+
+	return {
+		{"proved", result.proved},
+		{"reason", result.reason},
+		{"follower_count_requested", result.follower_count_requested},
+		{"follower_count_created", result.follower_count_created},
+		{"ticks_processed", result.ticks_processed},
+		{"elapsed_ms", result.elapsed_ms},
+		{"database_mutation", result.database_mutation},
+		{"owner", ToJson(result.owner)},
+		{"group_leader", ToJson(result.group_leader)},
+		{"actor_leader", ToJson(result.actor_leader)},
+		{"followers", followers},
+		{"all_bots_share_owner", result.all_bots_share_owner},
+		{"group_leader_change_to_actor_rejected", result.group_leader_change_to_actor_rejected},
+		{"followers_follow_actor_leader", result.followers_follow_actor_leader},
+		{"owner_target_command_observed", result.owner_target_command_observed},
+		{"actor_target_command_blocked", result.actor_target_command_blocked},
+		{"owner_leash_blocks_actor_led_combat", result.owner_leash_blocks_actor_led_combat},
+		{"slow_spell_id", result.slow_spell_id},
+		{"owner_target_reason", result.owner_target_reason},
+		{"actor_target_reason", result.actor_target_reason},
+		{"leash_reason", result.leash_reason},
+		{"owner_target_events", owner_target_events},
+		{"actor_target_events", actor_target_events},
+		{"runtime", ToJson(result.runtime)},
+	};
+}
+
 void SetJson(httplib::Response &res, const nlohmann::json &payload)
 {
 	res.set_content(payload.dump(), "application/json");
@@ -254,6 +299,29 @@ uint16_t ParseSpellID(const httplib::Request &req)
 	}
 
 	return 200;
+}
+
+uint8_t ParseFollowerCount(const httplib::Request &req)
+{
+	if (req.has_param("follower_count")) {
+		return static_cast<uint8_t>(Strings::ToUnsignedInt(req.get_param_value("follower_count")));
+	}
+
+	if (req.body.empty()) {
+		return 3;
+	}
+
+	try {
+		const auto payload = nlohmann::json::parse(req.body);
+		if (payload.contains("follower_count") && payload["follower_count"].is_number()) {
+			return payload["follower_count"].get<uint8_t>();
+		}
+	}
+	catch (const std::exception &) {
+		return 3;
+	}
+
+	return 3;
 }
 
 bool IsAuthorized(const httplib::Request &req, const std::string &bearer_token)
@@ -365,6 +433,10 @@ bool ServeHttp(const HttpServerOptions &options)
 
 	api.Post("/api/v1/harness/scenarios/bot-slow-maintenance/mezzed", [&runtime](const auto &, auto &res) {
 		SetJson(res, ToJson(runtime.RunBotSlowMaintenanceMezzed()));
+	});
+
+	api.Post("/api/v1/harness/scenarios/actor-led-bot-party", [&runtime](const auto &req, auto &res) {
+		SetJson(res, ToJson(runtime.RunActorLedBotPartyProof(ParseFollowerCount(req))));
 	});
 
 	api.Post("/api/v1/harness/shutdown", [&runtime, &api](const auto &, auto &res) {

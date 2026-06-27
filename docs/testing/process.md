@@ -374,6 +374,9 @@ the same container, and checks:
   **Engaged Hostile** after the current target is already slowed.
 - `POST /api/v1/harness/scenarios/bot-slow-maintenance/mezzed` proves the bot skips a mezzed hostile and slows
   another eligible hostile.
+- `POST /api/v1/harness/scenarios/actor-led-bot-party` proves the bounded `central-lhy.9` party shape:
+  synthetic owner authority plus bot-led follow anchors, while documenting the current owner-client blockers for
+  group leadership, target-command sourcing, and combat leash.
 - `POST /api/v1/harness/shutdown` requests clean shutdown.
 
 Expected validation result: the wrapper exits `0` with no scenario payload printed. On failure it prints either

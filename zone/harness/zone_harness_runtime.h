@@ -72,6 +72,33 @@ struct BotSlowMaintenanceScenarioResult {
 	RuntimeSnapshot runtime;
 };
 
+struct ActorLedBotPartyScenarioResult {
+	bool proved = false;
+	std::string reason;
+	uint8_t follower_count_requested = 0;
+	uint8_t follower_count_created = 0;
+	uint32_t ticks_processed = 0;
+	uint32_t elapsed_ms = 0;
+	std::string database_mutation;
+	ActorEventEntity owner;
+	ActorEventEntity group_leader;
+	ActorEventEntity actor_leader;
+	std::vector<ActorEventEntity> followers;
+	bool all_bots_share_owner = false;
+	bool group_leader_change_to_actor_rejected = false;
+	bool followers_follow_actor_leader = false;
+	bool owner_target_command_observed = false;
+	bool actor_target_command_blocked = false;
+	bool owner_leash_blocks_actor_led_combat = false;
+	uint16_t slow_spell_id = 0;
+	std::string owner_target_reason;
+	std::string actor_target_reason;
+	std::string leash_reason;
+	std::vector<ActorEvent> owner_target_events;
+	std::vector<ActorEvent> actor_target_events;
+	RuntimeSnapshot runtime;
+};
+
 enum class BotSlowMaintenanceScenarioKind {
 	CurrentTarget,
 	Fallback,
@@ -92,6 +119,11 @@ public:
 	BotSlowMaintenanceScenarioResult RunBotSlowMaintenanceCurrentTarget(uint32_t max_ticks = 160, uint32_t sleep_ms = 25);
 	BotSlowMaintenanceScenarioResult RunBotSlowMaintenanceFallback(uint32_t max_ticks = 160, uint32_t sleep_ms = 25);
 	BotSlowMaintenanceScenarioResult RunBotSlowMaintenanceMezzed(uint32_t max_ticks = 160, uint32_t sleep_ms = 25);
+	ActorLedBotPartyScenarioResult RunActorLedBotPartyProof(
+		uint8_t follower_count = 3,
+		uint32_t max_ticks = 160,
+		uint32_t sleep_ms = 25
+	);
 	void RequestShutdown();
 	void Shutdown();
 

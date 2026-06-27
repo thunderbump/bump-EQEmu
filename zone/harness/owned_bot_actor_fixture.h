@@ -43,6 +43,20 @@ struct HostileNpcConfig {
 	glm::vec4 position;
 };
 
+struct OwnedBotPartyConfig {
+	std::string owner_name = "HarnessPartyOwner";
+	std::string actor_leader_name = "HarnessActorLeader";
+	std::string follower_name_prefix = "HarnessFollower";
+	uint8_t follower_count = 3;
+	uint8_t level = 60;
+	uint16_t race = Race::Barbarian;
+	uint8_t leader_class = Class::Shaman;
+	uint8_t follower_class = Class::Shaman;
+	uint8_t gender = Gender::Male;
+	uint32_t leader_bot_spell_list_id = 3010;
+	uint32_t follower_bot_spell_list_id = 3010;
+};
+
 // Zone Harness fixture plumbing for owned bot Autonomous Actor scenarios.
 // Setup/reset methods create synthetic owner, owned bot, group, hostile NPCs, and hate/combat state that shape
 // Actor Perception, then clean those fixtures up. Actor Action methods express gameplay intent through ordinary
@@ -58,36 +72,51 @@ public:
 
 	// Zone Harness setup/reset shortcuts.
 	bool SetUpOwnedBotGroup(const OwnedBotActorConfig &config = {});
+	bool SetUpOwnedBotParty(const OwnedBotPartyConfig &config = {});
 	NPC *AddHostileNPC(const HostileNpcConfig &config);
 	void EngageHostileWithOwnerGroup(NPC *hostile, int32_t owner_hate = 25, int32_t bot_hate = 25);
+	void EngageHostileWithParty(NPC *hostile, int32_t owner_hate = 25, int32_t bot_hate = 25);
 	void OwnedBotEngages(Mob *hostile, int32_t hate = 100);
 	void RefreshOwnedBotPerception();
+	void RefreshPerception(Bot *bot);
+	void RefreshPartyPerception();
 	void Reset();
 
 	// Actor Actions.
 	void OwnerTargets(Mob *target);
 	void BotTargets(Mob *target);
+	void BotTargets(Bot *actor, Mob *target);
+	void SetBotFollowTarget(Bot *actor, Mob *target);
+	void SetFollowersFollowActorLeader();
+	void SetBotAttackFlag(Bot *actor, bool enabled = true);
 
 	// Zone Harness setup shortcuts for preconditions, not Actor Actions.
 	bool MarkHostileSlowed(NPC *hostile, uint16_t slow_spell_id, uint32_t ticks = 600);
 	bool MarkHostileMezzed(NPC *hostile);
 
 	uint16_t FindPreparedSingleTargetSlowSpell(Mob *target) const;
+	uint16_t FindPreparedSingleTargetSlowSpell(Bot *actor, Mob *target) const;
 	bool IsSingleTargetSlowCastStartFor(const ActorEvent &event, Mob *target) const;
+	bool IsSingleTargetSlowCastStartFor(Bot *actor, const ActorEvent &event, Mob *target) const;
 
 	Client *Owner() const { return owner; }
 	Bot *OwnedBot() const { return bot; }
+	Bot *ActorLeader() const { return bot; }
+	const std::vector<Bot*> &FollowerBots() const { return followers; }
 	Group *ActorGroup() const { return group; }
 	ActorEventEntity Describe(Mob *mob) const;
 	ActorEventEntity OwnerEntity() const;
 	ActorEventEntity OwnedBotEntity() const;
+	ActorEventEntity ActorLeaderEntity() const { return OwnedBotEntity(); }
 	std::string DatabaseMutationSummary() const;
 
 private:
+	Bot *CreateOwnedBot(const OwnedBotActorConfig &config);
 	void RememberMob(Mob *mob);
 
 	Client *owner = nullptr;
 	Bot *bot = nullptr;
+	std::vector<Bot*> followers;
 	Group *group = nullptr;
 	uint32_t group_id = 0;
 	std::vector<uint16_t> mob_ids;

@@ -182,6 +182,70 @@ if require_mezzed == "true" and any(
 PY
 }
 
+assert_actor_led_party_scenario() {
+  local payload=\"\$1\"
+  local expected_followers=\"\$2\"
+
+  ACTOR_PARTY_PAYLOAD=\"\$payload\" python3 - \"\$expected_followers\" <<'PY'
+import json
+import os
+import sys
+
+expected_followers = int(sys.argv[1])
+payload = json.loads(os.environ["ACTOR_PARTY_PAYLOAD"])
+
+def fail(message):
+    print(json.dumps({"error": message, "payload": payload}, separators=(",", ":")), file=sys.stderr)
+    sys.exit(1)
+
+if payload.get("proved") is not True:
+    fail("actor-led bot party proof did not complete")
+if payload.get("follower_count_requested") != expected_followers:
+    fail("unexpected requested follower count")
+if payload.get("follower_count_created") != expected_followers:
+    fail("unexpected created follower count")
+if not str(payload.get("database_mutation", "")).startswith("none:"):
+    fail("scenario reported database mutation")
+if payload.get("group_leader", {}).get("kind") != "client":
+    fail("group leader was not the synthetic owner client")
+if payload.get("actor_leader", {}).get("kind") != "bot":
+    fail("actor leader was not a bot")
+followers = payload.get("followers") or []
+if len(followers) != expected_followers:
+    fail("unexpected follower list length")
+if not payload.get("all_bots_share_owner"):
+    fail("bot owner invariants were not preserved")
+if not payload.get("group_leader_change_to_actor_rejected"):
+    fail("client-only group leader blocker was not observed")
+if not payload.get("followers_follow_actor_leader"):
+    fail("followers did not retain actor leader follow anchors")
+if not payload.get("owner_target_command_observed"):
+    fail("owner target command baseline was not observed")
+if not payload.get("actor_target_command_blocked"):
+    fail("actor target blocker was not observed")
+if not payload.get("owner_leash_blocks_actor_led_combat"):
+    fail("owner leash blocker was not observed")
+
+owner_events = payload.get("owner_target_events") or []
+if not any(
+    event.get("type") == "spell_cast_started"
+    and event.get("spell", {}).get("category") == "Slow"
+    and event.get("spell", {}).get("targeting") == "single"
+    for event in owner_events
+):
+    fail("owner target baseline did not produce a slow cast-start event")
+
+actor_events = payload.get("actor_target_events") or []
+if any(
+    event.get("type") == "spell_cast_started"
+    and event.get("spell", {}).get("category") == "Slow"
+    and event.get("spell", {}).get("targeting") == "single"
+    for event in actor_events
+):
+    fail("actor target blocker unexpectedly produced a follower slow cast-start event")
+PY
+}
+
 scenario=\$(curl -fsS -X POST -H 'Content-Type: application/json' --data '{\"spell_id\":200}' \"http://127.0.0.1:${port}/api/v1/harness/scenarios/spell-cast-start\")
 [[ \"\$scenario\" == *'\"started\":true'* ]] || { printf '%s\n' \"\$scenario\" >&2; exit 1; }
 
@@ -217,6 +281,9 @@ assert_slow_scenario \"\$fallback_scenario\" fallback HarnessSlowFallbackHostile
 
 mezzed_scenario=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/bot-slow-maintenance/mezzed\")
 assert_slow_scenario \"\$mezzed_scenario\" mezzed HarnessSlowSecondaryHostile false true
+
+actor_led_party=\$(curl -fsS -X POST -H 'Content-Type: application/json' --data '{\"follower_count\":3}' \"http://127.0.0.1:${port}/api/v1/harness/scenarios/actor-led-bot-party\")
+assert_actor_led_party_scenario \"\$actor_led_party\" 3
 
 shutdown=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/shutdown\")
 [[ \"\$shutdown\" == *'\"shutdown_requested\":true'* ]] || { printf '%s\n' \"\$shutdown\" >&2; exit 1; }

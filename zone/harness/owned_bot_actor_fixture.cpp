@@ -18,6 +18,8 @@
 #include "zone/npc.h"
 #include "zone/zonedb.h"
 
+#include <algorithm>
+
 extern EntityList entity_list;
 
 namespace EQ::ZoneHarness {
@@ -56,19 +58,8 @@ OwnedBotActorFixture::~OwnedBotActorFixture()
 	Reset();
 }
 
-bool OwnedBotActorFixture::SetUpOwnedBotGroup(const OwnedBotActorConfig &config)
+Bot *OwnedBotActorFixture::CreateOwnedBot(const OwnedBotActorConfig &config)
 {
-	Reset();
-
-	owner = new Client();
-	owner->TempName(config.owner_name.c_str());
-	owner->Mob::SetLevel(config.level);
-	owner->SetHP(10000);
-	owner->SetMana(10000);
-	owner->GMMove(0.0f, 0.0f, 0.0f, 0.0f);
-	entity_list.AddClient(owner);
-	RememberMob(owner);
-
 	auto *bot_type = Bot::CreateDefaultNPCTypeStructForBot(
 		config.bot_name,
 		"",
@@ -82,30 +73,117 @@ bool OwnedBotActorFixture::SetUpOwnedBotGroup(const OwnedBotActorConfig &config)
 	bot_type->max_hp = 5000;
 	bot_type->current_hp = 5000;
 
-	bot = new Bot(bot_type, owner);
-	bot->GMMove(2.0f, 0.0f, 0.0f, 0.0f);
-	bot->SetMana(bot->GetMaxMana());
-	bot->SetHP(bot->GetMaxHP());
-	bot->SetBotSpellID(config.bot_spell_list_id);
-	bot->LoadDefaultBotSettings();
+	auto *created_bot = new Bot(bot_type, owner);
+	created_bot->SetMana(created_bot->GetMaxMana());
+	created_bot->SetHP(created_bot->GetMaxHP());
+	created_bot->SetBotSpellID(config.bot_spell_list_id);
+	created_bot->LoadDefaultBotSettings();
 	for (uint16 spell_type = BotSpellTypes::START; spell_type <= BotSpellTypes::END; ++spell_type) {
-		bot->SetSpellTypePriority(spell_type, BotPriorityCategories::Engaged, spell_type == BotSpellTypes::Slow ? 1 : 0);
+		created_bot->SetSpellTypePriority(
+			spell_type,
+			BotPriorityCategories::Engaged,
+			spell_type == BotSpellTypes::Slow ? 1 : 0
+		);
 	}
 
-	if (!bot->AI_AddBotSpells(config.bot_spell_list_id)) {
-		delete bot;
-		bot = nullptr;
+	if (!created_bot->AI_AddBotSpells(config.bot_spell_list_id)) {
+		delete created_bot;
+		return nullptr;
+	}
+
+	entity_list.AddBot(created_bot, false, true);
+	RememberMob(created_bot);
+	created_bot->AI_Bot_Start();
+	return created_bot;
+}
+
+bool OwnedBotActorFixture::SetUpOwnedBotGroup(const OwnedBotActorConfig &config)
+{
+	Reset();
+
+	owner = new Client();
+	owner->TempName(config.owner_name.c_str());
+	owner->Mob::SetLevel(config.level);
+	owner->SetHP(10000);
+	owner->SetMana(10000);
+	owner->GMMove(0.0f, 0.0f, 0.0f, 0.0f);
+	entity_list.AddClient(owner);
+	RememberMob(owner);
+
+	bot = CreateOwnedBot(config);
+	if (!bot) {
+		Reset();
 		return false;
 	}
 
-	entity_list.AddBot(bot, false, true);
-	RememberMob(bot);
-	bot->AI_Bot_Start();
+	bot->GMMove(2.0f, 0.0f, 0.0f, 0.0f);
 
 	group = new Group(owner);
 	group->AddMember(bot);
 	group_id = 900001;
 	entity_list.AddGroup(group, group_id);
+
+	return true;
+}
+
+bool OwnedBotActorFixture::SetUpOwnedBotParty(const OwnedBotPartyConfig &config)
+{
+	Reset();
+
+	owner = new Client();
+	owner->TempName(config.owner_name.c_str());
+	owner->Mob::SetLevel(config.level);
+	owner->SetHP(10000);
+	owner->SetMana(10000);
+	owner->GMMove(0.0f, 0.0f, 0.0f, 0.0f);
+	entity_list.AddClient(owner);
+	RememberMob(owner);
+
+	bot = CreateOwnedBot({
+		.owner_name = config.owner_name,
+		.bot_name = config.actor_leader_name,
+		.level = config.level,
+		.race = config.race,
+		.bot_class = config.leader_class,
+		.gender = config.gender,
+		.bot_spell_list_id = config.leader_bot_spell_list_id,
+	});
+	if (!bot) {
+		Reset();
+		return false;
+	}
+
+	bot->GMMove(4.0f, 0.0f, 0.0f, 0.0f);
+
+	group = new Group(owner);
+	group->AddMember(bot);
+
+	const uint8_t bounded_followers = std::clamp<uint8_t>(config.follower_count, 1, 5);
+	followers.reserve(bounded_followers);
+
+	for (uint8_t index = 0; index < bounded_followers; ++index) {
+		auto *follower = CreateOwnedBot({
+			.owner_name = config.owner_name,
+			.bot_name = config.follower_name_prefix + std::to_string(index + 1),
+			.level = config.level,
+			.race = config.race,
+			.bot_class = config.follower_class,
+			.gender = config.gender,
+			.bot_spell_list_id = config.follower_bot_spell_list_id,
+		});
+		if (!follower) {
+			Reset();
+			return false;
+		}
+
+		follower->GMMove(6.0f + static_cast<float>(index * 2), 2.0f, 0.0f, 0.0f);
+		group->AddMember(follower);
+		followers.push_back(follower);
+	}
+
+	group_id = 900001;
+	entity_list.AddGroup(group, group_id);
+	SetFollowersFollowActorLeader();
 
 	return true;
 }
@@ -139,6 +217,21 @@ void OwnedBotActorFixture::EngageHostileWithOwnerGroup(NPC *hostile, int32_t own
 	}
 }
 
+void OwnedBotActorFixture::EngageHostileWithParty(NPC *hostile, int32_t owner_hate, int32_t bot_hate)
+{
+	EngageHostileWithOwnerGroup(hostile, owner_hate, bot_hate);
+
+	if (!hostile || bot_hate <= 0) {
+		return;
+	}
+
+	for (auto *follower : followers) {
+		if (follower) {
+			hostile->AddToHateList(follower, bot_hate, 1, false);
+		}
+	}
+}
+
 void OwnedBotActorFixture::OwnedBotEngages(Mob *hostile, int32_t hate)
 {
 	if (bot && hostile && hate > 0) {
@@ -150,6 +243,21 @@ void OwnedBotActorFixture::RefreshOwnedBotPerception()
 {
 	if (bot) {
 		entity_list.ScanCloseMobs(bot);
+	}
+}
+
+void OwnedBotActorFixture::RefreshPerception(Bot *actor)
+{
+	if (actor) {
+		entity_list.ScanCloseMobs(actor);
+	}
+}
+
+void OwnedBotActorFixture::RefreshPartyPerception()
+{
+	RefreshOwnedBotPerception();
+	for (auto *follower : followers) {
+		RefreshPerception(follower);
 	}
 }
 
@@ -167,6 +275,7 @@ void OwnedBotActorFixture::Reset()
 	mob_ids.clear();
 	owner = nullptr;
 	bot = nullptr;
+	followers.clear();
 }
 
 void OwnedBotActorFixture::OwnerTargets(Mob *target)
@@ -180,6 +289,34 @@ void OwnedBotActorFixture::BotTargets(Mob *target)
 {
 	if (bot) {
 		bot->SetTarget(target);
+	}
+}
+
+void OwnedBotActorFixture::BotTargets(Bot *actor, Mob *target)
+{
+	if (actor) {
+		actor->SetTarget(target);
+	}
+}
+
+void OwnedBotActorFixture::SetBotFollowTarget(Bot *actor, Mob *target)
+{
+	if (actor && target) {
+		actor->SetFollowID(target->GetID());
+	}
+}
+
+void OwnedBotActorFixture::SetFollowersFollowActorLeader()
+{
+	for (auto *follower : followers) {
+		SetBotFollowTarget(follower, bot);
+	}
+}
+
+void OwnedBotActorFixture::SetBotAttackFlag(Bot *actor, bool enabled)
+{
+	if (actor) {
+		actor->SetAttackFlag(enabled);
 	}
 }
 
@@ -205,11 +342,16 @@ bool OwnedBotActorFixture::MarkHostileMezzed(NPC *hostile)
 
 uint16_t OwnedBotActorFixture::FindPreparedSingleTargetSlowSpell(Mob *target) const
 {
-	if (!bot || !target) {
+	return FindPreparedSingleTargetSlowSpell(bot, target);
+}
+
+uint16_t OwnedBotActorFixture::FindPreparedSingleTargetSlowSpell(Bot *actor, Mob *target) const
+{
+	if (!actor || !target) {
 		return 0;
 	}
 
-	const auto slow_spells = Bot::GetPrioritizedBotSpellsBySpellType(bot, BotSpellTypes::Slow, target, false);
+	const auto slow_spells = Bot::GetPrioritizedBotSpellsBySpellType(actor, BotSpellTypes::Slow, target, false);
 	for (const auto &spell: slow_spells) {
 		if (IsValidSpell(spell.SpellId) && IsSlowSpell(spell.SpellId) && !IsAnyAESpell(spell.SpellId)) {
 			return spell.SpellId;
@@ -221,10 +363,15 @@ uint16_t OwnedBotActorFixture::FindPreparedSingleTargetSlowSpell(Mob *target) co
 
 bool OwnedBotActorFixture::IsSingleTargetSlowCastStartFor(const ActorEvent &event, Mob *target) const
 {
-	return bot &&
+	return IsSingleTargetSlowCastStartFor(bot, event, target);
+}
+
+bool OwnedBotActorFixture::IsSingleTargetSlowCastStartFor(Bot *actor, const ActorEvent &event, Mob *target) const
+{
+	return actor &&
 		target &&
 		event.type == "spell_cast_started" &&
-		event.caster.entity_id == bot->GetID() &&
+		event.caster.entity_id == actor->GetID() &&
 		event.target.has_value() &&
 		event.target->entity_id == target->GetID() &&
 		event.spell.category == "Slow" &&
