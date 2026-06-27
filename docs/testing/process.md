@@ -373,6 +373,9 @@ the same container, and checks:
   **Autonomous Actor** harness primitive by enqueueing target and say actions, processing a small tick budget,
   observing actor-scoped perception, and verifying cursor-based `target_changed` and `speech_emitted`
   **Actor Events** without default persistent DB mutation.
+- `POST /api/v1/harness/scenarios/actor-led-bot-party` proves one owned bot can act as an actor-leader
+  candidate with follower bots while current target and leash sourcing still expose the owner-client-shaped
+  blockers for the next `ActorCommandSource` seam.
 - `POST /api/v1/harness/shutdown` requests clean shutdown.
 
 Expected validation result: the wrapper exits `0` with no scenario payload printed. On failure it prints either

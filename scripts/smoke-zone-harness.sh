@@ -268,6 +268,56 @@ if not speech_events:
 PY
 }
 
+assert_actor_led_bot_party() {
+  local payload=\"\$1\"
+
+  ACTOR_PARTY_PAYLOAD=\"\$payload\" python3 - <<'PY'
+import json
+import os
+import sys
+
+payload = json.loads(os.environ["ACTOR_PARTY_PAYLOAD"])
+
+def fail(message):
+    print(json.dumps({"error": message, "payload": payload}, separators=(",", ":")), file=sys.stderr)
+    sys.exit(1)
+
+if payload.get("proved") is not True:
+    fail("actor-led bot party proof did not complete")
+if not str(payload.get("database_mutation", "")).startswith("none:"):
+    fail("actor-led bot party reported database mutation")
+if payload.get("follower_count_requested") != 3 or payload.get("follower_count_created") != 3:
+    fail("unexpected follower count")
+
+required_flags = [
+    "all_bots_share_owner",
+    "group_leader_change_to_actor_rejected",
+    "followers_follow_actor_leader",
+    "owner_target_command_observed",
+    "actor_target_command_blocked",
+    "owner_leash_blocks_actor_led_combat",
+]
+for flag in required_flags:
+    if payload.get(flag) is not True:
+        fail(f"{flag} was not proven")
+
+if len(payload.get("followers") or []) != 3:
+    fail("follower identities missing")
+if payload.get("owner", {}).get("kind") != "client":
+    fail("owner is not a client")
+if payload.get("actor_leader", {}).get("kind") != "bot":
+    fail("actor leader is not a bot")
+if payload.get("group_leader", {}).get("kind") != "client":
+    fail("group leader should remain the owner client")
+
+owner_events = payload.get("owner_target_events") or []
+if not any(event.get("type") == "spell_cast_started" for event in owner_events):
+    fail("owner target did not produce follower spell event evidence")
+if payload.get("actor_target_events"):
+    fail("actor target unexpectedly produced follower event evidence")
+PY
+}
+
 scenario=\$(curl -fsS -X POST -H 'Content-Type: application/json' --data '{\"spell_id\":200}' \"http://127.0.0.1:${port}/api/v1/harness/scenarios/spell-cast-start\")
 [[ \"\$scenario\" == *'\"started\":true'* ]] || { printf '%s\n' \"\$scenario\" >&2; exit 1; }
 
@@ -308,6 +358,9 @@ assert_slow_scenario \"\$mezzed_scenario\" mezzed HarnessSlowSecondaryHostile fa
 	assert_autonomous_actor_loop \"\$actor_loop\"
 	actor_loop_repeat=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/autonomous-actor-loop\")
 	assert_autonomous_actor_loop \"\$actor_loop_repeat\"
+
+	actor_party=\$(curl -fsS -X POST -H 'Content-Type: application/json' --data '{\"follower_count\":3}' \"http://127.0.0.1:${port}/api/v1/harness/scenarios/actor-led-bot-party\")
+	assert_actor_led_bot_party \"\$actor_party\"
 
 	shutdown=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/shutdown\")
 [[ \"\$shutdown\" == *'\"shutdown_requested\":true'* ]] || { printf '%s\n' \"\$shutdown\" >&2; exit 1; }
