@@ -14,19 +14,20 @@
 #include "common/database.h"
 #include "common/strings.h"
 
+#include <optional>
 #include <ctime>
 
 class BaseActorProfilesRepository {
 public:
 	struct ActorProfiles {
-		uint32_t    actor_id;
-		std::string actor_type;
-		std::string actor_substrate;
-		uint32_t    bot_id;
-		uint32_t    owner_character_id;
-		uint8_t     enabled;
-		time_t      created_at;
-		time_t      updated_at;
+		uint32_t                actor_id;
+		std::string             actor_type;
+		std::string             actor_substrate;
+		std::optional<uint32_t> bot_id;
+		std::optional<uint32_t> owner_character_id;
+		uint8_t                 enabled;
+		time_t                  created_at;
+		time_t                  updated_at;
 	};
 
 	static std::string PrimaryKey()
@@ -102,8 +103,8 @@ public:
 		e.actor_id           = 0;
 		e.actor_type         = "";
 		e.actor_substrate    = "";
-		e.bot_id             = 0;
-		e.owner_character_id = 0;
+		e.bot_id             = std::nullopt;
+		e.owner_character_id = std::nullopt;
 		e.enabled            = 1;
 		e.created_at         = 0;
 		e.updated_at         = 0;
@@ -146,8 +147,8 @@ public:
 			e.actor_id           = row[0] ? static_cast<uint32_t>(strtoul(row[0], nullptr, 10)) : 0;
 			e.actor_type         = row[1] ? row[1] : "";
 			e.actor_substrate    = row[2] ? row[2] : "";
-			e.bot_id             = row[3] ? static_cast<uint32_t>(strtoul(row[3], nullptr, 10)) : 0;
-			e.owner_character_id = row[4] ? static_cast<uint32_t>(strtoul(row[4], nullptr, 10)) : 0;
+			e.bot_id             = row[3] ? std::optional<uint32_t>(static_cast<uint32_t>(strtoul(row[3], nullptr, 10))) : std::nullopt;
+			e.owner_character_id = row[4] ? std::optional<uint32_t>(static_cast<uint32_t>(strtoul(row[4], nullptr, 10))) : std::nullopt;
 			e.enabled            = row[5] ? static_cast<uint8_t>(strtoul(row[5], nullptr, 10)) : 1;
 			e.created_at         = strtoll(row[6] ? row[6] : "-1", nullptr, 10);
 			e.updated_at         = strtoll(row[7] ? row[7] : "-1", nullptr, 10);
@@ -186,8 +187,8 @@ public:
 
 		v.push_back(columns[1] + " = '" + Strings::Escape(e.actor_type) + "'");
 		v.push_back(columns[2] + " = '" + Strings::Escape(e.actor_substrate) + "'");
-		v.push_back(columns[3] + " = " + std::to_string(e.bot_id));
-		v.push_back(columns[4] + " = " + std::to_string(e.owner_character_id));
+		v.push_back(columns[3] + " = " + NullableUintSql(e.bot_id));
+		v.push_back(columns[4] + " = " + NullableUintSql(e.owner_character_id));
 		v.push_back(columns[5] + " = " + std::to_string(e.enabled));
 		v.push_back(columns[6] + " = FROM_UNIXTIME(" + (e.created_at > 0 ? std::to_string(e.created_at) : "null") + ")");
 		v.push_back(columns[7] + " = FROM_UNIXTIME(" + (e.updated_at > 0 ? std::to_string(e.updated_at) : "null") + ")");
@@ -215,8 +216,8 @@ public:
 		v.push_back(std::to_string(e.actor_id));
 		v.push_back("'" + Strings::Escape(e.actor_type) + "'");
 		v.push_back("'" + Strings::Escape(e.actor_substrate) + "'");
-		v.push_back(std::to_string(e.bot_id));
-		v.push_back(std::to_string(e.owner_character_id));
+		v.push_back(NullableUintSql(e.bot_id));
+		v.push_back(NullableUintSql(e.owner_character_id));
 		v.push_back(std::to_string(e.enabled));
 		v.push_back("FROM_UNIXTIME(" + (e.created_at > 0 ? std::to_string(e.created_at) : "null") + ")");
 		v.push_back("FROM_UNIXTIME(" + (e.updated_at > 0 ? std::to_string(e.updated_at) : "null") + ")");
@@ -252,8 +253,8 @@ public:
 			v.push_back(std::to_string(e.actor_id));
 			v.push_back("'" + Strings::Escape(e.actor_type) + "'");
 			v.push_back("'" + Strings::Escape(e.actor_substrate) + "'");
-			v.push_back(std::to_string(e.bot_id));
-			v.push_back(std::to_string(e.owner_character_id));
+			v.push_back(NullableUintSql(e.bot_id));
+			v.push_back(NullableUintSql(e.owner_character_id));
 			v.push_back(std::to_string(e.enabled));
 			v.push_back("FROM_UNIXTIME(" + (e.created_at > 0 ? std::to_string(e.created_at) : "null") + ")");
 			v.push_back("FROM_UNIXTIME(" + (e.updated_at > 0 ? std::to_string(e.updated_at) : "null") + ")");
@@ -293,8 +294,8 @@ public:
 			e.actor_id           = row[0] ? static_cast<uint32_t>(strtoul(row[0], nullptr, 10)) : 0;
 			e.actor_type         = row[1] ? row[1] : "";
 			e.actor_substrate    = row[2] ? row[2] : "";
-			e.bot_id             = row[3] ? static_cast<uint32_t>(strtoul(row[3], nullptr, 10)) : 0;
-			e.owner_character_id = row[4] ? static_cast<uint32_t>(strtoul(row[4], nullptr, 10)) : 0;
+			e.bot_id             = row[3] ? std::optional<uint32_t>(static_cast<uint32_t>(strtoul(row[3], nullptr, 10))) : std::nullopt;
+			e.owner_character_id = row[4] ? std::optional<uint32_t>(static_cast<uint32_t>(strtoul(row[4], nullptr, 10))) : std::nullopt;
 			e.enabled            = row[5] ? static_cast<uint8_t>(strtoul(row[5], nullptr, 10)) : 1;
 			e.created_at         = strtoll(row[6] ? row[6] : "-1", nullptr, 10);
 			e.updated_at         = strtoll(row[7] ? row[7] : "-1", nullptr, 10);
@@ -325,8 +326,8 @@ public:
 			e.actor_id           = row[0] ? static_cast<uint32_t>(strtoul(row[0], nullptr, 10)) : 0;
 			e.actor_type         = row[1] ? row[1] : "";
 			e.actor_substrate    = row[2] ? row[2] : "";
-			e.bot_id             = row[3] ? static_cast<uint32_t>(strtoul(row[3], nullptr, 10)) : 0;
-			e.owner_character_id = row[4] ? static_cast<uint32_t>(strtoul(row[4], nullptr, 10)) : 0;
+			e.bot_id             = row[3] ? std::optional<uint32_t>(static_cast<uint32_t>(strtoul(row[3], nullptr, 10))) : std::nullopt;
+			e.owner_character_id = row[4] ? std::optional<uint32_t>(static_cast<uint32_t>(strtoul(row[4], nullptr, 10))) : std::nullopt;
 			e.enabled            = row[5] ? static_cast<uint8_t>(strtoul(row[5], nullptr, 10)) : 1;
 			e.created_at         = strtoll(row[6] ? row[6] : "-1", nullptr, 10);
 			e.updated_at         = strtoll(row[7] ? row[7] : "-1", nullptr, 10);
@@ -407,8 +408,8 @@ public:
 		v.push_back(std::to_string(e.actor_id));
 		v.push_back("'" + Strings::Escape(e.actor_type) + "'");
 		v.push_back("'" + Strings::Escape(e.actor_substrate) + "'");
-		v.push_back(std::to_string(e.bot_id));
-		v.push_back(std::to_string(e.owner_character_id));
+		v.push_back(NullableUintSql(e.bot_id));
+		v.push_back(NullableUintSql(e.owner_character_id));
 		v.push_back(std::to_string(e.enabled));
 		v.push_back("FROM_UNIXTIME(" + (e.created_at > 0 ? std::to_string(e.created_at) : "null") + ")");
 		v.push_back("FROM_UNIXTIME(" + (e.updated_at > 0 ? std::to_string(e.updated_at) : "null") + ")");
@@ -437,8 +438,8 @@ public:
 			v.push_back(std::to_string(e.actor_id));
 			v.push_back("'" + Strings::Escape(e.actor_type) + "'");
 			v.push_back("'" + Strings::Escape(e.actor_substrate) + "'");
-			v.push_back(std::to_string(e.bot_id));
-			v.push_back(std::to_string(e.owner_character_id));
+			v.push_back(NullableUintSql(e.bot_id));
+			v.push_back(NullableUintSql(e.owner_character_id));
 			v.push_back(std::to_string(e.enabled));
 			v.push_back("FROM_UNIXTIME(" + (e.created_at > 0 ? std::to_string(e.created_at) : "null") + ")");
 			v.push_back("FROM_UNIXTIME(" + (e.updated_at > 0 ? std::to_string(e.updated_at) : "null") + ")");
@@ -457,5 +458,11 @@ public:
 		);
 
 		return (results.Success() ? results.RowsAffected() : 0);
+	}
+
+private:
+	static std::string NullableUintSql(const std::optional<uint32_t> &value)
+	{
+		return value.has_value() ? std::to_string(*value) : "null";
 	}
 };

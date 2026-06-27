@@ -147,7 +147,7 @@ ON DUPLICATE KEY UPDATE
 		}
 
 		auto stored = FindByBotId(db, *record.bot_id);
-		return stored.value_or(ActorProfileRecord{});
+		return stored.value_or(record);
 	}
 
 private:

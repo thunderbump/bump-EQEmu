@@ -131,7 +131,7 @@ ON DUPLICATE KEY UPDATE
 		}
 
 		auto stored = FindByActorId(db, record.actor_id);
-		return stored.value_or(ActorStatusRecord{});
+		return stored.value_or(record);
 	}
 
 private:
@@ -162,7 +162,7 @@ private:
 
 	static std::string NullableTimeSql(const std::optional<std::time_t> &value)
 	{
-		return value.has_value() && *value > 0
+		return value.has_value()
 			? "FROM_UNIXTIME(" + std::to_string(*value) + ")"
 			: "NULL";
 	}

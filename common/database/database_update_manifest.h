@@ -7258,6 +7258,19 @@ ENGINE=InnoDB;
 )",
 		.content_schema_update = false
 	},
+	ManifestEntry{
+		.version = 9331,
+		.description = "2026_06_27_actor_status_status_json_bound.sql",
+		.check = "SHOW CREATE TABLE `actor_status`",
+		.condition = "missing",
+		.match = "char_length(`status_json`) <= 4096",
+		.sql = R"(
+ALTER TABLE `actor_status`
+	ADD CONSTRAINT `chk_actor_status_status_json_bounded`
+	CHECK (`status_json` IS NULL OR (json_valid(`status_json`) AND char_length(`status_json`) <= 4096));
+)",
+		.content_schema_update = false
+	},
 // -- template; copy/paste this when you need to create a new entry
 //	ManifestEntry{
 //		.version = 9228,

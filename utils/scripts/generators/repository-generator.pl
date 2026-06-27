@@ -182,6 +182,7 @@ foreach my $table_to_generate (@tables) {
           ORDINAL_POSITION,
           COLUMN_KEY,
           COLUMN_DEFAULT,
+          IS_NULLABLE,
           EXTRA
         FROM
           INFORMATION_SCHEMA.COLUMNS
@@ -201,12 +202,17 @@ foreach my $table_to_generate (@tables) {
         my $column_name_formatted = format_column_name_for_cpp_var($column_name);
         my $data_type             = $row[2];
         my $column_type           = $row[3];
+        my $is_nullable           = ($row[7] && $row[7] eq "YES") ? 1 : 0;
+        my $use_nullable_optional = $is_nullable && ($table_to_generate eq "actor_profiles" || $table_to_generate eq "actor_status");
 
         if ($longest_column_length < length($column_name_formatted)) {
             $longest_column_length = length($column_name_formatted);
         }
 
         my $struct_data_type = translate_mysql_data_type_to_c($data_type, $column_type);
+        if ($use_nullable_optional) {
+            $struct_data_type = sprintf('std::optional<%s>', $struct_data_type);
+        }
 
         if ($longest_data_type_length < length($struct_data_type)) {
             $longest_data_type_length = length($struct_data_type);
@@ -238,7 +244,9 @@ foreach my $table_to_generate (@tables) {
         my $ordinal_position      = $row[4];
         my $column_key            = $row[5];
         my $column_default        = ($row[6] ? $row[6] : "");
-        my $extra                 = ($row[7] ? $row[7] : "");
+        my $is_nullable           = ($row[7] && $row[7] eq "YES") ? 1 : 0;
+        my $extra                 = ($row[8] ? $row[8] : "");
+        my $use_nullable_optional = $is_nullable && ($table_to_generate eq "actor_profiles" || $table_to_generate eq "actor_status");
 
         if (!$table_primary_key{$table_name}) {
             if (($column_key eq "PRI" && $data_type =~ /int/) || ($ordinal_position == 0 && $column_name =~ /id/i)) {
@@ -269,7 +277,11 @@ foreach my $table_to_generate (@tables) {
             $default_value = 0;
         }
 
-        my $struct_data_type = translate_mysql_data_type_to_c($data_type, $column_type);
+        my $base_struct_data_type = translate_mysql_data_type_to_c($data_type, $column_type);
+        if ($use_nullable_optional && (trim($column_default) eq "" || $column_default eq "NULL")) {
+            $default_value = 'std::nullopt';
+        }
+        my $struct_data_type = $use_nullable_optional ? sprintf('std::optional<%s>', $base_struct_data_type) : $base_struct_data_type;
 
         # struct
         $table_struct_columns .= sprintf("\t\t\%-${longest_data_type_length}s %s;\n", $struct_data_type, $column_name_formatted);
@@ -293,7 +305,21 @@ foreach my $table_to_generate (@tables) {
         # update one
         if ($extra ne "auto_increment") {
             my $query_value = sprintf('\'" + Strings::Escape(e.%s) + "\'");', $column_name_formatted);
-            if ($data_type =~ /int|float|double|decimal/) {
+            if ($use_nullable_optional) {
+                if ($data_type =~ /int|float|double|decimal/) {
+                    $query_value = sprintf('\" + (e.%s.has_value() ? std::to_string(*e.%s) : \"null\"));', $column_name_formatted, $column_name_formatted);
+                }
+                elsif ($data_type =~ /datetime|timestamp/) {
+                    $query_value = sprintf('\" + (e.%s.has_value() ? \"FROM_UNIXTIME(\" + std::to_string(*e.%s) + \")\" : \"null\"));', $column_name_formatted, $column_name_formatted);
+                }
+                elsif ($data_type =~ /blob/) {
+                    $query_value = sprintf(q{" + (e.%s.has_value() ? "'" + *e.%s + "'" : "null"));}, $column_name_formatted, $column_name_formatted);
+                }
+                else {
+                    $query_value = sprintf(q{" + (e.%s.has_value() ? "'" + Strings::Escape(*e.%s) + "'" : "null"));}, $column_name_formatted, $column_name_formatted);
+                }
+            }
+            elsif ($data_type =~ /int|float|double|decimal/) {
                 $query_value = sprintf('" + std::to_string(e.%s));', $column_name_formatted);
             }
             elsif ($data_type =~ /datetime|timestamp/) {
@@ -312,7 +338,21 @@ foreach my $table_to_generate (@tables) {
 
         # insert
         my $value = sprintf("\"'\" + Strings::Escape(e.%s) + \"'\"", $column_name_formatted);
-        if ($data_type =~ /int|float|double|decimal/) {
+        if ($use_nullable_optional) {
+            if ($data_type =~ /int|float|double|decimal/) {
+                $value = sprintf('" + (e.%s.has_value() ? std::to_string(*e.%s) : "null") + "', $column_name_formatted, $column_name_formatted);
+            }
+            elsif ($data_type =~ /datetime|timestamp/) {
+                $value = sprintf('" + (e.%s.has_value() ? "FROM_UNIXTIME(" + std::to_string(*e.%s) + ")" : "null") + "', $column_name_formatted, $column_name_formatted);
+            }
+            elsif ($data_type =~ /blob/) {
+                $value = sprintf(q{" + (e.%s.has_value() ? "'" + *e.%s + "'" : "null") + "}, $column_name_formatted, $column_name_formatted);
+            }
+            else {
+                $value = sprintf(q{" + (e.%s.has_value() ? "'" + Strings::Escape(*e.%s) + "'" : "null") + "}, $column_name_formatted, $column_name_formatted);
+            }
+        }
+        elsif ($data_type =~ /int|float|double|decimal/) {
             $value = sprintf('std::to_string(e.%s)', $column_name_formatted);
         }
         elsif ($data_type =~ /datetime|timestamp/) {
@@ -327,7 +367,35 @@ foreach my $table_to_generate (@tables) {
 
         # find one / all (select)
 
-        if ($column_type =~ /unsigned/) {
+        if ($use_nullable_optional) {
+            if ($column_type =~ /unsigned/) {
+                if ($data_type =~ /bigint/) {
+                    $all_entries      .= sprintf("\t\t\te.%-${longest_column_length}s = row[%s] ? std::optional<%s>(strtoull(row[%s], nullptr, 10)) : std::nullopt;\n", $column_name_formatted, $index, $base_struct_data_type, $index);
+                    $find_one_entries .= sprintf("\t\t\te.%-${longest_column_length}s = row[%s] ? std::optional<%s>(strtoull(row[%s], nullptr, 10)) : std::nullopt;\n", $column_name_formatted, $index, $base_struct_data_type, $index);
+                }
+                elsif ($data_type =~ /int/) {
+                    $all_entries      .= sprintf("\t\t\te.%-${longest_column_length}s = row[%s] ? std::optional<%s>(static_cast<%s>(strtoul(row[%s], nullptr, 10))) : std::nullopt;\n", $column_name_formatted, $index, $base_struct_data_type, $base_struct_data_type, $index);
+                    $find_one_entries .= sprintf("\t\t\te.%-${longest_column_length}s = row[%s] ? std::optional<%s>(static_cast<%s>(strtoul(row[%s], nullptr, 10))) : std::nullopt;\n", $column_name_formatted, $index, $base_struct_data_type, $base_struct_data_type, $index);
+                }
+            }
+            elsif ($data_type =~ /bigint/) {
+                $all_entries      .= sprintf("\t\t\te.%-${longest_column_length}s = row[%s] ? std::optional<%s>(strtoll(row[%s], nullptr, 10)) : std::nullopt;\n", $column_name_formatted, $index, $base_struct_data_type, $index);
+                $find_one_entries .= sprintf("\t\t\te.%-${longest_column_length}s = row[%s] ? std::optional<%s>(strtoll(row[%s], nullptr, 10)) : std::nullopt;\n", $column_name_formatted, $index, $base_struct_data_type, $index);
+            }
+            elsif ($data_type =~ /datetime|timestamp/) {
+                $all_entries      .= sprintf("\t\t\te.%-${longest_column_length}s = row[%s] ? std::optional<%s>(strtoll(row[%s], nullptr, 10)) : std::nullopt;\n", $column_name_formatted, $index, $base_struct_data_type, $index);
+                $find_one_entries .= sprintf("\t\t\te.%-${longest_column_length}s = row[%s] ? std::optional<%s>(strtoll(row[%s], nullptr, 10)) : std::nullopt;\n", $column_name_formatted, $index, $base_struct_data_type, $index);
+            }
+            elsif ($data_type =~ /int/) {
+                $all_entries      .= sprintf("\t\t\te.%-${longest_column_length}s = row[%s] ? std::optional<%s>(static_cast<%s>(atoi(row[%s]))) : std::nullopt;\n", $column_name_formatted, $index, $base_struct_data_type, $base_struct_data_type, $index);
+                $find_one_entries .= sprintf("\t\t\te.%-${longest_column_length}s = row[%s] ? std::optional<%s>(static_cast<%s>(atoi(row[%s]))) : std::nullopt;\n", $column_name_formatted, $index, $base_struct_data_type, $base_struct_data_type, $index);
+            }
+            else {
+                $all_entries      .= sprintf("\t\t\te.%-${longest_column_length}s = row[%s] ? std::optional<%s>(row[%s]) : std::nullopt;\n", $column_name_formatted, $index, $base_struct_data_type, $index);
+                $find_one_entries .= sprintf("\t\t\te.%-${longest_column_length}s = row[%s] ? std::optional<%s>(row[%s]) : std::nullopt;\n", $column_name_formatted, $index, $base_struct_data_type, $index);
+            }
+        }
+        elsif ($column_type =~ /unsigned/) {
             if ($data_type =~ /bigint/) {
                 $all_entries      .= sprintf("\t\t\te.%-${longest_column_length}s = row[%s] ? strtoull(row[%s], nullptr, 10) : %s;\n", $column_name_formatted, $index, $index, $default_value);
                 $find_one_entries .= sprintf("\t\t\te.%-${longest_column_length}s = row[%s] ? strtoull(row[%s], nullptr, 10) : %s;\n", $column_name_formatted, $index, $index, $default_value);

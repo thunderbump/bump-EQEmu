@@ -14,19 +14,20 @@
 #include "common/database.h"
 #include "common/strings.h"
 
+#include <optional>
 #include <ctime>
 
 class BaseActorStatusRepository {
 public:
 	struct ActorStatus {
-		uint32_t    actor_id;
-		uint32_t    zone_id;
-		uint32_t    instance_id;
-		uint32_t    entity_id;
-		std::string state;
-		std::string status_json;
-		time_t      heartbeat_at;
-		time_t      updated_at;
+		uint32_t                    actor_id;
+		std::optional<uint32_t>     zone_id;
+		std::optional<uint32_t>     instance_id;
+		std::optional<uint32_t>     entity_id;
+		std::string                 state;
+		std::optional<std::string>  status_json;
+		std::optional<time_t>       heartbeat_at;
+		time_t                      updated_at;
 	};
 
 	static std::string PrimaryKey()
@@ -100,12 +101,12 @@ public:
 		ActorStatus e{};
 
 		e.actor_id     = 0;
-		e.zone_id      = 0;
-		e.instance_id  = 0;
-		e.entity_id    = 0;
+		e.zone_id      = std::nullopt;
+		e.instance_id  = std::nullopt;
+		e.entity_id    = std::nullopt;
 		e.state        = "";
-		e.status_json  = "";
-		e.heartbeat_at = 0;
+		e.status_json  = std::nullopt;
+		e.heartbeat_at = std::nullopt;
 		e.updated_at   = 0;
 
 		return e;
@@ -144,12 +145,12 @@ public:
 			ActorStatus e{};
 
 			e.actor_id     = row[0] ? static_cast<uint32_t>(strtoul(row[0], nullptr, 10)) : 0;
-			e.zone_id      = row[1] ? static_cast<uint32_t>(strtoul(row[1], nullptr, 10)) : 0;
-			e.instance_id  = row[2] ? static_cast<uint32_t>(strtoul(row[2], nullptr, 10)) : 0;
-			e.entity_id    = row[3] ? static_cast<uint32_t>(strtoul(row[3], nullptr, 10)) : 0;
+			e.zone_id      = row[1] ? std::optional<uint32_t>(static_cast<uint32_t>(strtoul(row[1], nullptr, 10))) : std::nullopt;
+			e.instance_id  = row[2] ? std::optional<uint32_t>(static_cast<uint32_t>(strtoul(row[2], nullptr, 10))) : std::nullopt;
+			e.entity_id    = row[3] ? std::optional<uint32_t>(static_cast<uint32_t>(strtoul(row[3], nullptr, 10))) : std::nullopt;
 			e.state        = row[4] ? row[4] : "";
-			e.status_json  = row[5] ? row[5] : "";
-			e.heartbeat_at = strtoll(row[6] ? row[6] : "-1", nullptr, 10);
+			e.status_json  = row[5] ? std::optional<std::string>(row[5]) : std::nullopt;
+			e.heartbeat_at = row[6] ? std::optional<time_t>(strtoll(row[6], nullptr, 10)) : std::nullopt;
 			e.updated_at   = strtoll(row[7] ? row[7] : "-1", nullptr, 10);
 
 			return e;
@@ -185,12 +186,12 @@ public:
 		auto columns = Columns();
 
 		v.push_back(columns[0] + " = " + std::to_string(e.actor_id));
-		v.push_back(columns[1] + " = " + std::to_string(e.zone_id));
-		v.push_back(columns[2] + " = " + std::to_string(e.instance_id));
-		v.push_back(columns[3] + " = " + std::to_string(e.entity_id));
+		v.push_back(columns[1] + " = " + NullableUintSql(e.zone_id));
+		v.push_back(columns[2] + " = " + NullableUintSql(e.instance_id));
+		v.push_back(columns[3] + " = " + NullableUintSql(e.entity_id));
 		v.push_back(columns[4] + " = '" + Strings::Escape(e.state) + "'");
-		v.push_back(columns[5] + " = '" + Strings::Escape(e.status_json) + "'");
-		v.push_back(columns[6] + " = FROM_UNIXTIME(" + (e.heartbeat_at > 0 ? std::to_string(e.heartbeat_at) : "null") + ")");
+		v.push_back(columns[5] + " = " + NullableStringSql(e.status_json));
+		v.push_back(columns[6] + " = " + NullableTimeSql(e.heartbeat_at));
 		v.push_back(columns[7] + " = FROM_UNIXTIME(" + (e.updated_at > 0 ? std::to_string(e.updated_at) : "null") + ")");
 
 		auto results = db.QueryDatabase(
@@ -214,12 +215,12 @@ public:
 		std::vector<std::string> v;
 
 		v.push_back(std::to_string(e.actor_id));
-		v.push_back(std::to_string(e.zone_id));
-		v.push_back(std::to_string(e.instance_id));
-		v.push_back(std::to_string(e.entity_id));
+		v.push_back(NullableUintSql(e.zone_id));
+		v.push_back(NullableUintSql(e.instance_id));
+		v.push_back(NullableUintSql(e.entity_id));
 		v.push_back("'" + Strings::Escape(e.state) + "'");
-		v.push_back("'" + Strings::Escape(e.status_json) + "'");
-		v.push_back("FROM_UNIXTIME(" + (e.heartbeat_at > 0 ? std::to_string(e.heartbeat_at) : "null") + ")");
+		v.push_back(NullableStringSql(e.status_json));
+		v.push_back(NullableTimeSql(e.heartbeat_at));
 		v.push_back("FROM_UNIXTIME(" + (e.updated_at > 0 ? std::to_string(e.updated_at) : "null") + ")");
 
 		auto results = db.QueryDatabase(
@@ -251,12 +252,12 @@ public:
 			std::vector<std::string> v;
 
 			v.push_back(std::to_string(e.actor_id));
-			v.push_back(std::to_string(e.zone_id));
-			v.push_back(std::to_string(e.instance_id));
-			v.push_back(std::to_string(e.entity_id));
+			v.push_back(NullableUintSql(e.zone_id));
+			v.push_back(NullableUintSql(e.instance_id));
+			v.push_back(NullableUintSql(e.entity_id));
 			v.push_back("'" + Strings::Escape(e.state) + "'");
-			v.push_back("'" + Strings::Escape(e.status_json) + "'");
-			v.push_back("FROM_UNIXTIME(" + (e.heartbeat_at > 0 ? std::to_string(e.heartbeat_at) : "null") + ")");
+			v.push_back(NullableStringSql(e.status_json));
+			v.push_back(NullableTimeSql(e.heartbeat_at));
 			v.push_back("FROM_UNIXTIME(" + (e.updated_at > 0 ? std::to_string(e.updated_at) : "null") + ")");
 
 			insert_chunks.push_back("(" + Strings::Implode(",", v) + ")");
@@ -292,12 +293,12 @@ public:
 			ActorStatus e{};
 
 			e.actor_id     = row[0] ? static_cast<uint32_t>(strtoul(row[0], nullptr, 10)) : 0;
-			e.zone_id      = row[1] ? static_cast<uint32_t>(strtoul(row[1], nullptr, 10)) : 0;
-			e.instance_id  = row[2] ? static_cast<uint32_t>(strtoul(row[2], nullptr, 10)) : 0;
-			e.entity_id    = row[3] ? static_cast<uint32_t>(strtoul(row[3], nullptr, 10)) : 0;
+			e.zone_id      = row[1] ? std::optional<uint32_t>(static_cast<uint32_t>(strtoul(row[1], nullptr, 10))) : std::nullopt;
+			e.instance_id  = row[2] ? std::optional<uint32_t>(static_cast<uint32_t>(strtoul(row[2], nullptr, 10))) : std::nullopt;
+			e.entity_id    = row[3] ? std::optional<uint32_t>(static_cast<uint32_t>(strtoul(row[3], nullptr, 10))) : std::nullopt;
 			e.state        = row[4] ? row[4] : "";
-			e.status_json  = row[5] ? row[5] : "";
-			e.heartbeat_at = strtoll(row[6] ? row[6] : "-1", nullptr, 10);
+			e.status_json  = row[5] ? std::optional<std::string>(row[5]) : std::nullopt;
+			e.heartbeat_at = row[6] ? std::optional<time_t>(strtoll(row[6], nullptr, 10)) : std::nullopt;
 			e.updated_at   = strtoll(row[7] ? row[7] : "-1", nullptr, 10);
 
 			all_entries.push_back(e);
@@ -324,12 +325,12 @@ public:
 			ActorStatus e{};
 
 			e.actor_id     = row[0] ? static_cast<uint32_t>(strtoul(row[0], nullptr, 10)) : 0;
-			e.zone_id      = row[1] ? static_cast<uint32_t>(strtoul(row[1], nullptr, 10)) : 0;
-			e.instance_id  = row[2] ? static_cast<uint32_t>(strtoul(row[2], nullptr, 10)) : 0;
-			e.entity_id    = row[3] ? static_cast<uint32_t>(strtoul(row[3], nullptr, 10)) : 0;
+			e.zone_id      = row[1] ? std::optional<uint32_t>(static_cast<uint32_t>(strtoul(row[1], nullptr, 10))) : std::nullopt;
+			e.instance_id  = row[2] ? std::optional<uint32_t>(static_cast<uint32_t>(strtoul(row[2], nullptr, 10))) : std::nullopt;
+			e.entity_id    = row[3] ? std::optional<uint32_t>(static_cast<uint32_t>(strtoul(row[3], nullptr, 10))) : std::nullopt;
 			e.state        = row[4] ? row[4] : "";
-			e.status_json  = row[5] ? row[5] : "";
-			e.heartbeat_at = strtoll(row[6] ? row[6] : "-1", nullptr, 10);
+			e.status_json  = row[5] ? std::optional<std::string>(row[5]) : std::nullopt;
+			e.heartbeat_at = row[6] ? std::optional<time_t>(strtoll(row[6], nullptr, 10)) : std::nullopt;
 			e.updated_at   = strtoll(row[7] ? row[7] : "-1", nullptr, 10);
 
 			all_entries.push_back(e);
@@ -406,12 +407,12 @@ public:
 		std::vector<std::string> v;
 
 		v.push_back(std::to_string(e.actor_id));
-		v.push_back(std::to_string(e.zone_id));
-		v.push_back(std::to_string(e.instance_id));
-		v.push_back(std::to_string(e.entity_id));
+		v.push_back(NullableUintSql(e.zone_id));
+		v.push_back(NullableUintSql(e.instance_id));
+		v.push_back(NullableUintSql(e.entity_id));
 		v.push_back("'" + Strings::Escape(e.state) + "'");
-		v.push_back("'" + Strings::Escape(e.status_json) + "'");
-		v.push_back("FROM_UNIXTIME(" + (e.heartbeat_at > 0 ? std::to_string(e.heartbeat_at) : "null") + ")");
+		v.push_back(NullableStringSql(e.status_json));
+		v.push_back(NullableTimeSql(e.heartbeat_at));
 		v.push_back("FROM_UNIXTIME(" + (e.updated_at > 0 ? std::to_string(e.updated_at) : "null") + ")");
 
 		auto results = db.QueryDatabase(
@@ -436,12 +437,12 @@ public:
 			std::vector<std::string> v;
 
 			v.push_back(std::to_string(e.actor_id));
-			v.push_back(std::to_string(e.zone_id));
-			v.push_back(std::to_string(e.instance_id));
-			v.push_back(std::to_string(e.entity_id));
+			v.push_back(NullableUintSql(e.zone_id));
+			v.push_back(NullableUintSql(e.instance_id));
+			v.push_back(NullableUintSql(e.entity_id));
 			v.push_back("'" + Strings::Escape(e.state) + "'");
-			v.push_back("'" + Strings::Escape(e.status_json) + "'");
-			v.push_back("FROM_UNIXTIME(" + (e.heartbeat_at > 0 ? std::to_string(e.heartbeat_at) : "null") + ")");
+			v.push_back(NullableStringSql(e.status_json));
+			v.push_back(NullableTimeSql(e.heartbeat_at));
 			v.push_back("FROM_UNIXTIME(" + (e.updated_at > 0 ? std::to_string(e.updated_at) : "null") + ")");
 
 			insert_chunks.push_back("(" + Strings::Implode(",", v) + ")");
@@ -458,5 +459,21 @@ public:
 		);
 
 		return (results.Success() ? results.RowsAffected() : 0);
+	}
+
+private:
+	static std::string NullableUintSql(const std::optional<uint32_t> &value)
+	{
+		return value.has_value() ? std::to_string(*value) : "null";
+	}
+
+	static std::string NullableStringSql(const std::optional<std::string> &value)
+	{
+		return value.has_value() ? "'" + Strings::Escape(*value) + "'" : "null";
+	}
+
+	static std::string NullableTimeSql(const std::optional<time_t> &value)
+	{
+		return value.has_value() ? "FROM_UNIXTIME(" + std::to_string(*value) + ")" : "null";
 	}
 };
