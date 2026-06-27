@@ -193,6 +193,11 @@ LIMIT 1
 				now
 			)
 		);
+		// First-slice portability: the current validation DB contract cannot assume a
+		// portable SKIP LOCKED path here, so concurrent claimers may block and lose a
+		// turn instead of immediately skipping to another eligible row. central-lhy.14
+		// can revisit this once execution ownership semantics and DB compatibility are
+		// advanced together.
 
 		if (!results.Success() || results.RowsAffected() < 1 || results.LastInsertedID() == 0) {
 			return std::nullopt;
@@ -247,13 +252,21 @@ WHERE state IN ('pending', 'claimed')
 		}
 
 		const auto completed_at = record.completed_at > 0 ? record.completed_at : std::time(nullptr);
-		auto results = db.QueryDatabase(
+		const auto transitioned = UpdateClaimedTerminalState(
+			db,
+			record.action_id,
 			fmt::format(
 				R"SQL(
 UPDATE {}
 SET
-	state = 'completed',
-	result_json = {},
+	state = CASE
+		WHEN expires_at IS NOT NULL AND expires_at <= FROM_UNIXTIME({}) THEN 'expired'
+		ELSE 'completed'
+	END,
+	result_json = CASE
+		WHEN expires_at IS NOT NULL AND expires_at <= FROM_UNIXTIME({}) THEN NULL
+		ELSE {}
+	END,
 	failure_reason = NULL,
 	completed_at = FROM_UNIXTIME({}),
 	updated_at = FROM_UNIXTIME({})
@@ -261,18 +274,21 @@ WHERE action_id = {}
   AND state = 'claimed'
 )SQL",
 				TableName(),
+				completed_at,
+				completed_at,
 				NullableStringSql(record.result_json),
 				completed_at,
 				completed_at,
 				record.action_id
-			)
+			),
+			"completed"
 		);
 
-		if (!results.Success() || results.RowsAffected() != 1) {
+		if (!transitioned.has_value()) {
 			return std::nullopt;
 		}
 
-		return FindOne(db, record.action_id);
+		return transitioned;
 	}
 
 	static std::optional<ActorActionRecord> MarkFailed(Database &db, FailureRecord record)
@@ -282,32 +298,43 @@ WHERE action_id = {}
 		}
 
 		const auto completed_at = record.completed_at > 0 ? record.completed_at : std::time(nullptr);
-		auto results = db.QueryDatabase(
+		const auto transitioned = UpdateClaimedTerminalState(
+			db,
+			record.action_id,
 			fmt::format(
 				R"SQL(
 UPDATE {}
 SET
-	state = 'failed',
+	state = CASE
+		WHEN expires_at IS NOT NULL AND expires_at <= FROM_UNIXTIME({}) THEN 'expired'
+		ELSE 'failed'
+	END,
 	result_json = NULL,
-	failure_reason = '{}',
+	failure_reason = CASE
+		WHEN expires_at IS NOT NULL AND expires_at <= FROM_UNIXTIME({}) THEN NULL
+		ELSE '{}'
+	END,
 	completed_at = FROM_UNIXTIME({}),
 	updated_at = FROM_UNIXTIME({})
 WHERE action_id = {}
   AND state = 'claimed'
 )SQL",
 				TableName(),
+				completed_at,
+				completed_at,
 				Strings::Escape(record.failure_reason),
 				completed_at,
 				completed_at,
 				record.action_id
-			)
+			),
+			"failed"
 		);
 
-		if (!results.Success() || results.RowsAffected() != 1) {
+		if (!transitioned.has_value()) {
 			return std::nullopt;
 		}
 
-		return FindOne(db, record.action_id);
+		return transitioned;
 	}
 
 	static int DeleteByActorId(Database &db, uint32_t actor_id)
@@ -377,7 +404,7 @@ private:
 
 	static bool IsValidJson(const std::string &document, size_t max_length)
 	{
-		if (document.empty() || document.size() > max_length) {
+		if (document.empty() || CountUtf8CodePoints(document) > max_length) {
 			return false;
 		}
 
@@ -391,6 +418,39 @@ private:
 			&root,
 			&errors
 		);
+	}
+
+	static size_t CountUtf8CodePoints(const std::string &document)
+	{
+		size_t count = 0;
+
+		for (const unsigned char byte: document) {
+			if ((byte & 0xc0) != 0x80) {
+				++count;
+			}
+		}
+
+		return count;
+	}
+
+	static std::optional<ActorActionRecord> UpdateClaimedTerminalState(
+		Database &db,
+		uint64_t action_id,
+		const std::string &sql,
+		const std::string &expected_state
+	)
+	{
+		auto results = db.QueryDatabase(sql);
+		if (!results.Success() || results.RowsAffected() != 1) {
+			return std::nullopt;
+		}
+
+		const auto updated = FindOne(db, action_id);
+		if (!updated.action_id || updated.state != expected_state) {
+			return std::nullopt;
+		}
+
+		return updated;
 	}
 
 	static std::string NullableStringSql(const std::optional<std::string> &value)

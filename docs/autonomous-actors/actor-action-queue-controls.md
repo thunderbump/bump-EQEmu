@@ -30,11 +30,15 @@ owning zone process. It is intentionally a bounded queue for fresh intent, not a
   speculative rows increases retry churn and stale backlog.
 - Terminal states (`completed`, `failed`, `expired`) are audit rows, not work items. Operational cleanup or retention
   policy can remove old terminal rows later without changing claim semantics.
+- The first claim slice uses a portable single-row `UPDATE ... ORDER BY ... LIMIT 1` path. Under concurrent claimers it
+  may briefly block and lose a turn instead of skipping to another eligible row; `central-lhy.14` can revisit that once
+  execution ownership and DB compatibility are advanced together.
 
 ## Current Persistence Semantics
 
 - `Enqueue()` inserts `pending` rows and returns the existing row when the `(actor_id, idempotency_key)` guard already
   exists.
 - `ClaimNextPending()` claims at most one due, non-expired row and stamps `claimed_by` plus `claimed_at`.
-- `MarkCompleted()` and `MarkFailed()` only succeed from `claimed`.
+- `MarkCompleted()` and `MarkFailed()` only succeed from fresh `claimed` rows; if the claim has already passed
+  `expires_at`, the attempted terminal transition atomically converts the row to `expired` instead.
 - `ExpireDue()` only affects `pending` or `claimed` rows whose `expires_at` has passed.
