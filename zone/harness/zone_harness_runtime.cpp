@@ -549,6 +549,8 @@ ActorLedBotPartyScenarioResult ZoneHarnessRuntime::RunActorLedBotPartyProof(
 			return result;
 		}
 
+		result.owner_target_probe_follower = fixture.Describe(probe_follower);
+		result.owner_target_expected_hostile = fixture.Describe(hostile);
 		result.slow_spell_id = fixture.FindPreparedSingleTargetSlowSpell(probe_follower, hostile);
 		if (!result.slow_spell_id) {
 			result.reason = "follower_slow_spell_unavailable";
@@ -623,6 +625,8 @@ ActorLedBotPartyScenarioResult ZoneHarnessRuntime::RunActorLedBotPartyProof(
 			return result;
 		}
 
+		result.actor_target_probe_follower = fixture.Describe(probe_follower);
+		result.actor_target_expected_hostile = fixture.Describe(hostile);
 		fixture.SetBotCommandTargetSource(probe_follower, actor_leader);
 		fixture.BotTargets(actor_leader, hostile);
 		fixture.OwnedBotEngages(hostile, 100);

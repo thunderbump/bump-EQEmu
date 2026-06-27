@@ -800,6 +800,7 @@ public:
 	void SetLeashSource(Mob* source);
 	void ClearCommandTargetSource() { _commandTargetSourceID = 0; }
 	void ClearLeashSource() { _leashSourceID = 0; }
+	void ClearCommandSourceReferences(uint16 entity_id);
 	uint32 GetBotRangedValue();
 	EQ::ItemInstance* GetBotItem(uint16 slot_id);
 	bool GetSpawnStatus() { return _spawnStatus; }
@@ -928,7 +929,7 @@ public:
 	void SetPetChooserID(uint8 id) { _petChooserID = id; }
 	void SetBotRangedSetting(bool value) { _botRangedSetting = value; }
 	void SetBotCharmer(bool c) { _botCharmer = c; }
-	void SetBotOwner(Mob* botOwner) { this->_botOwner = botOwner; }
+	void SetBotOwner(Mob* botOwner);
 	void SetRangerAutoWeaponSelect(bool enable) { GetClass() == Class::Ranger ? _rangerAutoWeaponSelect = enable : _rangerAutoWeaponSelect = false; }
 	void SetBotStance(uint8 stance_id) { _botStance = Stance::IsValid(stance_id) ? stance_id : Stance::Passive; }
 	uint32 GetSpellRecastTimer(uint16 spell_id = 0);

@@ -113,6 +113,10 @@ struct ActorLedBotPartyScenarioResult {
 	std::string owner_target_reason;
 	std::string actor_target_reason;
 	std::string leash_reason;
+	ActorEventEntity owner_target_probe_follower;
+	ActorEventEntity owner_target_expected_hostile;
+	ActorEventEntity actor_target_probe_follower;
+	ActorEventEntity actor_target_expected_hostile;
 	std::vector<ActorEvent> owner_target_events;
 	std::vector<ActorEvent> actor_target_events;
 	RuntimeSnapshot runtime;

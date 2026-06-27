@@ -315,11 +315,29 @@ if payload.get("group_leader", {}).get("kind") != "client":
     fail("group leader should remain the owner client")
 
 owner_events = payload.get("owner_target_events") or []
-if not any(event.get("type") == "spell_cast_started" for event in owner_events):
-    fail("owner target did not produce follower spell event evidence")
+owner_probe = payload.get("owner_target_probe_follower") or {}
+owner_expected = payload.get("owner_target_expected_hostile") or {}
+if not owner_probe.get("entity_id") or not owner_expected.get("entity_id"):
+    fail("owner target probe follower or expected hostile identity missing")
+if not any(
+    event.get("type") == "spell_cast_started"
+    and event.get("actor", {}).get("entity_id") == owner_probe.get("entity_id")
+    and event.get("target", {}).get("entity_id") == owner_expected.get("entity_id")
+    for event in owner_events
+):
+    fail("owner target did not produce the expected follower spell event")
 actor_events = payload.get("actor_target_events") or []
-if not any(event.get("type") == "spell_cast_started" for event in actor_events):
-    fail("actor target did not produce follower spell event evidence")
+actor_probe = payload.get("actor_target_probe_follower") or {}
+actor_expected = payload.get("actor_target_expected_hostile") or {}
+if not actor_probe.get("entity_id") or not actor_expected.get("entity_id"):
+    fail("actor target probe follower or expected hostile identity missing")
+if not any(
+    event.get("type") == "spell_cast_started"
+    and event.get("actor", {}).get("entity_id") == actor_probe.get("entity_id")
+    and event.get("target", {}).get("entity_id") == actor_expected.get("entity_id")
+    for event in actor_events
+):
+    fail("actor target did not produce the expected follower spell event")
 PY
 }
 
