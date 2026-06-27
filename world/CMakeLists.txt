@@ -15,6 +15,7 @@ set(world_sources
     cli/cli_etl_get_settings.cpp
     cli/cli_mercs_disable.cpp
     cli/cli_mercs_enable.cpp
+    cli/cli_test_actor_persistence.cpp
     cli/cli_test.cpp
     cli/cli_test_colors.cpp
     cli/cli_test_expansion.cpp
