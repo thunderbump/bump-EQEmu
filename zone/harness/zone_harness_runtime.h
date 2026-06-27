@@ -104,11 +104,14 @@ struct ActorLedBotPartyScenarioResult {
 	bool all_bots_share_owner = false;
 	bool group_leader_change_to_actor_rejected = false;
 	bool followers_follow_actor_leader = false;
+	bool followers_clear_removed_actor_leader_follow_id = false;
 	bool owner_target_command_observed = false;
 	bool actor_target_command_observed = false;
 	bool owner_nearby_control_kept_combat_target = false;
 	bool owner_leash_default_observed = false;
 	bool actor_leash_source_kept_combat_target = false;
+	uint32_t actor_leash_source_target_consecutive_ticks = 0;
+	uint32_t actor_leash_source_required_target_consecutive_ticks = 0;
 	uint16_t slow_spell_id = 0;
 	std::string owner_target_reason;
 	std::string actor_target_reason;

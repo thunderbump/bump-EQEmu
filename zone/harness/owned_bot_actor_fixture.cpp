@@ -352,6 +352,58 @@ void OwnedBotActorFixture::RefreshPartyPerception()
 	}
 }
 
+bool OwnedBotActorFixture::RemoveMob(Mob *mob)
+{
+	if (!mob) {
+		return false;
+	}
+
+	const auto entity_id = mob->GetID();
+	const bool removed_owner = owner == mob;
+	const bool removed_bot = bot == mob;
+	const bool removed_actor = actor == mob;
+	const bool removed_primary_target = primary_target == mob;
+	const bool removed_secondary_target = secondary_target == mob;
+	if (!entity_list.RemoveMob(entity_id)) {
+		return false;
+	}
+
+	mob_ids.erase(std::remove(mob_ids.begin(), mob_ids.end(), entity_id), mob_ids.end());
+
+	if (removed_owner) {
+		owner = nullptr;
+	}
+
+	if (removed_bot) {
+		bot = nullptr;
+	}
+
+	if (removed_actor) {
+		actor = nullptr;
+	}
+
+	if (removed_primary_target) {
+		primary_target = nullptr;
+	}
+
+	if (removed_secondary_target) {
+		secondary_target = nullptr;
+	}
+
+	followers.erase(
+		std::remove_if(
+			followers.begin(),
+			followers.end(),
+			[mob](Bot *follower) {
+				return follower == mob;
+			}
+		),
+		followers.end()
+	);
+
+	return true;
+}
+
 void OwnedBotActorFixture::Reset()
 {
 	if (group_id) {

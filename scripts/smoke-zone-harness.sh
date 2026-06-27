@@ -295,6 +295,7 @@ required_flags = [
     "all_bots_share_owner",
     "group_leader_change_to_actor_rejected",
     "followers_follow_actor_leader",
+    "followers_clear_removed_actor_leader_follow_id",
     "owner_target_command_observed",
     "actor_target_command_observed",
     "owner_nearby_control_kept_combat_target",
@@ -304,6 +305,13 @@ required_flags = [
 for flag in required_flags:
     if payload.get(flag) is not True:
         fail(f"{flag} was not proven")
+
+required_ticks = payload.get("actor_leash_source_required_target_consecutive_ticks") or 0
+observed_ticks = payload.get("actor_leash_source_target_consecutive_ticks") or 0
+if required_ticks < 2:
+    fail("actor leash proof did not require a sustained target window")
+if observed_ticks < required_ticks:
+    fail("actor leash proof did not sustain the hostile target long enough")
 
 if len(payload.get("followers") or []) != expected_followers:
     fail("follower identities missing")

@@ -32,6 +32,12 @@ extern volatile bool is_zone_loaded;
 
 namespace EQ::ZoneHarness {
 
+namespace {
+
+inline constexpr uint32_t kActorLeashSourceRequiredTargetTicks = 3;
+
+}
+
 bool ZoneHarnessRuntime::Boot(const std::string &zone_short_name, uint32_t instance_id)
 {
 	std::lock_guard lock(mutex);
@@ -523,6 +529,26 @@ ActorLedBotPartyScenarioResult ZoneHarnessRuntime::RunActorLedBotPartyProof(
 				follower &&
 				follower->GetFollowID() == actor_leader->GetID();
 		}
+
+		if (!fixture.RemoveMob(actor_leader)) {
+			result.reason = "actor_leader_remove_failed";
+			result.runtime = RuntimeLocked();
+			return result;
+		}
+
+		result.followers_clear_removed_actor_leader_follow_id = true;
+		for (auto *follower : fixture.FollowerBots()) {
+			result.followers_clear_removed_actor_leader_follow_id =
+				result.followers_clear_removed_actor_leader_follow_id &&
+				follower &&
+				follower->GetFollowID() == 0;
+		}
+
+		if (!result.followers_clear_removed_actor_leader_follow_id) {
+			result.reason = "removed_actor_leader_follow_id_not_cleared";
+			result.runtime = RuntimeLocked();
+			return result;
+		}
 	}
 
 	{
@@ -820,6 +846,7 @@ ActorLedBotPartyScenarioResult ZoneHarnessRuntime::RunActorLedBotPartyProof(
 
 		owner->GMMove(0.0f, 0.0f, 0.0f, 0.0f);
 		result.leash_reason = "actor_leash_source_did_not_keep_combat_target_after_owner_moved_outside_radius";
+		result.actor_leash_source_required_target_consecutive_ticks = kActorLeashSourceRequiredTargetTicks;
 		for (uint32_t tick = 0; tick < std::min<uint32_t>(bounded_ticks, 8); ++tick) {
 			if (!booted || !zone || !is_zone_loaded || shutdown_requested) {
 				result.reason = "zone_unavailable_during_actor_leash_phase";
@@ -832,9 +859,18 @@ ActorLedBotPartyScenarioResult ZoneHarnessRuntime::RunActorLedBotPartyProof(
 			++result.ticks_processed;
 
 			if (probe_follower->GetTarget() == hostile) {
-				result.actor_leash_source_kept_combat_target = true;
-				result.leash_reason = "actor_leash_source_kept_combat_target_after_owner_moved_outside_radius";
-				break;
+				++result.actor_leash_source_target_consecutive_ticks;
+				if (
+					result.actor_leash_source_target_consecutive_ticks >=
+					result.actor_leash_source_required_target_consecutive_ticks
+				) {
+					result.actor_leash_source_kept_combat_target = true;
+					result.leash_reason = "actor_leash_source_kept_combat_target_after_owner_moved_outside_radius";
+					break;
+				}
+			}
+			else {
+				result.actor_leash_source_target_consecutive_ticks = 0;
 			}
 
 			bounded_sleep();
@@ -851,6 +887,7 @@ ActorLedBotPartyScenarioResult ZoneHarnessRuntime::RunActorLedBotPartyProof(
 		result.all_bots_share_owner &&
 		result.group_leader_change_to_actor_rejected &&
 		result.followers_follow_actor_leader &&
+		result.followers_clear_removed_actor_leader_follow_id &&
 		result.owner_target_command_observed &&
 		result.actor_target_command_observed &&
 		result.owner_nearby_control_kept_combat_target &&

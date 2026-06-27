@@ -3483,6 +3483,10 @@ void Bot::ClearCommandSourceReferences(uint16 entity_id)
 		return;
 	}
 
+	if (GetFollowID() == entity_id) {
+		SetFollowID(0);
+	}
+
 	if (_commandTargetSourceID == entity_id) {
 		ClearCommandTargetSource();
 	}

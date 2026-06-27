@@ -92,6 +92,7 @@ public:
 	void RefreshOwnedBotPerception();
 	void RefreshPerception(Bot *bot);
 	void RefreshPartyPerception();
+	bool RemoveMob(Mob *mob);
 	void Reset();
 	void Cleanup() { Reset(); }
 
