@@ -32,6 +32,12 @@ extern volatile bool is_zone_loaded;
 
 namespace EQ::ZoneHarness {
 
+namespace {
+
+inline constexpr uint32_t kActorLeashSourceRequiredTargetTicks = 3;
+
+}
+
 bool ZoneHarnessRuntime::Boot(const std::string &zone_short_name, uint32_t instance_id)
 {
 	std::lock_guard lock(mutex);
@@ -523,6 +529,26 @@ ActorLedBotPartyScenarioResult ZoneHarnessRuntime::RunActorLedBotPartyProof(
 				follower &&
 				follower->GetFollowID() == actor_leader->GetID();
 		}
+
+		if (!fixture.RemoveMob(actor_leader)) {
+			result.reason = "actor_leader_remove_failed";
+			result.runtime = RuntimeLocked();
+			return result;
+		}
+
+		result.followers_clear_removed_actor_leader_follow_id = true;
+		for (auto *follower : fixture.FollowerBots()) {
+			result.followers_clear_removed_actor_leader_follow_id =
+				result.followers_clear_removed_actor_leader_follow_id &&
+				follower &&
+				follower->GetFollowID() == 0;
+		}
+
+		if (!result.followers_clear_removed_actor_leader_follow_id) {
+			result.reason = "removed_actor_leader_follow_id_not_cleared";
+			result.runtime = RuntimeLocked();
+			return result;
+		}
 	}
 
 	{
@@ -549,6 +575,8 @@ ActorLedBotPartyScenarioResult ZoneHarnessRuntime::RunActorLedBotPartyProof(
 			return result;
 		}
 
+		result.owner_target_probe_follower = fixture.Describe(probe_follower);
+		result.owner_target_expected_hostile = fixture.Describe(hostile);
 		result.slow_spell_id = fixture.FindPreparedSingleTargetSlowSpell(probe_follower, hostile);
 		if (!result.slow_spell_id) {
 			result.reason = "follower_slow_spell_unavailable";
@@ -623,6 +651,9 @@ ActorLedBotPartyScenarioResult ZoneHarnessRuntime::RunActorLedBotPartyProof(
 			return result;
 		}
 
+		result.actor_target_probe_follower = fixture.Describe(probe_follower);
+		result.actor_target_expected_hostile = fixture.Describe(hostile);
+		fixture.SetBotCommandTargetSource(probe_follower, actor_leader);
 		fixture.BotTargets(actor_leader, hostile);
 		fixture.OwnedBotEngages(hostile, 100);
 		hostile->AddToHateList(actor_leader, 100, 1, false);
@@ -651,25 +682,17 @@ ActorLedBotPartyScenarioResult ZoneHarnessRuntime::RunActorLedBotPartyProof(
 				}
 			);
 
-			if (observed != result.actor_target_events.end() || probe_follower->GetTarget()) {
-				result.actor_target_reason = "actor_target_unexpectedly_drove_follower_action";
+			if (observed != result.actor_target_events.end()) {
+				result.actor_target_command_observed = true;
+				result.actor_target_reason = "actor_target_drove_follower_slow_cast_through_command_source";
 				break;
 			}
 
 			bounded_sleep();
 		}
 
-		result.actor_target_command_blocked =
-			!probe_follower->GetTarget() &&
-			std::none_of(
-				result.actor_target_events.begin(),
-				result.actor_target_events.end(),
-				[&fixture, probe_follower, hostile](const ActorEvent &event) {
-					return fixture.IsSingleTargetSlowCastStartFor(probe_follower, event, hostile);
-				}
-			);
-		if (!result.actor_target_command_blocked) {
-			result.reason = "actor_target_phase_unexpectedly_succeeded";
+		if (!result.actor_target_command_observed) {
+			result.reason = "actor_target_phase_failed";
 			result.runtime = RuntimeLocked();
 			return result;
 		}
@@ -760,8 +783,8 @@ ActorLedBotPartyScenarioResult ZoneHarnessRuntime::RunActorLedBotPartyProof(
 			++result.ticks_processed;
 
 			if (!probe_follower->GetTarget()) {
-				result.owner_leash_blocks_actor_led_combat = probe_follower->GetFollowID() == actor_leader->GetID();
-				result.leash_reason = result.owner_leash_blocks_actor_led_combat ?
+				result.owner_leash_default_observed = probe_follower->GetFollowID() == actor_leader->GetID();
+				result.leash_reason = result.owner_leash_default_observed ?
 					"owner_client_leash_cleared_combat_target_only_after_owner_moved_outside_radius_while_follow_anchor_stayed_actor_leader" :
 					"owner_client_leash_cleared_combat_target_after_owner_moved_outside_radius";
 				break;
@@ -770,8 +793,91 @@ ActorLedBotPartyScenarioResult ZoneHarnessRuntime::RunActorLedBotPartyProof(
 			bounded_sleep();
 		}
 
-		if (!result.owner_leash_blocks_actor_led_combat) {
+		if (!result.owner_leash_default_observed) {
 			result.reason = "leash_phase_failed";
+			result.runtime = RuntimeLocked();
+			return result;
+		}
+	}
+
+	{
+		OwnedBotActorFixture fixture;
+		if (!fixture.SetUpOwnedBotParty({
+			.owner_name = "HarnessPartyOwner",
+			.actor_leader_name = "HarnessActorLeader",
+			.follower_name_prefix = "HarnessFollower",
+			.follower_count = bounded_followers,
+		})) {
+			result.reason = "actor_leash_setup_failed";
+			result.runtime = RuntimeLocked();
+			return result;
+		}
+
+		auto *owner = fixture.Owner();
+		auto *actor_leader = fixture.ActorLeader();
+		auto *probe_follower = fixture.FollowerBots().front();
+		if (!owner || !actor_leader || !probe_follower) {
+			result.reason = "actor_leash_fixture_incomplete";
+			result.runtime = RuntimeLocked();
+			return result;
+		}
+
+		const float leash_radius = std::sqrt(std::max<float>(RuleR(Bots, LeashDistance), 100.0f)) + 25.0f;
+		owner->GMMove(leash_radius - 8.0f, 0.0f, 0.0f, 0.0f);
+		actor_leader->GMMove(leash_radius, 0.0f, 0.0f, 0.0f);
+		probe_follower->GMMove(leash_radius + 4.0f, 0.0f, 0.0f, 0.0f);
+		fixture.SetBotFollowTarget(probe_follower, actor_leader);
+		fixture.SetBotLeashSource(probe_follower, actor_leader);
+
+		auto *hostile = fixture.AddHostileNPC({
+			.name = "HarnessActorLeashSourceHostile",
+			.position = glm::vec4(leash_radius + 8.0f, 0.0f, 0.0f, 0.0f),
+		});
+		if (!hostile) {
+			result.reason = "actor_leash_hostile_unavailable";
+			result.runtime = RuntimeLocked();
+			return result;
+		}
+
+		probe_follower->AddToHateList(hostile, 100, 1, false);
+		hostile->AddToHateList(probe_follower, 100, 1, false);
+		fixture.BotTargets(probe_follower, hostile);
+		fixture.RefreshPerception(probe_follower);
+
+		owner->GMMove(0.0f, 0.0f, 0.0f, 0.0f);
+		result.leash_reason = "actor_leash_source_did_not_keep_combat_target_after_owner_moved_outside_radius";
+		result.actor_leash_source_required_target_consecutive_ticks = kActorLeashSourceRequiredTargetTicks;
+		for (uint32_t tick = 0; tick < std::min<uint32_t>(bounded_ticks, 8); ++tick) {
+			if (!booted || !zone || !is_zone_loaded || shutdown_requested) {
+				result.reason = "zone_unavailable_during_actor_leash_phase";
+				result.runtime = RuntimeLocked();
+				return result;
+			}
+
+			ProcessOneTick();
+			++process_ticks;
+			++result.ticks_processed;
+
+			if (probe_follower->GetTarget() == hostile) {
+				++result.actor_leash_source_target_consecutive_ticks;
+				if (
+					result.actor_leash_source_target_consecutive_ticks >=
+					result.actor_leash_source_required_target_consecutive_ticks
+				) {
+					result.actor_leash_source_kept_combat_target = true;
+					result.leash_reason = "actor_leash_source_kept_combat_target_after_owner_moved_outside_radius";
+					break;
+				}
+			}
+			else {
+				result.actor_leash_source_target_consecutive_ticks = 0;
+			}
+
+			bounded_sleep();
+		}
+
+		if (!result.actor_leash_source_kept_combat_target) {
+			result.reason = "actor_leash_phase_failed";
 			result.runtime = RuntimeLocked();
 			return result;
 		}
@@ -781,12 +887,14 @@ ActorLedBotPartyScenarioResult ZoneHarnessRuntime::RunActorLedBotPartyProof(
 		result.all_bots_share_owner &&
 		result.group_leader_change_to_actor_rejected &&
 		result.followers_follow_actor_leader &&
+		result.followers_clear_removed_actor_leader_follow_id &&
 		result.owner_target_command_observed &&
-		result.actor_target_command_blocked &&
+		result.actor_target_command_observed &&
 		result.owner_nearby_control_kept_combat_target &&
-		result.owner_leash_blocks_actor_led_combat;
+		result.owner_leash_default_observed &&
+		result.actor_leash_source_kept_combat_target;
 	result.reason = result.proved ?
-		"actor_led_party_proved_follow_with_owner_command_and_leash_blockers" :
+		"actor_led_party_proved_owner_defaults_with_actor_command_source_seam" :
 		"actor_led_party_proof_incomplete";
 	result.elapsed_ms = static_cast<uint32_t>(
 		std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count()

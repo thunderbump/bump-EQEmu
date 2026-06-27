@@ -2782,6 +2782,15 @@ bool EntityList::RemoveMob(uint16 delete_id)
 		if (!it->second) {
 			return false;
 		}
+
+		for (const auto &bot_entry : bot_list) {
+			if (!bot_entry.second) {
+				continue;
+			}
+
+			bot_entry.second->ClearCommandSourceReferences(delete_id);
+		}
+
 		if (npc_list.count(delete_id)) {
 			entity_list.RemoveNPC(delete_id);
 		}

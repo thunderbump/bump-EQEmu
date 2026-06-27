@@ -374,8 +374,8 @@ the same container, and checks:
   observing actor-scoped perception, and verifying cursor-based `target_changed` and `speech_emitted`
   **Actor Events** without default persistent DB mutation.
 - `POST /api/v1/harness/scenarios/actor-led-bot-party` proves one owned bot can act as an actor-leader
-  candidate with 1-4 follower bots while current target and leash sourcing still expose the owner-client-shaped
-  blockers for the next `ActorCommandSource` seam.
+  candidate with 1-4 follower bots while the current owner-client target and leash defaults remain intact and
+  follower bots can instead source target and leash intent from a narrow `ActorCommandSource` seam.
 - `POST /api/v1/harness/shutdown` requests clean shutdown.
 
 Expected validation result: the wrapper exits `0` with no scenario payload printed. On failure it prints either
