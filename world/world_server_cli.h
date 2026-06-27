@@ -35,6 +35,7 @@ public:
 	static void DatabaseDump(int argc, char **argv, argh::parser &cmd, std::string &description);
 	static void DatabaseUpdates(int argc, char **argv, argh::parser &cmd, std::string &description);
 	static void TestCommand(int argc, char **argv, argh::parser &cmd, std::string &description);
+	static void TestActorActionQueue(int argc, char **argv, argh::parser &cmd, std::string &description);
 	static void TestActorEvents(int argc, char **argv, argh::parser &cmd, std::string &description);
 	static void TestActorPersistence(int argc, char **argv, argh::parser &cmd, std::string &description);
 	static void TestColors(int argc, char **argv, argh::parser &cmd, std::string &description);
