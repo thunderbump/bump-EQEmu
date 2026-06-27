@@ -30,6 +30,25 @@
 #include "zone/quest_parser_collection.h"
 #include "zone/raids.h"
 
+namespace {
+
+Client* GetDefaultLeashOwner(Client* bot_owner, Group* bot_group, Raid* raid, uint32 r_group)
+{
+	if (raid && r_group < MAX_RAID_GROUPS && raid->GetGroupLeader(r_group)) {
+		auto* raid_group_leader = raid->GetGroupLeader(r_group);
+		return raid_group_leader && raid_group_leader->IsClient() ? raid_group_leader->CastToClient() : bot_owner;
+	}
+
+	if (bot_group) {
+		auto* group_leader = bot_group->GetLeader();
+		return group_leader && group_leader->IsClient() ? group_leader->CastToClient() : bot_owner;
+	}
+
+	return bot_owner;
+}
+
+}
+
 /*
 TODO bot rewrite:
 --command cleanup remaining commands (move to new help window, make more descriptive)
@@ -3507,7 +3526,7 @@ Mob* Bot::SetFollowMob(Mob* leash_owner) {
 	return follow_mob;
 }
 
-Mob* Bot::GetLeashSource(Client* bot_owner, Group* /*bot_group*/, Raid* /*raid*/, uint32 /*r_group*/) {
+Mob* Bot::GetLeashSource(Client* bot_owner, Group* bot_group, Raid* raid, uint32 r_group) {
 	if (_leashSourceID) {
 		auto* leash_source = entity_list.GetMob(_leashSourceID);
 		if (leash_source && leash_source->GetAppearance() != eaDead && leash_source->GetHP() > 0 && IsInGroupOrRaid(leash_source)) {
@@ -3517,7 +3536,7 @@ Mob* Bot::GetLeashSource(Client* bot_owner, Group* /*bot_group*/, Raid* /*raid*/
 		ClearLeashSource();
 	}
 
-	return bot_owner;
+	return GetDefaultLeashOwner(bot_owner, bot_group, raid, r_group);
 }
 
 Mob* Bot::GetCommandTargetSource(Client* bot_owner)
