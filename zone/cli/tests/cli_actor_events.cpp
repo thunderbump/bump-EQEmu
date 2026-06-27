@@ -32,12 +32,15 @@
 #include "zone/zonedb.h"
 
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
+#include <future>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -130,6 +133,96 @@ private:
 	std::vector<uint32_t> actor_ids_;
 };
 
+class BlockingPersistenceSink final : public EQ::ZoneHarness::ActorEventPersistenceSink {
+public:
+	void PersistSpeechEmitted(Mob *, const EQ::ZoneHarness::ActorEvent &) override
+	{
+		std::unique_lock lock(mutex_);
+		persist_started_ = true;
+		persist_started_cv_.notify_all();
+		release_persist_cv_.wait(lock, [this]() { return allow_persist_to_finish_; });
+		persist_finished_ = true;
+		persist_finished_cv_.notify_all();
+	}
+
+	bool WaitUntilPersistStarted(std::chrono::milliseconds timeout)
+	{
+		std::unique_lock lock(mutex_);
+		return persist_started_cv_.wait_for(lock, timeout, [this]() { return persist_started_; });
+	}
+
+	void AllowPersistToFinish()
+	{
+		std::lock_guard lock(mutex_);
+		allow_persist_to_finish_ = true;
+		release_persist_cv_.notify_all();
+	}
+
+	bool WaitUntilPersistFinished(std::chrono::milliseconds timeout)
+	{
+		std::unique_lock lock(mutex_);
+		return persist_finished_cv_.wait_for(lock, timeout, [this]() { return persist_finished_; });
+	}
+
+private:
+	std::mutex mutex_;
+	std::condition_variable persist_started_cv_;
+	std::condition_variable release_persist_cv_;
+	std::condition_variable persist_finished_cv_;
+	bool persist_started_ = false;
+	bool allow_persist_to_finish_ = false;
+	bool persist_finished_ = false;
+};
+
+void ExpectRecorderShutdownWaitsForInFlightCallbacks()
+{
+	using namespace std::chrono_literals;
+
+	EQ::ZoneHarness::ActorEventRecorder recorder;
+	BlockingPersistenceSink blocking_sink;
+	recorder.SetPersistenceSink(&blocking_sink);
+	EQ::ZoneHarness::ActorEventRecorder::RegisterActiveRecorder(&recorder);
+
+	std::thread observe_thread([]() {
+		EQ::ZoneHarness::ActorEventRecorder::ObserveSpeechEmitted(nullptr, "say", "teardown-sync", 200);
+	});
+
+	const bool persist_started = blocking_sink.WaitUntilPersistStarted(1s);
+	if (!persist_started) {
+		observe_thread.join();
+		EQ::ZoneHarness::ActorEventRecorder::ClearActiveRecorder(&recorder);
+		recorder.SetPersistenceSink(nullptr);
+		Fail("blocking persistence sink should observe an in-flight speech callback");
+	}
+
+	auto clear_future = std::async(std::launch::async, [&recorder]() {
+		EQ::ZoneHarness::ActorEventRecorder::ClearActiveRecorder(&recorder);
+	});
+
+	const auto clear_status_while_blocked = clear_future.wait_for(100ms);
+	blocking_sink.AllowPersistToFinish();
+	const bool persist_finished = blocking_sink.WaitUntilPersistFinished(1s);
+	observe_thread.join();
+	const auto clear_status_after_release = clear_future.wait_for(1s);
+	clear_future.get();
+	recorder.SetPersistenceSink(nullptr);
+
+	Expect(
+		clear_status_while_blocked == std::future_status::timeout,
+		"active recorder teardown should wait for in-flight callbacks before returning"
+	);
+	Expect(persist_finished, "blocking persistence sink should finish after release");
+	Expect(
+		clear_status_after_release == std::future_status::ready,
+		"active recorder teardown should finish once in-flight callbacks drain"
+	);
+	ExpectEqual(
+		recorder.Since(0, 4).size(),
+		static_cast<size_t>(1),
+		"blocked speech callback should still record one actor event before teardown completes"
+	);
+}
+
 } // namespace
 
 void ZoneCLI::TestActorEvents(int argc, char **argv, argh::parser &cmd, std::string &description)
@@ -143,6 +236,8 @@ void ZoneCLI::TestActorEvents(int argc, char **argv, argh::parser &cmd, std::str
 	EQEmuLogSys::Instance()->SilenceConsoleLogging();
 
 	try {
+		ExpectRecorderShutdownWaitsForInFlightCallbacks();
+
 		const auto run_nonce = BuildRunNonce();
 
 		Zone::Bootup(ZoneID("qrg"), 0, false);
