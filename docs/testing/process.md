@@ -364,6 +364,9 @@ the same container, and checks:
 - `POST /api/v1/harness/process` with `{"ticks":2}` reports two processed ticks.
 - `GET /api/v1/harness/events` initially returns an empty event list.
 - `POST /api/v1/harness/scenarios/spell-cast-start` can produce a drained `spell_cast_started` Actor Event.
+- `POST /api/v1/harness/scenarios/headless-client/target` proves a synthetic headless `Client()` can set and
+  clear one NPC target without an `EQStream`, reports both `target_set` and `target_cleared` actor events in the
+  same scenario payload, and leaves no additional actor events after its reported final cursor.
 - `POST /api/v1/harness/scenarios/bot-slow-maintenance/current-target` proves the current target case.
 - `POST /api/v1/harness/scenarios/bot-slow-maintenance/fallback` proves fallback to another unslowed
   **Engaged Hostile** after the current target is already slowed.
@@ -390,6 +393,8 @@ Fixture and database expectations:
   gate. Schema-mutating scenarios always require the backup gate.
 - The default bot slow maintenance scenarios report `database_mutation` beginning with `none:` and should not
   leave persistent database changes.
+- The default headless-client target scenario reports `database_mutation` beginning with `none:` and should leave
+  no unreported `target_changed` cleanup events after its returned `event_cursor_end`.
 
 Processing expectations:
 

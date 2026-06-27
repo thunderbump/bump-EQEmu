@@ -194,6 +194,113 @@ if require_mezzed == "true" and any(
 PY
 }
 
+assert_headless_target_scenario() {
+  local payload=\"\$1\"
+
+  HEADLESS_TARGET_PAYLOAD=\"\$payload\" python3 - <<'PY'
+import json
+import os
+import sys
+
+payload = json.loads(os.environ["HEADLESS_TARGET_PAYLOAD"])
+
+def fail(message):
+    print(json.dumps({"error": message, "payload": payload}, separators=(",", ":")), file=sys.stderr)
+    sys.exit(1)
+
+if payload.get("completed") is not True:
+    fail("headless target scenario did not complete")
+if payload.get("observed") is not True:
+    fail("headless target scenario did not observe target_changed")
+if not str(payload.get("database_mutation", "")).startswith("none:"):
+    fail("headless target scenario reported database mutation")
+if payload.get("eqstream_backed") is not False:
+    fail("headless client unexpectedly reported an EQStream-backed connection")
+if payload.get("completed_connect") is not False:
+    fail("headless client unexpectedly completed connect")
+
+actor = payload.get("actor") or {}
+target = payload.get("target") or {}
+events = payload.get("events") or []
+start = payload.get("event_cursor_start", 0)
+end = payload.get("event_cursor_end", 0)
+
+if actor.get("kind") != "client":
+    fail("headless actor is not a client")
+if target.get("kind") != "npc":
+    fail("headless target is not an NPC")
+if not actor.get("entity_id") or not target.get("entity_id"):
+    fail("headless actor or target identity missing")
+if end <= start:
+    fail("headless target scenario cursor did not advance")
+
+target_events = [
+    event for event in events
+    if event.get("type") == "target_changed"
+    and event.get("actor", {}).get("entity_id") == actor.get("entity_id")
+]
+if len(target_events) != 2:
+    fail("headless target scenario did not emit exactly two actor target_changed events")
+
+set_event, clear_event = target_events
+if set_event.get("message") != "target_set":
+    fail("headless target scenario did not record target_set first")
+if set_event.get("target", {}).get("entity_id") != target.get("entity_id"):
+    fail("headless target scenario target_set event targeted the wrong NPC")
+if clear_event.get("message") != "target_cleared":
+    fail("headless target scenario did not record target_cleared second")
+if clear_event.get("previous_target", {}).get("entity_id") != target.get("entity_id"):
+    fail("headless target scenario did not clear the expected target")
+if clear_event.get("target") is not None:
+    fail("headless target scenario target_cleared event kept a target payload")
+
+event_ids = [event.get("id", 0) for event in target_events]
+if any(event_id <= start for event_id in event_ids):
+    fail("headless target scenario included a stale target_changed event")
+if event_ids[-1] != end:
+    fail("headless target scenario final cursor did not include cleanup event")
+PY
+}
+
+assert_headless_target_cursor_progression() {
+  local first_payload=\"\$1\"
+  local second_payload=\"\$2\"
+
+  HEADLESS_TARGET_FIRST=\"\$first_payload\" HEADLESS_TARGET_SECOND=\"\$second_payload\" python3 - <<'PY'
+import json
+import os
+import sys
+
+first = json.loads(os.environ["HEADLESS_TARGET_FIRST"])
+second = json.loads(os.environ["HEADLESS_TARGET_SECOND"])
+
+def fail(message):
+    print(json.dumps({"error": message, "first": first, "second": second}, separators=(",", ":")), file=sys.stderr)
+    sys.exit(1)
+
+if second.get("event_cursor_start", 0) < first.get("event_cursor_end", 0):
+    fail("second headless target scenario started before the first scenario cleanup cursor")
+PY
+}
+
+assert_empty_event_payload() {
+  local payload=\"\$1\"
+  local description=\"\$2\"
+
+  EVENT_PAYLOAD=\"\$payload\" python3 - \"\$description\" <<'PY'
+import json
+import os
+import sys
+
+description = sys.argv[1]
+payload = json.loads(os.environ["EVENT_PAYLOAD"])
+events = payload.get("events")
+if events != []:
+    print(json.dumps({"error": description, "payload": payload}, separators=(",", ":")), file=sys.stderr)
+    sys.exit(1)
+PY
+}
+
 assert_autonomous_actor_loop() {
   local payload=\"\$1\"
 
@@ -362,6 +469,24 @@ for _ in \$(seq 1 20); do
 done
 [[ \"\$cast_events\" == *'\"type\":\"spell_cast_started\"'* ]] || { printf '%s\n' \"\$cast_events\" >&2; exit 1; }
 [[ \"\$cast_events\" == *'\"caster\"'* && \"\$cast_events\" == *'\"target\"'* && \"\$cast_events\" == *'\"spell\"'* && \"\$cast_events\" == *'\"cast\"'* ]] || { printf '%s\n' \"\$cast_events\" >&2; exit 1; }
+
+headless_target_first=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/headless-client/target\")
+assert_headless_target_scenario \"\$headless_target_first\"
+
+headless_target_first_end=\$(HEADLESS_TARGET_PAYLOAD=\"\$headless_target_first\" python3 - <<'PY'
+import json
+import os
+
+payload = json.loads(os.environ["HEADLESS_TARGET_PAYLOAD"])
+print(payload["event_cursor_end"])
+PY
+)
+headless_cleanup_events=\$(curl -fsS \"http://127.0.0.1:${port}/api/v1/harness/events?since=\${headless_target_first_end}&limit=10\")
+assert_empty_event_payload \"\$headless_cleanup_events\" "headless target scenario left post-cleanup events after its reported cursor"
+
+headless_target_second=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/headless-client/target\")
+assert_headless_target_scenario \"\$headless_target_second\"
+assert_headless_target_cursor_progression \"\$headless_target_first\" \"\$headless_target_second\"
 
 slow_scenario=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/bot-slow-maintenance/current-target\")
 assert_slow_scenario \"\$slow_scenario\" current-target HarnessSlowCurrentTarget
