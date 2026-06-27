@@ -281,6 +281,7 @@ nlohmann::json ToJson(const ActorLedBotPartyScenarioResult &result)
 		{"followers_follow_actor_leader", result.followers_follow_actor_leader},
 		{"owner_target_command_observed", result.owner_target_command_observed},
 		{"actor_target_command_blocked", result.actor_target_command_blocked},
+		{"owner_nearby_control_kept_combat_target", result.owner_nearby_control_kept_combat_target},
 		{"owner_leash_blocks_actor_led_combat", result.owner_leash_blocks_actor_led_combat},
 		{"slow_spell_id", result.slow_spell_id},
 		{"owner_target_reason", result.owner_target_reason},
@@ -547,6 +548,8 @@ bool ServeHttp(const HttpServerOptions &options)
 	runtime.EnableAutonomousActorPrototype(options.enable_autonomous_actor_prototype);
 
 	httplib::Server api;
+	std::thread stop_thread;
+	std::once_flag stop_once;
 	std::mutex finished_mutex;
 	std::condition_variable finished_cv;
 	bool finished = false;
@@ -669,10 +672,12 @@ bool ServeHttp(const HttpServerOptions &options)
 		});
 	}
 
-	api.Post("/api/v1/harness/shutdown", [&runtime, &api](const auto &, auto &res) {
+	api.Post("/api/v1/harness/shutdown", [&runtime, &api, &stop_thread, &stop_once](const auto &, auto &res) {
 		runtime.RequestShutdown();
 		SetJson(res, {{"shutdown_requested", true}});
-		std::thread([&api]() { api.stop(); }).detach();
+		std::call_once(stop_once, [&api, &stop_thread]() {
+			stop_thread = std::thread([&api]() { api.stop(); });
+		});
 	});
 
 	std::thread watchdog;
@@ -702,6 +707,9 @@ bool ServeHttp(const HttpServerOptions &options)
 	finished_cv.notify_all();
 	if (watchdog.joinable()) {
 		watchdog.join();
+	}
+	if (stop_thread.joinable()) {
+		stop_thread.join();
 	}
 
 	runtime.Shutdown();

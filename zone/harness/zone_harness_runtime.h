@@ -106,6 +106,7 @@ struct ActorLedBotPartyScenarioResult {
 	bool followers_follow_actor_leader = false;
 	bool owner_target_command_observed = false;
 	bool actor_target_command_blocked = false;
+	bool owner_nearby_control_kept_combat_target = false;
 	bool owner_leash_blocks_actor_led_combat = false;
 	uint16_t slow_spell_id = 0;
 	std::string owner_target_reason;

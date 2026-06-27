@@ -7,14 +7,14 @@ Beads item: `central-lhy.9`
 ## Question
 
 Can Zone Harness prove a useful intermediate shape where one synthetic owner `Client` preserves normal bot owner
-invariants, one bot-backed `Autonomous Actor` acts as the party gameplay lead, and 1-5 follower bots behave as a
+invariants, one bot-backed `Autonomous Actor` acts as the party gameplay lead, and 1-4 follower bots behave as a
 normal group?
 
 ## Harness Proof
 
 Added `POST /api/v1/harness/scenarios/actor-led-bot-party`.
 
-The scenario builds one synthetic owner client, one owned bot actor leader, and a bounded 1-5 follower bot party
+The scenario builds one synthetic owner client, one owned bot actor leader, and a bounded 1-4 follower bot party
 inside one normal `Group`. It then runs four bounded proofs through ordinary zone processing:
 
 1. Owner invariants stay intact for the actor leader and all followers.
@@ -23,9 +23,13 @@ inside one normal `Group`. It then runs four bounded proofs through ordinary zon
 3. Current target command still comes from the owner client: an owner-target baseline produces a follower
    `spell_cast_started` slow event, while an actor-leader-target-only attempt does not.
 4. Combat leash still falls back to the owner client even when the follower keeps the actor leader as its
-   `FollowID`.
+   `FollowID`, and the leash clear is tied to the owner moving outside leash range rather than any target clear.
 
 The smoke path is wired into `scripts/smoke-zone-harness.sh` and Tier 3 harness validation.
+
+The upper bound is 4 followers, not 5, because the proof keeps the synthetic owner client and actor leader inside
+one ordinary six-member EQ group. The Tier 3 smoke now proves the minimum (`1`) and maximum (`4`) follower
+counts explicitly.
 
 ## Findings
 

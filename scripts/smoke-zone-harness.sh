@@ -270,13 +270,15 @@ PY
 
 assert_actor_led_bot_party() {
   local payload=\"\$1\"
+  local expected_followers=\"\$2\"
 
-  ACTOR_PARTY_PAYLOAD=\"\$payload\" python3 - <<'PY'
+  ACTOR_PARTY_PAYLOAD=\"\$payload\" python3 - \"\$expected_followers\" <<'PY'
 import json
 import os
 import sys
 
 payload = json.loads(os.environ["ACTOR_PARTY_PAYLOAD"])
+expected_followers = int(sys.argv[1])
 
 def fail(message):
     print(json.dumps({"error": message, "payload": payload}, separators=(",", ":")), file=sys.stderr)
@@ -286,7 +288,7 @@ if payload.get("proved") is not True:
     fail("actor-led bot party proof did not complete")
 if not str(payload.get("database_mutation", "")).startswith("none:"):
     fail("actor-led bot party reported database mutation")
-if payload.get("follower_count_requested") != 3 or payload.get("follower_count_created") != 3:
+if payload.get("follower_count_requested") != expected_followers or payload.get("follower_count_created") != expected_followers:
     fail("unexpected follower count")
 
 required_flags = [
@@ -295,13 +297,14 @@ required_flags = [
     "followers_follow_actor_leader",
     "owner_target_command_observed",
     "actor_target_command_blocked",
+    "owner_nearby_control_kept_combat_target",
     "owner_leash_blocks_actor_led_combat",
 ]
 for flag in required_flags:
     if payload.get(flag) is not True:
         fail(f"{flag} was not proven")
 
-if len(payload.get("followers") or []) != 3:
+if len(payload.get("followers") or []) != expected_followers:
     fail("follower identities missing")
 if payload.get("owner", {}).get("kind") != "client":
     fail("owner is not a client")
@@ -359,8 +362,12 @@ assert_slow_scenario \"\$mezzed_scenario\" mezzed HarnessSlowSecondaryHostile fa
 	actor_loop_repeat=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/autonomous-actor-loop\")
 	assert_autonomous_actor_loop \"\$actor_loop_repeat\"
 
-	actor_party=\$(curl -fsS -X POST -H 'Content-Type: application/json' --data '{\"follower_count\":3}' \"http://127.0.0.1:${port}/api/v1/harness/scenarios/actor-led-bot-party\")
-	assert_actor_led_bot_party \"\$actor_party\"
+	actor_party_min=\$(curl -fsS -X POST -H 'Content-Type: application/json' --data '{\"follower_count\":1}' \"http://127.0.0.1:${port}/api/v1/harness/scenarios/actor-led-bot-party\")
+	assert_actor_led_bot_party \"\$actor_party_min\" 1
+	actor_party_default=\$(curl -fsS -X POST -H 'Content-Type: application/json' --data '{\"follower_count\":3}' \"http://127.0.0.1:${port}/api/v1/harness/scenarios/actor-led-bot-party\")
+	assert_actor_led_bot_party \"\$actor_party_default\" 3
+	actor_party_max=\$(curl -fsS -X POST -H 'Content-Type: application/json' --data '{\"follower_count\":4}' \"http://127.0.0.1:${port}/api/v1/harness/scenarios/actor-led-bot-party\")
+	assert_actor_led_bot_party \"\$actor_party_max\" 4
 
 	shutdown=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/shutdown\")
 [[ \"\$shutdown\" == *'\"shutdown_requested\":true'* ]] || { printf '%s\n' \"\$shutdown\" >&2; exit 1; }

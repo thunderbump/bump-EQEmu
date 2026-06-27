@@ -333,16 +333,17 @@ SpellCastStartScenarioResult ZoneHarnessRuntime::StartKnownSpellCast(uint16_t sp
 	caster->SetTarget(target);
 
 	const bool started = caster->CastSpell(spell_id, target->GetID(), EQ::spells::CastingSlot::Gem2);
-	if (!started) {
-		caster->Depop(false);
-		target->Depop(false);
-	}
+	const uint16_t caster_id = caster->GetID();
+	const uint16_t target_id = target->GetID();
+
+	entity_list.RemoveMob(caster_id);
+	entity_list.RemoveMob(target_id);
 
 	return {
 		.started = started,
 		.reason = started ? "cast_started" : "cast_not_started",
-		.caster_id = caster->GetID(),
-		.target_id = target->GetID(),
+		.caster_id = caster_id,
+		.target_id = target_id,
 		.spell_id = spell_id,
 		.runtime = RuntimeLocked(),
 	};
@@ -442,7 +443,11 @@ ActorLedBotPartyScenarioResult ZoneHarnessRuntime::RunActorLedBotPartyProof(
 		return result;
 	}
 
-	const uint8_t bounded_followers = std::clamp<uint8_t>(follower_count, 1, 5);
+	const uint8_t bounded_followers = std::clamp<uint8_t>(
+		follower_count,
+		kMinOwnedBotPartyFollowers,
+		kMaxOwnedBotPartyFollowers
+	);
 	const uint32_t bounded_ticks = std::clamp<uint32_t>(max_ticks, 1, 1000);
 	const uint32_t bounded_sleep_ms = std::min<uint32_t>(sleep_ms, 250);
 	const auto started = std::chrono::steady_clock::now();
@@ -693,7 +698,7 @@ ActorLedBotPartyScenarioResult ZoneHarnessRuntime::RunActorLedBotPartyProof(
 		}
 
 		const float leash_radius = std::sqrt(std::max<float>(RuleR(Bots, LeashDistance), 100.0f)) + 25.0f;
-		owner->GMMove(0.0f, 0.0f, 0.0f, 0.0f);
+		owner->GMMove(leash_radius - 8.0f, 0.0f, 0.0f, 0.0f);
 		actor_leader->GMMove(leash_radius, 0.0f, 0.0f, 0.0f);
 		probe_follower->GMMove(leash_radius + 4.0f, 0.0f, 0.0f, 0.0f);
 		fixture.SetBotFollowTarget(probe_follower, actor_leader);
@@ -713,7 +718,36 @@ ActorLedBotPartyScenarioResult ZoneHarnessRuntime::RunActorLedBotPartyProof(
 		fixture.BotTargets(probe_follower, hostile);
 		fixture.RefreshPerception(probe_follower);
 
-		result.leash_reason = "owner_client_leash_did_not_clear_actor_led_combat_target";
+		result.leash_reason = "owner_nearby_control_did_not_keep_actor_led_combat_target";
+		for (uint32_t tick = 0; tick < std::min<uint32_t>(bounded_ticks, 4); ++tick) {
+			if (!booted || !zone || !is_zone_loaded || shutdown_requested) {
+				result.reason = "zone_unavailable_during_leash_phase";
+				result.runtime = RuntimeLocked();
+				return result;
+			}
+
+			ProcessOneTick();
+			++process_ticks;
+			++result.ticks_processed;
+
+			if (probe_follower->GetTarget() != hostile) {
+				result.leash_reason = "owner_nearby_control_lost_actor_led_combat_target";
+				break;
+			}
+
+			bounded_sleep();
+		}
+
+		result.owner_nearby_control_kept_combat_target = probe_follower->GetTarget() == hostile;
+		if (!result.owner_nearby_control_kept_combat_target) {
+			result.reason = "leash_phase_failed";
+			result.runtime = RuntimeLocked();
+			return result;
+		}
+
+		owner->GMMove(0.0f, 0.0f, 0.0f, 0.0f);
+		fixture.RefreshPerception(probe_follower);
+		result.leash_reason = "owner_client_leash_did_not_clear_actor_led_combat_target_after_owner_moved_outside_radius";
 		for (uint32_t tick = 0; tick < std::min<uint32_t>(bounded_ticks, 8); ++tick) {
 			if (!booted || !zone || !is_zone_loaded || shutdown_requested) {
 				result.reason = "zone_unavailable_during_leash_phase";
@@ -728,8 +762,8 @@ ActorLedBotPartyScenarioResult ZoneHarnessRuntime::RunActorLedBotPartyProof(
 			if (!probe_follower->GetTarget()) {
 				result.owner_leash_blocks_actor_led_combat = probe_follower->GetFollowID() == actor_leader->GetID();
 				result.leash_reason = result.owner_leash_blocks_actor_led_combat ?
-					"owner_client_leash_cleared_combat_target_while_follow_anchor_stayed_actor_leader" :
-					"owner_client_leash_cleared_combat_target";
+					"owner_client_leash_cleared_combat_target_only_after_owner_moved_outside_radius_while_follow_anchor_stayed_actor_leader" :
+					"owner_client_leash_cleared_combat_target_after_owner_moved_outside_radius";
 				break;
 			}
 
@@ -749,6 +783,7 @@ ActorLedBotPartyScenarioResult ZoneHarnessRuntime::RunActorLedBotPartyProof(
 		result.followers_follow_actor_leader &&
 		result.owner_target_command_observed &&
 		result.actor_target_command_blocked &&
+		result.owner_nearby_control_kept_combat_target &&
 		result.owner_leash_blocks_actor_led_combat;
 	result.reason = result.proved ?
 		"actor_led_party_proved_follow_with_owner_command_and_leash_blockers" :

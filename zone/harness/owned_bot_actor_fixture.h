@@ -28,6 +28,9 @@ class NPC;
 
 namespace EQ::ZoneHarness {
 
+inline constexpr uint8_t kMinOwnedBotPartyFollowers = 1;
+inline constexpr uint8_t kMaxOwnedBotPartyFollowers = 4;
+
 struct OwnedBotActorConfig {
 	std::string owner_name = "HarnessActorOwner";
 	std::string bot_name = "HarnessOwnedBot";

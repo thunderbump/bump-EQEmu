@@ -19,6 +19,7 @@
 #include "zone/zonedb.h"
 
 #include <algorithm>
+#include <utility>
 
 extern EntityList entity_list;
 
@@ -152,9 +153,19 @@ bool OwnedBotActorFixture::SetUpOwnedBotGroup(const OwnedBotActorConfig &config)
 	bot->GMMove(2.0f, 0.0f, 0.0f, 0.0f);
 
 	group = new Group(owner);
-	group->AddMember(bot);
-	group_id = 900001;
-	entity_list.AddGroup(group, group_id);
+	if (!group->AddMember(bot)) {
+		failure_reason = "group_member_add_failed";
+		Reset();
+		return false;
+	}
+
+	entity_list.AddGroup(group);
+	group_id = group->GetID();
+	if (!group_id) {
+		failure_reason = "group_registration_failed";
+		Reset();
+		return false;
+	}
 
 	return true;
 }
@@ -190,11 +201,13 @@ bool OwnedBotActorFixture::SetUpOwnedBotParty(const OwnedBotPartyConfig &config)
 
 	bot->GMMove(4.0f, 0.0f, 0.0f, 0.0f);
 
-	group = new Group(owner);
-	group->AddMember(bot);
-
-	const uint8_t bounded_followers = std::clamp<uint8_t>(config.follower_count, 1, 5);
-	followers.reserve(bounded_followers);
+	const uint8_t bounded_followers = std::clamp<uint8_t>(
+		config.follower_count,
+		kMinOwnedBotPartyFollowers,
+		kMaxOwnedBotPartyFollowers
+	);
+	std::vector<Bot*> created_followers;
+	created_followers.reserve(bounded_followers);
 
 	for (uint8_t index = 0; index < bounded_followers; ++index) {
 		auto *follower = CreateOwnedBot({
@@ -207,17 +220,39 @@ bool OwnedBotActorFixture::SetUpOwnedBotParty(const OwnedBotPartyConfig &config)
 			.bot_spell_list_id = config.follower_bot_spell_list_id,
 		});
 		if (!follower) {
+			failure_reason = "bot_spell_list_unavailable";
 			Reset();
 			return false;
 		}
 
 		follower->GMMove(6.0f + static_cast<float>(index * 2), 2.0f, 0.0f, 0.0f);
-		group->AddMember(follower);
-		followers.push_back(follower);
+		created_followers.push_back(follower);
 	}
 
-	group_id = 900001;
-	entity_list.AddGroup(group, group_id);
+	group = new Group(owner);
+	if (!group->AddMember(bot)) {
+		failure_reason = "group_member_add_failed";
+		Reset();
+		return false;
+	}
+
+	for (auto *follower : created_followers) {
+		if (!group->AddMember(follower)) {
+			failure_reason = "group_member_add_failed";
+			Reset();
+			return false;
+		}
+	}
+
+	entity_list.AddGroup(group);
+	group_id = group->GetID();
+	if (!group_id) {
+		failure_reason = "group_registration_failed";
+		Reset();
+		return false;
+	}
+
+	followers = std::move(created_followers);
 	SetFollowersFollowActorLeader();
 
 	return true;
@@ -322,6 +357,10 @@ void OwnedBotActorFixture::Reset()
 	if (group_id) {
 		entity_list.RemoveGroup(group_id);
 		group_id = 0;
+		group = nullptr;
+	}
+	else if (group) {
+		delete group;
 		group = nullptr;
 	}
 

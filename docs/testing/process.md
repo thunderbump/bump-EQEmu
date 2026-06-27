@@ -374,7 +374,7 @@ the same container, and checks:
   observing actor-scoped perception, and verifying cursor-based `target_changed` and `speech_emitted`
   **Actor Events** without default persistent DB mutation.
 - `POST /api/v1/harness/scenarios/actor-led-bot-party` proves one owned bot can act as an actor-leader
-  candidate with follower bots while current target and leash sourcing still expose the owner-client-shaped
+  candidate with 1-4 follower bots while current target and leash sourcing still expose the owner-client-shaped
   blockers for the next `ActorCommandSource` seam.
 - `POST /api/v1/harness/shutdown` requests clean shutdown.
 
@@ -413,6 +413,11 @@ process a small tick budget through normal zone processing, read cursor-bounded 
 actor's current target and nearby entities through actor-scoped perception. The failure payload should identify
 the actor, owner, pending action, tick budget, observed event count, and persistence/database-mutation
 classification.
+
+The actor-led bot party harness scenario is bounded by a normal six-member EQ group: one synthetic owner client,
+one actor leader bot, and 1-4 follower bots. Tier 3 smoke should prove the minimum (`1`) and maximum (`4`)
+follower counts, and the leash phase should include an owner-nearby control so the target clear is tied to the
+owner moving outside leash range instead of any unrelated combat-target loss.
 
 For AFK agents, use `./scripts/smoke-zone-harness.sh` after Tier 1 when a task touches harness-covered runtime
 gameplay. If a validation wrapper is requested, wire it to this smoke script rather than duplicating the long
