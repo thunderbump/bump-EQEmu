@@ -31,6 +31,8 @@ public:
 		TEST_ADD(BotHealSelectionTest::MissingAlternativeAndFallbackHasNoSelection);
 		TEST_ADD(BotHealSelectionTest::CompleteHealParentFallbackWaitsForRegularHealThreshold);
 		TEST_ADD(BotHealSelectionTest::CompleteHealParentFallbackPreservesLowHpEmergency);
+		TEST_ADD(BotHealSelectionTest::PetCompleteHealParentFallbackWaitsForModeratePetHp);
+		TEST_ADD(BotHealSelectionTest::PetCompleteHealParentFallbackPreservesLowHpEmergency);
 		TEST_ADD(BotHealSelectionTest::ExplicitCompleteHealEntryIgnoresParentFallbackGate);
 	}
 
@@ -117,6 +119,26 @@ private:
 	{
 		TEST_ASSERT(BotHealSelection::AllowsCompleteHealParentFallback(
 			BotSpellTypes::CompleteHeal,
+			BotSpellTypes::RegularHeal,
+			40,
+			60
+		));
+	}
+
+	void PetCompleteHealParentFallbackWaitsForModeratePetHp()
+	{
+		TEST_ASSERT(!BotHealSelection::AllowsCompleteHealParentFallback(
+			BotSpellTypes::PetCompleteHeals,
+			BotSpellTypes::RegularHeal,
+			65,
+			60
+		));
+	}
+
+	void PetCompleteHealParentFallbackPreservesLowHpEmergency()
+	{
+		TEST_ASSERT(BotHealSelection::AllowsCompleteHealParentFallback(
+			BotSpellTypes::PetCompleteHeals,
 			BotSpellTypes::RegularHeal,
 			40,
 			60

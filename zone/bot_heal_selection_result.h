@@ -63,12 +63,15 @@ inline bool AllowsCompleteHealParentFallback(
 	uint16 requested_spell_type,
 	uint16 candidate_spell_type,
 	uint8 target_hp_ratio,
-	uint8 regular_heal_max_threshold
+	uint8 parent_max_threshold
 )
 {
-	return requested_spell_type != BotSpellTypes::CompleteHeal ||
+	return (
+		requested_spell_type != BotSpellTypes::CompleteHeal &&
+		requested_spell_type != BotSpellTypes::PetCompleteHeals
+	) ||
 		candidate_spell_type != BotSpellTypes::RegularHeal ||
-		target_hp_ratio <= regular_heal_max_threshold;
+		target_hp_ratio <= parent_max_threshold;
 }
 
 }

@@ -1279,8 +1279,11 @@ BotSpell Bot::GetBestBotSpellForPercentageHeal(Bot* caster, Mob* tar, uint16 spe
 		const std::vector<BotSpells_wIndex>& bot_spell_list = caster->BotGetSpellsByType(spell_type);
 		const uint8 target_hp_ratio = tar ? tar->GetHPRatio() : 100;
 		const uint8 complete_heal_parent_fallback_max_threshold =
-			(spell_type == BotSpellTypes::CompleteHeal && tar) ?
-				caster->GetUltimateSpellTypeMaxThreshold(BotSpellTypes::RegularHeal, tar) :
+			(
+				(spell_type == BotSpellTypes::CompleteHeal || spell_type == BotSpellTypes::PetCompleteHeals) &&
+				tar
+			) ?
+				caster->GetUltimateSpellTypeMaxThreshold(GetParentSpellType(spell_type), tar) :
 				0;
 		for (int i = bot_spell_list.size() - 1; i >= 0; i--) {
 			if (!IsValidSpell(bot_spell_list[i].spellid)) {
