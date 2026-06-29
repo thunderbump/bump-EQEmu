@@ -132,6 +132,10 @@ Efficient `RegularHeal` selection has deterministic unit coverage in `tests/regu
 pressure ordering covered in `tests/pressure_aware_healing_test.h`. Live runtime validation for rule-off/rule-on
 real bot spell-list behavior is documented separately in `docs/testing/efficient-regular-heal-smoke.md`.
 
+Complete-heal parent-bucket fallback gating has deterministic coverage in `tests/bot_heal_selection_test.h`.
+If live CompleteHeal fallback remains too eager before a fix is deployed, lower the CompleteHeal max threshold
+(e.g. `^spellmaxthresholds completeheals 50 byname Wumpermup`) or hold CompleteHeal for that bot.
+
 ## Tier 2: DB-Backed CLI Tests
 
 Use this when the change touches code that is exercised by existing `zone` or `world` command hooks.

@@ -17,6 +17,7 @@
 */
 #pragma once
 
+#include "common/spdat.h"
 #include "common/types.h"
 
 namespace BotHealSelection {
@@ -56,6 +57,21 @@ SelectionResult<Spell> PreferAlternativeOrFallback(
 	}
 
 	return Found(fallback_spell_type, fallback_spell);
+}
+
+inline bool AllowsCompleteHealParentFallback(
+	uint16 requested_spell_type,
+	uint16 candidate_spell_type,
+	uint8 target_hp_ratio,
+	uint8 parent_max_threshold
+)
+{
+	return (
+		requested_spell_type != BotSpellTypes::CompleteHeal &&
+		requested_spell_type != BotSpellTypes::PetCompleteHeals
+	) ||
+		candidate_spell_type != BotSpellTypes::RegularHeal ||
+		target_hp_ratio <= parent_max_threshold;
 }
 
 }

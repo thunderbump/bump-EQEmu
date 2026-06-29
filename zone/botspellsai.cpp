@@ -1277,6 +1277,14 @@ BotSpell Bot::GetBestBotSpellForPercentageHeal(Bot* caster, Mob* tar, uint16 spe
 
 	if (caster && caster->AI_HasSpells()) {
 		const std::vector<BotSpells_wIndex>& bot_spell_list = caster->BotGetSpellsByType(spell_type);
+		const uint8 target_hp_ratio = tar ? tar->GetHPRatio() : 100;
+		const uint8 complete_heal_parent_fallback_max_threshold =
+			(
+				(spell_type == BotSpellTypes::CompleteHeal || spell_type == BotSpellTypes::PetCompleteHeals) &&
+				tar
+			) ?
+				caster->GetUltimateSpellTypeMaxThreshold(GetParentSpellType(spell_type), tar) :
+				0;
 		for (int i = bot_spell_list.size() - 1; i >= 0; i--) {
 			if (!IsValidSpell(bot_spell_list[i].spellid)) {
 				continue;
@@ -1286,6 +1294,12 @@ BotSpell Bot::GetBestBotSpellForPercentageHeal(Bot* caster, Mob* tar, uint16 spe
 				(bot_spell_list[i].type == spell_type || bot_spell_list[i].type == GetParentSpellType(spell_type)) &&
 				caster->IsValidSpellTypeBySpellID(spell_type, bot_spell_list[i].spellid) &&
 				IsCompleteHealSpell(bot_spell_list[i].spellid) &&
+				BotHealSelection::AllowsCompleteHealParentFallback(
+					spell_type,
+					bot_spell_list[i].type,
+					target_hp_ratio,
+					complete_heal_parent_fallback_max_threshold
+				) &&
 				caster->CastChecks(bot_spell_list[i].spellid, tar, spell_type)
 			) {
 				result.SpellId = bot_spell_list[i].spellid;
