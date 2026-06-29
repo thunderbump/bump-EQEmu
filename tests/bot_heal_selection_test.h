@@ -29,6 +29,9 @@ public:
 		TEST_ADD(BotHealSelectionTest::ResultCarriesSelectedSpellTypeAndConcreteSpell);
 		TEST_ADD(BotHealSelectionTest::InvalidAlternativeFallsBackToRequestedSpell);
 		TEST_ADD(BotHealSelectionTest::MissingAlternativeAndFallbackHasNoSelection);
+		TEST_ADD(BotHealSelectionTest::CompleteHealParentFallbackWaitsForRegularHealThreshold);
+		TEST_ADD(BotHealSelectionTest::CompleteHealParentFallbackPreservesLowHpEmergency);
+		TEST_ADD(BotHealSelectionTest::ExplicitCompleteHealEntryIgnoresParentFallbackGate);
 	}
 
 private:
@@ -98,5 +101,35 @@ private:
 		TEST_ASSERT(!result.found);
 		TEST_ASSERT_EQUALS(result.selected_spell_type, static_cast<uint16>(0));
 		TEST_ASSERT_EQUALS(result.spell.SpellId, static_cast<uint16>(0));
+	}
+
+	void CompleteHealParentFallbackWaitsForRegularHealThreshold()
+	{
+		TEST_ASSERT(!BotHealSelection::AllowsCompleteHealParentFallback(
+			BotSpellTypes::CompleteHeal,
+			BotSpellTypes::RegularHeal,
+			65,
+			60
+		));
+	}
+
+	void CompleteHealParentFallbackPreservesLowHpEmergency()
+	{
+		TEST_ASSERT(BotHealSelection::AllowsCompleteHealParentFallback(
+			BotSpellTypes::CompleteHeal,
+			BotSpellTypes::RegularHeal,
+			40,
+			60
+		));
+	}
+
+	void ExplicitCompleteHealEntryIgnoresParentFallbackGate()
+	{
+		TEST_ASSERT(BotHealSelection::AllowsCompleteHealParentFallback(
+			BotSpellTypes::CompleteHeal,
+			BotSpellTypes::CompleteHeal,
+			75,
+			60
+		));
 	}
 };
