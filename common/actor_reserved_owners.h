@@ -69,6 +69,24 @@ inline ReservedOwnerRecord ToReservedOwnerRecord(const CharacterDataRepository::
 	};
 }
 
+inline std::string BuildSoftDeletedProvisionName(
+	Database &db,
+	const std::string &requested_name,
+	uint32_t discriminator
+)
+{
+	for (uint32_t attempt = 0; attempt < 32; ++attempt) {
+		const auto suffix = fmt::format("R{}", discriminator + attempt);
+		const auto base_size = std::min<size_t>(64 - suffix.size(), requested_name.size());
+		const auto candidate = requested_name.substr(0, base_size) + suffix;
+		if (!CharacterDataRepository::FindAnyByName(db, candidate).id) {
+			return candidate;
+		}
+	}
+
+	return {};
+}
+
 inline std::optional<ReservedOwnerRecord> FindProvisionedByCharacterId(Database &db, uint32_t character_id)
 {
 	if (!character_id) {
@@ -124,9 +142,18 @@ inline ReservedOwnerRecord Provision(Database &db, const std::string &name, int3
 		return IsProvisionedReservedOwnerRecord(existing) ? ToReservedOwnerRecord(existing) : ReservedOwnerRecord{};
 	}
 
+	auto provision_name = name;
+	const auto existing_deleted = CharacterDataRepository::FindAnyByName(db, name);
+	if (existing_deleted.id && existing_deleted.deleted_at > 0) {
+		provision_name = BuildSoftDeletedProvisionName(db, name, existing_deleted.id);
+		if (provision_name.empty()) {
+			return {};
+		}
+	}
+
 	auto record = CharacterDataRepository::NewEntity();
 	record.account_id = account_id;
-	record.name = name;
+	record.name = provision_name;
 	record.last_name = std::string(kReservedOwnerLastNameMarker);
 	record = CharacterDataRepository::InsertOne(db, record);
 	if (!record.id) {

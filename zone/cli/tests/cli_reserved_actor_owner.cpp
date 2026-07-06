@@ -76,6 +76,10 @@ public:
 	uint32_t actor_id = 0;
 	uint32_t bot_id = 0;
 	uint32_t reserved_owner_character_id = 0;
+	uint32_t reprovisioned_reserved_owner_character_id = 0;
+	uint32_t soft_deleted_reserved_owner_character_id = 0;
+	uint32_t soft_deleted_collision_character_id = 0;
+	uint32_t reprovisioned_collision_character_id = 0;
 	uint32_t colliding_character_id = 0;
 	uint32_t playable_marker_character_id = 0;
 	uint32_t stale_actor_id = 0;
@@ -106,6 +110,24 @@ public:
 		if (reserved_owner_character_id > 0) {
 			std::string unused_reason;
 			EQ::Actor::ReservedOwners::Rollback(database, reserved_owner_character_id, &unused_reason);
+		}
+
+		if (reprovisioned_reserved_owner_character_id > 0) {
+			std::string unused_reason;
+			EQ::Actor::ReservedOwners::Rollback(database, reprovisioned_reserved_owner_character_id, &unused_reason);
+		}
+
+		if (reprovisioned_collision_character_id > 0) {
+			std::string unused_reason;
+			EQ::Actor::ReservedOwners::Rollback(database, reprovisioned_collision_character_id, &unused_reason);
+		}
+
+		if (soft_deleted_reserved_owner_character_id > 0) {
+			CharacterDataRepository::DeleteOne(database, soft_deleted_reserved_owner_character_id);
+		}
+
+		if (soft_deleted_collision_character_id > 0) {
+			CharacterDataRepository::DeleteOne(database, soft_deleted_collision_character_id);
 		}
 
 		if (colliding_character_id > 0) {
@@ -179,6 +201,81 @@ void ZoneCLI::TestReservedActorOwner(int argc, char **argv, argh::parser &cmd, s
 			!EQ::Actor::ReservedOwners::Provision(database, playable_marker_name).character_id,
 			"provisioning should refuse to adopt a marker-bearing playable Actorowner* row"
 		);
+
+		const auto soft_deleted_collision_name = fmt::format("ActorownerSoftDeletedCollision{}", run_nonce);
+		auto soft_deleted_collision_record = CharacterDataRepository::NewEntity();
+		soft_deleted_collision_record.name = soft_deleted_collision_name;
+		soft_deleted_collision_record = CharacterDataRepository::InsertOne(database, soft_deleted_collision_record);
+		Expect(soft_deleted_collision_record.id > 0, "soft-deleted collision row should insert for reprovision proof");
+		soft_deleted_collision_record.deleted_at = static_cast<time_t>(run_nonce);
+		ExpectEqual(
+			CharacterDataRepository::UpdateOne(database, soft_deleted_collision_record),
+			int(1),
+			"soft-deleted collision row should update deleted_at for reprovision proof"
+		);
+		cleanup.soft_deleted_collision_character_id = soft_deleted_collision_record.id;
+		const auto reprovisioned_collision = EQ::Actor::ReservedOwners::Provision(database, soft_deleted_collision_name);
+		Expect(
+			reprovisioned_collision.character_id > 0,
+			"soft-deleted Actorowner* collision row should not block reprovisioning"
+		);
+		Expect(
+			reprovisioned_collision.character_id != soft_deleted_collision_record.id,
+			"soft-deleted Actorowner* collision row should not be adopted as an active reserved owner"
+		);
+		Expect(
+			reprovisioned_collision.name != soft_deleted_collision_name,
+			"soft-deleted Actorowner* collision row should force a new unique reserved owner name"
+		);
+		Expect(
+			EQ::Actor::ReservedOwners::IsReservedOwnerName(reprovisioned_collision.name),
+			"soft-deleted Actorowner* collision reprovisioning should keep the reserved owner prefix"
+		);
+		cleanup.reprovisioned_collision_character_id = reprovisioned_collision.character_id;
+
+		const auto soft_deleted_reserved_name = fmt::format("ActorownerSoftDeletedReserved{}", run_nonce);
+		auto soft_deleted_reserved_owner = EQ::Actor::ReservedOwners::Provision(database, soft_deleted_reserved_name);
+		Expect(
+			soft_deleted_reserved_owner.character_id > 0,
+			"soft-deleted reserved owner seed should provision before reprovision proof"
+		);
+		auto soft_deleted_reserved_record = CharacterDataRepository::FindOne(database, soft_deleted_reserved_owner.character_id);
+		soft_deleted_reserved_record.deleted_at = static_cast<time_t>(run_nonce);
+		ExpectEqual(
+			CharacterDataRepository::UpdateOne(database, soft_deleted_reserved_record),
+			int(1),
+			"soft-deleted reserved owner seed should update deleted_at for reprovision proof"
+		);
+		cleanup.soft_deleted_reserved_owner_character_id = soft_deleted_reserved_owner.character_id;
+		const auto reprovisioned_reserved_owner = EQ::Actor::ReservedOwners::Provision(database, soft_deleted_reserved_name);
+		Expect(
+			reprovisioned_reserved_owner.character_id > 0,
+			"soft-deleted reserved owner should not block reprovisioning"
+		);
+		Expect(
+			reprovisioned_reserved_owner.character_id != soft_deleted_reserved_owner.character_id,
+			"soft-deleted reserved owner should not be adopted as an active owner"
+		);
+		Expect(
+			reprovisioned_reserved_owner.name != soft_deleted_reserved_name,
+			"soft-deleted reserved owner should force a new unique reserved owner name"
+		);
+		Expect(
+			EQ::Actor::ReservedOwners::IsReservedOwnerName(reprovisioned_reserved_owner.name),
+			"soft-deleted reserved owner reprovisioning should keep the reserved owner prefix"
+		);
+		const auto found_reprovisioned_reserved_owner =
+			EQ::Actor::ReservedOwners::FindProvisionedByName(database, reprovisioned_reserved_owner.name);
+		Expect(
+			found_reprovisioned_reserved_owner.has_value(),
+			"reserved owner lookup should resolve the reprovisioned active owner by its final provisioned name"
+		);
+		ExpectEqual(
+			found_reprovisioned_reserved_owner->character_id,
+			reprovisioned_reserved_owner.character_id,
+			"reserved owner lookup should resolve the reprovisioned active reserved owner"
+		);
+		cleanup.reprovisioned_reserved_owner_character_id = reprovisioned_reserved_owner.character_id;
 
 		const auto reserved_owner_name = fmt::format("Actorowner{}", run_nonce);
 		const auto reserved_owner = EQ::Actor::ReservedOwners::Provision(database, reserved_owner_name);
