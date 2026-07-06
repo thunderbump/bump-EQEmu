@@ -19,6 +19,7 @@
 #include "zone/npc.h"
 #include "zone/questmgr.h"
 #include "zone/worldserver.h"
+#include "zone/xtargetautohaters.h"
 #include "zone/zone.h"
 #include "zone/zone_event_scheduler.h"
 
@@ -707,6 +708,150 @@ ActorLedBotPartyScenarioResult ZoneHarnessRuntime::RunActorLedBotPartyProof(
 			.follower_name_prefix = "HarnessFollower",
 			.follower_count = bounded_followers,
 		})) {
+			result.reason = "owner_assist_setup_failed";
+			result.runtime = RuntimeLocked();
+			return result;
+		}
+
+		auto *owner = fixture.Owner();
+		auto *probe_follower = fixture.FollowerBots().front();
+		auto *hostile = fixture.AddHostileNPC({
+			.name = "HarnessOwnerAssistHostile",
+			.position = glm::vec4(12, 0, 0, 0),
+		});
+		if (!owner || !probe_follower || !hostile) {
+			result.reason = "owner_assist_fixture_incomplete";
+			result.runtime = RuntimeLocked();
+			return result;
+		}
+
+		result.owner_assist_probe_follower = fixture.Describe(probe_follower);
+		result.owner_assist_expected_hostile = fixture.Describe(hostile);
+		fixture.OwnerTargets(nullptr);
+		owner->IncrementAggroCount();
+		owner->GetXTargetAutoMgr()->increment_count(hostile);
+		hostile->AddToHateList(owner, 100, 1, false);
+		fixture.RefreshPerception(probe_follower);
+
+		const uint64_t since_event_id = events.MaxEventID();
+		result.owner_assist_reason = "owner_assist_did_not_source_follower_action_within_bounds";
+		for (uint32_t tick = 0; tick < bounded_ticks; ++tick) {
+			if (!booted || !zone || !is_zone_loaded || shutdown_requested) {
+				result.reason = "zone_unavailable_during_owner_assist_phase";
+				result.runtime = RuntimeLocked();
+				return result;
+			}
+
+			ProcessOneTick();
+			++process_ticks;
+			++result.ticks_processed;
+
+			result.owner_assist_events = events.Since(since_event_id, 100);
+			const auto observed = std::find_if(
+				result.owner_assist_events.begin(),
+				result.owner_assist_events.end(),
+				[&fixture, probe_follower, hostile](const ActorEvent &event) {
+					return fixture.IsSingleTargetSlowCastStartFor(probe_follower, event, hostile);
+				}
+			);
+
+			if (observed != result.owner_assist_events.end()) {
+				result.owner_assist_command_observed = true;
+				result.owner_assist_reason = "owner_assist_drove_follower_slow_cast";
+				break;
+			}
+
+			bounded_sleep();
+		}
+
+		if (!result.owner_assist_command_observed) {
+			result.reason = "owner_assist_phase_failed";
+			result.runtime = RuntimeLocked();
+			return result;
+		}
+	}
+
+	{
+		OwnedBotActorFixture fixture;
+		if (!fixture.SetUpOwnedBotParty({
+			.owner_name = "HarnessPartyOwner",
+			.actor_leader_name = "HarnessActorLeader",
+			.follower_name_prefix = "HarnessFollower",
+			.follower_count = bounded_followers,
+		})) {
+			result.reason = "actor_assist_setup_failed";
+			result.runtime = RuntimeLocked();
+			return result;
+		}
+
+		auto *owner = fixture.Owner();
+		auto *actor_leader = fixture.ActorLeader();
+		auto *probe_follower = fixture.FollowerBots().front();
+		auto *hostile = fixture.AddHostileNPC({
+			.name = "HarnessActorAssistHostile",
+			.position = glm::vec4(12, 0, 0, 0),
+		});
+		if (!owner || !actor_leader || !probe_follower || !hostile) {
+			result.reason = "actor_assist_fixture_incomplete";
+			result.runtime = RuntimeLocked();
+			return result;
+		}
+
+		result.actor_assist_probe_follower = fixture.Describe(probe_follower);
+		result.actor_assist_expected_hostile = fixture.Describe(hostile);
+		fixture.OwnerTargets(nullptr);
+		fixture.SetBotCommandTargetSource(probe_follower, actor_leader);
+		fixture.BotTargets(actor_leader, hostile);
+		fixture.OwnedBotEngages(hostile, 100);
+		hostile->AddToHateList(actor_leader, 100, 1, false);
+		fixture.RefreshPartyPerception();
+
+		const uint64_t since_event_id = events.MaxEventID();
+		result.actor_assist_reason = "actor_assist_did_not_source_follower_action_within_bounds";
+		for (uint32_t tick = 0; tick < bounded_ticks; ++tick) {
+			if (!booted || !zone || !is_zone_loaded || shutdown_requested) {
+				result.reason = "zone_unavailable_during_actor_assist_phase";
+				result.runtime = RuntimeLocked();
+				return result;
+			}
+
+			ProcessOneTick();
+			++process_ticks;
+			++result.ticks_processed;
+
+			result.actor_assist_events = events.Since(since_event_id, 100);
+			const auto observed = std::find_if(
+				result.actor_assist_events.begin(),
+				result.actor_assist_events.end(),
+				[&fixture, probe_follower, hostile](const ActorEvent &event) {
+					return fixture.IsSingleTargetSlowCastStartFor(probe_follower, event, hostile);
+				}
+			);
+
+			if (observed != result.actor_assist_events.end()) {
+				result.actor_assist_command_observed = true;
+				result.actor_assist_reason = "actor_assist_drove_follower_slow_cast_through_command_source";
+				break;
+			}
+
+			bounded_sleep();
+		}
+
+		if (!result.actor_assist_command_observed) {
+			result.reason = "actor_assist_phase_failed";
+			result.runtime = RuntimeLocked();
+			return result;
+		}
+	}
+
+	{
+		OwnedBotActorFixture fixture;
+		if (!fixture.SetUpOwnedBotParty({
+			.owner_name = "HarnessPartyOwner",
+			.actor_leader_name = "HarnessActorLeader",
+			.follower_name_prefix = "HarnessFollower",
+			.follower_count = bounded_followers,
+		})) {
 			result.reason = "leash_setup_failed";
 			result.runtime = RuntimeLocked();
 			return result;
@@ -891,11 +1036,13 @@ ActorLedBotPartyScenarioResult ZoneHarnessRuntime::RunActorLedBotPartyProof(
 		result.followers_clear_removed_actor_leader_follow_id &&
 		result.owner_target_command_observed &&
 		result.actor_target_command_observed &&
+		result.owner_assist_command_observed &&
+		result.actor_assist_command_observed &&
 		result.owner_nearby_control_kept_combat_target &&
 		result.owner_leash_default_observed &&
 		result.actor_leash_source_kept_combat_target;
 	result.reason = result.proved ?
-		"actor_led_party_proved_owner_defaults_with_actor_command_source_seam" :
+		"actor_led_party_proved_owner_defaults_with_actor_target_assist_leash_command_source_seam" :
 		"actor_led_party_proof_incomplete";
 	result.elapsed_ms = static_cast<uint32_t>(
 		std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count()

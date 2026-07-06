@@ -405,6 +405,8 @@ required_flags = [
     "followers_clear_removed_actor_leader_follow_id",
     "owner_target_command_observed",
     "actor_target_command_observed",
+    "owner_assist_command_observed",
+    "actor_assist_command_observed",
     "owner_nearby_control_kept_combat_target",
     "owner_leash_default_observed",
     "actor_leash_source_kept_combat_target",
@@ -453,6 +455,32 @@ if not any(
     for event in actor_events
 ):
     fail("actor target did not produce the expected follower spell event")
+
+owner_assist_events = payload.get("owner_assist_events") or []
+owner_assist_probe = payload.get("owner_assist_probe_follower") or {}
+owner_assist_expected = payload.get("owner_assist_expected_hostile") or {}
+if not owner_assist_probe.get("entity_id") or not owner_assist_expected.get("entity_id"):
+    fail("owner assist probe follower or expected hostile identity missing")
+if not any(
+    event.get("type") == "spell_cast_started"
+    and event.get("actor", {}).get("entity_id") == owner_assist_probe.get("entity_id")
+    and event.get("target", {}).get("entity_id") == owner_assist_expected.get("entity_id")
+    for event in owner_assist_events
+):
+    fail("owner assist did not produce the expected follower spell event")
+
+actor_assist_events = payload.get("actor_assist_events") or []
+actor_assist_probe = payload.get("actor_assist_probe_follower") or {}
+actor_assist_expected = payload.get("actor_assist_expected_hostile") or {}
+if not actor_assist_probe.get("entity_id") or not actor_assist_expected.get("entity_id"):
+    fail("actor assist probe follower or expected hostile identity missing")
+if not any(
+    event.get("type") == "spell_cast_started"
+    and event.get("actor", {}).get("entity_id") == actor_assist_probe.get("entity_id")
+    and event.get("target", {}).get("entity_id") == actor_assist_expected.get("entity_id")
+    for event in actor_assist_events
+):
+    fail("actor assist did not produce the expected follower spell event")
 PY
 }
 

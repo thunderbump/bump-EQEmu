@@ -6,15 +6,21 @@ Beads item: `central-lhy.10`
 
 ## Scope
 
-This change follows `central-lhy.9` by extracting a narrow **ActorCommandSource** seam inside bot AI for two
-gameplay intents only:
+This change follows `central-lhy.9` by extracting a narrow **ActorCommandSource** seam inside bot AI.
+`central-lhy.10` introduced two gameplay intents:
 
 - command target sourcing for the owned-bot attack path; and
 - leash anchor sourcing for combat target validation.
 
+`central-lhy.17` extends that same seam one step further for assist intent:
+
+- actor-sourced auto-defend/assist can now resolve from the configured command source before falling back to the
+  existing owner/client assist paths.
+
 The seam is runtime-only. It stores ephemeral entity IDs on each `Bot` and resolves them through ordinary zone
 entity lookup. When no actor-specific source is configured, the bot still defaults to the current owner-client
-behavior.
+behavior. Dead, removed, and out-of-group command sources are cleared through the same runtime lookup and entity
+removal cleanup, so the extension does not introduce a new entity-ID reuse hazard.
 
 ## What Stays The Same
 
@@ -37,8 +43,9 @@ client as the source of gameplay intent.
 
 `POST /api/v1/harness/scenarios/actor-led-bot-party` now proves both sides of the seam:
 
-- owner-client target and leash defaults still behave as before; and
-- a follower bot can source target and leash intent from the actor-leader bot while all bots keep the same owner.
+- owner-client target, assist, and leash defaults still behave as before; and
+- a follower bot can source target, assist, and leash intent from the actor-leader bot while all bots keep the
+  same owner.
 
-That proof stays intentionally narrow so follow-up work can address assist sourcing or broader party leadership
-separately if needed.
+That proof stays intentionally narrow: it extends `central-lhy.10` rather than replacing bot ownership,
+owner authority, or client-only group leadership.

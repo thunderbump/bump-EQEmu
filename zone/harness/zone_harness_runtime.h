@@ -108,6 +108,8 @@ struct ActorLedBotPartyScenarioResult {
 	bool followers_clear_removed_actor_leader_follow_id = false;
 	bool owner_target_command_observed = false;
 	bool actor_target_command_observed = false;
+	bool owner_assist_command_observed = false;
+	bool actor_assist_command_observed = false;
 	bool owner_nearby_control_kept_combat_target = false;
 	bool owner_leash_default_observed = false;
 	bool actor_leash_source_kept_combat_target = false;
@@ -116,13 +118,21 @@ struct ActorLedBotPartyScenarioResult {
 	uint16_t slow_spell_id = 0;
 	std::string owner_target_reason;
 	std::string actor_target_reason;
+	std::string owner_assist_reason;
+	std::string actor_assist_reason;
 	std::string leash_reason;
 	ActorEventEntity owner_target_probe_follower;
 	ActorEventEntity owner_target_expected_hostile;
 	ActorEventEntity actor_target_probe_follower;
 	ActorEventEntity actor_target_expected_hostile;
+	ActorEventEntity owner_assist_probe_follower;
+	ActorEventEntity owner_assist_expected_hostile;
+	ActorEventEntity actor_assist_probe_follower;
+	ActorEventEntity actor_assist_expected_hostile;
 	std::vector<ActorEvent> owner_target_events;
 	std::vector<ActorEvent> actor_target_events;
+	std::vector<ActorEvent> owner_assist_events;
+	std::vector<ActorEvent> actor_assist_events;
 	RuntimeSnapshot runtime;
 };
 

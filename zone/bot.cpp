@@ -2645,7 +2645,38 @@ bool Bot::TryAutoDefend(Client* bot_owner, float leash_distance) {
 			XTargetAutoHaters* temp_haters;
 			std::vector<XTargetAutoHaters*> assistee_haters;
 			std::vector<Client*> assistee_members;
-			bool found = false;
+
+			auto engage_assist_target = [&](Mob *assist_target) {
+				if (!assist_target) {
+					return false;
+				}
+
+				AddToHateList(assist_target, 1);
+				SetTarget(assist_target);
+				SetAttackingFlag();
+
+				if (HasControllablePet(BotAnimEmpathy::Attack)) {
+					GetPet()->AddToHateList(assist_target, 1);
+					GetPet()->SetTarget(assist_target);
+				}
+
+				m_auto_defend_timer.Disable();
+				return true;
+			};
+
+			auto *assist_command_source = GetAssistCommandSource(bot_owner);
+			auto *assist_command_target = assist_command_source ? assist_command_source->GetTarget() : nullptr;
+			if (
+				assist_command_source &&
+				assist_command_target &&
+				assist_command_target->GetAppearance() != eaDead &&
+				assist_command_target->GetHP() > 0 &&
+				assist_command_target->CheckAggro(assist_command_source) &&
+				IsAttackAllowed(assist_command_target) &&
+				(DistanceSquared(assist_command_target->GetPosition(), bot_owner->GetPosition()) <= leash_distance)
+			) {
+				return engage_assist_target(assist_command_target);
+			}
 
 			if (bot_owner->GetAggroCount()) {
 				temp_haters = bot_owner->GetXTargetAutoMgr();
@@ -2761,18 +2792,7 @@ bool Bot::TryAutoDefend(Client* bot_owner, float leash_distance) {
 							}
 
 							if (hater) {
-								AddToHateList(hater, 1);
-								SetTarget(hater);
-								SetAttackingFlag();
-
-								if (HasControllablePet(BotAnimEmpathy::Attack)) {
-									GetPet()->AddToHateList(hater, 1);
-									GetPet()->SetTarget(hater);
-								}
-
-								m_auto_defend_timer.Disable();
-
-								return true;
+								return engage_assist_target(hater);
 							}
 						}
 					}
@@ -3551,6 +3571,16 @@ Mob* Bot::GetCommandTargetSource(Client* bot_owner)
 	}
 
 	return bot_owner;
+}
+
+Mob* Bot::GetAssistCommandSource(Client* bot_owner)
+{
+	auto *command_source = GetCommandTargetSource(bot_owner);
+	if (!command_source || command_source == bot_owner) {
+		return nullptr;
+	}
+
+	return command_source;
 }
 
 Mob* Bot::GetCommandTarget(Client* bot_owner)

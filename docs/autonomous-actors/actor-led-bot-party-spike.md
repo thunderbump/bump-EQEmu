@@ -41,8 +41,9 @@ counts explicitly.
   non-client leaders, so a bot-backed actor cannot become the normal group leader today.
 - Target command is owner-client-shaped. `Bot::SetOwnerTarget()` reads only the owner client's target, and the
   proof's positive baseline depends on that path.
-- Assist remains owner/client-shaped as well. `Bot::TryAutoDefend()` scans the owner client and client main-assist
-  members; it does not use bot leaders as assist sources.
+- Assist was owner/client-shaped in the spike baseline. `Bot::TryAutoDefend()` scanned the owner client and client
+  main-assist members only. `central-lhy.17` later extended the same command-source seam so actor-led assist can be
+  sourced without replacing owner authority or group leadership.
 - Combat leash is still owner-client-shaped. `Bot::SetLeashOwner()` falls back to the owner client for group
   leashing, and `Bot::IsValidTarget()` measures leash distance from that owner client.
 

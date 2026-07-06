@@ -264,6 +264,16 @@ nlohmann::json ToJson(const ActorLedBotPartyScenarioResult &result)
 		actor_target_events.push_back(ToJson(event));
 	}
 
+	nlohmann::json owner_assist_events = nlohmann::json::array();
+	for (const auto &event : result.owner_assist_events) {
+		owner_assist_events.push_back(ToJson(event));
+	}
+
+	nlohmann::json actor_assist_events = nlohmann::json::array();
+	for (const auto &event : result.actor_assist_events) {
+		actor_assist_events.push_back(ToJson(event));
+	}
+
 	return {
 		{"proved", result.proved},
 		{"reason", result.reason},
@@ -282,6 +292,8 @@ nlohmann::json ToJson(const ActorLedBotPartyScenarioResult &result)
 		{"followers_clear_removed_actor_leader_follow_id", result.followers_clear_removed_actor_leader_follow_id},
 		{"owner_target_command_observed", result.owner_target_command_observed},
 		{"actor_target_command_observed", result.actor_target_command_observed},
+		{"owner_assist_command_observed", result.owner_assist_command_observed},
+		{"actor_assist_command_observed", result.actor_assist_command_observed},
 		{"owner_nearby_control_kept_combat_target", result.owner_nearby_control_kept_combat_target},
 		{"owner_leash_default_observed", result.owner_leash_default_observed},
 		{"actor_leash_source_kept_combat_target", result.actor_leash_source_kept_combat_target},
@@ -290,13 +302,21 @@ nlohmann::json ToJson(const ActorLedBotPartyScenarioResult &result)
 		{"slow_spell_id", result.slow_spell_id},
 		{"owner_target_reason", result.owner_target_reason},
 		{"actor_target_reason", result.actor_target_reason},
+		{"owner_assist_reason", result.owner_assist_reason},
+		{"actor_assist_reason", result.actor_assist_reason},
 		{"leash_reason", result.leash_reason},
 		{"owner_target_probe_follower", ToJson(result.owner_target_probe_follower)},
 		{"owner_target_expected_hostile", ToJson(result.owner_target_expected_hostile)},
 		{"actor_target_probe_follower", ToJson(result.actor_target_probe_follower)},
 		{"actor_target_expected_hostile", ToJson(result.actor_target_expected_hostile)},
+		{"owner_assist_probe_follower", ToJson(result.owner_assist_probe_follower)},
+		{"owner_assist_expected_hostile", ToJson(result.owner_assist_expected_hostile)},
+		{"actor_assist_probe_follower", ToJson(result.actor_assist_probe_follower)},
+		{"actor_assist_expected_hostile", ToJson(result.actor_assist_expected_hostile)},
 		{"owner_target_events", owner_target_events},
 		{"actor_target_events", actor_target_events},
+		{"owner_assist_events", owner_assist_events},
+		{"actor_assist_events", actor_assist_events},
 		{"runtime", ToJson(result.runtime)},
 	};
 }

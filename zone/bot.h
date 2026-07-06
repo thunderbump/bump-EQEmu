@@ -1088,6 +1088,7 @@ public:
 	Mob* GetBotTarget(Client* bot_owner);
 	Mob* GetCommandTarget(Client* bot_owner);
 	Mob* GetCommandTargetSource(Client* bot_owner);
+	Mob* GetAssistCommandSource(Client* bot_owner);
 	void SetOwnerTarget(Client* bot_owner);
 	bool IsValidTarget(
 		Client* bot_owner,
