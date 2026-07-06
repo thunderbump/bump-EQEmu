@@ -76,6 +76,7 @@ public:
 	uint32_t actor_id = 0;
 	uint32_t bot_id = 0;
 	uint32_t reserved_owner_character_id = 0;
+	uint32_t colliding_character_id = 0;
 
 	~ReservedActorOwnerCleanup()
 	{
@@ -100,6 +101,10 @@ public:
 			std::string unused_reason;
 			EQ::Actor::ReservedOwners::Rollback(database, reserved_owner_character_id, &unused_reason);
 		}
+
+		if (colliding_character_id > 0) {
+			CharacterDataRepository::DeleteOne(database, colliding_character_id);
+		}
 	}
 };
 
@@ -123,12 +128,39 @@ void ZoneCLI::TestReservedActorOwner(int argc, char **argv, argh::parser &cmd, s
 		entity_list.Process();
 		entity_list.MobProcess();
 
+		ReservedActorOwnerCleanup cleanup;
+
+		const auto colliding_name = fmt::format("ActorownerCollision{}", run_nonce);
+		auto colliding_record = CharacterDataRepository::NewEntity();
+		colliding_record.name = colliding_name;
+		colliding_record = CharacterDataRepository::InsertOne(database, colliding_record);
+		Expect(colliding_record.id > 0, "prefix-only collision row should insert for reserved-owner proof");
+		cleanup.colliding_character_id = colliding_record.id;
+		Expect(
+			!EQ::Actor::ReservedOwners::FindByCharacterId(database, colliding_record.id).has_value(),
+			"prefix-only collision row should not resolve as a reserved owner without provisioning marker and actor profile"
+		);
+		Expect(
+			!EQ::Actor::ReservedOwners::Provision(database, colliding_name).character_id,
+			"provisioning should refuse to adopt an existing Actorowner* row without the reserved-owner marker"
+		);
+		std::string collision_rollback_failure;
+		Expect(
+			!EQ::Actor::ReservedOwners::Rollback(database, colliding_record.id, &collision_rollback_failure),
+			"rollback should refuse a prefix-only collision row"
+		);
+		ExpectEqual(collision_rollback_failure, std::string("reserved_owner_not_found"), "prefix-only collision row should fail rollback as not a reserved owner");
+
 		const auto reserved_owner_name = fmt::format("Actorowner{}", run_nonce);
 		const auto reserved_owner = EQ::Actor::ReservedOwners::Provision(database, reserved_owner_name);
 		Expect(reserved_owner.character_id > 0, "reserved owner provisioning should create a character_data row");
 		ExpectEqual(reserved_owner.name, reserved_owner_name, "reserved owner provisioning should preserve reserved owner name");
-
-		ReservedActorOwnerCleanup cleanup;
+		const auto reserved_owner_record = CharacterDataRepository::FindOne(database, reserved_owner.character_id);
+		ExpectEqual(
+			reserved_owner_record.last_name,
+			std::string(EQ::Actor::ReservedOwners::kReservedOwnerLastNameMarker),
+			"reserved owner provisioning should stamp the non-secret reserved-owner marker"
+		);
 		cleanup.reserved_owner_character_id = reserved_owner.character_id;
 
 		EQ::ZoneHarness::OwnedBotActorFixture fixture;

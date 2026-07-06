@@ -17,13 +17,19 @@ The identity split stays:
 
 ## Reserved Owner Identification
 
-A reserved owner is identified by both of these conditions:
+A reserved owner record is provisioned with both of these durable markers in `character_data`:
 
-1. `actor_profiles.owner_character_id` points at a `character_data.id` row.
-2. That `character_data.name` starts with the reserved prefix `Actorowner`.
+1. `name` starts with the reserved prefix `Actorowner`.
+2. `last_name` is stamped to the non-secret marker `ReservedActorOwner` by `Provision()`.
+
+An active reserved owner association is identified by both of these conditions:
+
+1. the provisioned `character_data` row above exists; and
+2. `actor_profiles.owner_character_id` points at that row.
 
 This keeps identification deterministic without storing a password, login token, or any actor secret in repo code,
-`actor_profiles`, or harness payloads.
+`actor_profiles`, or harness payloads, and avoids treating an arbitrary player-created `Actorowner*` name as a
+reserved owner record.
 
 ## Provisioning
 
@@ -33,7 +39,8 @@ The code-level provisioning helper is `EQ::Actor::ReservedOwners::Provision()` i
 Behavior:
 
 - accepts only names with the `Actorowner` prefix;
-- reuses the existing row when it already exists;
+- stamps the provisioned row with non-secret marker `character_data.last_name = ReservedActorOwner`;
+- reuses an existing row only when that row already carries the same provisioned marker;
 - otherwise inserts a minimal `character_data` row and returns its `character_id`;
 - stores no secrets.
 
@@ -43,6 +50,9 @@ Operator guidance:
 - If your environment requires character rows to belong to an account, use a dedicated operator-managed service
   account ID. Do not record that account password in actor config, docs checked into git, or `actor_profiles`.
 - `actor_profiles.owner_character_id` is the only durable actor-to-owner link needed by this seam.
+- If a normal character already occupies an `Actorowner*` name without the reserved-owner marker, provisioning now
+  fails instead of silently adopting that row. Pick a different reserved name or retire that ordinary character
+  name first.
 
 ## Runtime Boundary
 
@@ -69,13 +79,14 @@ existing owner-character ID match succeeds. That keeps the normal bot invariant 
 
 `zone tests:reserved-actor-owner` covers the reserved-owner path end to end:
 
-1. provision a reserved owner row;
-2. save a bot with that owner character ID;
-3. associate `actor_profiles.owner_character_id` without writing secrets;
-4. reload the bot with no live owner client present;
-5. spawn and save it again through a harness-only synthetic owner client whose `CharacterID()` matches the
+1. prove that a plain `Actorowner*` collision row without the provisioned marker is not treated as reserved;
+2. provision a reserved owner row;
+3. save a bot with that owner character ID;
+4. associate `actor_profiles.owner_character_id` without writing secrets;
+5. reload the bot with no live owner client present;
+6. spawn and save it again through a harness-only synthetic owner client whose `CharacterID()` matches the
    reserved owner row;
-6. verify rollback once the bot and actor profile rows are removed.
+7. verify rollback once the bot and actor profile rows are removed.
 
 ## Rollback
 
@@ -86,6 +97,7 @@ Use this order:
 3. delete the reserved owner row.
 
 `EQ::Actor::ReservedOwners::Rollback()` enforces that last step by refusing to delete the reserved owner when
-`actor_profiles.owner_character_id` or `bot_data.owner_id` still reference it.
+`actor_profiles.owner_character_id` or `bot_data.owner_id` still reference it. Rollback also requires the
+provisioned non-secret marker, so a plain `Actorowner*` character row is not treated as a reserved owner record.
 
 That makes rollback operator-visible and keeps accidental dangling ownership from silently persisting.

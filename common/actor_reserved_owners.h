@@ -13,6 +13,7 @@
 namespace EQ::Actor::ReservedOwners {
 
 inline constexpr std::string_view kReservedOwnerNamePrefix = "Actorowner";
+inline constexpr std::string_view kReservedOwnerLastNameMarker = "ReservedActorOwner";
 
 struct ReservedOwnerRecord {
 	uint32_t character_id = 0;
@@ -27,6 +28,29 @@ inline bool IsReservedOwnerName(std::string_view name)
 		name.substr(0, kReservedOwnerNamePrefix.size()) == kReservedOwnerNamePrefix;
 }
 
+inline bool HasActorProfileAssociation(Database &db, uint32_t character_id)
+{
+	return character_id > 0 &&
+		ActorProfilesRepository::Count(db, fmt::format("owner_character_id = {}", character_id)) > 0;
+}
+
+inline bool IsProvisionedReservedOwnerRecord(const CharacterDataRepository::CharacterData &record)
+{
+	return record.id > 0 &&
+		IsReservedOwnerName(record.name) &&
+		record.last_name == kReservedOwnerLastNameMarker;
+}
+
+inline ReservedOwnerRecord ToReservedOwnerRecord(const CharacterDataRepository::CharacterData &record, bool created = false)
+{
+	return ReservedOwnerRecord{
+		.character_id = record.id,
+		.account_id = record.account_id,
+		.name = record.name,
+		.created = created,
+	};
+}
+
 inline std::optional<ReservedOwnerRecord> FindByCharacterId(Database &db, uint32_t character_id)
 {
 	if (!character_id) {
@@ -34,31 +58,21 @@ inline std::optional<ReservedOwnerRecord> FindByCharacterId(Database &db, uint32
 	}
 
 	const auto record = CharacterDataRepository::FindOne(db, character_id);
-	if (!record.id || !IsReservedOwnerName(record.name)) {
+	if (!IsProvisionedReservedOwnerRecord(record) || !HasActorProfileAssociation(db, record.id)) {
 		return std::nullopt;
 	}
 
-	return ReservedOwnerRecord{
-		.character_id = record.id,
-		.account_id = record.account_id,
-		.name = record.name,
-		.created = false,
-	};
+	return ToReservedOwnerRecord(record);
 }
 
 inline std::optional<ReservedOwnerRecord> FindByName(Database &db, const std::string &name)
 {
 	const auto record = CharacterDataRepository::FindByName(db, name);
-	if (!record.id || !IsReservedOwnerName(record.name)) {
+	if (!IsProvisionedReservedOwnerRecord(record) || !HasActorProfileAssociation(db, record.id)) {
 		return std::nullopt;
 	}
 
-	return ReservedOwnerRecord{
-		.character_id = record.id,
-		.account_id = record.account_id,
-		.name = record.name,
-		.created = false,
-	};
+	return ToReservedOwnerRecord(record);
 }
 
 inline ReservedOwnerRecord Provision(Database &db, const std::string &name, int32_t account_id = 0)
@@ -67,30 +81,27 @@ inline ReservedOwnerRecord Provision(Database &db, const std::string &name, int3
 		return {};
 	}
 
-	if (const auto existing = FindByName(db, name)) {
-		return *existing;
+	const auto existing = CharacterDataRepository::FindByName(db, name);
+	if (existing.id) {
+		return IsProvisionedReservedOwnerRecord(existing) ? ToReservedOwnerRecord(existing) : ReservedOwnerRecord{};
 	}
 
 	auto record = CharacterDataRepository::NewEntity();
 	record.account_id = account_id;
 	record.name = name;
+	record.last_name = std::string(kReservedOwnerLastNameMarker);
 	record = CharacterDataRepository::InsertOne(db, record);
 	if (!record.id) {
 		return {};
 	}
 
-	return ReservedOwnerRecord{
-		.character_id = record.id,
-		.account_id = record.account_id,
-		.name = record.name,
-		.created = true,
-	};
+	return ToReservedOwnerRecord(record, true);
 }
 
 inline bool Rollback(Database &db, uint32_t character_id, std::string *failure_reason = nullptr)
 {
-	const auto reserved_owner = FindByCharacterId(db, character_id);
-	if (!reserved_owner.has_value()) {
+	const auto reserved_owner = CharacterDataRepository::FindOne(db, character_id);
+	if (!IsProvisionedReservedOwnerRecord(reserved_owner)) {
 		if (failure_reason) {
 			*failure_reason = "reserved_owner_not_found";
 		}

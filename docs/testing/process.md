@@ -194,11 +194,13 @@ Risk classification:
   may replace and then delete `respawn_times` rows whose IDs match `soldungb` `spawn2` IDs. Use it only for
   zone-state or spawn persistence changes, preferably after the backup gate if the local database contains
   important `soldungb` state.
-- Caution: `tests:reserved-actor-owner` provisions a reserved `character_data` row with the `Actorowner` prefix,
-  saves a bot through that owner ID, inserts an `actor_profiles` row, reloads and respawns the bot through a
-  harness-only synthetic owner client, then deletes the bot, actor profile, and reserved owner row again. The test
-  is intended to be self-cleaning, but it still mutates persistent `character_data`, `bot_data`, and
-  `actor_profiles` during the run, so keep it behind the backup gate when using a shared validation database.
+- Caution: `tests:reserved-actor-owner` provisions a reserved `character_data` row with the `Actorowner` prefix
+  and non-secret `last_name = ReservedActorOwner` marker, saves a bot through that owner ID, inserts an
+  `actor_profiles` row, reloads and respawns the bot through a harness-only synthetic owner client, then deletes
+  the bot, actor profile, and reserved owner row again. The test also proves that a plain `Actorowner*` character
+  row without the marker is not silently adopted as a reserved owner. The test is intended to be self-cleaning,
+  but it still mutates persistent `character_data`, `bot_data`, and `actor_profiles` during the run, so keep it
+  behind the backup gate when using a shared validation database.
 
 `tests:databuckets` exact startup cleanup keys:
 

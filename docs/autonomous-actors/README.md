@@ -11,7 +11,7 @@
 - `actor-command-source-seam.md`
   - `central-lhy.10` implementation note for the narrow **ActorCommandSource** seam that keeps owner authority intact while allowing actor-sourced target and leash intent in bot AI.
 - `reserved-owner-character-seam.md`
-  - `central-lhy.15` implementation note for the reserved owner-character seam that keeps production bot ownership tied to a persisted `owner_character_id` record while leaving synthetic owner clients harness-only.
+  - `central-lhy.15` implementation note for the reserved owner-character seam that keeps production bot ownership tied to a persisted `owner_character_id` record, stamps provisioned owner rows with a non-secret reserved-owner marker, and leaves synthetic owner clients harness-only.
 - `actor-planner-deployment-spike.md`
   - `central-lhy.7` spike on keeping high-level **Autonomous Actor** planning out of zone ticks, recommending a same-container helper-process MVP that can later promote to a dedicated sidecar container.
 - `actor-persistence-event-schema-spike.md`
