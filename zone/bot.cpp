@@ -2671,6 +2671,7 @@ bool Bot::TryAutoDefend(Client* bot_owner, float leash_distance) {
 				assist_command_target &&
 				assist_command_target->GetAppearance() != eaDead &&
 				assist_command_target->GetHP() > 0 &&
+				!assist_command_target->IsMezzed() &&
 				assist_command_target->CheckAggro(assist_command_source) &&
 				IsAttackAllowed(assist_command_target) &&
 				(DistanceSquared(assist_command_target->GetPosition(), bot_owner->GetPosition()) <= leash_distance)
