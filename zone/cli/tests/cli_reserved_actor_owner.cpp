@@ -297,9 +297,10 @@ void ZoneCLI::TestReservedActorOwner(int argc, char **argv, argh::parser &cmd, s
 			"soft-deleted exhaustion seed should update deleted_at for reprovision proof"
 		);
 		cleanup.exhausted_soft_deleted_collision_character_ids.push_back(exhausted_soft_deleted_record.id);
-		for (uint32_t suffix = 1; suffix <= 32; ++suffix) {
+		for (uint32_t suffix = 1; suffix <= EQ::Actor::ReservedOwners::kSoftDeletedProvisionLinearProbeLimit; ++suffix) {
 			auto exhausted_collision_record = CharacterDataRepository::NewEntity();
-			exhausted_collision_record.name = fmt::format("{}R{}", exhausted_soft_deleted_name, suffix);
+			exhausted_collision_record.name =
+				EQ::Actor::ReservedOwners::BuildProvisionNameWithSuffix(exhausted_soft_deleted_name, suffix);
 			exhausted_collision_record = CharacterDataRepository::InsertOne(database, exhausted_collision_record);
 			Expect(
 				exhausted_collision_record.id > 0,
@@ -307,6 +308,14 @@ void ZoneCLI::TestReservedActorOwner(int argc, char **argv, argh::parser &cmd, s
 			);
 			cleanup.exhausted_soft_deleted_collision_character_ids.push_back(exhausted_collision_record.id);
 		}
+		const auto exhausted_suffixes =
+			EQ::Actor::ReservedOwners::BuildSoftDeletedProvisionSuffixes(exhausted_soft_deleted_record.id);
+		Expect(
+			exhausted_suffixes.size() > EQ::Actor::ReservedOwners::kSoftDeletedProvisionLinearProbeLimit,
+			"soft-deleted reprovision suffix plan should include deterministic fallbacks beyond the first 32 collisions"
+		);
+		const auto expected_exhausted_suffix =
+			exhausted_suffixes.at(EQ::Actor::ReservedOwners::kSoftDeletedProvisionLinearProbeLimit);
 		const auto reprovisioned_exhausted_reserved_owner =
 			EQ::Actor::ReservedOwners::Provision(database, exhausted_soft_deleted_name);
 		Expect(
@@ -315,10 +324,40 @@ void ZoneCLI::TestReservedActorOwner(int argc, char **argv, argh::parser &cmd, s
 		);
 		ExpectEqual(
 			reprovisioned_exhausted_reserved_owner.name,
-			fmt::format("{}R33", exhausted_soft_deleted_name),
+			EQ::Actor::ReservedOwners::BuildProvisionNameWithSuffix(exhausted_soft_deleted_name, expected_exhausted_suffix),
 			"soft-deleted reserved owner should deterministically continue past the first 32 fallback collisions"
 		);
 		cleanup.exhausted_soft_deleted_collision_character_ids.push_back(reprovisioned_exhausted_reserved_owner.character_id);
+
+		const auto fully_exhausted_soft_deleted_name = fmt::format("ActorownerFullyExhausted{}", run_nonce);
+		auto fully_exhausted_soft_deleted_record = CharacterDataRepository::NewEntity();
+		fully_exhausted_soft_deleted_record.name = fully_exhausted_soft_deleted_name;
+		fully_exhausted_soft_deleted_record = CharacterDataRepository::InsertOne(database, fully_exhausted_soft_deleted_record);
+		Expect(fully_exhausted_soft_deleted_record.id > 0, "fully exhausted soft-deleted seed should insert for fail-closed proof");
+		fully_exhausted_soft_deleted_record.deleted_at = static_cast<time_t>(run_nonce);
+		ExpectEqual(
+			CharacterDataRepository::UpdateOne(database, fully_exhausted_soft_deleted_record),
+			int(1),
+			"fully exhausted soft-deleted seed should update deleted_at for fail-closed proof"
+		);
+		cleanup.exhausted_soft_deleted_collision_character_ids.push_back(fully_exhausted_soft_deleted_record.id);
+		const auto fully_exhausted_suffixes =
+			EQ::Actor::ReservedOwners::BuildSoftDeletedProvisionSuffixes(fully_exhausted_soft_deleted_record.id);
+		for (const auto suffix : fully_exhausted_suffixes) {
+			auto fully_exhausted_collision_record = CharacterDataRepository::NewEntity();
+			fully_exhausted_collision_record.name =
+				EQ::Actor::ReservedOwners::BuildProvisionNameWithSuffix(fully_exhausted_soft_deleted_name, suffix);
+			fully_exhausted_collision_record = CharacterDataRepository::InsertOne(database, fully_exhausted_collision_record);
+			Expect(
+				fully_exhausted_collision_record.id > 0,
+				fmt::format("fully exhausted collision row R{} should insert for fail-closed proof", suffix)
+			);
+			cleanup.exhausted_soft_deleted_collision_character_ids.push_back(fully_exhausted_collision_record.id);
+		}
+		Expect(
+			!EQ::Actor::ReservedOwners::Provision(database, fully_exhausted_soft_deleted_name).character_id,
+			"soft-deleted reserved owner should fail closed when the bounded fallback candidate set is exhausted"
+		);
 
 		const auto reserved_owner_name = fmt::format("Actorowner{}", run_nonce);
 		const auto reserved_owner = EQ::Actor::ReservedOwners::Provision(database, reserved_owner_name);

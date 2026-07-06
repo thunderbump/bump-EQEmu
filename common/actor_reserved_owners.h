@@ -10,12 +10,16 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_set>
+#include <vector>
 
 namespace EQ::Actor::ReservedOwners {
 
 inline constexpr std::string_view kReservedOwnerNamePrefix = "Actorowner";
 inline constexpr std::string_view kReservedOwnerLastNameMarker = "ReservedActorOwner";
 inline constexpr size_t kReservedOwnerNameMaxLength = 64;
+inline constexpr uint32_t kSoftDeletedProvisionLinearProbeLimit = 32;
+inline constexpr uint32_t kSoftDeletedProvisionDerivedProbeWindow = 32;
 
 struct ReservedOwnerRecord {
 	uint32_t character_id = 0;
@@ -78,18 +82,58 @@ inline std::string BuildProvisionNameWithSuffix(const std::string &requested_nam
 	return requested_name.substr(0, base_size) + suffix_text;
 }
 
-inline std::string BuildSoftDeletedProvisionName(Database &db, const std::string &requested_name)
+inline std::vector<uint32_t> BuildSoftDeletedProvisionSuffixes(uint32_t deleted_character_id)
 {
-	for (uint32_t suffix = 1; suffix != std::numeric_limits<uint32_t>::max(); ++suffix) {
+	std::vector<uint32_t> suffixes;
+	suffixes.reserve(kSoftDeletedProvisionLinearProbeLimit + kSoftDeletedProvisionDerivedProbeWindow);
+
+	for (uint32_t suffix = 1; suffix <= kSoftDeletedProvisionLinearProbeLimit; ++suffix) {
+		suffixes.push_back(suffix);
+	}
+
+	uint64_t derived_suffix = std::max<uint64_t>(kSoftDeletedProvisionLinearProbeLimit + 1, deleted_character_id);
+	for (uint32_t offset = 0; offset < kSoftDeletedProvisionDerivedProbeWindow; ++offset) {
+		const auto candidate_suffix = derived_suffix + offset;
+		if (candidate_suffix > std::numeric_limits<uint32_t>::max()) {
+			break;
+		}
+
+		suffixes.push_back(static_cast<uint32_t>(candidate_suffix));
+	}
+
+	return suffixes;
+}
+
+inline std::string BuildSoftDeletedProvisionName(Database &db, const std::string &requested_name, uint32_t deleted_character_id)
+{
+	const auto suffixes = BuildSoftDeletedProvisionSuffixes(deleted_character_id);
+	std::vector<std::string> candidates;
+	candidates.reserve(suffixes.size());
+
+	std::vector<std::string> escaped_candidates;
+	escaped_candidates.reserve(suffixes.size());
+	for (const auto suffix : suffixes) {
 		const auto candidate = BuildProvisionNameWithSuffix(requested_name, suffix);
-		if (!CharacterDataRepository::FindAnyByName(db, candidate).id) {
-			return candidate;
+		candidates.push_back(candidate);
+		escaped_candidates.push_back(fmt::format("'{}'", Strings::Escape(candidate)));
+	}
+
+	std::unordered_set<std::string> existing_names;
+	if (!escaped_candidates.empty()) {
+		const auto existing_records = CharacterDataRepository::GetWhere(
+			db,
+			fmt::format("`name` IN ({})", Strings::Implode(", ", escaped_candidates))
+		);
+		existing_names.reserve(existing_records.size());
+		for (const auto &record : existing_records) {
+			existing_names.insert(record.name);
 		}
 	}
 
-	const auto final_candidate = BuildProvisionNameWithSuffix(requested_name, std::numeric_limits<uint32_t>::max());
-	if (!CharacterDataRepository::FindAnyByName(db, final_candidate).id) {
-		return final_candidate;
+	for (const auto &candidate : candidates) {
+		if (!existing_names.count(candidate)) {
+			return candidate;
+		}
 	}
 
 	return {};
@@ -153,7 +197,7 @@ inline ReservedOwnerRecord Provision(Database &db, const std::string &name, int3
 	auto provision_name = name;
 	const auto existing_deleted = CharacterDataRepository::FindAnyByName(db, name);
 	if (existing_deleted.id && existing_deleted.deleted_at > 0) {
-		provision_name = BuildSoftDeletedProvisionName(db, name);
+		provision_name = BuildSoftDeletedProvisionName(db, name, existing_deleted.id);
 		if (provision_name.empty()) {
 			return {};
 		}
