@@ -153,9 +153,9 @@ cd ~/server
 ~/code/build/bin/zone tests:npc-handins-multiquest'
 ```
 
-`tests:databuckets` and `tests:zone-state` are intentionally omitted from the default command block because they
-mutate persistent validation data. Use the raw `zone tests:*` commands for those checks only after applying the
-backup gate and confirming the validation database is the intended target.
+`tests:databuckets`, `tests:zone-state`, and `tests:reserved-actor-owner` are intentionally omitted from the
+default command block because they mutate persistent validation data. Use the raw `zone tests:*` commands for
+those checks only after applying the backup gate and confirming the validation database is the intended target.
 
 The repo-local wrapper covers only the read-mostly targeted zone checks:
 
@@ -166,10 +166,10 @@ The repo-local wrapper covers only the read-mostly targeted zone checks:
 
 That command runs the preflight, starts or verifies validation MariaDB through the canonical Compose files with
 `--no-recreate`, then runs `tests:npc-handins` and `tests:npc-handins-multiquest` as separate `zone` processes
-inside a single one-off validation `eqemu-server` container. It intentionally does not run `tests:databuckets` or
-`tests:zone-state`; use the raw commands after applying the backup gate when a change specifically needs those
-caution-tier checks. The wrapper should not require the persistent gameplay `eqemu-server` container to be running
-and should not `exec` into it.
+inside a single one-off validation `eqemu-server` container. It intentionally does not run `tests:databuckets`,
+`tests:zone-state`, or `tests:reserved-actor-owner`; use the raw commands after applying the backup gate when a
+change specifically needs those caution-tier checks. The wrapper should not require the persistent gameplay
+`eqemu-server` container to be running and should not `exec` into it.
 
 Risk classification:
 
@@ -194,6 +194,15 @@ Risk classification:
   may replace and then delete `respawn_times` rows whose IDs match `soldungb` `spawn2` IDs. Use it only for
   zone-state or spawn persistence changes, preferably after the backup gate if the local database contains
   important `soldungb` state.
+- Caution: `tests:reserved-actor-owner` provisions a reserved non-playable `character_data` shell with the
+  `Actorowner` prefix, non-secret `last_name = ReservedActorOwner` marker, and zeroed `level/class/race`, saves a
+  bot through that owner ID, inserts an `actor_profiles` row, reloads and respawns the bot through a harness-only
+  synthetic owner client, then deletes the bot, actor profile, and reserved owner row again. The test also proves
+  that a plain `Actorowner*` character row without the marker is not silently adopted, that a marker-bearing
+  playable `Actorowner*` row is still rejected, and that a non-bot `actor_profiles` association does not activate
+  reserved-owner lookup. The test is intended to be self-cleaning,
+  but it still mutates persistent `character_data`, `bot_data`, and `actor_profiles` during the run, so keep it
+  behind the backup gate when using a shared validation database.
 
 `tests:databuckets` exact startup cleanup keys:
 
@@ -219,6 +228,14 @@ atexit cleanup, all four targeted `zone tests:*` commands had successful runtime
 was restored afterward. With a refreshed backup gate in place, `tests:zone-state` exited cleanly and left 115
 `zone_state_spawns` rows for `zone_id = 32`, plus one `zone_state_test` loottable, lootdrop, loottable entry, and
 lootdrop entry; the dev database was restored afterward.
+
+Reserved-owner actor setup can be exercised explicitly with:
+
+```sh
+cd ../bump-akk-stack-validation
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --no-recreate mariadb
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml run --rm --no-deps --entrypoint bash eqemu-server -lc 'cd ~/server && ~/code/build/bin/zone tests:reserved-actor-owner'
+```
 
 World CLI checks can also be targeted:
 

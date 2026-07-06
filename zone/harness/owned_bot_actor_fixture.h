@@ -33,6 +33,7 @@ inline constexpr uint8_t kMaxOwnedBotPartyFollowers = 4;
 
 struct OwnedBotActorConfig {
 	std::string owner_name = "HarnessActorOwner";
+	uint32_t owner_character_id = 0;
 	std::string bot_name = "HarnessOwnedBot";
 	uint8_t level = 60;
 	uint16_t race = Race::Barbarian;
@@ -55,6 +56,7 @@ struct OwnedBotActorFixtureNames {
 
 struct OwnedBotPartyConfig {
 	std::string owner_name = "HarnessPartyOwner";
+	uint32_t owner_character_id = 0;
 	std::string actor_leader_name = "HarnessActorLeader";
 	std::string follower_name_prefix = "HarnessFollower";
 	uint8_t follower_count = 3;
@@ -68,10 +70,12 @@ struct OwnedBotPartyConfig {
 };
 
 // Zone Harness fixture plumbing for owned bot Autonomous Actor scenarios.
-// Setup/reset methods create synthetic owner, owned bot, group, hostile NPCs, and hate/combat state that shape
-// Actor Perception, then clean those fixtures up. Actor Action methods express gameplay intent through ordinary
-// Mob target state; scenarios observe Actor Events such as spell cast-start rather than using test-only
-// completion shortcuts.
+// Setup/reset methods create harness-only synthetic owner clients, owned bots, groups, hostile NPCs, and
+// hate/combat state that shape Actor Perception, then clean those fixtures up. Production reserved-owner actor
+// setup should use persisted owner_character_id records; synthetic Client owners stay inside zone harness/tests
+// as setup shortcuts rather than becoming a new production owner runtime.
+// Actor Action methods express gameplay intent through ordinary Mob target state; scenarios observe Actor Events
+// such as spell cast-start rather than using test-only completion shortcuts.
 class OwnedBotActorFixture {
 public:
 	OwnedBotActorFixture() = default;
@@ -138,6 +142,7 @@ public:
 	Group *group = nullptr;
 
 private:
+	Client *CreateSyntheticOwnerClient(const std::string &owner_name, uint32_t owner_character_id, uint8_t level);
 	Bot *CreateOwnedBot(const OwnedBotActorConfig &config);
 	void RememberMob(Mob *mob);
 

@@ -32,6 +32,7 @@ public:
 	static bool RanTestCommand(int argc, char **argv);
 	static void TestDataBuckets(int argc, char **argv, argh::parser &cmd, std::string &description);
 	static void TestActorEvents(int argc, char **argv, argh::parser &cmd, std::string &description);
+	static void TestReservedActorOwner(int argc, char **argv, argh::parser &cmd, std::string &description);
 	static void TestNpcHandins(int argc, char **argv, argh::parser &cmd, std::string &description);
 	static void TestNpcHandinsMultiQuest(int argc, char **argv, argh::parser &cmd, std::string &description);
 	static void TestServeHttp(int argc, char **argv, argh::parser &cmd, std::string &description);

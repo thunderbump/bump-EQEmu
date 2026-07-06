@@ -21,6 +21,7 @@ set(zone_sources
     cli/cli_benchmark_databuckets.cpp
     cli/cli_sidecar_serve_http.cpp
     cli/tests/cli_actor_events.cpp
+    cli/tests/cli_reserved_actor_owner.cpp
     cli/tests/cli_databuckets.cpp
     cli/tests/cli_npc_handins.cpp
     cli/tests/cli_npc_handins_multiquest.cpp

@@ -90,6 +90,22 @@ public:
 		auto l = CharacterDataRepository::GetWhere(
 			db,
 			fmt::format(
+				"`name` = '{}' AND `deleted_at` IS NULL LIMIT 1",
+				Strings::Escape(character_name)
+			)
+		);
+
+		return l.empty() ? CharacterDataRepository::NewEntity() : l.front();
+	}
+
+	static CharacterData FindAnyByName(
+		Database& db,
+		const std::string& character_name
+	)
+	{
+		auto l = CharacterDataRepository::GetWhere(
+			db,
+			fmt::format(
 				"`name` = '{}' LIMIT 1",
 				Strings::Escape(character_name)
 			)
