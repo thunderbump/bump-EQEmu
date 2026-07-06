@@ -19,8 +19,8 @@ This change follows `central-lhy.9` by extracting a narrow **ActorCommandSource*
 
 The seam is runtime-only. It stores ephemeral entity IDs on each `Bot` and resolves them through ordinary zone
 entity lookup. When no actor-specific source is configured, the bot still defaults to the current owner-client
-behavior. Dead, removed, and out-of-group command sources are cleared through the same runtime lookup and entity
-removal cleanup, so the extension does not introduce a new entity-ID reuse hazard.
+behavior. Existing entity lookup and removal cleanup also cover dead, removed, and out-of-group command sources; this
+PR only adds happy-path owner/actor assist proof and does not add new negative harness coverage for those edge cases.
 
 ## What Stays The Same
 
