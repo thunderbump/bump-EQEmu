@@ -17,6 +17,7 @@
 */
 #include "world/world_server_cli.h"
 
+#include "common/actor_reserved_owners.h"
 #include "common/eqemu_logsys.h"
 #include "common/repositories/actor_action_queue_repository.h"
 #include "common/repositories/actor_profiles_repository.h"
@@ -93,6 +94,13 @@ public:
 		}
 	}
 
+	void TrackReservedOwnerId(uint32_t character_id)
+	{
+		if (character_id > 0) {
+			reserved_owner_ids_.push_back(character_id);
+		}
+	}
+
 	~ActorActionQueueCleanup()
 	{
 		for (auto actor_id: actor_ids_) {
@@ -102,11 +110,17 @@ public:
 		for (auto it = actor_ids_.rbegin(); it != actor_ids_.rend(); ++it) {
 			ActorProfilesRepository::DeleteOne(database_, *it);
 		}
+
+		for (auto it = reserved_owner_ids_.rbegin(); it != reserved_owner_ids_.rend(); ++it) {
+			std::string unused_reason;
+			EQ::Actor::ReservedOwners::Rollback(database_, *it, &unused_reason);
+		}
 	}
 
 private:
 	Database &database_;
 	std::vector<uint32_t> actor_ids_;
+	std::vector<uint32_t> reserved_owner_ids_;
 };
 
 ActorProfilesRepository::ActorProfileRecord CreateProfile(
@@ -121,6 +135,15 @@ ActorProfilesRepository::ActorProfileRecord CreateProfile(
 	profile.actor_type = "autonomous_actor";
 	profile.actor_substrate = "bot";
 	profile.bot_id = bot_id;
+	const auto reserved_owner = EQ::Actor::ReservedOwners::Provision(
+		database,
+		fmt::format("ActorownerQueue{}{}", bot_id, created_at)
+	);
+	if (!reserved_owner.character_id) {
+		Fail("reserved owner provisioning should succeed for actor action queue profile");
+	}
+	cleanup.TrackReservedOwnerId(reserved_owner.character_id);
+	profile.owner_character_id = reserved_owner.character_id;
 	profile.enabled = true;
 	profile.created_at = created_at;
 	profile.updated_at = updated_at;

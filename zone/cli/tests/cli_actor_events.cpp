@@ -18,6 +18,7 @@
 
 #include "zone/zone_cli.h"
 
+#include "common/actor_reserved_owners.h"
 #include "common/eqemu_logsys.h"
 #include "common/json/json.h"
 #include "common/repositories/actor_events_repository.h"
@@ -118,6 +119,8 @@ public:
 		}
 	}
 
+	uint32_t reserved_owner_character_id = 0;
+
 	~ActorEventPersistenceCleanup()
 	{
 		for (auto actor_id: actor_ids_) {
@@ -126,6 +129,11 @@ public:
 
 		for (auto it = actor_ids_.rbegin(); it != actor_ids_.rend(); ++it) {
 			ActorProfilesRepository::DeleteOne(database, *it);
+		}
+
+		if (reserved_owner_character_id > 0) {
+			std::string unused_reason;
+			EQ::Actor::ReservedOwners::Rollback(database, reserved_owner_character_id, &unused_reason);
 		}
 	}
 
@@ -251,8 +259,20 @@ void ZoneCLI::TestActorEvents(int argc, char **argv, argh::parser &cmd, std::str
 		EQ::ZoneHarness::ActorEventRecorder::RegisterActiveRecorder(&recorder);
 
 		ActorEventPersistenceCleanup cleanup;
+		const auto reserved_owner = EQ::Actor::ReservedOwners::Provision(
+			database,
+			fmt::format("ActorownerRuntime{}", run_nonce)
+		);
+		Expect(reserved_owner.character_id > 0, "reserved owner provisioning should succeed for runtime actor event persistence");
+		cleanup.reserved_owner_character_id = reserved_owner.character_id;
 		EQ::ZoneHarness::OwnedBotActorFixture fixture;
-		Expect(fixture.SetUpOwnedBotSolo(), "owned bot harness fixture should boot");
+		Expect(
+			fixture.SetUpOwnedBotSolo({
+				.owner_name = reserved_owner.name,
+				.owner_character_id = reserved_owner.character_id,
+			}),
+			"owned bot harness fixture should boot"
+		);
 		Expect(fixture.OwnedBot() != nullptr, "owned bot harness fixture should create a bot actor");
 
 		const auto next_free_bot_id = [&](uint32_t salt) -> uint32_t {
@@ -267,14 +287,13 @@ void ZoneCLI::TestActorEvents(int argc, char **argv, argh::parser &cmd, std::str
 		};
 
 		const auto actor_bot_id = next_free_bot_id(0);
-		const auto owner_character_id = 410000000u + ((run_nonce + 77u) % 90000000u);
 		fixture.AssignBotID(fixture.OwnedBot(), actor_bot_id);
 
 		ActorProfilesRepository::ActorProfileRecord profile{};
 		profile.actor_type = "autonomous_actor";
 		profile.actor_substrate = "bot";
 		profile.bot_id = actor_bot_id;
-		profile.owner_character_id = owner_character_id;
+		profile.owner_character_id = reserved_owner.character_id;
 		profile.enabled = true;
 		const auto inserted_profile = ActorProfilesRepository::UpsertBotBackedProfile(database, profile);
 		Expect(inserted_profile.actor_id > 0, "actor profile insert should allocate an actor_id");
@@ -294,7 +313,7 @@ void ZoneCLI::TestActorEvents(int argc, char **argv, argh::parser &cmd, std::str
 		ExpectEqual(persisted_events.size(), static_cast<size_t>(1), "runtime speech_emitted path should persist one actor event row");
 		ExpectEqual(persisted_events[0].actor_id, inserted_profile.actor_id, "persisted runtime actor event should target the actor profile");
 		ExpectEqual(persisted_events[0].bot_id, std::optional<uint32_t>(actor_bot_id), "persisted runtime actor event should keep bot_id");
-		ExpectEqual(persisted_events[0].owner_character_id, std::optional<uint32_t>(owner_character_id), "persisted runtime actor event should keep owner_character_id");
+		ExpectEqual(persisted_events[0].owner_character_id, std::optional<uint32_t>(reserved_owner.character_id), "persisted runtime actor event should keep owner_character_id");
 		ExpectEqual(persisted_events[0].entity_id, std::optional<uint32_t>(fixture.OwnedBot()->GetID()), "persisted runtime actor event should keep entity_id");
 		ExpectEqual(persisted_events[0].event_type, std::string("speech_emitted"), "persisted runtime actor event should keep speech_emitted type");
 

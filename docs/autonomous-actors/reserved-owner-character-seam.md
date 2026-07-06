@@ -17,15 +17,16 @@ The identity split stays:
 
 ## Reserved Owner Identification
 
-A reserved owner record is provisioned with both of these durable markers in `character_data`:
+A reserved owner record is provisioned with these durable markers in `character_data`:
 
 1. `name` starts with the reserved prefix `Actorowner`.
 2. `last_name` is stamped to the non-secret marker `ReservedActorOwner` by `Provision()`.
+3. the row stays a non-playable shell: `level = 0`, `class = 0`, and `race = 0`.
 
 An active reserved owner association is identified by both of these conditions:
 
 1. the provisioned `character_data` row above exists; and
-2. `actor_profiles.owner_character_id` points at that row.
+2. a bot-backed `actor_profiles` row (`actor_substrate = 'bot'` with `bot_id IS NOT NULL`) points at that row.
 
 This keeps identification deterministic without storing a password, login token, or any actor secret in repo code,
 `actor_profiles`, or harness payloads, and avoids treating an arbitrary player-created `Actorowner*` name as a
@@ -40,7 +41,8 @@ Behavior:
 
 - accepts only names with the `Actorowner` prefix;
 - stamps the provisioned row with non-secret marker `character_data.last_name = ReservedActorOwner`;
-- reuses an existing row only when that row already carries the same provisioned marker;
+- keeps the provisioned row non-playable by leaving `level`, `class`, and `race` at zero;
+- reuses an existing row only when that row still carries the same provisioned non-playable shell shape;
 - otherwise inserts a minimal `character_data` row and returns its `character_id`;
 - stores no secrets.
 
@@ -50,9 +52,13 @@ Operator guidance:
 - If your environment requires character rows to belong to an account, use a dedicated operator-managed service
   account ID. Do not record that account password in actor config, docs checked into git, or `actor_profiles`.
 - `actor_profiles.owner_character_id` is the only durable actor-to-owner link needed by this seam.
+- Bot-backed `actor_profiles` must keep that reserved owner binding; `UpsertBotBackedProfile()` now rejects null,
+  arbitrary, or non-provisioned owner bindings instead of clearing or replacing them.
 - If a normal character already occupies an `Actorowner*` name without the reserved-owner marker, provisioning now
   fails instead of silently adopting that row. Pick a different reserved name or retire that ordinary character
   name first.
+- If a playable `Actorowner*` character is manually stamped with `last_name = ReservedActorOwner`, provisioning and
+  lookup still reject it because it no longer matches the provisioned non-playable shell.
 
 ## Runtime Boundary
 
@@ -80,13 +86,15 @@ existing owner-character ID match succeeds. That keeps the normal bot invariant 
 `zone tests:reserved-actor-owner` covers the reserved-owner path end to end:
 
 1. prove that a plain `Actorowner*` collision row without the provisioned marker is not treated as reserved;
-2. provision a reserved owner row;
-3. save a bot with that owner character ID;
-4. associate `actor_profiles.owner_character_id` without writing secrets;
-5. reload the bot with no live owner client present;
-6. spawn and save it again through a harness-only synthetic owner client whose `CharacterID()` matches the
+2. prove that a marker-bearing playable `Actorowner*` row is still rejected;
+3. prove that a stale non-bot `actor_profiles.owner_character_id` association does not activate reserved-owner lookup;
+4. provision a reserved owner row;
+5. save a bot with that owner character ID;
+6. associate `actor_profiles.owner_character_id` through the reserved binding path without writing secrets;
+7. reload the bot with no live owner client present;
+8. spawn and save it again through a harness-only synthetic owner client whose `CharacterID()` matches the
    reserved owner row;
-7. verify rollback once the bot and actor profile rows are removed.
+9. verify rollback once the bot and actor profile rows are removed.
 
 ## Rollback
 

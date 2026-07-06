@@ -77,9 +77,15 @@ public:
 	uint32_t bot_id = 0;
 	uint32_t reserved_owner_character_id = 0;
 	uint32_t colliding_character_id = 0;
+	uint32_t playable_marker_character_id = 0;
+	uint32_t stale_actor_id = 0;
 
 	~ReservedActorOwnerCleanup()
 	{
+		if (stale_actor_id > 0) {
+			ActorProfilesRepository::DeleteOne(database, stale_actor_id);
+		}
+
 		if (actor_id > 0) {
 			ActorProfilesRepository::DeleteOne(database, actor_id);
 		}
@@ -104,6 +110,10 @@ public:
 
 		if (colliding_character_id > 0) {
 			CharacterDataRepository::DeleteOne(database, colliding_character_id);
+		}
+
+		if (playable_marker_character_id > 0) {
+			CharacterDataRepository::DeleteOne(database, playable_marker_character_id);
 		}
 	}
 };
@@ -151,6 +161,25 @@ void ZoneCLI::TestReservedActorOwner(int argc, char **argv, argh::parser &cmd, s
 		);
 		ExpectEqual(collision_rollback_failure, std::string("reserved_owner_not_found"), "prefix-only collision row should fail rollback as not a reserved owner");
 
+		const auto playable_marker_name = fmt::format("ActorownerPlayable{}", run_nonce);
+		auto playable_marker_record = CharacterDataRepository::NewEntity();
+		playable_marker_record.name = playable_marker_name;
+		playable_marker_record.last_name = std::string(EQ::Actor::ReservedOwners::kReservedOwnerLastNameMarker);
+		playable_marker_record.level = 60;
+		playable_marker_record.race = 1;
+		playable_marker_record.class_ = 1;
+		playable_marker_record = CharacterDataRepository::InsertOne(database, playable_marker_record);
+		Expect(playable_marker_record.id > 0, "marker-bearing playable collision row should insert for reserved-owner proof");
+		cleanup.playable_marker_character_id = playable_marker_record.id;
+		Expect(
+			!EQ::Actor::ReservedOwners::FindProvisionedByCharacterId(database, playable_marker_record.id).has_value(),
+			"marker-bearing playable collision row should not resolve as a provisioned reserved owner"
+		);
+		Expect(
+			!EQ::Actor::ReservedOwners::Provision(database, playable_marker_name).character_id,
+			"provisioning should refuse to adopt a marker-bearing playable Actorowner* row"
+		);
+
 		const auto reserved_owner_name = fmt::format("Actorowner{}", run_nonce);
 		const auto reserved_owner = EQ::Actor::ReservedOwners::Provision(database, reserved_owner_name);
 		Expect(reserved_owner.character_id > 0, "reserved owner provisioning should create a character_data row");
@@ -161,7 +190,26 @@ void ZoneCLI::TestReservedActorOwner(int argc, char **argv, argh::parser &cmd, s
 			std::string(EQ::Actor::ReservedOwners::kReservedOwnerLastNameMarker),
 			"reserved owner provisioning should stamp the non-secret reserved-owner marker"
 		);
+		ExpectEqual(reserved_owner_record.level, uint32_t(0), "reserved owner provisioning should keep the row non-playable");
+		ExpectEqual(reserved_owner_record.class_, uint8_t(0), "reserved owner provisioning should keep the row classless");
+		ExpectEqual(reserved_owner_record.race, uint16_t(0), "reserved owner provisioning should keep the row raceless");
 		cleanup.reserved_owner_character_id = reserved_owner.character_id;
+
+		auto stale_profile = ActorProfilesRepository::NewEntity();
+		stale_profile.actor_type = "autonomous_actor";
+		stale_profile.actor_substrate = "synthetic_owner";
+		stale_profile.bot_id = std::nullopt;
+		stale_profile.owner_character_id = reserved_owner.character_id;
+		stale_profile.enabled = 1;
+		stale_profile.created_at = static_cast<time_t>(run_nonce);
+		stale_profile.updated_at = static_cast<time_t>(run_nonce);
+		stale_profile = ActorProfilesRepository::InsertOne(database, stale_profile);
+		Expect(stale_profile.actor_id > 0, "stale non-bot actor profile association should insert for reserved-owner proof");
+		cleanup.stale_actor_id = stale_profile.actor_id;
+		Expect(
+			!EQ::Actor::ReservedOwners::FindByCharacterId(database, reserved_owner.character_id).has_value(),
+			"reserved owner lookup should ignore a non-bot actor profile association"
+		);
 
 		EQ::ZoneHarness::OwnedBotActorFixture fixture;
 		Expect(
@@ -192,6 +240,8 @@ void ZoneCLI::TestReservedActorOwner(int argc, char **argv, argh::parser &cmd, s
 		Expect(stored_profile.actor_id > 0, "actor profile upsert should allocate an actor_id");
 		ExpectEqual(stored_profile.owner_character_id, std::optional<uint32_t>(reserved_owner.character_id), "actor profile should keep reserved owner character id");
 		cleanup.actor_id = stored_profile.actor_id;
+		ActorProfilesRepository::DeleteOne(database, cleanup.stale_actor_id);
+		cleanup.stale_actor_id = 0;
 
 		fixture.Reset();
 		Expect(entity_list.GetClientByCharID(reserved_owner.character_id) == nullptr, "fixture reset should remove harness-only synthetic owner client");

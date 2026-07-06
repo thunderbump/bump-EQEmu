@@ -17,6 +17,7 @@
 */
 #include "world/world_server_cli.h"
 
+#include "common/actor_reserved_owners.h"
 #include "common/eqemu_logsys.h"
 #include "common/repositories/actor_profiles_repository.h"
 #include "common/repositories/actor_status_repository.h"
@@ -93,17 +94,30 @@ public:
 		}
 	}
 
+	void TrackReservedOwnerId(uint32_t character_id)
+	{
+		if (character_id > 0) {
+			reserved_owner_ids_.push_back(character_id);
+		}
+	}
+
 	~ActorPersistenceCleanup()
 	{
 		for (auto it = actor_ids_.rbegin(); it != actor_ids_.rend(); ++it) {
 			ActorStatusRepository::DeleteOne(database_, *it);
 			ActorProfilesRepository::DeleteOne(database_, *it);
 		}
+
+		for (auto it = reserved_owner_ids_.rbegin(); it != reserved_owner_ids_.rend(); ++it) {
+			std::string unused_reason;
+			EQ::Actor::ReservedOwners::Rollback(database_, *it, &unused_reason);
+		}
 	}
 
 private:
 	Database &database_;
 	std::vector<uint32_t> actor_ids_;
+	std::vector<uint32_t> reserved_owner_ids_;
 };
 
 } // namespace
@@ -144,8 +158,14 @@ void WorldserverCLI::TestActorPersistence(int argc, char **argv, argh::parser &c
 		};
 
 		const auto actor_bot_id = next_free_bot_id(0);
-		const auto owner_character_id = 401000000u + ((run_nonce + 77u) % 100000000u);
+		const auto mismatched_owner_character_id = 401000000u + ((run_nonce + 77u) % 100000000u);
 		const auto null_profile_tag = fmt::format("base_null_{}", run_nonce);
+		const auto reserved_owner = EQ::Actor::ReservedOwners::Provision(
+			database,
+			fmt::format("ActorownerPersistence{}", run_nonce)
+		);
+		Expect(reserved_owner.character_id > 0, "reserved owner provisioning should succeed for actor profile persistence");
+		cleanup.TrackReservedOwnerId(reserved_owner.character_id);
 
 		ActorProfilesRepository::ActorProfileRecord first_profile{};
 		first_profile.actor_type      = "autonomous_actor";
@@ -156,30 +176,37 @@ void WorldserverCLI::TestActorPersistence(int argc, char **argv, argh::parser &c
 		first_profile.updated_at      = first_updated_at;
 
 		const auto inserted_profile = ActorProfilesRepository::UpsertBotBackedProfile(database, first_profile);
-		cleanup.TrackActorId(inserted_profile.actor_id);
+		ExpectEqual(inserted_profile.actor_id, uint32_t(0), "bot-backed profile insert should reject a missing reserved owner binding");
+		Expect(
+			!ActorProfilesRepository::FindByBotId(database, actor_bot_id).has_value(),
+			"bot-backed profile insert without reserved owner binding should not persist a row"
+		);
 
-		Expect(inserted_profile.actor_id > 0, "first actor profile insert should allocate an actor_id");
-		ExpectEqual(inserted_profile.actor_type, first_profile.actor_type, "profile actor_type should round-trip");
-		ExpectEqual(inserted_profile.actor_substrate, first_profile.actor_substrate, "profile actor_substrate should round-trip");
-		ExpectOptionalEqual(inserted_profile.bot_id, std::optional<uint32_t>(actor_bot_id), "profile bot_id should round-trip");
-		ExpectOptionalEqual(inserted_profile.owner_character_id, std::optional<uint32_t>{}, "profile owner_character_id should start empty");
-		ExpectEqual(inserted_profile.enabled, true, "profile enabled flag should round-trip");
-		ExpectEqual(inserted_profile.created_at, created_at, "profile created_at should round-trip");
-		ExpectEqual(inserted_profile.updated_at, first_updated_at, "profile updated_at should round-trip");
+		first_profile.owner_character_id = reserved_owner.character_id;
+		const auto bound_profile = ActorProfilesRepository::UpsertBotBackedProfile(database, first_profile);
+		cleanup.TrackActorId(bound_profile.actor_id);
 
-		const auto loaded_profile_by_id = ActorProfilesRepository::FindByActorId(database, inserted_profile.actor_id);
+		Expect(bound_profile.actor_id > 0, "bound actor profile insert should allocate an actor_id");
+		ExpectEqual(bound_profile.actor_type, first_profile.actor_type, "profile actor_type should round-trip");
+		ExpectEqual(bound_profile.actor_substrate, first_profile.actor_substrate, "profile actor_substrate should round-trip");
+		ExpectOptionalEqual(bound_profile.bot_id, std::optional<uint32_t>(actor_bot_id), "profile bot_id should round-trip");
+		ExpectOptionalEqual(bound_profile.owner_character_id, std::optional<uint32_t>(reserved_owner.character_id), "profile owner_character_id should store the reserved owner binding");
+		ExpectEqual(bound_profile.enabled, true, "profile enabled flag should round-trip");
+		ExpectEqual(bound_profile.created_at, created_at, "profile created_at should round-trip");
+		ExpectEqual(bound_profile.updated_at, first_updated_at, "profile updated_at should round-trip");
+
+		const auto loaded_profile_by_id = ActorProfilesRepository::FindByActorId(database, bound_profile.actor_id);
 		Expect(loaded_profile_by_id.has_value(), "profile lookup by actor_id should succeed");
-		ExpectEqual(loaded_profile_by_id->actor_id, inserted_profile.actor_id, "lookup by actor_id should return the inserted profile");
+		ExpectEqual(loaded_profile_by_id->actor_id, bound_profile.actor_id, "lookup by actor_id should return the inserted profile");
 
-		auto updated_profile = inserted_profile;
-		updated_profile.owner_character_id = owner_character_id;
+		auto updated_profile = bound_profile;
 		updated_profile.enabled            = false;
 		updated_profile.updated_at         = second_updated_at;
 
 		const auto upserted_profile = ActorProfilesRepository::UpsertBotBackedProfile(database, updated_profile);
 
-		ExpectEqual(upserted_profile.actor_id, inserted_profile.actor_id, "profile upsert should reuse the existing actor_id");
-		ExpectOptionalEqual(upserted_profile.owner_character_id, std::optional<uint32_t>(owner_character_id), "profile upsert should store owner_character_id");
+		ExpectEqual(upserted_profile.actor_id, bound_profile.actor_id, "profile upsert should reuse the existing actor_id");
+		ExpectOptionalEqual(upserted_profile.owner_character_id, std::optional<uint32_t>(reserved_owner.character_id), "profile upsert should preserve owner_character_id");
 		ExpectEqual(upserted_profile.enabled, false, "profile upsert should update enabled");
 		ExpectEqual(upserted_profile.created_at, created_at, "profile upsert should preserve created_at");
 		ExpectEqual(upserted_profile.updated_at, second_updated_at, "profile upsert should update updated_at");
@@ -196,9 +223,21 @@ void WorldserverCLI::TestActorPersistence(int argc, char **argv, argh::parser &c
 
 		const auto cleared_upserted_profile = ActorProfilesRepository::UpsertBotBackedProfile(database, cleared_profile);
 
-		ExpectOptionalEqual(cleared_upserted_profile.owner_character_id, std::optional<uint32_t>{}, "profile upsert should clear owner_character_id");
-		ExpectEqual(cleared_upserted_profile.enabled, true, "profile upsert should restore enabled");
-		ExpectEqual(cleared_upserted_profile.updated_at, third_updated_at, "profile upsert should update updated_at when clearing owner");
+		ExpectEqual(cleared_upserted_profile.actor_id, uint32_t(0), "profile upsert should reject clearing the reserved owner binding");
+		const auto persisted_after_clear_attempt = ActorProfilesRepository::FindByBotId(database, actor_bot_id);
+		Expect(persisted_after_clear_attempt.has_value(), "existing bot-backed profile should remain after a rejected clear attempt");
+		ExpectOptionalEqual(persisted_after_clear_attempt->owner_character_id, std::optional<uint32_t>(reserved_owner.character_id), "rejected clear attempt should preserve the stored reserved owner binding");
+		ExpectEqual(persisted_after_clear_attempt->enabled, false, "rejected clear attempt should leave prior stored enabled state intact");
+		ExpectEqual(persisted_after_clear_attempt->updated_at, second_updated_at, "rejected clear attempt should leave prior stored updated_at intact");
+
+		auto mismatched_profile = upserted_profile;
+		mismatched_profile.owner_character_id = mismatched_owner_character_id;
+		mismatched_profile.updated_at         = third_updated_at;
+		const auto mismatched_upserted_profile = ActorProfilesRepository::UpsertBotBackedProfile(database, mismatched_profile);
+		ExpectEqual(mismatched_upserted_profile.actor_id, uint32_t(0), "profile upsert should reject an arbitrary non-reserved owner binding");
+		const auto persisted_after_mismatch_attempt = ActorProfilesRepository::FindByBotId(database, actor_bot_id);
+		Expect(persisted_after_mismatch_attempt.has_value(), "existing bot-backed profile should remain after a rejected owner mismatch");
+		ExpectOptionalEqual(persisted_after_mismatch_attempt->owner_character_id, std::optional<uint32_t>(reserved_owner.character_id), "rejected owner mismatch should preserve the stored reserved owner binding");
 
 		auto first_base_profile = ActorProfilesRepository::NewEntity();
 		first_base_profile.actor_type         = "autonomous_actor";
@@ -235,7 +274,7 @@ void WorldserverCLI::TestActorPersistence(int argc, char **argv, argh::parser &c
 		ExpectOptionalEqual(loaded_second_base_profile.owner_character_id, std::optional<uint32_t>{}, "base profile find should preserve null owner_character_id");
 
 		ActorStatusRepository::ActorStatusRecord first_status{};
-		first_status.actor_id     = inserted_profile.actor_id;
+		first_status.actor_id     = bound_profile.actor_id;
 		first_status.zone_id      = first_zone_id;
 		first_status.entity_id    = first_entity_id;
 		first_status.state        = "active";
@@ -245,7 +284,7 @@ void WorldserverCLI::TestActorPersistence(int argc, char **argv, argh::parser &c
 
 		const auto inserted_status = ActorStatusRepository::UpsertOne(database, first_status);
 
-		ExpectEqual(inserted_status.actor_id, inserted_profile.actor_id, "status insert should target the actor profile");
+		ExpectEqual(inserted_status.actor_id, bound_profile.actor_id, "status insert should target the actor profile");
 		ExpectOptionalEqual(inserted_status.zone_id, std::optional<uint32_t>(first_zone_id), "status zone_id should round-trip");
 		ExpectOptionalEqual(inserted_status.instance_id, std::optional<uint32_t>{}, "status instance_id should start empty");
 		ExpectOptionalEqual(inserted_status.entity_id, std::optional<uint32_t>(first_entity_id), "status entity_id should round-trip");
@@ -265,7 +304,7 @@ void WorldserverCLI::TestActorPersistence(int argc, char **argv, argh::parser &c
 
 		const auto upserted_status = ActorStatusRepository::UpsertOne(database, updated_status);
 
-		ExpectEqual(upserted_status.actor_id, inserted_profile.actor_id, "status upsert should preserve actor_id");
+		ExpectEqual(upserted_status.actor_id, bound_profile.actor_id, "status upsert should preserve actor_id");
 		ExpectOptionalEqual(upserted_status.zone_id, std::optional<uint32_t>(second_zone_id), "status upsert should update zone_id");
 		ExpectOptionalEqual(upserted_status.instance_id, std::optional<uint32_t>(first_instance_id), "status upsert should update instance_id");
 		ExpectOptionalEqual(upserted_status.entity_id, std::optional<uint32_t>{}, "status upsert should clear entity_id");
@@ -274,7 +313,7 @@ void WorldserverCLI::TestActorPersistence(int argc, char **argv, argh::parser &c
 		ExpectOptionalEqual(upserted_status.heartbeat_at, std::optional<std::time_t>(second_updated_at), "status upsert should update heartbeat_at");
 		ExpectEqual(upserted_status.updated_at, second_updated_at, "status upsert should update updated_at");
 		ExpectEqual(
-			ActorStatusRepository::Count(database, fmt::format("actor_id = {}", inserted_profile.actor_id)),
+			ActorStatusRepository::Count(database, fmt::format("actor_id = {}", bound_profile.actor_id)),
 			static_cast<int64>(1),
 			"status upsert should remain idempotent by actor_id"
 		);

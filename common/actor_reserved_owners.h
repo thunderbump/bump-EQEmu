@@ -1,11 +1,11 @@
 #pragma once
 
-#include "common/repositories/actor_profiles_repository.h"
 #include "common/repositories/bot_data_repository.h"
 #include "common/repositories/character_data_repository.h"
 
 #include "fmt/format.h"
 
+#include <cstdlib>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -28,17 +28,35 @@ inline bool IsReservedOwnerName(std::string_view name)
 		name.substr(0, kReservedOwnerNamePrefix.size()) == kReservedOwnerNamePrefix;
 }
 
-inline bool HasActorProfileAssociation(Database &db, uint32_t character_id)
+inline bool HasBotBackedActorProfileAssociation(Database &db, uint32_t character_id)
 {
-	return character_id > 0 &&
-		ActorProfilesRepository::Count(db, fmt::format("owner_character_id = {}", character_id)) > 0;
+	if (!character_id) {
+		return false;
+	}
+
+	auto results = db.QueryDatabase(
+		fmt::format(
+			"SELECT COUNT(*) FROM actor_profiles WHERE owner_character_id = {} AND actor_substrate = 'bot' AND bot_id IS NOT NULL",
+			character_id
+		)
+	);
+	if (!results.Success() || results.RowCount() != 1) {
+		return false;
+	}
+
+	auto row = results.begin();
+	return row[0] && strtoull(row[0], nullptr, 10) > 0;
 }
 
 inline bool IsProvisionedReservedOwnerRecord(const CharacterDataRepository::CharacterData &record)
 {
 	return record.id > 0 &&
 		IsReservedOwnerName(record.name) &&
-		record.last_name == kReservedOwnerLastNameMarker;
+		record.last_name == kReservedOwnerLastNameMarker &&
+		record.level == 0 &&
+		record.class_ == 0 &&
+		record.race == 0 &&
+		record.deleted_at <= 0;
 }
 
 inline ReservedOwnerRecord ToReservedOwnerRecord(const CharacterDataRepository::CharacterData &record, bool created = false)
@@ -51,28 +69,48 @@ inline ReservedOwnerRecord ToReservedOwnerRecord(const CharacterDataRepository::
 	};
 }
 
-inline std::optional<ReservedOwnerRecord> FindByCharacterId(Database &db, uint32_t character_id)
+inline std::optional<ReservedOwnerRecord> FindProvisionedByCharacterId(Database &db, uint32_t character_id)
 {
 	if (!character_id) {
 		return std::nullopt;
 	}
 
 	const auto record = CharacterDataRepository::FindOne(db, character_id);
-	if (!IsProvisionedReservedOwnerRecord(record) || !HasActorProfileAssociation(db, record.id)) {
+	if (!IsProvisionedReservedOwnerRecord(record)) {
 		return std::nullopt;
 	}
 
 	return ToReservedOwnerRecord(record);
 }
 
-inline std::optional<ReservedOwnerRecord> FindByName(Database &db, const std::string &name)
+inline std::optional<ReservedOwnerRecord> FindProvisionedByName(Database &db, const std::string &name)
 {
 	const auto record = CharacterDataRepository::FindByName(db, name);
-	if (!IsProvisionedReservedOwnerRecord(record) || !HasActorProfileAssociation(db, record.id)) {
+	if (!IsProvisionedReservedOwnerRecord(record)) {
 		return std::nullopt;
 	}
 
 	return ToReservedOwnerRecord(record);
+}
+
+inline std::optional<ReservedOwnerRecord> FindByCharacterId(Database &db, uint32_t character_id)
+{
+	const auto reserved_owner = FindProvisionedByCharacterId(db, character_id);
+	if (!reserved_owner.has_value() || !HasBotBackedActorProfileAssociation(db, reserved_owner->character_id)) {
+		return std::nullopt;
+	}
+
+	return reserved_owner;
+}
+
+inline std::optional<ReservedOwnerRecord> FindByName(Database &db, const std::string &name)
+{
+	const auto reserved_owner = FindProvisionedByName(db, name);
+	if (!reserved_owner.has_value() || !HasBotBackedActorProfileAssociation(db, reserved_owner->character_id)) {
+		return std::nullopt;
+	}
+
+	return reserved_owner;
 }
 
 inline ReservedOwnerRecord Provision(Database &db, const std::string &name, int32_t account_id = 0)
@@ -108,11 +146,15 @@ inline bool Rollback(Database &db, uint32_t character_id, std::string *failure_r
 		return false;
 	}
 
-	const auto linked_actor_profiles = ActorProfilesRepository::Count(
-		db,
-		fmt::format("owner_character_id = {}", character_id)
+	auto linked_actor_profiles = db.QueryDatabase(
+		fmt::format("SELECT COUNT(*) FROM actor_profiles WHERE owner_character_id = {}", character_id)
 	);
-	if (linked_actor_profiles > 0) {
+	if (
+		linked_actor_profiles.Success() &&
+		linked_actor_profiles.RowCount() == 1 &&
+		linked_actor_profiles.begin()[0] &&
+		strtoull(linked_actor_profiles.begin()[0], nullptr, 10) > 0
+	) {
 		if (failure_reason) {
 			*failure_reason = "reserved_owner_still_referenced_by_actor_profiles";
 		}

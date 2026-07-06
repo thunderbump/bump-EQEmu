@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common/actor_reserved_owners.h"
 #include "common/repositories/base/base_actor_profiles_repository.h"
 
 #include "common/database.h"
@@ -94,7 +95,11 @@ public:
 
 	static ActorProfileRecord UpsertBotBackedProfile(Database &db, ActorProfileRecord record)
 	{
-		if (!record.bot_id.has_value()) {
+		if (!record.bot_id.has_value() || !record.owner_character_id.has_value()) {
+			return {};
+		}
+
+		if (!EQ::Actor::ReservedOwners::FindProvisionedByCharacterId(db, *record.owner_character_id).has_value()) {
 			return {};
 		}
 
