@@ -6,6 +6,7 @@
 #include "fmt/format.h"
 
 #include <cstdlib>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -14,6 +15,7 @@ namespace EQ::Actor::ReservedOwners {
 
 inline constexpr std::string_view kReservedOwnerNamePrefix = "Actorowner";
 inline constexpr std::string_view kReservedOwnerLastNameMarker = "ReservedActorOwner";
+inline constexpr size_t kReservedOwnerNameMaxLength = 64;
 
 struct ReservedOwnerRecord {
 	uint32_t character_id = 0;
@@ -69,19 +71,25 @@ inline ReservedOwnerRecord ToReservedOwnerRecord(const CharacterDataRepository::
 	};
 }
 
-inline std::string BuildSoftDeletedProvisionName(
-	Database &db,
-	const std::string &requested_name,
-	uint32_t discriminator
-)
+inline std::string BuildProvisionNameWithSuffix(const std::string &requested_name, uint32_t suffix)
 {
-	for (uint32_t attempt = 0; attempt < 32; ++attempt) {
-		const auto suffix = fmt::format("R{}", discriminator + attempt);
-		const auto base_size = std::min<size_t>(64 - suffix.size(), requested_name.size());
-		const auto candidate = requested_name.substr(0, base_size) + suffix;
+	const auto suffix_text = fmt::format("R{}", suffix);
+	const auto base_size = std::min<size_t>(kReservedOwnerNameMaxLength - suffix_text.size(), requested_name.size());
+	return requested_name.substr(0, base_size) + suffix_text;
+}
+
+inline std::string BuildSoftDeletedProvisionName(Database &db, const std::string &requested_name)
+{
+	for (uint32_t suffix = 1; suffix != std::numeric_limits<uint32_t>::max(); ++suffix) {
+		const auto candidate = BuildProvisionNameWithSuffix(requested_name, suffix);
 		if (!CharacterDataRepository::FindAnyByName(db, candidate).id) {
 			return candidate;
 		}
+	}
+
+	const auto final_candidate = BuildProvisionNameWithSuffix(requested_name, std::numeric_limits<uint32_t>::max());
+	if (!CharacterDataRepository::FindAnyByName(db, final_candidate).id) {
+		return final_candidate;
 	}
 
 	return {};
@@ -145,7 +153,7 @@ inline ReservedOwnerRecord Provision(Database &db, const std::string &name, int3
 	auto provision_name = name;
 	const auto existing_deleted = CharacterDataRepository::FindAnyByName(db, name);
 	if (existing_deleted.id && existing_deleted.deleted_at > 0) {
-		provision_name = BuildSoftDeletedProvisionName(db, name, existing_deleted.id);
+		provision_name = BuildSoftDeletedProvisionName(db, name);
 		if (provision_name.empty()) {
 			return {};
 		}

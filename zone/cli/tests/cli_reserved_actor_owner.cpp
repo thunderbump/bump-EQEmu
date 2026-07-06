@@ -32,6 +32,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "fmt/format.h"
 
@@ -83,6 +84,7 @@ public:
 	uint32_t colliding_character_id = 0;
 	uint32_t playable_marker_character_id = 0;
 	uint32_t stale_actor_id = 0;
+	std::vector<uint32_t> exhausted_soft_deleted_collision_character_ids;
 
 	~ReservedActorOwnerCleanup()
 	{
@@ -136,6 +138,12 @@ public:
 
 		if (playable_marker_character_id > 0) {
 			CharacterDataRepository::DeleteOne(database, playable_marker_character_id);
+		}
+
+		for (const auto character_id : exhausted_soft_deleted_collision_character_ids) {
+			if (character_id > 0) {
+				CharacterDataRepository::DeleteOne(database, character_id);
+			}
 		}
 	}
 };
@@ -276,6 +284,41 @@ void ZoneCLI::TestReservedActorOwner(int argc, char **argv, argh::parser &cmd, s
 			"reserved owner lookup should resolve the reprovisioned active reserved owner"
 		);
 		cleanup.reprovisioned_reserved_owner_character_id = reprovisioned_reserved_owner.character_id;
+
+		const auto exhausted_soft_deleted_name = fmt::format("ActorownerExhausted{}", run_nonce);
+		auto exhausted_soft_deleted_record = CharacterDataRepository::NewEntity();
+		exhausted_soft_deleted_record.name = exhausted_soft_deleted_name;
+		exhausted_soft_deleted_record = CharacterDataRepository::InsertOne(database, exhausted_soft_deleted_record);
+		Expect(exhausted_soft_deleted_record.id > 0, "soft-deleted exhaustion seed should insert for reprovision proof");
+		exhausted_soft_deleted_record.deleted_at = static_cast<time_t>(run_nonce);
+		ExpectEqual(
+			CharacterDataRepository::UpdateOne(database, exhausted_soft_deleted_record),
+			int(1),
+			"soft-deleted exhaustion seed should update deleted_at for reprovision proof"
+		);
+		cleanup.exhausted_soft_deleted_collision_character_ids.push_back(exhausted_soft_deleted_record.id);
+		for (uint32_t suffix = 1; suffix <= 32; ++suffix) {
+			auto exhausted_collision_record = CharacterDataRepository::NewEntity();
+			exhausted_collision_record.name = fmt::format("{}R{}", exhausted_soft_deleted_name, suffix);
+			exhausted_collision_record = CharacterDataRepository::InsertOne(database, exhausted_collision_record);
+			Expect(
+				exhausted_collision_record.id > 0,
+				fmt::format("soft-deleted exhaustion collision row R{} should insert for reprovision proof", suffix)
+			);
+			cleanup.exhausted_soft_deleted_collision_character_ids.push_back(exhausted_collision_record.id);
+		}
+		const auto reprovisioned_exhausted_reserved_owner =
+			EQ::Actor::ReservedOwners::Provision(database, exhausted_soft_deleted_name);
+		Expect(
+			reprovisioned_exhausted_reserved_owner.character_id > 0,
+			"soft-deleted reserved owner with 32 occupied fallback names should still reprovision"
+		);
+		ExpectEqual(
+			reprovisioned_exhausted_reserved_owner.name,
+			fmt::format("{}R33", exhausted_soft_deleted_name),
+			"soft-deleted reserved owner should deterministically continue past the first 32 fallback collisions"
+		);
+		cleanup.exhausted_soft_deleted_collision_character_ids.push_back(reprovisioned_exhausted_reserved_owner.character_id);
 
 		const auto reserved_owner_name = fmt::format("Actorowner{}", run_nonce);
 		const auto reserved_owner = EQ::Actor::ReservedOwners::Provision(database, reserved_owner_name);
