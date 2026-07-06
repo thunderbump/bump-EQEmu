@@ -94,14 +94,12 @@ bool OwnedBotActorFixture::SetUpOwnedBotSolo(const OwnedBotActorConfig &config)
 {
 	Reset();
 
-	owner = new Client();
-	owner->TempName(config.owner_name.c_str());
-	owner->Mob::SetLevel(config.level);
-	owner->SetHP(10000);
-	owner->SetMana(10000);
-	owner->GMMove(0.0f, 0.0f, 0.0f, 0.0f);
-	entity_list.AddClient(owner);
-	RememberMob(owner);
+	owner = CreateSyntheticOwnerClient(config.owner_name, config.owner_character_id, config.level);
+	if (!owner) {
+		failure_reason = "synthetic_owner_create_failed";
+		Reset();
+		return false;
+	}
 
 	bot = CreateOwnedBot(config);
 	if (!bot) {
@@ -113,6 +111,20 @@ bool OwnedBotActorFixture::SetUpOwnedBotSolo(const OwnedBotActorConfig &config)
 
 	bot->GMMove(2.0f, 0.0f, 0.0f, 0.0f);
 	return true;
+}
+
+Client *OwnedBotActorFixture::CreateSyntheticOwnerClient(const std::string &owner_name, uint32_t owner_character_id, uint8_t level)
+{
+	auto *synthetic_owner = new Client();
+	synthetic_owner->TempName(owner_name.c_str());
+	synthetic_owner->SetCharacterId(owner_character_id);
+	synthetic_owner->Mob::SetLevel(level);
+	synthetic_owner->SetHP(10000);
+	synthetic_owner->SetMana(10000);
+	synthetic_owner->GMMove(0.0f, 0.0f, 0.0f, 0.0f);
+	entity_list.AddClient(synthetic_owner);
+	RememberMob(synthetic_owner);
+	return synthetic_owner;
 }
 
 Bot *OwnedBotActorFixture::CreateOwnedBot(const OwnedBotActorConfig &config)
@@ -158,14 +170,12 @@ bool OwnedBotActorFixture::SetUpOwnedBotGroup(const OwnedBotActorConfig &config)
 {
 	Reset();
 
-	owner = new Client();
-	owner->TempName(config.owner_name.c_str());
-	owner->Mob::SetLevel(config.level);
-	owner->SetHP(10000);
-	owner->SetMana(10000);
-	owner->GMMove(0.0f, 0.0f, 0.0f, 0.0f);
-	entity_list.AddClient(owner);
-	RememberMob(owner);
+	owner = CreateSyntheticOwnerClient(config.owner_name, config.owner_character_id, config.level);
+	if (!owner) {
+		failure_reason = "synthetic_owner_create_failed";
+		Reset();
+		return false;
+	}
 
 	bot = CreateOwnedBot(config);
 	if (!bot) {
@@ -199,17 +209,16 @@ bool OwnedBotActorFixture::SetUpOwnedBotParty(const OwnedBotPartyConfig &config)
 {
 	Reset();
 
-	owner = new Client();
-	owner->TempName(config.owner_name.c_str());
-	owner->Mob::SetLevel(config.level);
-	owner->SetHP(10000);
-	owner->SetMana(10000);
-	owner->GMMove(0.0f, 0.0f, 0.0f, 0.0f);
-	entity_list.AddClient(owner);
-	RememberMob(owner);
+	owner = CreateSyntheticOwnerClient(config.owner_name, config.owner_character_id, config.level);
+	if (!owner) {
+		failure_reason = "synthetic_owner_create_failed";
+		Reset();
+		return false;
+	}
 
 	bot = CreateOwnedBot({
 		.owner_name = config.owner_name,
+		.owner_character_id = config.owner_character_id,
 		.bot_name = config.actor_leader_name,
 		.level = config.level,
 		.race = config.race,
@@ -237,6 +246,7 @@ bool OwnedBotActorFixture::SetUpOwnedBotParty(const OwnedBotPartyConfig &config)
 	for (uint8_t index = 0; index < bounded_followers; ++index) {
 		auto *follower = CreateOwnedBot({
 			.owner_name = config.owner_name,
+			.owner_character_id = config.owner_character_id,
 			.bot_name = config.follower_name_prefix + std::to_string(index + 1),
 			.level = config.level,
 			.race = config.race,

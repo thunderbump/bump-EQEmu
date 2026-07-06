@@ -3667,6 +3667,8 @@ bool Bot::Spawn(Client* botCharacterOwner) {
 		botCharacterOwner &&
 		botCharacterOwner->CharacterID() == _botOwnerCharacterID
 	) {
+		SetBotOwner(botCharacterOwner);
+
 		// Rename the bot name to make sure that Mob::GetName() matches Mob::GetCleanName() so we dont have a bot named "Jesuschrist001"
 		strcpy(name, GetCleanName());
 
