@@ -29,6 +29,7 @@ install_manifest.txt
 log/
 logs/
 graphify-out/
+.afk/
 vcpkg/
 perl/
 

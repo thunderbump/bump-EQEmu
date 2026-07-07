@@ -21,6 +21,21 @@ Use the default Beads triage label vocabulary. See `docs/agents/triage-labels.md
 
 Single-context repo: read root `CONTEXT.md` and `docs/adr/` when present. See `docs/agents/domain.md`.
 
+### Sub-agents
+
+Whenever you use a sub-agent, choose a model you think would be appropriate for the task.
+- For implementation try to use gpt-5.4.
+- For very simple tasks like small updates or quick code searches use gpt-5.3-codex-spark
+
+### Issue Implementation
+
+- Work all AFK beads through a sub-agent.
+- Commit after every bead that writes code, push, and PR it.
+- On PR, spin up two sub-agents to review: one to judge correctness against the bead, and one to look for bugs in the implementation. Comment all feedback in the PR.
+- Respond to all PR feedback through sequential sub-agents and have them comment what the resolution was in the PR.
+- If another review pass would reduce risk, repeat the review and response steps.
+- Close the PR after all feedback has been responded to.
+
 ## Testing
 
 Use the tiered validation process in `docs/testing/process.md`. Prefer the persistent local AkkStack dev environment in `../bump-akk-stack`; avoid changing AkkStack unless the test process cannot be supported from this repo and existing stack commands.
