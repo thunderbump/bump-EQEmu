@@ -83,7 +83,17 @@ run_tier2_readonly_zone_tests() {
     cd "$stack_dir"
     "${compose[@]}" run --rm --no-deps --entrypoint bash eqemu-server -lc \
       'set -euo pipefail
-cd ~/server
+until mysqladmin status -ueqemu -p"$EQEMU_DB_PASSWORD" -h mariadb --silent; do
+  sleep 1
+done
+runtime=/tmp/zone-cli-validation-runtime
+rm -rf "$runtime"
+mkdir -p "$runtime"
+jq ".server.database.host = \"mariadb\" | .server.database.port = \"3306\" | .server.qsdatabase.host = \"mariadb\" | .server.qsdatabase.port = \"3306\"" ~/server/eqemu_config.json > "$runtime/eqemu_config.json"
+ln -s ~/server/shared "$runtime/shared"
+ln -s ~/server/plugins "$runtime/plugins"
+ln -s ~/server/lua_modules "$runtime/lua_modules"
+cd "$runtime"
 ~/code/build/bin/zone tests:npc-handins
 ~/code/build/bin/zone tests:npc-handins-multiquest'
   )

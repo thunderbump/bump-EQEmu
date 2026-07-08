@@ -170,10 +170,12 @@ The repo-local wrapper covers only the read-mostly targeted zone checks:
 
 That command runs the preflight, starts or verifies validation MariaDB through the canonical Compose files with
 `--no-recreate`, then runs `tests:npc-handins` and `tests:npc-handins-multiquest` as separate `zone` processes
-inside a single one-off validation `eqemu-server` container. It intentionally does not run `tests:databuckets`,
-`tests:zone-state`, or `tests:reserved-actor-owner`; use the raw commands after applying the backup gate when a
-change specifically needs those caution-tier checks. The wrapper should not require the persistent gameplay
-`eqemu-server` container to be running and should not `exec` into it.
+inside a single one-off validation `eqemu-server` container. The wrapper waits for the `mariadb` service through
+Docker service DNS, writes a temporary runtime `eqemu_config.json` with `server.database` and `server.qsdatabase`
+pointed at `mariadb:3306`, and keeps the persistent stack config untouched. It intentionally does not run
+`tests:databuckets`, `tests:zone-state`, or `tests:reserved-actor-owner`; use the raw commands after applying the
+backup gate when a change specifically needs those caution-tier checks. The wrapper should not require the
+persistent gameplay `eqemu-server` container to be running and should not `exec` into it.
 
 Risk classification:
 
