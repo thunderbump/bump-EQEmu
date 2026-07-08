@@ -11,16 +11,20 @@ usage() {
 Usage: scripts/validation-worker.sh <command> [options]
 
 Commands:
-  run --request <path>  Execute a validation worker request JSON.
-  self-test             Run validation worker shell self-tests.
-  -h, --help            Show this help.
+  profiles --json        List portable validation worker profiles.
+  run --request <path>   Execute a validation worker request JSON.
+  self-test              Run validation worker shell self-tests.
+  -h, --help             Show this help.
 
 Request JSON fields:
   project            Required project name, must be "bump-eqemu" or "bump-EQEmu".
-  repo               Required fetchable Git repository URL or path.
-  ref                Required fetchable Git ref, branch, tag, or commit.
-  commit             Optional expected commit SHA. HEAD must match after checkout.
-  profile            Required validation profile: preflight, tier1, tier2-readonly, tier3-harness, tier1-tier3-harness, or safe.
+  repo               Fetch source as a string URL/path, or repo.url/repo.path in an object.
+  ref                Required for fetch requests. May also be repo.ref.
+  commit             Optional expected commit SHA. May also be repo.commit.
+  checkout.path      Optional local-checkout request path. Also accepts local_checkout.path,
+                     target_worktree_checkout, target_checkout_path, or repo.path without a ref.
+  profile            Required validation profile: preflight, tier1, tier2-readonly,
+                     tier3-harness, tier1-tier3-harness, or safe.
   run_id             Required stable run identifier used for worker-owned checkout storage.
   evidence_dir       Required directory where request.json, result.json, and logs are written.
   timeout_seconds    Optional validation timeout in seconds. Defaults to 3600.
@@ -28,10 +32,12 @@ Request JSON fields:
   stack.role         Optional stack role. If present, must be "validation".
   stack.path         Optional validation AkkStack path to bind while validation runs.
 
-The worker fetches into VALIDATION_WORKER_HOME (default: .validation-worker),
-acquires one local validation slot, delegates to scripts/validate.sh in the
-fetched checkout, and returns a normal process exit code. Set
-VALIDATION_WORKER_VALIDATE_DRY_RUN=1 to delegate with --dry-run for local
+Fetch requests clone into VALIDATION_WORKER_HOME (default: .validation-worker),
+run git submodule update --init --recursive, verify any expected commit, and
+delegate to scripts/validate.sh in the fetched checkout. Local-checkout requests
+skip fetch, require an existing checkout, and verify submodules are already
+initialized and pinned to recorded commits instead of mutating the checkout.
+Set VALIDATION_WORKER_VALIDATE_DRY_RUN=1 to delegate with --dry-run for local
 contract tests. If stack.path is omitted, AKKSTACK_DIR remains a path override.
 USAGE
 }
@@ -41,12 +47,65 @@ json_get() {
   jq -er "$path // empty" "$file" 2>/dev/null || true
 }
 
-json_string() {
-  jq -Rn --arg v "$1" '$v'
-}
-
 now_utc() {
   date -u +%Y-%m-%dT%H:%M:%SZ
+}
+
+profile_names=(preflight safe tier3-harness tier1-tier3-harness)
+
+profile_description() {
+  case "$1" in
+    preflight) printf '%s' 'Verify the validation stack contract only.' ;;
+    safe) printf '%s' 'Run preflight, Tier 1, and read-mostly Tier 2 checks.' ;;
+    tier3-harness) printf '%s' 'Run the canonical Tier 3 Zone Harness smoke.' ;;
+    tier1-tier3-harness) printf '%s' 'Run Tier 1 first, then Tier 3 harness under one timeout budget.' ;;
+    *) return 1 ;;
+  esac
+}
+
+profile_mutation_classification() {
+  case "$1" in
+    preflight) printf '%s' 'read-only' ;;
+    safe) printf '%s' 'read-mostly' ;;
+    tier3-harness) printf '%s' 'read-mostly/runtime-fixture' ;;
+    tier1-tier3-harness) printf '%s' 'read-mostly/runtime-fixture' ;;
+    *) return 1 ;;
+  esac
+}
+
+profile_timeout_guidance() {
+  case "$1" in
+    preflight) printf '%s' 'Short. Roughly 5-10 minutes is usually enough.' ;;
+    safe) printf '%s' 'Medium. Roughly 15-30 minutes depending on build speed.' ;;
+    tier3-harness) printf '%s' 'Medium. Roughly 10-20 minutes including harness startup.' ;;
+    tier1-tier3-harness) printf '%s' 'Longer. Give one shared budget that covers both Tier 1 and Tier 3.' ;;
+    *) return 1 ;;
+  esac
+}
+
+profile_lock_guidance() {
+  case "$1" in
+    preflight) printf '%s' 'Takes the exclusive worker slot. Also takes the stack binding lock when stack.path is used.' ;;
+    safe) printf '%s' 'Takes the exclusive worker slot for the whole run. Also takes the stack binding lock when stack.path is used.' ;;
+    tier3-harness) printf '%s' 'Takes the exclusive worker slot for the whole run. Also takes the stack binding lock when stack.path is used.' ;;
+    tier1-tier3-harness) printf '%s' 'Takes the exclusive worker slot for both tiers under one run. Also takes the stack binding lock when stack.path is used.' ;;
+    *) return 1 ;;
+  esac
+}
+
+emit_profiles_json() {
+  local name
+  {
+    for name in "${profile_names[@]}"; do
+      jq -n \
+        --arg name "$name" \
+        --arg description "$(profile_description "$name")" \
+        --arg mutation_classification "$(profile_mutation_classification "$name")" \
+        --arg timeout_guidance "$(profile_timeout_guidance "$name")" \
+        --arg lock_guidance "$(profile_lock_guidance "$name")" \
+        '{name:$name, description:$description, mutation_classification:$mutation_classification, timeout_guidance:$timeout_guidance, lock_guidance:$lock_guidance}'
+    done
+  } | jq -s '{profiles:.}'
 }
 
 ensure_log_files() {
@@ -62,17 +121,71 @@ ensure_log_files() {
 
 write_result() {
   local evidence_dir="$1" status="$2" category="$3" exit_code="$4" message="$5" checkout_dir="${6:-}" head_commit="${7:-}"
+  local stack_path_source="${8:-}"
+  local result_json
+
   mkdir -p "$evidence_dir"
+  result_json="$evidence_dir/result.json"
+
   jq -n \
     --arg status "$status" \
     --arg category "$category" \
     --arg message "$message" \
+    --arg profile "$profile" \
     --arg checkout_dir "$checkout_dir" \
+    --arg expected_commit "$commit" \
+    --arg actual_checkout_commit "$head_commit" \
     --arg head_commit "$head_commit" \
+    --arg evidence_dir "$evidence_dir" \
+    --arg stack_role "$stack_role" \
+    --arg stack_path "$stack_path" \
+    --arg stack_path_source "$stack_path_source" \
+    --arg request_source_type "$request_source_type" \
+    --arg request_source_repo "$request_source_repo" \
+    --arg request_source_ref "$request_source_ref" \
+    --arg request_source_commit "$request_source_commit" \
+    --arg request_source_checkout_path "$request_source_checkout_path" \
+    --arg project "$project" \
+    --arg run_id "$run_id" \
     --arg completed_at "$(now_utc)" \
     --argjson exit_code "$exit_code" \
-    '{status:$status, category:$category, exit_code:$exit_code, message:$message, checkout_dir:$checkout_dir, head_commit:$head_commit, completed_at:$completed_at}' \
-    >"$evidence_dir/result.json"
+    --argjson timeout_seconds "$timeout_seconds" \
+    --argjson lock_wait_seconds "$lock_wait_seconds" \
+    '{
+      status:$status,
+      category:$category,
+      exit_code:$exit_code,
+      message:$message,
+      profile:$profile,
+      checkout_dir:$checkout_dir,
+      expected_commit:$expected_commit,
+      actual_checkout_commit:$actual_checkout_commit,
+      head_commit:$head_commit,
+      evidence_dir:$evidence_dir,
+      stack:{
+        role:$stack_role,
+        path:$stack_path,
+        path_source:$stack_path_source
+      },
+      request_metadata:{
+        project:$project,
+        run_id:$run_id,
+        profile:$profile,
+        timeout_seconds:$timeout_seconds,
+        lock_wait_seconds:$lock_wait_seconds,
+        source:{
+          type:$request_source_type,
+          repo:$request_source_repo,
+          ref:$request_source_ref,
+          commit:$request_source_commit,
+          checkout_path:$request_source_checkout_path
+        }
+      },
+      completed_at:$completed_at
+    }' \
+    >"$result_json"
+
+  cp "$result_json" "$evidence_dir/worker-output.json"
 }
 
 copy_request_evidence() {
@@ -90,6 +203,83 @@ sanitize_run_id() {
   [[ "$run_id" =~ ^[A-Za-z0-9._-]+$ ]]
 }
 
+resolve_request_source() {
+  local request_path="$1"
+  local repo_string repo_url repo_path top_ref repo_ref top_commit repo_commit checkout_path local_checkout_path
+
+  repo_string="$(json_get '.repo | strings' "$request_path")"
+  repo_url="$(json_get '.repo.url | strings' "$request_path")"
+  repo_path="$(json_get '.repo.path | strings' "$request_path")"
+  top_ref="$(json_get '.ref | strings' "$request_path")"
+  repo_ref="$(json_get '.repo.ref | strings' "$request_path")"
+  top_commit="$(json_get '.commit | strings' "$request_path")"
+  repo_commit="$(json_get '.repo.commit | strings' "$request_path")"
+  checkout_path="$(json_get '.checkout.path | strings' "$request_path")"
+  local_checkout_path="$(json_get '.local_checkout.path | strings' "$request_path")"
+  [[ -n "$local_checkout_path" ]] || local_checkout_path="$(json_get '.target_worktree_checkout | strings' "$request_path")"
+  [[ -n "$local_checkout_path" ]] || local_checkout_path="$(json_get '.target_checkout_path | strings' "$request_path")"
+  [[ -n "$local_checkout_path" ]] || local_checkout_path="$(json_get '.checkout_path | strings' "$request_path")"
+  [[ -n "$local_checkout_path" ]] || local_checkout_path="$checkout_path"
+
+  if [[ -n "$top_ref" && -n "$repo_ref" && "$top_ref" != "$repo_ref" ]]; then
+    printf 'conflicting ref and repo.ref\n'
+    return 1
+  fi
+  if [[ -n "$top_commit" && -n "$repo_commit" && "$top_commit" != "$repo_commit" ]]; then
+    printf 'conflicting commit and repo.commit\n'
+    return 1
+  fi
+
+  ref="${top_ref:-$repo_ref}"
+  commit="${top_commit:-$repo_commit}"
+
+  if [[ -n "$repo_string" ]]; then
+    request_source_type=fetch
+    request_source_repo="$repo_string"
+    request_source_ref="$ref"
+    request_source_commit="$commit"
+    request_source_checkout_path=""
+  elif [[ -n "$repo_url" ]]; then
+    request_source_type=fetch
+    request_source_repo="$repo_url"
+    request_source_ref="$ref"
+    request_source_commit="$commit"
+    request_source_checkout_path=""
+  elif [[ -n "$repo_path" && -n "$ref" ]]; then
+    request_source_type=fetch
+    request_source_repo="$repo_path"
+    request_source_ref="$ref"
+    request_source_commit="$commit"
+    request_source_checkout_path=""
+  elif [[ -n "$local_checkout_path" ]]; then
+    request_source_type=local-checkout
+    request_source_repo=""
+    request_source_ref=""
+    request_source_commit="$commit"
+    request_source_checkout_path="$local_checkout_path"
+  elif [[ -n "$repo_path" ]]; then
+    request_source_type=local-checkout
+    request_source_repo=""
+    request_source_ref=""
+    request_source_commit="$commit"
+    request_source_checkout_path="$repo_path"
+  else
+    printf 'missing repo/ref fetch source or local checkout path\n'
+    return 1
+  fi
+
+  if [[ "$request_source_type" == "fetch" ]]; then
+    repo="$request_source_repo"
+    [[ -n "$request_source_ref" ]] || { printf 'missing ref\n'; return 1; }
+  else
+    repo=""
+    if [[ -n "$ref" ]]; then
+      printf 'local-checkout requests may not set ref; use commit for pinned verification\n'
+      return 1
+    fi
+  fi
+}
+
 validate_request() {
   local request_path="$1"
   if [[ ! -f "$request_path" ]]; then
@@ -102,9 +292,6 @@ validate_request() {
   fi
 
   project="$(json_get '.project | strings' "$request_path")"
-  repo="$(json_get '.repo | strings' "$request_path")"
-  ref="$(json_get '.ref | strings' "$request_path")"
-  commit="$(json_get '.commit | strings' "$request_path")"
   profile="$(json_get '.profile | strings' "$request_path")"
   run_id="$(json_get '.run_id | strings' "$request_path")"
   evidence_dir="$(json_get '.evidence_dir | strings' "$request_path")"
@@ -112,10 +299,17 @@ validate_request() {
   lock_wait_seconds="$(json_get '.lock_wait_seconds // 0 | numbers' "$request_path")"
   stack_role="$(json_get '.stack.role // "validation" | strings' "$request_path")"
   stack_path="$(json_get '.stack.path | strings' "$request_path")"
+  repo=
+  ref=
+  commit=
+  request_source_type=
+  request_source_repo=
+  request_source_ref=
+  request_source_commit=
+  request_source_checkout_path=
 
   [[ "$project" == "bump-eqemu" || "$project" == "bump-EQEmu" ]] || { printf 'invalid or missing project\n'; return 1; }
-  [[ -n "$repo" ]] || { printf 'missing repo\n'; return 1; }
-  [[ -n "$ref" ]] || { printf 'missing ref\n'; return 1; }
+  resolve_request_source "$request_path" || return 1
   [[ -z "$commit" || "$commit" =~ ^[0-9a-fA-F]{7,40}$ ]] || { printf 'invalid commit\n'; return 1; }
   case "$profile" in preflight|tier1|tier2-readonly|tier3-harness|tier1-tier3-harness|safe) ;; *) printf 'invalid or missing profile\n'; return 1 ;; esac
   [[ -n "$run_id" ]] || { printf 'missing run_id\n'; return 1; }
@@ -125,6 +319,10 @@ validate_request() {
   [[ "$lock_wait_seconds" =~ ^[0-9]+$ ]] || { printf 'invalid lock_wait_seconds\n'; return 1; }
   [[ "$stack_role" == "validation" ]] || { printf 'validation worker stack.role must be validation\n'; return 1; }
   [[ -z "$stack_path" || -d "$stack_path" ]] || { printf 'stack.path is not a directory\n'; return 1; }
+  if [[ "$request_source_type" == "local-checkout" ]]; then
+    [[ -d "$request_source_checkout_path" ]] || { printf 'local checkout path is not a directory\n'; return 1; }
+    git -C "$request_source_checkout_path" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { printf 'local checkout path is not a git work tree\n'; return 1; }
+  fi
 }
 
 acquire_lock() {
@@ -285,9 +483,79 @@ restore_validation_stack() {
   write_stack_binding "$evidence_dir" "$STACK_BINDING_STATUS" validation "$STACK_BINDING_SOURCE" "$STACK_BINDING_STACK_DIR" "$STACK_BINDING_CODE_PATH" "$STACK_BINDING_TARGET" "$STACK_BINDING_PREVIOUS_KIND" "$STACK_BINDING_PREVIOUS_TARGET" "$restore_status" "stack code binding cleanup complete"
 }
 
+verify_checkout_submodules() {
+  local checkout_dir="$1" evidence_dir="$2" mode="$3" output status
+
+  set +e
+  output="$(timeout "$timeout_seconds" git -C "$checkout_dir" submodule status --recursive 2>&1)"
+  status=$?
+  set -e
+  printf '%s\n' "$output" >>"$evidence_dir/logs/submodule.log"
+
+  if [[ "$status" -eq 124 ]]; then
+    SUBMODULE_ERROR_CATEGORY=timeout
+    SUBMODULE_ERROR_MESSAGE="submodule verification timed out"
+    return 1
+  fi
+  if [[ "$status" -ne 0 ]]; then
+    SUBMODULE_ERROR_CATEGORY=submodule_failed
+    SUBMODULE_ERROR_MESSAGE="failed to inspect checkout submodules"
+    return 1
+  fi
+  if [[ "$mode" == "local-checkout" ]] && printf '%s\n' "$output" | grep -Eq '^[\-+U]'; then
+    SUBMODULE_ERROR_CATEGORY=submodule_failed
+    SUBMODULE_ERROR_MESSAGE="local checkout submodules are not initialized and pinned to recorded commits"
+    return 1
+  fi
+
+  return 0
+}
+
+prepare_checkout() {
+  local checkout_dir="$1" evidence_dir="$2"
+  local status
+
+  if [[ "$request_source_type" == "fetch" ]]; then
+    if ! git -C "$checkout_dir" init >>"$evidence_dir/logs/fetch.log" 2>&1 \
+      || ! git -C "$checkout_dir" remote add origin "$repo" >>"$evidence_dir/logs/fetch.log" 2>&1 \
+      || ! git -C "$checkout_dir" fetch --depth=1 origin "$request_source_ref" >>"$evidence_dir/logs/fetch.log" 2>&1 \
+      || ! git -C "$checkout_dir" checkout --detach FETCH_HEAD >>"$evidence_dir/logs/fetch.log" 2>&1; then
+      PREPARE_ERROR_CATEGORY=fetch_failed
+      PREPARE_ERROR_MESSAGE="failed to fetch or checkout requested ref"
+      return 1
+    fi
+
+    set +e
+    env GIT_TERMINAL_PROMPT=0 GIT_ASKPASS= SSH_ASKPASS= timeout "$timeout_seconds" git -C "$checkout_dir" -c protocol.file.allow=always submodule update --init --recursive >>"$evidence_dir/logs/submodule.log" 2>&1
+    status=$?
+    set -e
+
+    if [[ "$status" -eq 124 ]]; then
+      PREPARE_ERROR_CATEGORY=timeout
+      PREPARE_ERROR_MESSAGE="submodule initialization timed out"
+      return 1
+    fi
+    if [[ "$status" -ne 0 ]]; then
+      PREPARE_ERROR_CATEGORY=submodule_failed
+      PREPARE_ERROR_MESSAGE="failed to initialize checkout submodules"
+      return 1
+    fi
+  fi
+
+  if ! verify_checkout_submodules "$checkout_dir" "$evidence_dir" "$request_source_type"; then
+    PREPARE_ERROR_CATEGORY="$SUBMODULE_ERROR_CATEGORY"
+    PREPARE_ERROR_MESSAGE="$SUBMODULE_ERROR_MESSAGE"
+    return 1
+  fi
+
+  return 0
+}
+
 run_request() {
-  local request_path="$1" validation_status lock_dir stack_lock_dir stack_lock checkout_dir head_commit
-  project= repo= ref= commit= profile= run_id= evidence_dir= timeout_seconds= lock_wait_seconds= stack_role= stack_path= stack_source=
+  local request_path="$1" validation_status lock_dir stack_lock_dir stack_lock checkout_dir head_commit stack_path_source
+  project= repo= ref= commit= profile= run_id= evidence_dir= timeout_seconds= lock_wait_seconds= stack_role= stack_path=
+  request_source_type= request_source_repo= request_source_ref= request_source_commit= request_source_checkout_path=
+  stack_path_source=
   STACK_BINDING_STATUS= STACK_BINDING_SOURCE= STACK_BINDING_STACK_DIR= STACK_BINDING_CODE_PATH= STACK_BINDING_TARGET= STACK_BINDING_PREVIOUS_KIND= STACK_BINDING_PREVIOUS_TARGET= STACK_BINDING_RESTORE_NEEDED=0
 
   if ! validate_request "$request_path" >/tmp/validation-worker-request-error.$$ 2>&1; then
@@ -306,65 +574,53 @@ run_request() {
   copy_request_evidence "$request_path" "$evidence_dir" || true
 
   if [[ -n "$stack_path" ]]; then
-    stack_source=request.stack.path
+    stack_path_source=request.stack.path
   elif [[ -n "${AKKSTACK_DIR:-}" ]]; then
     stack_path="$AKKSTACK_DIR"
-    stack_source=AKKSTACK_DIR
+    stack_path_source=AKKSTACK_DIR
     if [[ ! -d "$stack_path" ]]; then
-      write_result "$evidence_dir" failed invalid_request 2 "AKKSTACK_DIR is not a directory"
+      write_result "$evidence_dir" failed invalid_request 2 "AKKSTACK_DIR is not a directory" "" "" "$stack_path_source"
       return 2
     fi
   fi
 
   checkout_dir="$worker_home/checkouts/$run_id"
+  if [[ "$request_source_type" == "local-checkout" ]]; then
+    checkout_dir="$(resolve_path "$request_source_checkout_path")"
+  fi
 
   if ! lock_dir="$(acquire_lock "$evidence_dir" "$lock_wait_seconds")"; then
-    write_result "$evidence_dir" failed worker_busy 1 "exclusive validation slot is busy" "$checkout_dir"
+    write_result "$evidence_dir" failed worker_busy 1 "exclusive validation slot is busy" "$checkout_dir" "" "$stack_path_source"
     return 1
   fi
   trap 'restore_validation_stack "$evidence_dir"; release_lock "${stack_lock:-}"; release_lock "${lock_dir:-}"' RETURN
 
-  rm -rf "$checkout_dir"
-  mkdir -p "$checkout_dir"
+  if [[ "$request_source_type" == "fetch" ]]; then
+    rm -rf "$checkout_dir"
+    mkdir -p "$checkout_dir"
+  fi
 
-  if ! git -C "$checkout_dir" init >>"$evidence_dir/logs/fetch.log" 2>&1 \
-    || ! git -C "$checkout_dir" remote add origin "$repo" >>"$evidence_dir/logs/fetch.log" 2>&1 \
-    || ! git -C "$checkout_dir" fetch --depth=1 origin "$ref" >>"$evidence_dir/logs/fetch.log" 2>&1 \
-    || ! git -C "$checkout_dir" checkout --detach FETCH_HEAD >>"$evidence_dir/logs/fetch.log" 2>&1; then
-    write_result "$evidence_dir" failed fetch_failed 1 "failed to fetch or checkout requested ref" "$checkout_dir"
+  if ! prepare_checkout "$checkout_dir" "$evidence_dir"; then
+    write_result "$evidence_dir" failed "$PREPARE_ERROR_CATEGORY" 1 "$PREPARE_ERROR_MESSAGE" "$checkout_dir" "" "$stack_path_source"
     return 1
   fi
 
   head_commit="$(git -C "$checkout_dir" rev-parse HEAD)"
   if [[ -n "$commit" && "$head_commit" != "$commit" ]]; then
-    write_result "$evidence_dir" failed commit_mismatch 1 "checked out HEAD does not match requested commit" "$checkout_dir" "$head_commit"
-    return 1
-  fi
-
-  set +e
-  env GIT_TERMINAL_PROMPT=0 GIT_ASKPASS= SSH_ASKPASS= timeout "$timeout_seconds" git -C "$checkout_dir" -c protocol.file.allow=always submodule update --init --recursive >>"$evidence_dir/logs/submodule.log" 2>&1
-  submodule_status=$?
-  set -e
-
-  if [[ "$submodule_status" -eq 124 ]]; then
-    write_result "$evidence_dir" failed timeout 1 "submodule initialization timed out" "$checkout_dir" "$head_commit"
-    return 1
-  fi
-  if [[ "$submodule_status" -ne 0 ]]; then
-    write_result "$evidence_dir" failed submodule_failed 1 "failed to initialize checkout submodules" "$checkout_dir" "$head_commit"
+    write_result "$evidence_dir" failed commit_mismatch 1 "checked out HEAD does not match requested commit" "$checkout_dir" "$head_commit" "$stack_path_source"
     return 1
   fi
 
   if [[ -n "$stack_path" ]]; then
     stack_lock_dir="$stack_path/.validation-worker-code.lock"
     if ! stack_lock="$(acquire_named_lock "$evidence_dir" "$lock_wait_seconds" "$stack_lock_dir" stack)"; then
-      write_result "$evidence_dir" failed stack_busy 1 "validation stack is busy" "$checkout_dir" "$head_commit"
+      write_result "$evidence_dir" failed stack_busy 1 "validation stack is busy" "$checkout_dir" "$head_commit" "$stack_path_source"
       return 1
     fi
   fi
 
-  if ! bind_validation_stack "$evidence_dir" "$stack_path" "$checkout_dir" "$stack_source"; then
-    write_result "$evidence_dir" failed stack_binding_failed 1 "failed to bind validation stack to worker checkout" "$checkout_dir" "$head_commit"
+  if ! bind_validation_stack "$evidence_dir" "$stack_path" "$checkout_dir" "$stack_path_source"; then
+    write_result "$evidence_dir" failed stack_binding_failed 1 "failed to bind validation stack to worker checkout" "$checkout_dir" "$head_commit" "$stack_path_source"
     return 1
   fi
 
@@ -406,10 +662,10 @@ run_request() {
       else
         validation_status=$?
         if [[ "$validation_status" -eq 124 ]]; then
-          write_result "$evidence_dir" failed timeout 1 "validation timed out" "$checkout_dir" "$head_commit"
+          write_result "$evidence_dir" failed timeout 1 "validation timed out" "$checkout_dir" "$head_commit" "$stack_path_source"
           return 1
         fi
-        write_result "$evidence_dir" failed validation_failed 1 "validation profile failed" "$checkout_dir" "$head_commit"
+        write_result "$evidence_dir" failed validation_failed 1 "validation profile failed" "$checkout_dir" "$head_commit" "$stack_path_source"
         return 1
       fi
       if run_validation tier3-harness; then
@@ -417,10 +673,10 @@ run_request() {
       else
         validation_status=$?
         if [[ "$validation_status" -eq 124 ]]; then
-          write_result "$evidence_dir" failed timeout 1 "validation timed out" "$checkout_dir" "$head_commit"
+          write_result "$evidence_dir" failed timeout 1 "validation timed out" "$checkout_dir" "$head_commit" "$stack_path_source"
           return 1
         fi
-        write_result "$evidence_dir" failed validation_failed 1 "validation profile failed" "$checkout_dir" "$head_commit"
+        write_result "$evidence_dir" failed validation_failed 1 "validation profile failed" "$checkout_dir" "$head_commit" "$stack_path_source"
         return 1
       fi
       ;;
@@ -430,16 +686,16 @@ run_request() {
       else
         validation_status=$?
         if [[ "$validation_status" -eq 124 ]]; then
-          write_result "$evidence_dir" failed timeout 1 "validation timed out" "$checkout_dir" "$head_commit"
+          write_result "$evidence_dir" failed timeout 1 "validation timed out" "$checkout_dir" "$head_commit" "$stack_path_source"
           return 1
         fi
-        write_result "$evidence_dir" failed validation_failed 1 "validation profile failed" "$checkout_dir" "$head_commit"
+        write_result "$evidence_dir" failed validation_failed 1 "validation profile failed" "$checkout_dir" "$head_commit" "$stack_path_source"
         return 1
       fi
       ;;
   esac
 
-  write_result "$evidence_dir" passed ok 0 "validation passed" "$checkout_dir" "$head_commit"
+  write_result "$evidence_dir" passed ok 0 "validation passed" "$checkout_dir" "$head_commit" "$stack_path_source"
   return 0
 }
 
@@ -452,6 +708,15 @@ case "$1" in
   -h|--help)
     usage
     exit 0
+    ;;
+  profiles)
+    shift
+    if [[ "$#" -eq 1 && "$1" == "--json" ]]; then
+      emit_profiles_json
+      exit 0
+    fi
+    usage >&2
+    exit 2
     ;;
   self-test)
     shift
