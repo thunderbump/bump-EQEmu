@@ -172,7 +172,8 @@ That command runs the preflight, starts or verifies validation MariaDB through t
 `--no-recreate`, then runs `tests:npc-handins` and `tests:npc-handins-multiquest` as separate `zone` processes
 inside a single one-off validation `eqemu-server` container. The wrapper waits for the `mariadb` service through
 Docker service DNS, writes a temporary runtime `eqemu_config.json` with `server.database` and `server.qsdatabase`
-pointed at `mariadb:3306`, and keeps the persistent stack config untouched. It intentionally does not run
+pointed at `mariadb:3306`, links quest plugin directories from `~/server/quests/plugins` and
+`~/server/quests/lua_modules` when available, and keeps the persistent stack config untouched. It intentionally does not run
 `tests:databuckets`, `tests:zone-state`, or `tests:reserved-actor-owner`; use the raw commands after applying the
 backup gate when a change specifically needs those caution-tier checks. The wrapper should not require the
 persistent gameplay `eqemu-server` container to be running and should not `exec` into it.
@@ -378,7 +379,9 @@ docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --no-recrea
 It then applies a temporary Compose override only to the one-off validation `eqemu-server` service so host
 gameplay ports are disabled for that short-lived server container. Do not apply that temporary port override to
 `mariadb`; the database should stay on the canonical validation stack Compose definition so Compose does not
-recreate the long-running database container.
+recreate the long-running database container. The temporary runtime should link quest plugin directories from
+`~/server/quests/plugins` and `~/server/quests/lua_modules` when those exist, falling back to legacy
+`~/server/plugins` and `~/server/lua_modules` layouts only when needed.
 
 Inside the one-off `eqemu-server` container, the wrapper waits for the validation MariaDB service through Docker
 service DNS, builds a temporary runtime directory that links the repo build binaries and initialized server
@@ -538,8 +541,8 @@ mkdir -p "$runtime/bin" "$runtime/logs" "$runtime/maps" "$runtime/quests"
 ln -s ~/code/build/bin/zone "$runtime/bin/zone"
 ln -s ~/code/build/bin/shared_memory "$runtime/bin/shared_memory"
 ln -s ~/server/eqemu_config.json "$runtime/eqemu_config.json"
-ln -s ~/server/plugins "$runtime/plugins"
-ln -s ~/server/lua_modules "$runtime/lua_modules"
+ln -s ~/server/quests/plugins "$runtime/plugins"
+ln -s ~/server/quests/lua_modules "$runtime/lua_modules"
 ln -s ~/server/shared "$runtime/shared"
 cd "$runtime"
 ./bin/zone sidecar:serve-http --port 9099

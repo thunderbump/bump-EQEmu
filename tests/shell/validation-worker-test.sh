@@ -271,6 +271,12 @@ test_fetch_checkout_and_evidence() {
   assert_json_equals "$evidence/result.json" .request_metadata.source.repo "$source"
   assert_json_equals "$evidence/result.json" .request_metadata.source.ref HEAD
   assert_json_equals "$evidence/result.json" .request_metadata.source.commit "$head"
+  assert_json_equals "$evidence/result.json" .request_metadata.run_id "run-$(basename "$evidence")"
+  assert_json_equals "$evidence/result.json" .request_metadata.timeout_seconds 10
+  assert_json_equals "$evidence/result.json" .request_metadata.lock_wait_seconds 0
+  assert_json_equals "$evidence/result.json" .stack.role validation
+  assert_json_equals "$evidence/result.json" .stack.path ""
+  assert_json_equals "$evidence/result.json" .stack.path_source ""
   assert_json_equals "$evidence/result.json" .evidence_dir "$evidence"
 }
 
@@ -387,6 +393,7 @@ test_local_checkout_request_works() {
   assert_json_equals "$evidence/result.json" .status passed
   assert_json_equals "$evidence/result.json" .request_metadata.source.type local-checkout
   assert_json_equals "$evidence/result.json" .request_metadata.source.checkout_path "$source"
+  assert_json_equals "$evidence/result.json" .request_metadata.source.ref ""
   assert_json_equals "$evidence/result.json" .actual_checkout_commit "$head"
 }
 

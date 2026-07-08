@@ -427,6 +427,8 @@ test_zone_harness_command_checks_build_artifacts_before_zone_launch() {
   [[ "$status" -eq 1 ]] || return 1
   [[ -f "$capture_file" ]] || return 1
   command_text="$(cat "$capture_file")"
+  assert_contains "$command_text" "link_runtime_dir plugins ~/server/quests/plugins ~/server/plugins"
+  assert_contains "$command_text" "link_runtime_dir lua_modules ~/server/quests/lua_modules ~/server/lua_modules"
   assert_contains "$command_text" "require_runtime_binary ./bin/zone"
   assert_contains "$command_text" "require_runtime_binary ./bin/shared_memory"
   assert_contains "$command_text" "tier3-harness requires a prior Tier 1 build or a combined build+harness profile"
@@ -588,6 +590,8 @@ EOF
   assert_contains "$(cat "$payload_file")" 'mysqladmin status -ueqemu -p"$EQEMU_DB_PASSWORD" -h mariadb --silent'
   assert_contains "$(cat "$payload_file")" '.server.database.host = \"mariadb\"'
   assert_contains "$(cat "$payload_file")" '.server.qsdatabase.host = \"mariadb\"'
+  assert_contains "$(cat "$payload_file")" 'link_runtime_dir plugins ~/server/quests/plugins ~/server/plugins'
+  assert_contains "$(cat "$payload_file")" 'link_runtime_dir lua_modules ~/server/quests/lua_modules ~/server/lua_modules'
   assert_contains "$(cat "$payload_file")" '~/code/build/bin/zone tests:npc-handins'
 }
 
