@@ -24,8 +24,7 @@ Primary baseline:
 - Source formatting standard is `clang-format`.
 - Formatting must run on these file patterns:
   - `*.c`, `*.cc`, `*.cpp`, `*.cxx`, `*.h`, `*.hpp`, `*.hh`, `*.hxx`
-- Use repo settings if available: `clang-format --style=file`.
-- Temporary workaround until `.clang-format` is added: start with current in-repo style and keep `clang-format` output consistent per touched area.
+- Use the repo settings: `clang-format --style=file`.
 
 Suggested command:
 
@@ -99,26 +98,28 @@ Use concrete command wrappers for project-level runs to keep analyzer noise low 
 
 ## Pre-commit direction
 
-- Do not install hooks in this PR.
-- Future hook rollout plan:
-  - Add blocking hooks only for:
-    - `clang-format` (for tracked C/C++ files)
-    - whitespace/helpers (`trailing-whitespace`, `end-of-file-fixer`, `check-merge-conflict`)
-  - Keep `clang-tidy`, `cppcheck`, `include-what-you-use` as advisory/manual at first.
+- Blocking hooks:
+  - `clang-format` for tracked C/C++ files
+  - lightweight hygiene checks (`trailing-whitespace`, `end-of-file-fixer`,
+    `check-merge-conflict`, and case-conflict checks)
+- Advisory/manual hooks:
+  - `clang-tidy`
+  - `cppcheck`
+  - `include-what-you-use`
 
 ## Migration/rollout risks (large existing C++ repo)
 
-- No existing `.clang-format` means first-wave reformat churn is expected if strict formatting is enabled.
+- First-wave reformat churn is expected if strict formatting is applied broadly.
 - Substantial existing third-party/vendor code should stay excluded to avoid vendor drift.
 - `cppcheck`/`clang-tidy` can produce many false positives in legacy modules.
 - IWYU and deep analyzers require consistent `compile_commands.json`; missing or stale compile databases reduce signal.
 - Analyzer performance can be heavy on large touched sets; run incrementally on changed files first.
 
-## Open decisions
+## Current rollout decisions
 
-- Adopt/author a repo-level `.clang-format` file from this baseline (source to be finalized) before enforcement.
-- Finalize advisory check list for pre-commit and whether checks are:
-  - manual-only, or
-  - run in CI/pre-push after a short warm-up window.
-- Decide whether generated SQL headers/scripts in `utils/`/deprecated paths receive the same review standard or explicit exception.
-- Define whether warnings from analyzers are “warnings-only” for a fixed grace period (recommended).
+- Advisory analyzers remain manual-only for now. Revisit CI/pre-push enforcement
+  in `central-ni6t` after collecting signal/noise from representative changes.
+- Generated, third-party, deprecated, and build paths listed above are explicit
+  exceptions for formatter and analyzer hooks.
+- Advisory analyzer warnings are non-blocking until a future task explicitly
+  promotes a check to CI or pre-push enforcement.
