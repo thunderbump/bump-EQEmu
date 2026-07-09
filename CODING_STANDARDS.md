@@ -36,7 +36,8 @@ clang-format --style=file -i <changed-cpp-or-h-files>
 
 - Phase 1 (now): formatter + build validation are the required quality gates.
 - Phase 2 (manual/advisory): `clang-tidy`, `cppcheck`, and `include-what-you-use`.
-- Keep these advisory in CI initially; run by command or hook when `compile_commands.json` is reliable.
+- Keep these analyzers manual-only for now; do not add them to local pre-push hooks.
+- If a future rollout wants shared repo-wide signal, prefer a non-blocking CI job over pre-push after `compile_commands.json` and wrapper noise are reliable.
 - Do not enforce advisory check failures as merge blockers until teams are calibrated on remaining churn.
 
 ## Install prerequisites
@@ -117,9 +118,7 @@ Use concrete command wrappers for project-level runs to keep analyzer noise low 
 
 ## Current rollout decisions
 
-- Advisory analyzers remain manual-only for now. Revisit CI/pre-push enforcement
-  in `central-ni6t` after collecting signal/noise from representative changes.
-- Generated, third-party, deprecated, and build paths listed above are explicit
-  exceptions for formatter and analyzer hooks.
-- Advisory analyzer warnings are non-blocking until a future task explicitly
-  promotes a check to CI or pre-push enforcement.
+- ADR 0007 keeps advisory analyzers manual-only for now and rejects local pre-push enforcement.
+- If advisory analyzers are promoted later, prefer a non-blocking CI job over pre-push after representative signal/noise stays acceptable.
+- Generated, third-party, deprecated, and build paths listed above are explicit exceptions for formatter and analyzer hooks.
+- Advisory analyzer warnings stay non-blocking until a future task explicitly promotes a check in CI.
