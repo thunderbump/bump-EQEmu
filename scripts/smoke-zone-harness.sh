@@ -83,9 +83,6 @@ mkdir -p \"\$runtime/bin\" \"\$runtime/logs\" \"\$runtime/maps\" \"\$runtime/que
 ln -s ~/code/build/bin/zone \"\$runtime/bin/zone\"
 ln -s ~/code/build/bin/shared_memory \"\$runtime/bin/shared_memory\"
 ln -s ~/server/eqemu_config.json \"\$runtime/eqemu_config.json\"
-ln -s ~/server/plugins \"\$runtime/plugins\"
-ln -s ~/server/lua_modules \"\$runtime/lua_modules\"
-ln -s ~/server/shared \"\$runtime/shared\"
 cd \"\$runtime\"
 
 dump_harness_log() {
@@ -108,6 +105,25 @@ require_runtime_binary() {
 
 require_runtime_binary ./bin/zone
 require_runtime_binary ./bin/shared_memory
+
+link_runtime_dir() {
+  local target=\"\$1\"
+  shift
+  local candidate
+
+  for candidate in \"\$@\"; do
+    if [[ -d \"\$candidate\" ]]; then
+      ln -s \"\$candidate\" \"\$runtime/\$target\"
+      return 0
+    fi
+  done
+
+  printf \"missing runtime directory for %s\\n\" \"\$target\" >&2
+  return 1
+}
+link_runtime_dir shared ~/server/shared
+link_runtime_dir plugins ~/server/quests/plugins ~/server/plugins
+link_runtime_dir lua_modules ~/server/quests/lua_modules ~/server/lua_modules
 
 ./bin/zone tests:serve-http --zone qrg --port ${port} --max-runtime-seconds 30 > logs/zone_harness.out 2>&1 &
 harness_pid=\$!

@@ -184,6 +184,22 @@ write_request() {
     >"$path"
 }
 
+write_local_checkout_request() {
+  local path="$1" checkout_path="$2" evidence_dir="$3" commit="${4:-}" lock_wait="${5:-0}" timeout="${6:-10}" stack_path="${7:-}" profile="${8:-preflight}"
+  jq -n \
+    --arg project bump-eqemu \
+    --arg checkout_path "$checkout_path" \
+    --arg commit "$commit" \
+    --arg profile "$profile" \
+    --arg run_id "run-$(basename "$evidence_dir")" \
+    --arg evidence_dir "$evidence_dir" \
+    --arg stack_path "$stack_path" \
+    --argjson timeout_seconds "$timeout" \
+    --argjson lock_wait_seconds "$lock_wait" \
+    '{project:$project, checkout:{path:$checkout_path}, profile:$profile, run_id:$run_id, evidence_dir:$evidence_dir, timeout_seconds:$timeout_seconds, lock_wait_seconds:$lock_wait_seconds} + (if $commit == "" then {} else {commit:$commit} end) + (if $stack_path == "" then {} else {stack:{role:"validation", path:$stack_path}} end)' \
+    >"$path"
+}
+
 worker_env() {
   env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 "$@"
 }
@@ -196,10 +212,22 @@ test_help() {
   local status output
   capture_run status output "$repo_root/scripts/validation-worker.sh" --help
   [[ "$status" -eq 0 ]] || return 1
+  assert_contains "$output" "profiles --json"
   assert_contains "$output" "run --request <path>"
   assert_contains "$output" "evidence_dir"
   assert_contains "$output" "lock_wait_seconds"
   assert_contains "$output" "tier1-tier3-harness"
+}
+
+test_profiles_json() {
+  local status output
+  capture_run status output "$repo_root/scripts/validation-worker.sh" profiles --json
+  [[ "$status" -eq 0 ]] || return 1
+  jq -e '.profiles | length == 4' >/dev/null <<<"$output" || return 1
+  jq -e '.profiles[] | select(.name == "preflight") | .mutation_classification == "read-only"' >/dev/null <<<"$output" || return 1
+  jq -e '.profiles[] | select(.name == "safe") | (.timeout_guidance | length > 0) and (.lock_guidance | length > 0)' >/dev/null <<<"$output" || return 1
+  jq -e '.profiles[] | select(.name == "tier3-harness")' >/dev/null <<<"$output" || return 1
+  jq -e '.profiles[] | select(.name == "tier1-tier3-harness")' >/dev/null <<<"$output" || return 1
 }
 
 test_invalid_request_writes_evidence() {
@@ -231,10 +259,25 @@ test_fetch_checkout_and_evidence() {
   [[ "$status" -eq 0 ]] || return 1
   [[ -f "$evidence/request.json" ]] || return 1
   [[ -f "$evidence/result.json" ]] || return 1
+  [[ -f "$evidence/worker-output.json" ]] || return 1
   [[ -f "$evidence/logs/fetch.log" ]] || return 1
   [[ -f "$evidence/logs/validation.log" ]] || return 1
   assert_json_equals "$evidence/result.json" .status passed
   assert_json_equals "$evidence/result.json" .head_commit "$head"
+  assert_json_equals "$evidence/result.json" .expected_commit "$head"
+  assert_json_equals "$evidence/result.json" .actual_checkout_commit "$head"
+  assert_json_equals "$evidence/result.json" .profile preflight
+  assert_json_equals "$evidence/result.json" .request_metadata.source.type fetch
+  assert_json_equals "$evidence/result.json" .request_metadata.source.repo "$source"
+  assert_json_equals "$evidence/result.json" .request_metadata.source.ref HEAD
+  assert_json_equals "$evidence/result.json" .request_metadata.source.commit "$head"
+  assert_json_equals "$evidence/result.json" .request_metadata.run_id "run-$(basename "$evidence")"
+  assert_json_equals "$evidence/result.json" .request_metadata.timeout_seconds 10
+  assert_json_equals "$evidence/result.json" .request_metadata.lock_wait_seconds 0
+  assert_json_equals "$evidence/result.json" .stack.role validation
+  assert_json_equals "$evidence/result.json" .stack.path ""
+  assert_json_equals "$evidence/result.json" .stack.path_source ""
+  assert_json_equals "$evidence/result.json" .evidence_dir "$evidence"
 }
 
 test_fetch_checkout_initializes_submodules_before_validation() {
@@ -319,6 +362,7 @@ test_commit_mismatch() {
 
   [[ "$status" -eq 1 ]] || return 1
   assert_json_equals "$evidence/result.json" .category commit_mismatch
+  assert_json_equals "$evidence/result.json" .expected_commit 0000000000000000000000000000000000000000
 }
 
 test_fetch_failure() {
@@ -332,6 +376,25 @@ test_fetch_failure() {
 
   [[ "$status" -eq 1 ]] || return 1
   assert_json_equals "$evidence/result.json" .category fetch_failed
+}
+
+test_local_checkout_request_works() {
+  local source request evidence status output head
+  make_source_repo source
+  reset_worker_home
+  head="$(git -C "$source" rev-parse HEAD)"
+  evidence="$tmp_root/evidence-local-checkout"
+  request="$tmp_root/local-checkout.json"
+  write_local_checkout_request "$request" "$source" "$evidence" "$head"
+
+  capture_run status output worker_env "$repo_root/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 0 ]] || return 1
+  assert_json_equals "$evidence/result.json" .status passed
+  assert_json_equals "$evidence/result.json" .request_metadata.source.type local-checkout
+  assert_json_equals "$evidence/result.json" .request_metadata.source.checkout_path "$source"
+  assert_json_equals "$evidence/result.json" .request_metadata.source.ref ""
+  assert_json_equals "$evidence/result.json" .actual_checkout_commit "$head"
 }
 
 test_lock_contention() {
@@ -560,6 +623,7 @@ test_akkstack_dir_real_code_directory_fails_fast() {
 }
 
 run_test "validation worker help mentions request contract" test_help
+run_test "validation worker profiles discovery emits portable metadata" test_profiles_json
 run_test "invalid request writes structured evidence" test_invalid_request_writes_evidence
 run_test "fake repo fetch checkout writes evidence" test_fetch_checkout_and_evidence
 run_test "fetched checkout initializes submodules before validation" test_fetch_checkout_initializes_submodules_before_validation
@@ -567,6 +631,7 @@ run_test "submodule timeout is categorized" test_submodule_timeout_is_categorize
 run_test "stack lock is not held during submodule initialization" test_stack_lock_is_not_held_during_submodule_initialization
 run_test "commit mismatch is categorized" test_commit_mismatch
 run_test "fetch failure is categorized" test_fetch_failure
+run_test "local-checkout request still works" test_local_checkout_request_works
 run_test "lock contention is worker_busy" test_lock_contention
 run_test "validation timeout is categorized" test_timeout
 run_test "tier3 harness failure is categorized with logs" test_tier3_harness_failure_is_categorized_with_logs

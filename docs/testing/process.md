@@ -2,9 +2,13 @@
 
 This repo is validated through local AkkStack environments. Automated validation should run against a validation stack, while client-facing play and live smoke checks should use a separate gameplay stack.
 
-ADR 0006 defines the portable automation contract: automation should call `scripts/validation-worker.sh run --request <request.json>` with a fetchable repo/ref or commit and an evidence directory. The worker fetches into worker-owned storage, acquires an exclusive validation slot, delegates to the project validation profile, and writes mechanical evidence (`request.json`, `result.json`, and logs). Requests may include `stack.role: "validation"` and `stack.path` to select a validation AkkStack checkout; when present, the worker binds that stack's `code` symlink to the fetched worker checkout under the same exclusive lock and writes `stack-binding.json`. Direct path-based wrapper usage such as `scripts/validate.sh` remains supported for local diagnostics and narrowing failures, but it is not the portable automation contract because it assumes the caller can see the local checkout, AkkStack path, and Docker host.
+ADR 0006 defines the portable automation contract: automation should call `scripts/validation-worker.sh run --request <request.json>` with a fetchable repo/ref or commit and an evidence directory. For local diagnostics, the same worker also accepts a local-checkout request path instead of a fetch source. Fetch requests clone into worker-owned storage, local-checkout requests validate the named checkout in place, and both paths acquire an exclusive validation slot, delegate to the project validation profile, and write mechanical evidence (`request.json`, `result.json`, and logs). Requests may include `stack.role: "validation"` and `stack.path` to select a validation AkkStack checkout; when present, the worker binds that stack's `code` symlink to the active checkout under the same exclusive lock and writes `stack-binding.json`. Direct path-based wrapper usage such as `scripts/validate.sh` remains supported for local diagnostics and narrowing failures, but it is not the portable automation contract because it assumes the caller can see the local checkout, AkkStack path, and Docker host.
 
 Bootstrap from zero is a separate setup task. Do not fold `make install`, environment generation, data downloads, or first-time database setup into every validation pass.
+
+Use `scripts/validation-worker.sh profiles --json` to discover the portable AFK-facing profiles and their rough mutation, timeout, and locking guidance. Today that discovery surface exposes `preflight`, `safe`, `tier3-harness`, and `tier1-tier3-harness`.
+
+Submodule expectations are part of the worker contract. Fetch requests run `git submodule update --init --recursive` before validation. Local-checkout requests continue to work for diagnostics, but the worker treats missing or drifting submodules as request failures instead of mutating the caller-owned checkout.
 
 ## Environment Contract
 
@@ -166,10 +170,13 @@ The repo-local wrapper covers only the read-mostly targeted zone checks:
 
 That command runs the preflight, starts or verifies validation MariaDB through the canonical Compose files with
 `--no-recreate`, then runs `tests:npc-handins` and `tests:npc-handins-multiquest` as separate `zone` processes
-inside a single one-off validation `eqemu-server` container. It intentionally does not run `tests:databuckets`,
-`tests:zone-state`, or `tests:reserved-actor-owner`; use the raw commands after applying the backup gate when a
-change specifically needs those caution-tier checks. The wrapper should not require the persistent gameplay
-`eqemu-server` container to be running and should not `exec` into it.
+inside a single one-off validation `eqemu-server` container. The wrapper waits for the `mariadb` service through
+Docker service DNS, writes a temporary runtime `eqemu_config.json` with `server.database` and `server.qsdatabase`
+pointed at `mariadb:3306`, links quest plugin directories from `~/server/quests/plugins` and
+`~/server/quests/lua_modules` when available, and keeps the persistent stack config untouched. It intentionally does not run
+`tests:databuckets`, `tests:zone-state`, or `tests:reserved-actor-owner`; use the raw commands after applying the
+backup gate when a change specifically needs those caution-tier checks. The wrapper should not require the
+persistent gameplay `eqemu-server` container to be running and should not `exec` into it.
 
 Risk classification:
 
@@ -372,7 +379,9 @@ docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --no-recrea
 It then applies a temporary Compose override only to the one-off validation `eqemu-server` service so host
 gameplay ports are disabled for that short-lived server container. Do not apply that temporary port override to
 `mariadb`; the database should stay on the canonical validation stack Compose definition so Compose does not
-recreate the long-running database container.
+recreate the long-running database container. The temporary runtime should link quest plugin directories from
+`~/server/quests/plugins` and `~/server/quests/lua_modules` when those exist, falling back to legacy
+`~/server/plugins` and `~/server/lua_modules` layouts only when needed.
 
 Inside the one-off `eqemu-server` container, the wrapper waits for the validation MariaDB service through Docker
 service DNS, builds a temporary runtime directory that links the repo build binaries and initialized server
@@ -532,8 +541,8 @@ mkdir -p "$runtime/bin" "$runtime/logs" "$runtime/maps" "$runtime/quests"
 ln -s ~/code/build/bin/zone "$runtime/bin/zone"
 ln -s ~/code/build/bin/shared_memory "$runtime/bin/shared_memory"
 ln -s ~/server/eqemu_config.json "$runtime/eqemu_config.json"
-ln -s ~/server/plugins "$runtime/plugins"
-ln -s ~/server/lua_modules "$runtime/lua_modules"
+ln -s ~/server/quests/plugins "$runtime/plugins"
+ln -s ~/server/quests/lua_modules "$runtime/lua_modules"
 ln -s ~/server/shared "$runtime/shared"
 cd "$runtime"
 ./bin/zone sidecar:serve-http --port 9099

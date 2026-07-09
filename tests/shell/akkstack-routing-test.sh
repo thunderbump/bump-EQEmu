@@ -427,6 +427,8 @@ test_zone_harness_command_checks_build_artifacts_before_zone_launch() {
   [[ "$status" -eq 1 ]] || return 1
   [[ -f "$capture_file" ]] || return 1
   command_text="$(cat "$capture_file")"
+  assert_contains "$command_text" "link_runtime_dir plugins ~/server/quests/plugins ~/server/plugins"
+  assert_contains "$command_text" "link_runtime_dir lua_modules ~/server/quests/lua_modules ~/server/lua_modules"
   assert_contains "$command_text" "require_runtime_binary ./bin/zone"
   assert_contains "$command_text" "require_runtime_binary ./bin/shared_memory"
   assert_contains "$command_text" "tier3-harness requires a prior Tier 1 build or a combined build+harness profile"
@@ -548,6 +550,51 @@ test_tier2_readonly_dry_run_describes_single_one_off_container() {
   assert_contains "$output" "tests:npc-handins and tests:npc-handins-multiquest as separate zone CLI processes"
 }
 
+test_tier2_readonly_uses_service_dns_runtime_config() {
+  local fixture_repo fixture_parent fake_bin capture_file payload_file status output
+  make_fixture fixture_repo fixture_parent
+  fake_bin="$(mktemp -d "$tmp_root/fake-tier2-bin.XXXXXX")"
+  capture_file="$tmp_root/tier2-capture.txt"
+  payload_file="$tmp_root/tier2-payload.txt"
+
+  cat >"$fake_bin/docker-compose" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "\$*" >"$capture_file"
+if [[ " \$* " == *" up "* ]]; then
+  exit 0
+fi
+previous=""
+for arg in "\$@"; do
+  if [[ "\$previous" == "-lc" ]]; then
+    printf '%s\n' "\$arg" >"$payload_file"
+    exit 0
+  fi
+  previous="\$arg"
+done
+printf 'missing bash -lc payload\n' >&2
+exit 1
+EOF
+  chmod +x "$fake_bin/docker-compose"
+
+  cat >"$fake_bin/mysqladmin" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+  chmod +x "$fake_bin/mysqladmin"
+
+  capture_run status output env PATH="$fake_bin:$PATH" "$fixture_repo/scripts/validate.sh" tier2-readonly
+
+  [[ "$status" -eq 0 ]] || return 1
+  assert_contains "$(cat "$capture_file")" "run --rm --no-deps --entrypoint bash eqemu-server"
+  assert_contains "$(cat "$payload_file")" 'mysqladmin status -ueqemu -p"$EQEMU_DB_PASSWORD" -h mariadb --silent'
+  assert_contains "$(cat "$payload_file")" '.server.database.host = \"mariadb\"'
+  assert_contains "$(cat "$payload_file")" '.server.qsdatabase.host = \"mariadb\"'
+  assert_contains "$(cat "$payload_file")" 'link_runtime_dir plugins ~/server/quests/plugins ~/server/plugins'
+  assert_contains "$(cat "$payload_file")" 'link_runtime_dir lua_modules ~/server/quests/lua_modules ~/server/lua_modules'
+  assert_contains "$(cat "$payload_file")" '~/code/build/bin/zone tests:npc-handins'
+}
+
 test_safe_dry_run_keeps_readonly_composition() {
   local fixture_repo fixture_parent status output
   make_fixture fixture_repo fixture_parent
@@ -576,6 +623,7 @@ run_test "validate tier3-harness delegates to smoke script" test_validate_tier3_
 run_test "help mentions stack and dry-run" test_help_mentions_stack_and_dry_run
 run_test "dry-run prints route and skips Docker" test_dry_run_prints_route_and_skips_docker
 run_test "tier2-readonly dry-run describes one-off container" test_tier2_readonly_dry_run_describes_single_one_off_container
+run_test "tier2-readonly runtime payload rewrites DB host to mariadb service DNS" test_tier2_readonly_uses_service_dns_runtime_config
 run_test "safe dry-run keeps readonly composition" test_safe_dry_run_keeps_readonly_composition
 
 if [[ "$failures" -gt 0 ]]; then
