@@ -138,6 +138,7 @@ repos:
             submodules(/.*)?|
             dependencies(/.*)?|
             libs(/.*)?|
+            third-party(/.*)?|
             vendor(/.*)?|
             graphify-out(/.*)?|
             \\.case(/.*)?|
