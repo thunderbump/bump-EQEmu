@@ -66,6 +66,8 @@ repos:
             .*/generated|
             utils(/.*)?/deprecated(/.*)?
           )$
+  # ADR 0007: advisory analyzers stay manual-only for now.
+  # If they move anywhere later, prefer non-blocking CI over pre-push.
   - repo: local
     hooks:
       - id: clang-tidy
@@ -136,6 +138,7 @@ repos:
             submodules(/.*)?|
             dependencies(/.*)?|
             libs(/.*)?|
+            third-party(/.*)?|
             vendor(/.*)?|
             graphify-out(/.*)?|
             \\.case(/.*)?|
