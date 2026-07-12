@@ -216,6 +216,15 @@ exit 0
 EOF
   chmod +x "$fake_bin/mysqladmin"
 
+  cat >"$fake_bin/jq" <<'EOF'
+#!/usr/bin/env bash
+if [[ -f "${@: -1}" ]]; then
+  exec /usr/bin/jq "$@"
+fi
+printf '%s\n' '{"server":{"database":{"host":"mariadb","port":"3306"},"qsdatabase":{"host":"mariadb","port":"3306"}}}'
+EOF
+  chmod +x "$fake_bin/jq"
+
   cat >"$fake_bin/docker-compose" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
@@ -447,6 +456,50 @@ if shared_memory_check == -1 or zone_launch == -1 or shared_memory_check > zone_
 PY
 }
 
+test_zone_harness_uses_service_dns_runtime_config_without_mutating_source() {
+  local fixture_repo fixture_parent fake_bin fake_home fake_server capture_file payload_file source_hash status output
+  make_fixture fixture_repo fixture_parent
+  fake_bin="$(mktemp -d "$tmp_root/fake-smoke-config-bin.XXXXXX")"
+  fake_home="$tmp_root/fake-home"
+  fake_server="$fake_home/server"
+  capture_file="$tmp_root/smoke-zone-harness-config.command"
+  payload_file="$tmp_root/smoke-zone-harness-config.payload"
+  mkdir -p "$fake_server" "$fake_home/code/build/bin"
+  touch "$fake_home/code/build/bin/zone" "$fake_home/code/build/bin/shared_memory"
+  chmod +x "$fake_home/code/build/bin/zone" "$fake_home/code/build/bin/shared_memory"
+  cat >"$fake_server/eqemu_config.json" <<'JSON'
+{"server":{"database":{"host":"127.0.0.1","port":"13306"},"qsdatabase":{"host":"127.0.0.1","port":"13306"}}}
+JSON
+  source_hash="$(sha256sum "$fake_server/eqemu_config.json")"
+  cat >"$fake_bin/mysqladmin" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+  chmod +x "$fake_bin/mysqladmin"
+  cat >"$fake_bin/docker-compose" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ " \$* " == *" up "* ]]; then exit 0; fi
+previous=""
+for arg in "\$@"; do
+  if [[ "\$previous" == "-lc" ]]; then
+    printf '%s\n' "\$arg" >"$payload_file"
+    HOME="$fake_home" PATH="$fake_bin:\$PATH" bash -c "\$arg"
+  fi
+  previous="\$arg"
+done
+exit 1
+EOF
+  chmod +x "$fake_bin/docker-compose"
+
+  capture_run status output env PATH="$fake_bin:$PATH" "$fixture_repo/scripts/smoke-zone-harness.sh" --stack validation
+
+  [[ "$status" -eq 1 ]] || return 1
+  [[ "$(jq -r '.server.database.host + ":" + .server.database.port' /tmp/zone-harness-validation-runtime/eqemu_config.json)" == "mariadb:3306" ]] || return 1
+  [[ "$(jq -r '.server.qsdatabase.host + ":" + .server.qsdatabase.port' /tmp/zone-harness-validation-runtime/eqemu_config.json)" == "mariadb:3306" ]] || return 1
+  [[ "$(sha256sum "$fake_server/eqemu_config.json")" == "$source_hash" ]] || return 1
+}
+
 test_zone_harness_command_exercises_headless_target_twice_with_cursor_cleanup_checks() {
   local fixture_repo fixture_parent fake_bin capture_file payload_file status output command_text
   make_fixture fixture_repo fixture_parent
@@ -618,6 +671,7 @@ run_test "default role paths are distinct" test_default_roles_must_not_resolve_t
 run_test "validation commands warn on gameplay stack" test_validation_commands_warn_on_gameplay_stack
 run_test "zone harness dry-run describes stable DB and portless server" test_zone_harness_dry_run_describes_stable_db_and_portless_server
 run_test "zone harness command checks build artifacts before launch" test_zone_harness_command_checks_build_artifacts_before_zone_launch
+run_test "zone harness uses service DNS runtime config without mutating source" test_zone_harness_uses_service_dns_runtime_config_without_mutating_source
 run_test "zone harness command exercises headless target twice with cursor cleanup checks" test_zone_harness_command_exercises_headless_target_twice_with_cursor_cleanup_checks
 run_test "validate tier3-harness delegates to smoke script" test_validate_tier3_harness_delegates_to_smoke_script
 run_test "help mentions stack and dry-run" test_help_mentions_stack_and_dry_run

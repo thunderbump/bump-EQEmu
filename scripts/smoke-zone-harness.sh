@@ -82,7 +82,7 @@ rm -rf \"\$runtime\"
 mkdir -p \"\$runtime/bin\" \"\$runtime/logs\" \"\$runtime/maps\" \"\$runtime/quests\"
 ln -s ~/code/build/bin/zone \"\$runtime/bin/zone\"
 ln -s ~/code/build/bin/shared_memory \"\$runtime/bin/shared_memory\"
-ln -s ~/server/eqemu_config.json \"\$runtime/eqemu_config.json\"
+jq '.server.database.host = \"mariadb\" | .server.database.port = \"3306\" | .server.qsdatabase.host = \"mariadb\" | .server.qsdatabase.port = \"3306\"' ~/server/eqemu_config.json > \"\$runtime/eqemu_config.json\"
 cd \"\$runtime\"
 
 dump_harness_log() {
