@@ -132,6 +132,26 @@ _Avoid_: Named Spawn, name-prefix match, spawn-probability guess, ordinary spawn
 A server-controlled character or creature that can perceive ordinary gameplay state, choose bounded actions toward a goal, and act through normal gameplay paths without direct player input.
 _Avoid_: AI actor, test actor, entity, mob
 
+**Actor Objective**:
+A persistent desired state advanced by observing **Actor Perception** and **Actor Events**, requesting one bounded **Actor Action** at a time, and evaluating its postcondition before choosing the next step.
+_Avoid_: Goal command, queued plan, action script
+
+**Actor Profile**:
+Stable persistent identity, replay metadata, and a small set of objective-mechanics traits for an **Autonomous Actor**. The first objective contract uses persistence, risk tolerance, and recovery threshold; current **Actor Objective** execution state is stored separately.
+_Avoid_: Objective state, personality blob, complete behavior configuration
+
+**Action Retry Budget**:
+The bounded number of retries allowed for one concrete **Actor Action** plan, such as a selected checkpoint or target, before the **Actor Objective** requires a fresh replacement plan.
+_Avoid_: Objective lifetime, death limit, infinite retry
+
+**Actor Replan Request**:
+The persistent request for a fresh concrete phase plan after an **Actor Action** exhausts its retry budget or is temporarily deferred. It identifies the action, phase, and action generation being replaced so stale or wrong-phase plans cannot resume the objective.
+_Avoid_: Uncorrelated retry, planner suggestion, queued plan
+
+**Objective Viability Allowance**:
+The bounded allowance for replanning, danger interruption, and death recovery before an **Actor Objective** is abandoned as no longer worthwhile.
+_Avoid_: Action retry count, actor health, global failure limit
+
 **Actor Perception**:
 The gameplay state visible or inferable to an **Autonomous Actor** at a decision point.
 _Avoid_: Actor context, AI context, full world state
@@ -316,6 +336,13 @@ _Avoid_: Autonomous Actor runtime, test actor system, production sidecar
 - **Zone Harness** diagnostic snapshots may include omniscient fields for assertions, but those snapshots should not be treated as **Actor Perception**.
 - An **Actor Action** expresses intent such as saying, targeting, moving, assisting, casting, attacking, tracking, or looting; it should not describe a forced outcome such as directly applying a buff, setting HP, forcing spell success, or marking an NPC as tracked.
 - **Actor Actions** should be intent requests when ordinary server rules exist for the behavior, so spell validity, range, line of sight, cooldowns, mana checks, aggro checks, holds, priorities, and resist outcomes remain authoritative.
+- One **Actor Objective** transition consumes one bounded observation or outcome and emits zero or one **Actor Action**; it must not emit a phase action without a concrete phase payload.
+- Exhausting an **Action Retry Budget** clears the concrete phase payload and requires a fresh replacement plan before another phase action is emitted.
+- An **Actor Replan Request** must match the replacement observation by request identity, phase, action generation, exact phase payload shape, and a concrete non-empty phase value before another phase action is emitted.
+- An abandoned **Actor Objective** has no live **Actor Replan Request** or recovery state.
+- A temporarily deferred **Actor Action** creates an **Actor Replan Request** without spending **Action Retry Budget** or **Objective Viability Allowance**; a structurally blocked action remains a retry failure.
+- Actor interruption preserves objective phase and active-versus-replanning resume state, spends **Objective Viability Allowance** rather than **Action Retry Budget**, and requires correlated recovery readiness before resuming.
+- Actor interruption observations use a persistent ordered watermark for snapshot-idempotent deduplication and advance an action-generation fence before recovery is emitted, so late attempts and outcomes from older generations cannot execute or advance the objective.
 - An **Actor Event** may be captured by tests or diagnostics, but not every **Actor Event** needs to be player-visible.
 - The first **Zone Harness** use of **Actor Events** should be ephemeral test observation, not durable world history, replay, analytics, learning memory, or cross-session actor state.
 - Durable memory for future **Autonomous Actors** should be designed separately rather than inferred from the first **Zone Harness** event drain.
