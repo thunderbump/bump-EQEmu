@@ -135,9 +135,10 @@ but the first contract does not invent mid-combat retreat. Ordinary Bot combat r
 combat end, target loss, or death. A retreat/disengage action requires a later ordinary-gameplay seam.
 
 Only the correlated death of the selected target satisfies `HuntOneAllowlistedTarget`. Player contention observed
-before engage is `deferred`. Target loss or combat ending with the selected target still alive is `failed` unless the
-terminal event names a separately recognized actor-level interruption, in which case it is `interrupted`. Party death
-is `death`. None of these non-success outcomes satisfies the hunt postcondition.
+before engage acceptance, or loss of the selected target before engage acceptance, is `deferred`. Loss of the selected
+target after Committed Engagement, or combat ending with that target still alive, is `failed`. Party death is `death`,
+and only correlated selected-target death is `succeeded`. The runner reserves `interrupted` for a distinct actor- or
+world-level interruption rather than using it for one of these hunt terminals.
 
 Committed Engagement also fences replacement behavior. Action expiry or an Objective Progress Lease stall may record
 stuck evidence while combat continues, but it cannot emit another consequential action, create a replacement replan,
