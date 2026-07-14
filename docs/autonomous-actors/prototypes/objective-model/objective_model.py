@@ -58,6 +58,9 @@ def make_snapshot(profile_name: str) -> dict[str, Any]:
             "viability_budget": 3,
             "viability_spent": 0,
             "interrupted_by": None,
+            "resume_status": None,
+            "interruption_watermark": 0,
+            "action_generation": 0,
         },
         "pending_action": None,
         "decision_sequence": 0,
@@ -85,6 +88,7 @@ def _action(snapshot: dict[str, Any]) -> dict[str, Any]:
         "objective_id": objective["id"],
         "phase": phase["name"],
         "attempt": objective["attempt"],
+        "generation": objective["action_generation"],
         "payload": copy.deepcopy(objective["phase_payload"]),
     }
 
@@ -104,14 +108,17 @@ def _recovery_action(snapshot: dict[str, Any]) -> dict[str, Any]:
         "objective_id": objective["id"],
         "phase": "recovery",
         "attempt": 1,
+        "generation": objective["action_generation"],
         "payload": {
             "readiness": snapshot["actor"]["profile"]["recovery_threshold"]
         },
     }
 
 
-def _request_phase_action(snapshot: dict[str, Any]) -> dict[str, Any]:
+def _request_phase_action(snapshot: dict[str, Any]) -> dict[str, Any] | None:
     objective = snapshot["objective"]
+    if not objective["phase_payload"]:
+        return None
     objective["attempt"] += 1
     action = _action(snapshot)
     snapshot["pending_action"] = action
@@ -134,6 +141,32 @@ def _decision(
     }
 
 
+def _interrupt(
+    snapshot: dict[str, Any], observation: dict[str, Any], interrupted_by: str, reason: str
+) -> tuple[dict[str, Any] | None, str]:
+    objective = snapshot["objective"]
+    observation_id = observation.get("observation_id")
+    if not isinstance(observation_id, int) or observation_id <= objective["interruption_watermark"]:
+        return None, "duplicate_or_stale_interruption"
+
+    objective["interruption_watermark"] = observation_id
+    objective["viability_spent"] += 1
+    objective["action_generation"] += 1
+    snapshot["pending_action"] = None
+    if objective["viability_spent"] > objective["viability_budget"]:
+        objective["status"] = "abandoned"
+        objective["resume_status"] = None
+        return None, "objective_viability_exhausted"
+
+    if objective["status"] != "recovering":
+        objective["resume_status"] = objective["status"]
+    objective["status"] = "recovering"
+    objective["interrupted_by"] = interrupted_by
+    action = _recovery_action(snapshot)
+    snapshot["pending_action"] = action
+    return action, reason
+
+
 def step(
     persistent_snapshot: dict[str, Any], observation: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any] | None, dict[str, Any]]:
@@ -146,45 +179,54 @@ def step(
 
     if objective["status"] in {"completed", "abandoned"}:
         reason = "objective_terminal"
+    elif observation["type"] == "interruption":
+        action, reason = _interrupt(
+            snapshot, observation, observation.get("reason", "interruption"), "actor_interrupted"
+        )
     elif observation["type"] == "death":
-        snapshot["pending_action"] = None
-        objective["viability_spent"] += 1
-        if objective["viability_spent"] > objective["viability_budget"]:
-            objective["status"] = "abandoned"
-            reason = "objective_viability_exhausted"
-        else:
-            objective["status"] = "recovering"
-            objective["interrupted_by"] = "death"
-            action = _recovery_action(snapshot)
-            snapshot["pending_action"] = action
-            reason = "death_interrupted"
+        action, reason = _interrupt(snapshot, observation, "death", "death_interrupted")
     elif observation["type"] == "danger":
         severity = observation["severity"]
         if severity > snapshot["actor"]["profile"]["risk_tolerance"]:
-            snapshot["pending_action"] = None
-            objective["viability_spent"] += 1
-            if objective["viability_spent"] > objective["viability_budget"]:
-                objective["status"] = "abandoned"
-                reason = "objective_viability_exhausted"
-            else:
-                objective["status"] = "recovering"
-                objective["interrupted_by"] = "danger"
-                action = _recovery_action(snapshot)
-                snapshot["pending_action"] = action
-                reason = "risk_threshold_exceeded"
+            action, reason = _interrupt(snapshot, observation, "danger", "risk_threshold_exceeded")
         else:
             reason = "risk_accepted"
+    elif observation["type"] == "action_attempt":
+        attempted = observation.get("action")
+        pending = snapshot["pending_action"]
+        if not isinstance(attempted, dict):
+            reason = "action_attempt_invalid"
+        elif attempted.get("generation", -1) < objective["action_generation"]:
+            reason = "action_attempt_fenced"
+        elif (
+            pending is not None
+            and attempted.get("id") == pending["id"]
+            and attempted.get("generation") == objective["action_generation"]
+        ):
+            reason = "action_attempt_allowed"
+        else:
+            reason = "stale_or_unknown_action_attempt"
     elif observation["type"] == "recovery_observation":
         if objective["status"] != "recovering":
             reason = "not_recovering"
+        elif (
+            snapshot["pending_action"] is None
+            or snapshot["pending_action"]["type"] != "recover_until"
+            or observation.get("action_id") != snapshot["pending_action"]["id"]
+        ):
+            reason = "stale_or_unknown_recovery"
         elif observation["readiness"] < snapshot["actor"]["profile"]["recovery_threshold"]:
             reason = "recovery_incomplete"
         else:
-            objective["status"] = "active"
+            objective["status"] = objective["resume_status"] or "active"
+            objective["resume_status"] = None
             objective["interrupted_by"] = None
             snapshot["pending_action"] = None
-            action = _request_phase_action(snapshot)
-            reason = "recovery_complete"
+            if objective["status"] == "replanning":
+                reason = "recovery_complete_awaiting_replacement"
+            else:
+                action = _request_phase_action(snapshot)
+                reason = "recovery_complete" if action else "phase_plan_required"
     elif observation["type"] == "decide":
         if objective["status"] == "replanning":
             reason = "awaiting_replacement_plan"
@@ -199,11 +241,13 @@ def step(
             reason = "awaiting_action_outcome"
         else:
             action = _request_phase_action(snapshot)
-            reason = "action_requested"
+            reason = "action_requested" if action else "phase_plan_required"
     elif observation["type"] == "replan":
         if objective["status"] != "replanning":
             reason = "replan_not_requested"
         else:
+            if not observation.get("payload"):
+                return snapshot, None, _decision(snapshot, observation, "replacement_plan_required", None)
             objective["status"] = "active"
             objective["failures"] = 0
             objective["phase_payload"] = copy.deepcopy(observation["payload"])
@@ -217,6 +261,8 @@ def step(
             or observation["action_id"] != pending["id"]
         ):
             reason = "stale_or_unknown_outcome"
+        elif observation["outcome"] == "interrupted":
+            action, reason = _interrupt(snapshot, observation, "action_interrupted", "actor_interrupted")
         elif observation["outcome"] == "succeeded":
             snapshot["pending_action"] = None
             objective["failures"] = 0
@@ -231,7 +277,7 @@ def step(
                 objective["phase_payload"] = copy.deepcopy(_phase(snapshot)["payload"])
                 action = _request_phase_action(snapshot)
                 reason = "postcondition_observed"
-        elif observation["outcome"] in {"blocked", "expired", "failed", "interrupted"}:
+        elif observation["outcome"] in {"blocked", "expired", "failed"}:
             snapshot["pending_action"] = None
             objective["failures"] += 1
             if objective["failures"] > snapshot["actor"]["profile"]["persistence"]:
@@ -241,6 +287,7 @@ def step(
                     reason = "objective_viability_exhausted"
                 else:
                     objective["status"] = "replanning"
+                    objective["phase_payload"] = None
                     reason = "action_retry_budget_exhausted"
             else:
                 action = _request_phase_action(snapshot)
@@ -276,11 +323,18 @@ def _command_observation(command: str, snapshot: dict[str, Any]) -> dict[str, An
         if pending is None:
             raise ValueError("there is no pending action")
         outcome = "succeeded" if words[0] == "success" else words[0]
-        return {"type": "action_outcome", "action_id": pending["id"], "outcome": outcome}
+        observation = {"type": "action_outcome", "action_id": pending["id"], "outcome": outcome}
+        if outcome == "interrupted":
+            observation["observation_id"] = snapshot["decision_sequence"] + 1
+        return observation
     if words[0] == "danger" and len(words) == 2:
-        return {"type": "danger", "severity": int(words[1])}
+        return {
+            "type": "danger",
+            "observation_id": snapshot["decision_sequence"] + 1,
+            "severity": int(words[1]),
+        }
     if words[0] == "death":
-        return {"type": "death"}
+        return {"type": "death", "observation_id": snapshot["decision_sequence"] + 1}
     if words[0] == "replan" and len(words) == 2:
         payload_key = {
             "travel": "checkpoint",
@@ -289,7 +343,14 @@ def _command_observation(command: str, snapshot: dict[str, Any]) -> dict[str, An
         }[snapshot["objective"]["phase"]]
         return {"type": "replan", "payload": {payload_key: words[1]}}
     if words[0] == "ready" and len(words) == 2:
-        return {"type": "recovery_observation", "readiness": int(words[1])}
+        pending = snapshot["pending_action"]
+        if pending is None or pending["type"] != "recover_until":
+            raise ValueError("there is no pending recovery action")
+        return {
+            "type": "recovery_observation",
+            "action_id": pending["id"],
+            "readiness": int(words[1]),
+        }
     raise ValueError("unknown command")
 
 

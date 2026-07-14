@@ -77,7 +77,12 @@ class ObjectiveModelTest(unittest.TestCase):
         )
         self.assertIsNone(action)
         self.assertEqual("replanning", snapshot["objective"]["status"])
+        self.assertIsNone(snapshot["objective"]["phase_payload"])
         self.assertEqual("action_retry_budget_exhausted", decision["reason"])
+
+        snapshot, action, decision = step(snapshot, {"type": "decide"})
+        self.assertIsNone(action)
+        self.assertEqual("awaiting_replacement_plan", decision["reason"])
 
         snapshot, replacement_action, decision = step(
             snapshot,
@@ -86,6 +91,15 @@ class ObjectiveModelTest(unittest.TestCase):
         self.assertEqual("active", snapshot["objective"]["status"])
         self.assertEqual("easier-allowlisted-mob", replacement_action["payload"]["target"])
         self.assertEqual("replacement_plan_observed", decision["reason"])
+
+    def test_active_objective_refuses_to_emit_without_a_phase_plan(self):
+        snapshot = make_snapshot("steady")
+        snapshot["objective"]["phase_payload"] = None
+
+        snapshot, action, decision = step(snapshot, {"type": "decide"})
+
+        self.assertIsNone(action)
+        self.assertEqual("phase_plan_required", decision["reason"])
 
     def test_objective_viability_bounds_repeated_replanning(self):
         snapshot = make_snapshot("cautious")
@@ -123,7 +137,7 @@ class ObjectiveModelTest(unittest.TestCase):
         )
 
         snapshot, recovery_action, decision = step(
-            snapshot, {"type": "danger", "severity": 70}
+            snapshot, {"type": "danger", "observation_id": 1, "severity": 70}
         )
         self.assertEqual("recover_until", recovery_action["type"])
         self.assertEqual("recovering", snapshot["objective"]["status"])
@@ -133,16 +147,132 @@ class ObjectiveModelTest(unittest.TestCase):
             snapshot,
             {
                 "type": "recovery_observation",
+                "action_id": recovery_action["id"],
                 "readiness": snapshot["actor"]["profile"]["recovery_threshold"],
             },
         )
         self.assertEqual("hunt", snapshot["objective"]["phase"])
         self.assertEqual("engage", resumed_action["type"])
 
-        snapshot, death_recovery_action, decision = step(snapshot, {"type": "death"})
+        snapshot, death_recovery_action, decision = step(
+            snapshot, {"type": "death", "observation_id": 2}
+        )
         self.assertEqual("recover_until", death_recovery_action["type"])
         self.assertEqual("death_interrupted", decision["reason"])
         self.assertEqual("hunt", snapshot["objective"]["phase"])
+
+    def test_actor_interruption_recovers_without_spending_action_retries(self):
+        snapshot = make_snapshot("cautious")
+        snapshot, action, _ = step(snapshot, {"type": "decide"})
+
+        snapshot, recovery_action, decision = step(
+            snapshot,
+            {
+                "type": "action_outcome",
+                "action_id": action["id"],
+                "outcome": "interrupted",
+                "observation_id": 1,
+            },
+        )
+
+        self.assertEqual("recovering", snapshot["objective"]["status"])
+        self.assertEqual(0, snapshot["objective"]["failures"])
+        self.assertEqual(1, snapshot["objective"]["viability_spent"])
+        self.assertEqual("recover_until", recovery_action["type"])
+        self.assertEqual("actor_interrupted", decision["reason"])
+
+    def test_recovery_resumes_replanning_without_emitting_an_action(self):
+        snapshot = make_snapshot("cautious")
+        snapshot, action, _ = step(snapshot, {"type": "decide"})
+        snapshot, _, _ = step(
+            snapshot,
+            {"type": "action_outcome", "action_id": action["id"], "outcome": "failed"},
+        )
+        snapshot, recovery_action, _ = step(
+            snapshot,
+            {"type": "interruption", "observation_id": 1, "reason": "death"},
+        )
+
+        snapshot, action, decision = step(
+            snapshot,
+            {
+                "type": "recovery_observation",
+                "action_id": recovery_action["id"],
+                "readiness": snapshot["actor"]["profile"]["recovery_threshold"],
+            },
+        )
+
+        self.assertEqual("replanning", snapshot["objective"]["status"])
+        self.assertIsNone(action)
+        self.assertEqual("recovery_complete_awaiting_replacement", decision["reason"])
+
+    def test_duplicate_interruption_observation_does_not_spend_viability_twice(self):
+        snapshot = make_snapshot("steady")
+        snapshot, _, _ = step(snapshot, {"type": "decide"})
+        death = {"type": "death", "observation_id": 7}
+
+        snapshot, recovery_action, _ = step(snapshot, death)
+        snapshot, duplicate_action, decision = step(snapshot, death)
+
+        self.assertEqual(1, snapshot["objective"]["viability_spent"])
+        self.assertEqual(recovery_action, snapshot["pending_action"])
+        self.assertIsNone(duplicate_action)
+        self.assertEqual("duplicate_or_stale_interruption", decision["reason"])
+
+    def test_stale_readiness_cannot_complete_a_replaced_recovery_action(self):
+        snapshot = make_snapshot("steady")
+        snapshot, _, _ = step(snapshot, {"type": "decide"})
+        snapshot, first_recovery, _ = step(
+            snapshot, {"type": "death", "observation_id": 1}
+        )
+        snapshot, current_recovery, _ = step(
+            snapshot, {"type": "danger", "observation_id": 2, "severity": 90}
+        )
+
+        snapshot, action, decision = step(
+            snapshot,
+            {
+                "type": "recovery_observation",
+                "action_id": first_recovery["id"],
+                "readiness": 100,
+            },
+        )
+
+        self.assertEqual("recovering", snapshot["objective"]["status"])
+        self.assertEqual(current_recovery, snapshot["pending_action"])
+        self.assertIsNone(action)
+        self.assertEqual("stale_or_unknown_recovery", decision["reason"])
+
+    def test_interruption_fences_late_action_attempts_and_outcomes(self):
+        snapshot = make_snapshot("steady")
+        snapshot, interrupted_action, _ = step(snapshot, {"type": "decide"})
+        snapshot, recovery_action, _ = step(
+            snapshot,
+            {"type": "interruption", "observation_id": 1, "reason": "capacity_reclaimed"},
+        )
+
+        snapshot, action, attempt_decision = step(
+            snapshot, {"type": "action_attempt", "action": interrupted_action}
+        )
+        self.assertIsNone(action)
+        self.assertEqual("action_attempt_fenced", attempt_decision["reason"])
+
+        snapshot, action, outcome_decision = step(
+            snapshot,
+            {
+                "type": "action_outcome",
+                "action_id": interrupted_action["id"],
+                "outcome": "succeeded",
+            },
+        )
+        self.assertIsNone(action)
+        self.assertEqual("stale_or_unknown_outcome", outcome_decision["reason"])
+
+        snapshot, action, recovery_decision = step(
+            snapshot, {"type": "action_attempt", "action": recovery_action}
+        )
+        self.assertIsNone(action)
+        self.assertEqual("action_attempt_allowed", recovery_decision["reason"])
 
     def test_replay_is_deterministic_and_ignores_stale_outcomes(self):
         initial = make_snapshot("steady")

@@ -332,6 +332,10 @@ _Avoid_: Autonomous Actor runtime, test actor system, production sidecar
 - **Zone Harness** diagnostic snapshots may include omniscient fields for assertions, but those snapshots should not be treated as **Actor Perception**.
 - An **Actor Action** expresses intent such as saying, targeting, moving, assisting, casting, attacking, tracking, or looting; it should not describe a forced outcome such as directly applying a buff, setting HP, forcing spell success, or marking an NPC as tracked.
 - **Actor Actions** should be intent requests when ordinary server rules exist for the behavior, so spell validity, range, line of sight, cooldowns, mana checks, aggro checks, holds, priorities, and resist outcomes remain authoritative.
+- One **Actor Objective** transition consumes one bounded observation or outcome and emits zero or one **Actor Action**; it must not emit a phase action without a concrete phase payload.
+- Exhausting an **Action Retry Budget** clears the concrete phase payload and requires a fresh replacement plan before another phase action is emitted.
+- Actor interruption preserves objective phase and active-versus-replanning resume state, spends **Objective Viability Allowance** rather than **Action Retry Budget**, and requires correlated recovery readiness before resuming.
+- Actor interruption observations use a persistent ordered watermark for deduplication and advance an action-generation fence before recovery is emitted, so late attempts and outcomes from older generations cannot execute or advance the objective.
 - An **Actor Event** may be captured by tests or diagnostics, but not every **Actor Event** needs to be player-visible.
 - The first **Zone Harness** use of **Actor Events** should be ephemeral test observation, not durable world history, replay, analytics, learning memory, or cross-session actor state.
 - Durable memory for future **Autonomous Actors** should be designed separately rather than inferred from the first **Zone Harness** event drain.
