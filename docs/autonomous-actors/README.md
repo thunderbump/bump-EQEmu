@@ -20,3 +20,5 @@
   - Actor Events stay actor-scoped in `actor_events`, keyed by `actor_id` plus monotonic `event_id`; Player Events stay account/character-scoped in `player_event_logs`.
 - `actor-action-queue-controls.md`
   - `central-lhy.13` persistence note for bounded queue controls: duplicate suppression, stale-intent expiry, claim safety, and queue buildup limits for `actor_action_queue`.
+- `conserved-inventory-economy-seams.md`
+  - `central-dcq7.9` research on reusing ordinary loot, Bot equipment valuation, merchant, currency, and market rules behind session-independent conserved transaction seams for Actors.
