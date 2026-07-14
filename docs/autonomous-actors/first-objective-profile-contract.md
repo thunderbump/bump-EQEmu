@@ -40,7 +40,7 @@ The first registry declares seven flat templates:
 | --- | --- | --- |
 | `DwellAtAnchor` | Party remains visibly or coarsely at an authored safe anchor for a bounded dwell | First promotion target after dwell outcomes are proven |
 | `TravelTo` | Party reaches one configured checkpoint or destination through repeated bounded movement/handoff actions | Disabled until nav reachability and cross-zone handoff are proven |
-| `HuntOneAllowlistedTarget` | One zone-selected, allowlisted target reaches an authoritative combat terminal state | First consequential promotion target in materialized Misty |
+| `HuntOneAllowlistedTarget` | The selected, zone-owned allowlisted target has an authoritatively correlated death | First consequential promotion target in materialized Misty |
 | `RecoverToThreshold` | Party reaches Party Readiness through ordinary recovery behavior | Live-authoritative first; coarse elapsed recovery requires separate proof |
 | `AcquireOneItem` | One observed corpse item changes conserved custody | Disabled until the custody/loot seam is proven |
 | `SellOneItem` | One conserved item-for-currency merchant transaction completes | Disabled until custody, wallet, and merchant authority are proven |
@@ -50,15 +50,27 @@ Declaration does not imply availability. An Actor Routine may instantiate a temp
 authority class, progress event, terminal result, and postcondition in the template has authoritative runtime proof.
 Optional unavailable objectives are omitted before instantiation; they are never entered and allowed to stall.
 
-The initial authored routine is:
+The full-route authored routine is:
 
 ```text
 TravelTo -> HuntOneAllowlistedTarget -> RecoverToThreshold -> TravelTo(home) -> DwellAtAnchor
 ```
 
 `AcquireOneItem`, `SellOneItem`, and `ResupplyOneItem` join the routine only after their conserved seams are enabled.
-The first promoted slice is `DwellAtAnchor` plus `HuntOneAllowlistedTarget` for an already-materialized Actor-led Party in
-the bounded Misty hunting area. Travel and economy remain gated.
+This routine remains unavailable until `TravelTo`, including its cross-zone handoff, is proven.
+
+The separately versioned first-promotion routine is intentionally local:
+
+```text
+MistyLocalPresenceV1: DwellAtAnchor -> HuntOneAllowlistedTarget ->
+  RecoverToThreshold(when unready) -> DwellAtAnchor
+```
+
+It begins with an already-materialized Actor-led Party at an authored anchor in the bounded Misty hunting area and does
+not instantiate or skip `TravelTo`. Before this routine can promote `HuntOneAllowlistedTarget`, authoritative
+interruption recovery and correlated Party Readiness must be proven as supporting capabilities. This is required even
+when a run does not select scheduled `RecoverToThreshold`: danger, interruption, or death can enter runner-owned
+recovery from any active hunt. Travel and economy remain gated.
 
 ## Profile presets
 
@@ -89,12 +101,14 @@ Every template uses the same transition contract:
 | `deferred` | Clear the concrete plan, create a correlated Actor Replan Request, and spend no retry or viability |
 | `blocked`, `failed`, `expired` | Spend an action attempt; when retries are exhausted, spend one viability and require a fresh correlated plan |
 | `interrupted`, `death` | Spend one viability and enter recovery while preserving active-versus-replanning resume state |
-| stale, duplicate, or mismatched input | Leave persistent state and budgets unchanged |
+| stale, duplicate, or mismatched input | Leave objective execution state, the outstanding request, and budgets unchanged; an audit decision receipt or sequence may still advance |
 | viability exhausted | Abandon the objective and return conserved state to the Actor Routine |
 
 Templates define concrete payload schemas, postconditions, meaningful progress events, and deferred-versus-structural
-classifications. The runner alone owns the common transitions. A fresh plan must match the outstanding replan request,
-phase, failed/deferred action generation, and exact concrete payload shape.
+classifications. The runner alone owns the common transitions. A fresh plan must match the outstanding replan request
+identity, its phase, its current action-generation fence, and the exact concrete payload shape. If interruption occurs
+while replanning, the runner advances the action generation and atomically refreshes the persisted request identity and
+generation; a response correlated to the pre-interruption request remains stale.
 
 Abandonment never deletes, teleports, silently dematerializes, or fabricates a successful return. The routine selects
 `RecoverToThreshold` when the party is unready and recovery is possible, otherwise `DwellAtAnchor` at a configured safe
@@ -119,6 +133,16 @@ blocked/interrupted results rather than being silently excluded.
 An accepted engage action creates a **Committed Engagement**. Party Danger may prevent engagement or schedule recovery,
 but the first contract does not invent mid-combat retreat. Ordinary Bot combat remains authoritative until observed
 combat end, target loss, or death. A retreat/disengage action requires a later ordinary-gameplay seam.
+
+Only the correlated death of the selected target satisfies `HuntOneAllowlistedTarget`. Player contention observed
+before engage is `deferred`. Target loss or combat ending with the selected target still alive is `failed` unless the
+terminal event names a separately recognized actor-level interruption, in which case it is `interrupted`. Party death
+is `death`. None of these non-success outcomes satisfies the hunt postcondition.
+
+Committed Engagement also fences replacement behavior. Action expiry or an Objective Progress Lease stall may record
+stuck evidence while combat continues, but it cannot emit another consequential action, create a replacement replan,
+or dematerialize the party before an authoritative combat terminal is observed. The runner classifies that terminal
+outcome afterward, then applies the ordinary retry, recovery, replanning, or abandonment transition.
 
 ## Time and execution authority
 
