@@ -132,6 +132,22 @@ _Avoid_: Named Spawn, name-prefix match, spawn-probability guess, ordinary spawn
 A server-controlled character or creature that can perceive ordinary gameplay state, choose bounded actions toward a goal, and act through normal gameplay paths without direct player input.
 _Avoid_: AI actor, test actor, entity, mob
 
+**Actor Objective**:
+A persistent desired state advanced by observing **Actor Perception** and **Actor Events**, requesting one bounded **Actor Action** at a time, and evaluating its postcondition before choosing the next step.
+_Avoid_: Goal command, queued plan, action script
+
+**Actor Profile**:
+Stable persistent identity, replay metadata, and a small set of objective-mechanics traits for an **Autonomous Actor**. The first objective contract uses persistence, risk tolerance, and recovery threshold; current **Actor Objective** execution state is stored separately.
+_Avoid_: Objective state, personality blob, complete behavior configuration
+
+**Action Retry Budget**:
+The bounded number of retries allowed for one concrete **Actor Action** plan, such as a selected checkpoint or target, before the **Actor Objective** requires a fresh replacement plan.
+_Avoid_: Objective lifetime, death limit, infinite retry
+
+**Objective Viability Allowance**:
+The bounded allowance for replanning, danger interruption, and death recovery before an **Actor Objective** is abandoned as no longer worthwhile.
+_Avoid_: Action retry count, actor health, global failure limit
+
 **Actor Perception**:
 The gameplay state visible or inferable to an **Autonomous Actor** at a decision point.
 _Avoid_: Actor context, AI context, full world state
