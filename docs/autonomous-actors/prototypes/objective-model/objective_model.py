@@ -61,6 +61,7 @@ def make_snapshot(profile_name: str) -> dict[str, Any]:
             "resume_status": None,
             "interruption_watermark": 0,
             "action_generation": 0,
+            "replan_request": None,
         },
         "pending_action": None,
         "decision_sequence": 0,
@@ -101,7 +102,7 @@ def _recovery_action(snapshot: dict[str, Any]) -> dict[str, Any]:
                 snapshot["actor"]["id"],
                 objective["id"],
                 "recovery",
-                str(snapshot["decision_sequence"]),
+                str(objective["action_generation"]),
             )
         ),
         "type": "recover_until",
@@ -141,6 +142,50 @@ def _decision(
     }
 
 
+def _required_payload_key(snapshot: dict[str, Any]) -> str:
+    return next(iter(_phase(snapshot)["payload"]))
+
+
+def _open_replan_request(
+    snapshot: dict[str, Any], action: dict[str, Any]
+) -> dict[str, Any]:
+    objective = snapshot["objective"]
+    request = {
+        "id": f"{action['id']}:replan:{objective['action_generation']}",
+        "action_id": action["id"],
+        "phase": objective["phase"],
+        "generation": objective["action_generation"],
+        "required_payload_key": _required_payload_key(snapshot),
+    }
+    objective["replan_request"] = request
+    return request
+
+
+def _refresh_replan_request(snapshot: dict[str, Any]) -> None:
+    objective = snapshot["objective"]
+    request = objective["replan_request"]
+    if request is None:
+        return
+    request["generation"] = objective["action_generation"]
+    request["id"] = f"{request['action_id']}:replan:{objective['action_generation']}"
+
+
+def _is_duplicate_interruption(
+    snapshot: dict[str, Any], observation: dict[str, Any]
+) -> bool:
+    observation_id = observation.get("observation_id")
+    if not isinstance(observation_id, int):
+        return False
+    if observation_id > snapshot["objective"]["interruption_watermark"]:
+        return False
+
+    if observation.get("type") in {"interruption", "death"}:
+        return True
+    if observation.get("type") == "danger":
+        return observation.get("severity", 0) > snapshot["actor"]["profile"]["risk_tolerance"]
+    return observation.get("type") == "action_outcome" and observation.get("outcome") == "interrupted"
+
+
 def _interrupt(
     snapshot: dict[str, Any], observation: dict[str, Any], interrupted_by: str, reason: str
 ) -> tuple[dict[str, Any] | None, str]:
@@ -152,6 +197,8 @@ def _interrupt(
     objective["interruption_watermark"] = observation_id
     objective["viability_spent"] += 1
     objective["action_generation"] += 1
+    if objective["status"] == "replanning" or objective["resume_status"] == "replanning":
+        _refresh_replan_request(snapshot)
     snapshot["pending_action"] = None
     if objective["viability_spent"] > objective["viability_budget"]:
         objective["status"] = "abandoned"
@@ -172,6 +219,8 @@ def step(
 ) -> tuple[dict[str, Any], dict[str, Any] | None, dict[str, Any]]:
     """Apply one observation and emit at most one bounded Actor Action."""
     snapshot = copy.deepcopy(persistent_snapshot)
+    if _is_duplicate_interruption(snapshot, observation):
+        return snapshot, None, _decision(snapshot, observation, "duplicate_or_stale_interruption", None)
     snapshot["decision_sequence"] += 1
     objective = snapshot["objective"]
     action = None
@@ -246,11 +295,18 @@ def step(
         if objective["status"] != "replanning":
             reason = "replan_not_requested"
         else:
-            if not observation.get("payload"):
-                return snapshot, None, _decision(snapshot, observation, "replacement_plan_required", None)
+            request = objective["replan_request"]
+            if request is None or observation.get("request_id") != request["id"]:
+                return snapshot, None, _decision(snapshot, observation, "stale_or_unknown_replan", None)
+            if request["phase"] != objective["phase"] or request["generation"] != objective["action_generation"]:
+                return snapshot, None, _decision(snapshot, observation, "stale_or_unknown_replan", None)
+            payload = observation.get("payload")
+            if not isinstance(payload, dict) or set(payload) != {request["required_payload_key"]}:
+                return snapshot, None, _decision(snapshot, observation, "replacement_plan_invalid", None)
             objective["status"] = "active"
             objective["failures"] = 0
-            objective["phase_payload"] = copy.deepcopy(observation["payload"])
+            objective["phase_payload"] = copy.deepcopy(payload)
+            objective["replan_request"] = None
             action = _request_phase_action(snapshot)
             reason = "replacement_plan_observed"
     elif observation["type"] == "action_outcome":
@@ -277,6 +333,12 @@ def step(
                 objective["phase_payload"] = copy.deepcopy(_phase(snapshot)["payload"])
                 action = _request_phase_action(snapshot)
                 reason = "postcondition_observed"
+        elif observation["outcome"] == "deferred":
+            snapshot["pending_action"] = None
+            objective["status"] = "replanning"
+            objective["phase_payload"] = None
+            _open_replan_request(snapshot, pending)
+            reason = "action_temporarily_deferred"
         elif observation["outcome"] in {"blocked", "expired", "failed"}:
             snapshot["pending_action"] = None
             objective["failures"] += 1
@@ -288,6 +350,7 @@ def step(
                 else:
                     objective["status"] = "replanning"
                     objective["phase_payload"] = None
+                    _open_replan_request(snapshot, pending)
                     reason = "action_retry_budget_exhausted"
             else:
                 action = _request_phase_action(snapshot)
@@ -318,7 +381,7 @@ def _command_observation(command: str, snapshot: dict[str, Any]) -> dict[str, An
         return None
     if words[0] == "decide":
         return {"type": "decide"}
-    if words[0] in {"success", "failed", "blocked", "expired", "interrupted"}:
+    if words[0] in {"success", "failed", "blocked", "deferred", "expired", "interrupted"}:
         pending = snapshot["pending_action"]
         if pending is None:
             raise ValueError("there is no pending action")
@@ -336,12 +399,14 @@ def _command_observation(command: str, snapshot: dict[str, Any]) -> dict[str, An
     if words[0] == "death":
         return {"type": "death", "observation_id": snapshot["decision_sequence"] + 1}
     if words[0] == "replan" and len(words) == 2:
-        payload_key = {
-            "travel": "checkpoint",
-            "hunt": "target",
-            "acquire": "item",
-        }[snapshot["objective"]["phase"]]
-        return {"type": "replan", "payload": {payload_key: words[1]}}
+        request = snapshot["objective"]["replan_request"]
+        if request is None:
+            raise ValueError("there is no pending replan request")
+        return {
+            "type": "replan",
+            "request_id": request["id"],
+            "payload": {request["required_payload_key"]: words[1]},
+        }
     if words[0] == "ready" and len(words) == 2:
         pending = snapshot["pending_action"]
         if pending is None or pending["type"] != "recover_until":
@@ -366,7 +431,7 @@ def main() -> None:
     initial = make_snapshot(args.profile)
     snapshot = copy.deepcopy(initial)
     observations: list[dict[str, Any]] = []
-    print("Commands: decide, success, failed, blocked, expired, interrupted, replan NAME, danger N, death, ready N, show, replay, quit")
+    print("Commands: decide, success, failed, blocked, deferred, expired, interrupted, replan NAME, danger N, death, ready N, show, replay, quit")
     print(json.dumps(snapshot, indent=2))
 
     while True:

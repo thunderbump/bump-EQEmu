@@ -31,7 +31,8 @@ states:
 - `active`: may emit one bounded action and wait for its correlated outcome;
 - `recovering`: preserves objective phase and whether execution should resume as `active` or `replanning` while waiting
   for readiness;
-- `replanning`: emits no gameplay action until a fresh bounded replacement plan is observed;
+- `replanning`: persists an **Actor Replan Request** and emits no gameplay action until a matching fresh bounded
+  replacement plan is observed;
 - `completed`: terminal because the objective postcondition was observed;
 - `abandoned`: terminal because the broader objective is no longer viable.
 
@@ -50,6 +51,11 @@ Exhausting the Action Retry Budget clears the concrete phase payload and enters 
 emitted without a payload. A fresh observation must supply a replacement before another action is emitted. This
 prevents an actor from fixating on a target that is too difficult.
 
+The persisted Actor Replan Request identifies the exhausted action, phase, and action generation and declares the one
+payload key required by that phase. A replacement observation must match the request identity and provide exactly that
+key. Replayed same-phase plans, delayed plans from an earlier phase, missing keys, and extra keys are rejected without
+consuming the current request.
+
 Danger and death preserve the current phase and do not consume the Action Retry Budget because they do not necessarily
 prove the concrete strategy was bad. They do consume Objective Viability. Exhausting Objective Viability abandons the
 broader objective, preventing infinite recover-and-resume loops.
@@ -58,9 +64,10 @@ Actor-level interruption, including the public `interrupted` outcome, follows th
 than being classified as action failure. Recovery remembers whether it interrupted active execution or replanning; a
 replanning objective returns to `replanning` and emits nothing until it receives a replacement plan.
 
-Temporary deferrals such as player contention should not automatically consume the Action Retry Budget. Structural or
-terminal failures such as no route, an expired action, or a failed engagement should. The exact outcome classification
-belongs in each live action contract.
+Temporary deferrals such as player contention use the explicit `deferred` outcome. Deferral clears the concrete payload
+and creates an Actor Replan Request, but spends neither the Action Retry Budget nor Objective Viability Allowance.
+`blocked` is reserved for structural rejection and remains a retry failure, along with terminal failures such as no
+route, an expired action, or a failed engagement. Each live action contract must classify its outcomes accordingly.
 
 ## Deterministic replay
 
@@ -69,8 +76,9 @@ record exposes the actor, objective, phase, state, observation, reason, and emit
 is deliberately not selected by this prototype.
 
 Interruption observations carry monotonically increasing IDs. The persistent snapshot keeps a watermark so duplicate
-or stale danger, death, and interruption delivery cannot spend Objective Viability twice. A readiness observation must
-name the current recovery action; stale readiness cannot finish a replaced recovery.
+or stale danger, death, and interruption delivery leaves the snapshot unchanged and cannot spend Objective Viability
+twice. A readiness observation must name the current recovery action; stale readiness cannot finish a replaced
+recovery. Recovery action identity derives from the action generation rather than observation delivery count.
 
 Every emitted action also carries the objective's current action generation. An interruption atomically increments the
 generation and clears the pending action before emitting recovery, fencing every older action attempt. An executor must
@@ -80,10 +88,12 @@ zero-or-one action seam.
 
 ## Evidence and remaining decisions
 
-The disposable simulator is in [`prototypes/objective-model/`](prototypes/objective-model/). Twelve behavior tests cover
+The disposable simulator is in [`prototypes/objective-model/`](prototypes/objective-model/). Sixteen behavior tests cover
 bounded emission, observed phase progress, profile differences, danger/death recovery, replacement-plan enforcement,
 viability exhaustion, recovery resume state, interruption deduplication and fencing, stale readiness and outcomes, and
-deterministic replay. Interactive failure, replanning, replacement, and replay matched exactly.
+deterministic replay. They also cover stale same-phase and cross-phase replacement plans, exact replacement payload
+shape, non-consuming temporary deferral, and structural blocking. Interactive failure, replanning, replacement, and
+replay matched exactly.
 
 This result does not choose production persistence, tune numeric values, select replacement targets, or define the
 first objective hierarchy. Those decisions follow in `central-dcq7.8` using this state model and the mapped gameplay

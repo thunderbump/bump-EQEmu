@@ -86,7 +86,11 @@ class ObjectiveModelTest(unittest.TestCase):
 
         snapshot, replacement_action, decision = step(
             snapshot,
-            {"type": "replan", "payload": {"target": "easier-allowlisted-mob"}},
+            {
+                "type": "replan",
+                "request_id": snapshot["objective"]["replan_request"]["id"],
+                "payload": {"target": "easier-allowlisted-mob"},
+            },
         )
         self.assertEqual("active", snapshot["objective"]["status"])
         self.assertEqual("easier-allowlisted-mob", replacement_action["payload"]["target"])
@@ -112,7 +116,11 @@ class ObjectiveModelTest(unittest.TestCase):
         )
         snapshot, action, _ = step(
             snapshot,
-            {"type": "replan", "payload": {"checkpoint": "alternate-route"}},
+            {
+                "type": "replan",
+                "request_id": snapshot["objective"]["replan_request"]["id"],
+                "payload": {"checkpoint": "alternate-route"},
+            },
         )
         snapshot, next_action, decision = step(
             snapshot,
@@ -188,10 +196,14 @@ class ObjectiveModelTest(unittest.TestCase):
             snapshot,
             {"type": "action_outcome", "action_id": action["id"], "outcome": "failed"},
         )
+        exhausted_request_id = snapshot["objective"]["replan_request"]["id"]
         snapshot, recovery_action, _ = step(
             snapshot,
             {"type": "interruption", "observation_id": 1, "reason": "death"},
         )
+        refreshed_request = copy.deepcopy(snapshot["objective"]["replan_request"])
+        self.assertNotEqual(exhausted_request_id, refreshed_request["id"])
+        self.assertEqual(snapshot["objective"]["action_generation"], refreshed_request["generation"])
 
         snapshot, action, decision = step(
             snapshot,
@@ -206,14 +218,27 @@ class ObjectiveModelTest(unittest.TestCase):
         self.assertIsNone(action)
         self.assertEqual("recovery_complete_awaiting_replacement", decision["reason"])
 
+        snapshot, action, decision = step(
+            snapshot,
+            {
+                "type": "replan",
+                "request_id": refreshed_request["id"],
+                "payload": {"checkpoint": "safe-route"},
+            },
+        )
+        self.assertEqual("move_to", action["type"])
+        self.assertEqual("replacement_plan_observed", decision["reason"])
+
     def test_duplicate_interruption_observation_does_not_spend_viability_twice(self):
         snapshot = make_snapshot("steady")
         snapshot, _, _ = step(snapshot, {"type": "decide"})
         death = {"type": "death", "observation_id": 7}
 
         snapshot, recovery_action, _ = step(snapshot, death)
+        before_duplicate = copy.deepcopy(snapshot)
         snapshot, duplicate_action, decision = step(snapshot, death)
 
+        self.assertEqual(before_duplicate, snapshot)
         self.assertEqual(1, snapshot["objective"]["viability_spent"])
         self.assertEqual(recovery_action, snapshot["pending_action"])
         self.assertIsNone(duplicate_action)
@@ -273,6 +298,123 @@ class ObjectiveModelTest(unittest.TestCase):
         )
         self.assertIsNone(action)
         self.assertEqual("action_attempt_allowed", recovery_decision["reason"])
+
+    def test_replan_rejects_stale_same_phase_request(self):
+        snapshot = make_snapshot("cautious")
+        snapshot, action, _ = step(snapshot, {"type": "decide"})
+        snapshot, _, _ = step(
+            snapshot,
+            {"type": "action_outcome", "action_id": action["id"], "outcome": "failed"},
+        )
+        old_request_id = snapshot["objective"]["replan_request"]["id"]
+        snapshot, action, _ = step(
+            snapshot,
+            {
+                "type": "replan",
+                "request_id": old_request_id,
+                "payload": {"checkpoint": "route-b"},
+            },
+        )
+        snapshot, _, _ = step(
+            snapshot,
+            {"type": "action_outcome", "action_id": action["id"], "outcome": "failed"},
+        )
+        current_request = copy.deepcopy(snapshot["objective"]["replan_request"])
+
+        snapshot, action, decision = step(
+            snapshot,
+            {
+                "type": "replan",
+                "request_id": old_request_id,
+                "payload": {"checkpoint": "stale-route-a"},
+            },
+        )
+
+        self.assertIsNone(action)
+        self.assertEqual("replanning", snapshot["objective"]["status"])
+        self.assertEqual(current_request, snapshot["objective"]["replan_request"])
+        self.assertEqual("stale_or_unknown_replan", decision["reason"])
+
+    def test_replan_rejects_delayed_cross_phase_request_and_wrong_payload_shape(self):
+        snapshot = make_snapshot("cautious")
+        snapshot, action, _ = step(snapshot, {"type": "decide"})
+        snapshot, _, _ = step(
+            snapshot,
+            {"type": "action_outcome", "action_id": action["id"], "outcome": "failed"},
+        )
+        travel_request_id = snapshot["objective"]["replan_request"]["id"]
+        snapshot, action, _ = step(
+            snapshot,
+            {
+                "type": "replan",
+                "request_id": travel_request_id,
+                "payload": {"checkpoint": "route-b"},
+            },
+        )
+        snapshot, hunt_action, _ = step(
+            snapshot,
+            {"type": "action_outcome", "action_id": action["id"], "outcome": "succeeded"},
+        )
+        snapshot, _, _ = step(
+            snapshot,
+            {"type": "action_outcome", "action_id": hunt_action["id"], "outcome": "failed"},
+        )
+        hunt_request_id = snapshot["objective"]["replan_request"]["id"]
+
+        snapshot, action, decision = step(
+            snapshot,
+            {
+                "type": "replan",
+                "request_id": travel_request_id,
+                "payload": {"checkpoint": "stale-route-a"},
+            },
+        )
+        self.assertIsNone(action)
+        self.assertEqual("stale_or_unknown_replan", decision["reason"])
+
+        snapshot, action, decision = step(
+            snapshot,
+            {
+                "type": "replan",
+                "request_id": hunt_request_id,
+                "payload": {"checkpoint": "wrong-key", "target": "also-extra"},
+            },
+        )
+        self.assertIsNone(action)
+        self.assertEqual("replacement_plan_invalid", decision["reason"])
+        self.assertEqual(hunt_request_id, snapshot["objective"]["replan_request"]["id"])
+
+    def test_temporary_deferral_requires_replan_without_spending_budgets(self):
+        snapshot = make_snapshot("cautious")
+        snapshot, action, _ = step(snapshot, {"type": "decide"})
+
+        snapshot, next_action, decision = step(
+            snapshot,
+            {"type": "action_outcome", "action_id": action["id"], "outcome": "deferred"},
+        )
+
+        self.assertIsNone(next_action)
+        self.assertEqual("replanning", snapshot["objective"]["status"])
+        self.assertEqual(0, snapshot["objective"]["failures"])
+        self.assertEqual(0, snapshot["objective"]["viability_spent"])
+        self.assertEqual(action["id"], snapshot["objective"]["replan_request"]["action_id"])
+        self.assertEqual(action["phase"], snapshot["objective"]["replan_request"]["phase"])
+        self.assertEqual(action["generation"], snapshot["objective"]["replan_request"]["generation"])
+        self.assertEqual("action_temporarily_deferred", decision["reason"])
+
+    def test_structural_blocked_outcome_spends_retry_and_viability(self):
+        snapshot = make_snapshot("cautious")
+        snapshot, action, _ = step(snapshot, {"type": "decide"})
+
+        snapshot, next_action, decision = step(
+            snapshot,
+            {"type": "action_outcome", "action_id": action["id"], "outcome": "blocked"},
+        )
+
+        self.assertIsNone(next_action)
+        self.assertEqual(1, snapshot["objective"]["failures"])
+        self.assertEqual(1, snapshot["objective"]["viability_spent"])
+        self.assertEqual("action_retry_budget_exhausted", decision["reason"])
 
     def test_replay_is_deterministic_and_ignores_stale_outcomes(self):
         initial = make_snapshot("steady")
