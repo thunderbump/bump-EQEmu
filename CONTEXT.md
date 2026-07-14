@@ -132,13 +132,45 @@ _Avoid_: Named Spawn, name-prefix match, spawn-probability guess, ordinary spawn
 A server-controlled character or creature that can perceive ordinary gameplay state, choose bounded actions toward a goal, and act through normal gameplay paths without direct player input.
 _Avoid_: AI actor, test actor, entity, mob
 
+**Actor-led Party**:
+A party with one **Autonomous Actor** as its gameplay-intent source and ordinary owned bots filling the remaining group roles.
+_Avoid_: Actor group, autonomous group, multi-actor party
+
 **Actor Objective**:
 A persistent desired state advanced by observing **Actor Perception** and **Actor Events**, requesting one bounded **Actor Action** at a time, and evaluating its postcondition before choosing the next step.
 _Avoid_: Goal command, queued plan, action script
 
+**Actor Objective Template**:
+A versioned, operator-approved definition of one bounded desired state that an **Actor Routine** may instantiate. Templates remain unavailable until their required gameplay capabilities have authoritative execution and observable completion.
+_Avoid_: Composite quest, action script, behavior tree
+
+**Actor Routine**:
+A versioned, operator-approved strategy that selects one flat **Actor Objective** at a time to create a believable larger activity cycle. It does not nest objectives or decide that gameplay actions succeeded.
+_Avoid_: Composite objective, queued plan, objective hierarchy
+
+**Actor Strategy Registry**:
+The operator-controlled collection of immutable, versioned **Actor Routines**, **Actor Objective Templates**, **Actor Profile Presets**, and **Party Danger** evaluators. Persistent Actors reference published versions rather than accepting live-edited or planner-authored strategy definitions.
+_Avoid_: Strategy database, live behavior editor, planner configuration
+
 **Actor Profile**:
 Stable persistent identity, replay metadata, and a small set of objective-mechanics traits for an **Autonomous Actor**. The first objective contract uses persistence, risk tolerance, and recovery threshold; current **Actor Objective** execution state is stored separately.
 _Avoid_: Objective state, personality blob, complete behavior configuration
+
+**Actor Profile Preset**:
+A versioned, operator-approved bundle of persistence, risk tolerance, and recovery threshold assigned to an **Actor Profile**. The first contract uses fixed cautious, steady, and tenacious presets without per-actor overrides.
+_Avoid_: Personality class, mutable strategy, arbitrary trait values
+
+**Party Readiness**:
+The Actor leader and its spawned Bot followers being present, alive, out of combat, and above the configured HP and applicable mana recovery thresholds. Endurance and pets are not part of the first readiness contract.
+_Avoid_: Actor health, full resources, recovery timer
+
+**Party Danger**:
+A versioned, normalized live estimate of immediate risk to an Actor-led Party, computed from authoritative party and combat state independently of its **Actor Profile Preset**. The first contract is reactive and does not predict zone depth or route difficulty.
+_Avoid_: Zone difficulty, planner risk guess, objective importance
+
+**Committed Engagement**:
+An accepted Actor-led Party combat engagement that remains under ordinary Bot combat authority until combat ends, the target is lost, or the party dies. The first contract does not treat recovery as an unproven mid-combat retreat.
+_Avoid_: Uncancellable fight, forced combat result, recovery action
 
 **Action Retry Budget**:
 The bounded number of retries allowed for one concrete **Actor Action** plan, such as a selected checkpoint or target, before the **Actor Objective** requires a fresh replacement plan.
@@ -147,6 +179,10 @@ _Avoid_: Objective lifetime, death limit, infinite retry
 **Actor Replan Request**:
 The persistent request for a fresh concrete phase plan after an **Actor Action** exhausts its retry budget or is temporarily deferred. It identifies the action, phase, and action generation being replaced so stale or wrong-phase plans cannot resume the objective.
 _Avoid_: Uncorrelated retry, planner suggestion, queued plan
+
+**Objective Progress Lease**:
+A template-specific stall bound refreshed by correlated meaningful progress, including movement checkpoints and active combat progress toward the objective. Capacity deferral pauses the lease; an optional longer active-age cap provides a separate safety ceiling.
+_Avoid_: Universal objective timeout, wall-clock failure, action expiry
 
 **Objective Viability Allowance**:
 The bounded allowance for replanning, danger interruption, and death recovery before an **Actor Objective** is abandoned as no longer worthwhile.
@@ -337,6 +373,8 @@ _Avoid_: Autonomous Actor runtime, test actor system, production sidecar
 - An **Actor Action** expresses intent such as saying, targeting, moving, assisting, casting, attacking, tracking, or looting; it should not describe a forced outcome such as directly applying a buff, setting HP, forcing spell success, or marking an NPC as tracked.
 - **Actor Actions** should be intent requests when ordinary server rules exist for the behavior, so spell validity, range, line of sight, cooldowns, mana checks, aggro checks, holds, priorities, and resist outcomes remain authoritative.
 - One **Actor Objective** transition consumes one bounded observation or outcome and emits zero or one **Actor Action**; it must not emit a phase action without a concrete phase payload.
+- An **Actor Routine** selects another **Actor Objective** only when no objective is active; an **Actor Objective** never creates or contains another objective.
+- An **Actor Objective Template** is available to an **Actor Routine** only when every required action and postcondition in that template is supported by authoritative runtime capabilities.
 - Exhausting an **Action Retry Budget** clears the concrete phase payload and requires a fresh replacement plan before another phase action is emitted.
 - An **Actor Replan Request** must match the replacement observation by request identity, phase, action generation, exact phase payload shape, and a concrete non-empty phase value before another phase action is emitted.
 - An abandoned **Actor Objective** has no live **Actor Replan Request** or recovery state.
