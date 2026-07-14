@@ -53,12 +53,12 @@ prevents an actor from fixating on a target that is too difficult.
 
 The persisted Actor Replan Request identifies the exhausted action, phase, and action generation and declares the one
 payload key required by that phase. A replacement observation must match the request identity and provide exactly that
-key. Replayed same-phase plans, delayed plans from an earlier phase, missing keys, and extra keys are rejected without
-consuming the current request.
+key with a concrete non-empty phase value. Replayed same-phase plans, delayed plans from an earlier phase, missing keys,
+extra keys, and empty values are rejected without consuming the current request.
 
 Danger and death preserve the current phase and do not consume the Action Retry Budget because they do not necessarily
 prove the concrete strategy was bad. They do consume Objective Viability. Exhausting Objective Viability abandons the
-broader objective, preventing infinite recover-and-resume loops.
+broader objective, clears replan and recovery state, and prevents infinite recover-and-resume loops.
 
 Actor-level interruption, including the public `interrupted` outcome, follows the same recovery/viability path rather
 than being classified as action failure. Recovery remembers whether it interrupted active execution or replanning; a
@@ -75,10 +75,11 @@ Replay requires the initial snapshot, ordered bounded observations/outcomes, str
 record exposes the actor, objective, phase, state, observation, reason, and emitted action identity. Production storage
 is deliberately not selected by this prototype.
 
-Interruption observations carry monotonically increasing IDs. The persistent snapshot keeps a watermark so duplicate
-or stale danger, death, and interruption delivery leaves the snapshot unchanged and cannot spend Objective Viability
-twice. A readiness observation must name the current recovery action; stale readiness cannot finish a replaced
-recovery. Recovery action identity derives from the action generation rather than observation delivery count.
+Danger and interruption observations carry monotonically increasing IDs. The persistent snapshot keeps separate danger
+and interruption watermarks so duplicate or stale accepted danger, death, and interruption delivery leaves the snapshot
+unchanged and cannot spend Objective Viability twice. A readiness observation must name the current recovery action;
+stale readiness cannot finish a replaced recovery. Recovery action identity derives from the action generation rather
+than observation delivery count.
 
 Every emitted action also carries the objective's current action generation. An interruption atomically increments the
 generation and clears the pending action before emitting recovery, fencing every older action attempt. An executor must
@@ -88,12 +89,12 @@ zero-or-one action seam.
 
 ## Evidence and remaining decisions
 
-The disposable simulator is in [`prototypes/objective-model/`](prototypes/objective-model/). Sixteen behavior tests cover
+The disposable simulator is in [`prototypes/objective-model/`](prototypes/objective-model/). Twenty behavior tests cover
 bounded emission, observed phase progress, profile differences, danger/death recovery, replacement-plan enforcement,
 viability exhaustion, recovery resume state, interruption deduplication and fencing, stale readiness and outcomes, and
 deterministic replay. They also cover stale same-phase and cross-phase replacement plans, exact replacement payload
-shape, non-consuming temporary deferral, and structural blocking. Interactive failure, replanning, replacement, and
-replay matched exactly.
+shape and values, non-consuming temporary deferral, structural blocking, terminal cleanup, CLI replan gating, and
+accepted-danger deduplication. Interactive failure, replanning, replacement, and replay matched exactly.
 
 This result does not choose production persistence, tune numeric values, select replacement targets, or define the
 first objective hierarchy. Those decisions follow in `central-dcq7.8` using this state model and the mapped gameplay

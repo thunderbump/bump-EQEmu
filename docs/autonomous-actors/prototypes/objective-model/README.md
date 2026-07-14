@@ -38,18 +38,19 @@ Useful comparison:
 
 When a profile exhausts its action retry budget, enter `replan replacement-name`. The old checkpoint, target, or item is
 cleared and a persisted replan request records the exhausted action, phase, generation, and required payload key. No
-action is emitted until a matching replacement supplies exactly that phase payload. Replayed same-phase and delayed
-cross-phase replacements are rejected. Replanning and actor interruption recovery consume a separate objective
-viability allowance; exhausting it abandons the broader objective instead of looping forever. Recovery returns to the
-interrupted `active` or `replanning` state rather than assuming an action is ready.
+action is emitted until a matching replacement supplies exactly that phase payload with a non-empty value. Replayed
+same-phase, delayed cross-phase, and empty replacements are rejected. The CLI accepts `replan` only while the objective
+is replanning. Replanning and actor interruption recovery consume a separate objective viability allowance; exhausting
+it abandons the broader objective and clears transient replan and recovery state instead of looping forever. Recovery
+returns to the interrupted `active` or `replanning` state rather than assuming an action is ready.
 
 Use `deferred` for a temporary condition such as player contention. It requests a fresh plan without spending action
 retries or objective viability. `blocked` means the server structurally rejected the action and remains a retry failure.
 
-Interruption observations use an ordered ID watermark so duplicate delivery leaves the persistent snapshot unchanged.
-They also advance an action generation before recovery is emitted. Older action attempts are fenced, older outcomes are
-stale, and readiness must correlate to the current recovery action. The snapshot transition still emits at most one
-action.
+Danger and interruption observations use separate ordered ID watermarks so duplicate delivery, including accepted
+low-severity danger, leaves the persistent snapshot unchanged. Interruptions also advance an action generation before
+recovery is emitted. Older action attempts are fenced, older outcomes are stale, and readiness must correlate to the
+current recovery action. The snapshot transition still emits at most one action.
 
 Other commands are `success`, `blocked`, `deferred`, `expired`, `interrupted`, `death`, `show`, and `quit`. Every
 transition prints the observation, decision reason, emitted action, and full persistent snapshot.

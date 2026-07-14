@@ -1,10 +1,23 @@
 import copy
+import subprocess
+import sys
 import unittest
 
 from objective_model import make_snapshot, replay, step
 
 
 class ObjectiveModelTest(unittest.TestCase):
+    def test_cli_replan_requires_replanning_status(self):
+        result = subprocess.run(
+            [sys.executable, "objective_model.py", "cautious"],
+            input="decide\nfailed\ndeath\nreplan alternate-route\nquit\n",
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+        self.assertIn("error: objective is not awaiting a replacement plan", result.stdout)
+
     def test_emits_only_one_action_and_advances_after_observed_success(self):
         snapshot = make_snapshot("steady")
 
@@ -132,6 +145,32 @@ class ObjectiveModelTest(unittest.TestCase):
         self.assertEqual(2, snapshot["objective"]["viability_spent"])
         self.assertEqual("objective_viability_exhausted", decision["reason"])
 
+    def test_viability_abandonment_clears_replan_and_recovery_state(self):
+        snapshot = make_snapshot("cautious")
+        snapshot["objective"]["viability_budget"] = 2
+        snapshot, action, _ = step(snapshot, {"type": "decide"})
+        snapshot, _, _ = step(
+            snapshot,
+            {"type": "action_outcome", "action_id": action["id"], "outcome": "failed"},
+        )
+        snapshot, _, _ = step(
+            snapshot,
+            {"type": "interruption", "observation_id": 1, "reason": "capacity_reclaimed"},
+        )
+
+        snapshot, action, decision = step(
+            snapshot,
+            {"type": "interruption", "observation_id": 2, "reason": "capacity_reclaimed"},
+        )
+
+        self.assertIsNone(action)
+        self.assertEqual("abandoned", snapshot["objective"]["status"])
+        self.assertIsNone(snapshot["objective"]["replan_request"])
+        self.assertIsNone(snapshot["objective"]["resume_status"])
+        self.assertIsNone(snapshot["objective"]["interrupted_by"])
+        self.assertIsNone(snapshot["pending_action"])
+        self.assertEqual("objective_viability_exhausted", decision["reason"])
+
     def test_danger_and_death_interrupt_without_losing_objective_progress(self):
         snapshot = make_snapshot("cautious")
         snapshot, travel_action, _ = step(snapshot, {"type": "decide"})
@@ -243,6 +282,21 @@ class ObjectiveModelTest(unittest.TestCase):
         self.assertEqual(recovery_action, snapshot["pending_action"])
         self.assertIsNone(duplicate_action)
         self.assertEqual("duplicate_or_stale_interruption", decision["reason"])
+
+    def test_duplicate_accepted_danger_observation_leaves_snapshot_unchanged(self):
+        snapshot = make_snapshot("stubborn")
+        danger = {"type": "danger", "observation_id": 7, "severity": 70}
+
+        snapshot, action, decision = step(snapshot, danger)
+        self.assertIsNone(action)
+        self.assertEqual("risk_accepted", decision["reason"])
+        before_duplicate = copy.deepcopy(snapshot)
+
+        snapshot, action, decision = step(snapshot, danger)
+
+        self.assertEqual(before_duplicate, snapshot)
+        self.assertIsNone(action)
+        self.assertEqual("duplicate_or_stale_danger", decision["reason"])
 
     def test_stale_readiness_cannot_complete_a_replaced_recovery_action(self):
         snapshot = make_snapshot("steady")
@@ -383,6 +437,31 @@ class ObjectiveModelTest(unittest.TestCase):
         self.assertIsNone(action)
         self.assertEqual("replacement_plan_invalid", decision["reason"])
         self.assertEqual(hunt_request_id, snapshot["objective"]["replan_request"]["id"])
+
+    def test_replan_rejects_non_concrete_phase_payload_values(self):
+        for invalid_value in (None, "", "   "):
+            with self.subTest(invalid_value=invalid_value):
+                snapshot = make_snapshot("cautious")
+                snapshot, action, _ = step(snapshot, {"type": "decide"})
+                snapshot, _, _ = step(
+                    snapshot,
+                    {"type": "action_outcome", "action_id": action["id"], "outcome": "failed"},
+                )
+                request = copy.deepcopy(snapshot["objective"]["replan_request"])
+
+                snapshot, action, decision = step(
+                    snapshot,
+                    {
+                        "type": "replan",
+                        "request_id": request["id"],
+                        "payload": {"checkpoint": invalid_value},
+                    },
+                )
+
+                self.assertIsNone(action)
+                self.assertEqual("replanning", snapshot["objective"]["status"])
+                self.assertEqual(request, snapshot["objective"]["replan_request"])
+                self.assertEqual("replacement_plan_invalid", decision["reason"])
 
     def test_temporary_deferral_requires_replan_without_spending_budgets(self):
         snapshot = make_snapshot("cautious")

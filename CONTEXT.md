@@ -338,7 +338,8 @@ _Avoid_: Autonomous Actor runtime, test actor system, production sidecar
 - **Actor Actions** should be intent requests when ordinary server rules exist for the behavior, so spell validity, range, line of sight, cooldowns, mana checks, aggro checks, holds, priorities, and resist outcomes remain authoritative.
 - One **Actor Objective** transition consumes one bounded observation or outcome and emits zero or one **Actor Action**; it must not emit a phase action without a concrete phase payload.
 - Exhausting an **Action Retry Budget** clears the concrete phase payload and requires a fresh replacement plan before another phase action is emitted.
-- An **Actor Replan Request** must match the replacement observation by request identity, phase, action generation, and exact phase payload shape before another phase action is emitted.
+- An **Actor Replan Request** must match the replacement observation by request identity, phase, action generation, exact phase payload shape, and a concrete non-empty phase value before another phase action is emitted.
+- An abandoned **Actor Objective** has no live **Actor Replan Request** or recovery state.
 - A temporarily deferred **Actor Action** creates an **Actor Replan Request** without spending **Action Retry Budget** or **Objective Viability Allowance**; a structurally blocked action remains a retry failure.
 - Actor interruption preserves objective phase and active-versus-replanning resume state, spends **Objective Viability Allowance** rather than **Action Retry Budget**, and requires correlated recovery readiness before resuming.
 - Actor interruption observations use a persistent ordered watermark for snapshot-idempotent deduplication and advance an action-generation fence before recovery is emitted, so late attempts and outcomes from older generations cannot execute or advance the objective.
