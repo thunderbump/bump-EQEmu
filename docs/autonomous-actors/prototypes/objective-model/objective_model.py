@@ -194,14 +194,23 @@ def _duplicate_observation_reason(
 
 
 def _interrupt(
-    snapshot: dict[str, Any], observation: dict[str, Any], interrupted_by: str, reason: str
+    snapshot: dict[str, Any],
+    observation: dict[str, Any],
+    interrupted_by: str,
+    reason: str,
+    watermark_key: str = "interruption_watermark",
 ) -> tuple[dict[str, Any] | None, str]:
     objective = snapshot["objective"]
     observation_id = observation.get("observation_id")
-    if not isinstance(observation_id, int) or observation_id <= objective["interruption_watermark"]:
-        return None, "duplicate_or_stale_interruption"
+    if not isinstance(observation_id, int) or observation_id <= objective[watermark_key]:
+        duplicate_reason = (
+            "duplicate_or_stale_danger"
+            if watermark_key == "danger_watermark"
+            else "duplicate_or_stale_interruption"
+        )
+        return None, duplicate_reason
 
-    objective["interruption_watermark"] = observation_id
+    objective[watermark_key] = observation_id
     objective["viability_spent"] += 1
     objective["action_generation"] += 1
     if objective["status"] == "replanning" or objective["resume_status"] == "replanning":
@@ -245,13 +254,19 @@ def step(
     elif observation["type"] == "death":
         action, reason = _interrupt(snapshot, observation, "death", "death_interrupted")
     elif observation["type"] == "danger":
-        observation_id = observation.get("observation_id")
-        if isinstance(observation_id, int):
-            objective["danger_watermark"] = observation_id
         severity = observation["severity"]
         if severity > snapshot["actor"]["profile"]["risk_tolerance"]:
-            action, reason = _interrupt(snapshot, observation, "danger", "risk_threshold_exceeded")
+            action, reason = _interrupt(
+                snapshot,
+                observation,
+                "danger",
+                "risk_threshold_exceeded",
+                watermark_key="danger_watermark",
+            )
         else:
+            observation_id = observation.get("observation_id")
+            if isinstance(observation_id, int):
+                objective["danger_watermark"] = observation_id
             reason = "risk_accepted"
     elif observation["type"] == "action_attempt":
         attempted = observation.get("action")

@@ -89,12 +89,13 @@ zero-or-one action seam.
 
 ## Evidence and remaining decisions
 
-The disposable simulator is in [`prototypes/objective-model/`](prototypes/objective-model/). Twenty behavior tests cover
+The disposable simulator is in [`prototypes/objective-model/`](prototypes/objective-model/). Twenty-one behavior tests cover
 bounded emission, observed phase progress, profile differences, danger/death recovery, replacement-plan enforcement,
 viability exhaustion, recovery resume state, interruption deduplication and fencing, stale readiness and outcomes, and
 deterministic replay. They also cover stale same-phase and cross-phase replacement plans, exact replacement payload
-shape and values, non-consuming temporary deferral, structural blocking, terminal cleanup, CLI replan gating, and
-accepted-danger deduplication. Interactive failure, replanning, replacement, and replay matched exactly.
+shape and values, non-consuming temporary deferral, structural blocking, terminal cleanup, CLI replan gating,
+accepted-danger deduplication, and independent danger/interruption observation ID namespaces. Interactive failure,
+replanning, replacement, and replay matched exactly.
 
 This result does not choose production persistence, tune numeric values, select replacement targets, or define the
 first objective hierarchy. Those decisions follow in `central-dcq7.8` using this state model and the mapped gameplay

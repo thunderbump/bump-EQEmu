@@ -298,6 +298,31 @@ class ObjectiveModelTest(unittest.TestCase):
         self.assertIsNone(action)
         self.assertEqual("duplicate_or_stale_danger", decision["reason"])
 
+    def test_danger_and_other_interruptions_use_separate_observation_id_namespaces(self):
+        snapshot = make_snapshot("stubborn")
+        snapshot, _, _ = step(snapshot, {"type": "death", "observation_id": 7})
+
+        snapshot, action, decision = step(
+            snapshot,
+            {"type": "danger", "observation_id": 6, "severity": 90},
+        )
+
+        self.assertEqual("risk_threshold_exceeded", decision["reason"])
+        self.assertEqual("recover_until", action["type"])
+        self.assertEqual(2, snapshot["objective"]["viability_spent"])
+        self.assertEqual(7, snapshot["objective"]["interruption_watermark"])
+        self.assertEqual(6, snapshot["objective"]["danger_watermark"])
+
+        before_stale_danger = copy.deepcopy(snapshot)
+        snapshot, action, decision = step(
+            snapshot,
+            {"type": "danger", "observation_id": 6, "severity": 90},
+        )
+
+        self.assertEqual(before_stale_danger, snapshot)
+        self.assertIsNone(action)
+        self.assertEqual("duplicate_or_stale_danger", decision["reason"])
+
     def test_stale_readiness_cannot_complete_a_replaced_recovery_action(self):
         snapshot = make_snapshot("steady")
         snapshot, _, _ = step(snapshot, {"type": "decide"})
