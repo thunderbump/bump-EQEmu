@@ -1,7 +1,7 @@
 # Conserved Actor Inventory and Economy Seams
 
-Date: 2026-07-14  
-Wayfinder bead: `central-dcq7.9`  
+Date: 2026-07-14
+Wayfinder bead: `central-dcq7.9`
 Source state: [`bcf3473671d7f3967a0727e70b883c9254d97cd3`](https://github.com/thunderbump/bump-EQEmu/tree/bcf3473671d7f3967a0727e70b883c9254d97cd3), verified against `origin/master` on 2026-07-14
 
 ## Decision
