@@ -158,7 +158,7 @@ Add the following correlation and fencing fields whenever that boundary exists:
 | `entity_ref`, `target_ref`, `target_generation` | Live targets whose numeric entity IDs can be reused. |
 | `settlement_key`, `custody_version`, `item_fingerprint` | Item/currency mutations. |
 | `experiment_id`, `manifest_version`, `manifest_digest` | Controlled comparisons and every execution of an Actor Experiment Manifest. |
-| `experiment_run_id`, `run_iteration` | Every record produced by one observable execution; the opaque run identity and manifest-scoped iteration distinguish repetitions of the same manifest. |
+| `experiment_run_id`, `run_iteration` | Every record produced by one **Actor Experiment Run**; the opaque run identity and manifest-scoped iteration distinguish repetitions of the same manifest. |
 | `cohort_id`, `assignment_digest` | Cohort-scoped records and controlled comparisons. |
 
 Names and free-form text belong in bounded payloads, not correlation keys. IDs are opaque. Timestamps help operators
@@ -346,14 +346,15 @@ range, and missing/dropped evidence count.
 | evidence volume | records and serialized bytes / Actor hour, by evidence class and record type |
 | evidence loss rate | dropped or overwritten eligible records / attempted eligible records; required evidence loss is a violation |
 
-“World feels populated” still requires human observation. Each controlled run therefore accepts a bounded operator
-rating and note set for perceived presence, plausibility, noisiness, visible discontinuities, and interference. Store
-the rubric version and blinded run label; do not convert subjective notes into fabricated gameplay events.
+“World feels populated” still requires human observation. Each controlled **Actor Experiment Run** therefore accepts a
+bounded operator rating and note set for perceived presence, plausibility, noisiness, visible discontinuities, and
+interference. Store the rubric version and blinded run label; do not convert subjective notes into fabricated gameplay
+events.
 
 ## Actor Experiment Manifest
 
-An **Actor Experiment Manifest** is an immutable experiment definition once a run begins. Its digest is the experiment
-identity referenced by every run and run-produced record. It contains:
+An **Actor Experiment Manifest** is an immutable experiment definition once an **Actor Experiment Run** begins. Its
+digest is the experiment identity referenced by every **Actor Experiment Run** and every record it produces. It contains:
 
 ```text
 manifest schema/version and immutable digest
@@ -370,24 +371,26 @@ sampling, aggregation, retention, and evidence-loss policy
 human-observation rubric and blinding, when applicable
 ```
 
-An experiment run is an observable execution of that definition, not a mutation of it. Each execution receives a new
-durable `experiment_run_id` and the next manifest-scoped `run_iteration`, including retries and exact repetitions.
-Record both boundaries at full fidelity:
+An **Actor Experiment Run** is an observable execution of that definition, not a mutation of it. Each execution receives
+a new durable `experiment_run_id` and the next manifest-scoped `run_iteration`, including retries and exact
+repetitions. Record both boundaries at full fidelity:
 
-- `experiment.run_started` binds the run identity to the manifest identity/digest, actual repository/config/content/
-  schema and strategy provenance digests, authority and workload mode, initial snapshot and ordered-input/replay-bundle
-  digests, seed-set digest, actual cohort roster/exclusions and assignment digest, planned observation window and stop
-  rules, start wall time and logical-time origin, and starting source/Actor watermarks. When human observation is used,
-  it also references the rubric version, blinded run label, and opaque observation-session identity.
-- `experiment.run_terminal` links to the start record and records one stable run terminal (`completed`, `stopped`,
-  `failed`, or `invalidated`) plus reason code; actual wall/logical timing and observation window; terminal watermarks by
-  source, Actor, and cohort; attempted/accepted/dropped/overwritten/rejected evidence counts by class; required-evidence
-  completeness; final state, output, replay-result, metric/report, and other produced artifact digests; and the bounded
-  human-observation artifact/session reference when used. Any required-evidence loss or provenance/input mismatch makes
-  the run `invalidated`, never a complete-looking comparison.
+- `experiment.run_started` binds the **Actor Experiment Run** identity to the manifest identity/digest, actual
+  repository/config/content/schema and strategy provenance digests, authority and workload mode, initial snapshot and
+  ordered-input/replay-bundle digests, seed-set digest, actual cohort roster/exclusions and assignment digest, planned
+  observation window and stop rules, start wall time and logical-time origin, and starting source/Actor watermarks. When
+  human observation is used, it also references the rubric version, blinded run label, and opaque observation-session
+  identity.
+- `experiment.run_terminal` links to the start record and records one stable **Actor Experiment Run** terminal
+  (`completed`, `stopped`, `failed`, or `invalidated`) plus reason code; actual wall/logical timing and observation
+  window; terminal watermarks by source, Actor, and cohort; attempted/accepted/dropped/overwritten/rejected evidence
+  counts by class; required-evidence completeness; final state, output, replay-result, metric/report, and other produced
+  artifact digests; and the bounded human-observation artifact/session reference when used. Any required-evidence loss
+  or provenance/input mismatch makes the **Actor Experiment Run** `invalidated`, never a complete-looking comparison.
 
-Run records report observed execution facts. They cannot rewrite the manifest, assignment, strategy publication, input
-bundle, or expected stop rules. Artifact references are immutable identities and content digests, not mutable paths.
+**Actor Experiment Run** records report observed execution facts. They cannot rewrite the manifest, assignment,
+strategy publication, input bundle, or expected stop rules. Artifact references are immutable identities and content
+digests, not mutable paths.
 
 Use paired replay over the same initial snapshot, ordered inputs, and seeds when comparing pure decisions. Use matched
 live cohorts or crossover windows when ordinary gameplay timing, players, pathing, or zone cost is part of the question.
@@ -440,7 +443,7 @@ the complete server combat simulation from a terminal summary.
 
 ### Never sample or silently drop
 
-- Actor Experiment Manifests and strategy publications used by a run;
+- Actor Experiment Manifests and strategy publications used by an **Actor Experiment Run**;
 - every observation that participates in an Actor Decision Record;
 - objective/action decisions, generations, fences, and terminals;
 - travel handoff and materialization authority transitions;

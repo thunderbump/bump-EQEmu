@@ -228,6 +228,10 @@ _Avoid_: Actor Event, planner log, action result
 An immutable, versioned definition of one controlled Actor strategy comparison, including its hypothesis, strategy variants, cohort assignment, replay inputs, world/configuration provenance, and observation window.
 _Avoid_: Test config, mutable experiment settings, strategy version
 
+**Actor Experiment Run**:
+An observable execution of one **Actor Experiment Manifest**, kept distinct across retries and exact repetitions so its start, terminal, provenance, evidence completeness, and produced artifacts remain attributable. It does not mutate the manifest.
+_Avoid_: Manifest revision, experiment result, anonymous repetition
+
 **Actor Economy Evidence**:
 An attributable account of item and currency custody changes and economy outcomes used to assess conservation and strategy behavior.
 _Avoid_: Economy debug log, aggregate-only metric, inferred transaction
