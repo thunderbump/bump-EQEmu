@@ -290,16 +290,33 @@ must share trigger/delivery vocabulary even if only an Autonomous Actor has an o
 
 ### Player contention
 
-Contention needs no special priority policy, but evidence must explain when ordinary player presence changed an Actor
-result:
+Contention needs no special priority policy, but evidence must measure both affected and unaffected opportunities. A
+contestable opportunity is one bounded Actor decision or action evaluation against `target`, `corpse`,
+`merchant_stock`, `interaction`, or `zone_capacity` that concludes with an explicit selection/no-action decision,
+ingress rejection, or one canonical action terminal.
 
-- record `contention.observed` only when it changes selection, authority, or a terminal outcome;
-- identify bounded resource kind (`target`, `corpse`, `merchant_stock`, `interaction`, or `zone_capacity`) and whether
-  contention occurred before or after action acceptance;
-- record only opaque player-presence correlation and counts, never player chat, account data, inventory, or identity
-  details not needed for gameplay authority; and
-- map the effect to the common terminal vocabulary. Ordinary merchant state may simply cause the existing transaction
-  terminal; it does not require a special winner event.
+Emit exactly one `contention.opportunity` when each unique contestable evaluation concludes, including when no player
+contender was observed or an observed contender had no effect. The record contains:
+
+- a stable opportunity identity bound to the Actor Decision Record and bounded resource kind, plus the action
+  identity/generation/attempt when an action exists;
+- whether a contender was authoritatively observed, a capped opaque contender count, and whether observation occurred
+  before acceptance, after acceptance, or both;
+- a bounded effect set containing zero or more of `selection_changed`, `authority_changed`, and `terminal_changed`;
+- the resulting canonical action terminal, the separate `rejected` ingress classification, or `no_action` for a
+  selection-only decision; and
+- the linked action and decision records that establish causation rather than inferring it from nearby timestamps.
+
+An opportunity with an empty effect set is zero-impact even when a contender was present. If ordinary merchant state
+changed but the Actor cannot authoritatively attribute that change to player contention, record no contention effect;
+the merchant action still retains its ordinary rejection or terminal. Actions still active at the report watermark are
+reported as censored and do not enter a terminal-opportunity denominator.
+
+Retain these bounded opportunity records in full during controlled runs; do not emit proximity scans or per-tick
+player-presence records. Record only opaque player-presence correlation and capped counts, never player chat, account
+data, inventory, or identity details not needed for gameplay authority. Live dimensions are limited to resource kind,
+observation phase, effect category, and canonical outcome; Actor, action, opportunity, and player correlations remain
+event fields or offline grouping keys.
 
 ### Runtime and zone cost
 
@@ -367,7 +384,12 @@ wallet currency, or merchant settlement. Operation and reason are bounded schema
 | chatter delivery rate | delivered messages / materialized Actor hour, split by Actor/Bot/NPC speaker kind |
 | chatter suppression rate | suppressed chatter decisions / chatter opportunities |
 | repetition rate | repeated normalized text digests within the manifest's repetition window / deliveries |
-| contention impact rate | contention-caused deferred/failed terminals / actions for which contention was observable |
+| contention exposure rate | emitted `contention.opportunity` records with an authoritatively observed contender / all emitted `contention.opportunity` records |
+| contention impact rate | emitted `contention.opportunity` records with a non-empty effect set / all emitted `contention.opportunity` records |
+| contention conditional impact rate | emitted `contention.opportunity` records with a non-empty effect set / emitted opportunities with an observed contender; a zero denominator is undefined and reported |
+| contention-affected action outcome share | contention-affected opportunities ending in one canonical action outcome / all contention-affected opportunities with an action terminal; report `succeeded`, `deferred`, `blocked`, `failed`, `expired`, `interrupted`, and `death` separately |
+| contention-affected rejection count | contention-affected opportunities ending at the separate `rejected` ingress classification; never fold rejection into a canonical action outcome |
+| contention-affected selection-only count | contention-affected opportunities ending in `no_action`; report separately from rejected requests and canonical action outcomes |
 | zone loop p50/p95/p99 | quantiles of loop wall time from the same fixed sampling windows |
 | loop overrun rate | loops above the configured budget / measured loops |
 | marginal CPU | matched actor-on CPU seconds minus actor-off CPU seconds / materialized Actor hour |
