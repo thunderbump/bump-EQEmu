@@ -514,13 +514,15 @@ Comparison reports must:
 - separate replay, controlled-zone, production-like, and human-observation results; and
 - require explicit reviewed promotion of a new Actor Strategy Registry version.
 
-This follows the useful AFK pipeline convention that verification evidence belongs to an exact committed candidate:
-the pushed pipeline source binds implementation evidence to the checkout HEAD
-([exact-head normalization](https://github.com/thunderbump/afk-composable-pipeline/blob/87578dc0f2c49bb1f7f054335b36749f188c6a61/src/afk/review.py#L257-L315))
+Actor experiments require verification evidence to name the exact committed candidate to which it applies. That is an
+explicit Actor experiment contract here, not an enforcement claim about the cited AFK review function. The pinned AFK
+source more narrowly normalizes or infers implementation metadata and packages it into review evidence
+([implementation evidence normalization](https://github.com/thunderbump/afk-composable-pipeline/blob/87578dc0f2c49bb1f7f054335b36749f188c6a61/src/afk/review.py#L257-L315)),
 and refuses review before required validation evidence passes
 ([evidence gate](https://github.com/thunderbump/afk-composable-pipeline/blob/87578dc0f2c49bb1f7f054335b36749f188c6a61/src/afk/review.py#L52-L78)).
-Actor experiments apply the same principle to exact strategy/config/content provenance, without importing AFK workflow
-state into the game domain.
+Those cited lines do not independently prove that caller-supplied implementation metadata equals checkout `HEAD`.
+Actor experiments therefore make exact strategy/config/content/candidate binding independently verifiable without
+importing AFK workflow state into the game domain.
 
 ## Deterministic replay contract
 
