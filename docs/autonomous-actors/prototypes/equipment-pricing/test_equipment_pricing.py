@@ -71,6 +71,21 @@ class EquipmentPricingPrototypeTest(unittest.TestCase):
             {"action": "hold", "reason": "upgrade_evaluation_incomplete"},
         )
 
+    def test_party_upgrade_evaluation_requires_a_nonempty_exact_bot_set(self):
+        for relevant, evaluated in (
+            ([], []),
+            (["Mellis", "Mellis"], ["Mellis"]),
+            (["Mellis"], ["Unknown"]),
+        ):
+            with self.subTest(relevant=relevant, evaluated=evaluated):
+                snapshot = demo_trace()[1]
+                snapshot["upgrade_evaluation"]["relevant_bots"] = relevant
+                snapshot["upgrade_evaluation"]["evaluated_bots"] = evaluated
+                self.assertEqual(
+                    recommend(snapshot),
+                    {"action": "hold", "reason": "upgrade_evaluation_incomplete"},
+                )
+
     def test_malformed_upgrade_snapshots_hold_without_crashing(self):
         for upgrades in (None, [None], [{"legal": True, "gain": 1}]):
             with self.subTest(upgrades=upgrades):
@@ -115,6 +130,36 @@ class EquipmentPricingPrototypeTest(unittest.TestCase):
         mismatched = demo_trace()[2]
         mismatched["market_outcome"]["buyer_debited_copper"] = 150
         self.assertIn("market_currency_imbalance", compare([mismatched])["accounting"]["errors"])
+
+    def test_malformed_market_outcomes_expire_safely_with_a_stable_error(self):
+        for outcome in (
+            None,
+            {"sold_after_days": "7", "buyer_max_copper": 180,
+             "settled_copper": 164, "buyer_debited_copper": 164},
+            {"sold_after_days": 7, "buyer_max_copper": "180",
+             "settled_copper": 164, "buyer_debited_copper": 164},
+            {"sold_after_days": 7, "buyer_max_copper": 180,
+             "settled_copper": None, "buyer_debited_copper": 164},
+            {"sold_after_days": 7, "buyer_max_copper": 180,
+             "settled_copper": -1, "buyer_debited_copper": 164},
+            {"sold_after_days": 7, "buyer_max_copper": 180,
+             "settled_copper": 164},
+            {"sold_after_days": 7, "buyer_max_copper": 180,
+             "settled_copper": 164, "buyer_debited_copper": -1},
+        ):
+            with self.subTest(outcome=outcome):
+                item = demo_trace()[2]
+                item["market_outcome"] = outcome
+                result = compare([item], "balanced-v1")
+                self.assertEqual(result["recommendations"][0]["action"], "offer_later")
+                self.assertEqual(
+                    result["custody_ledger"][0]["to"],
+                    "merchant:Rivervale Merchant",
+                )
+                self.assertIn(
+                    "invalid_market_outcome:loot-103",
+                    result["accounting"]["errors"],
+                )
 
     def test_unconfirmed_authority_holds_the_item(self):
         snapshot = {
@@ -300,14 +345,14 @@ class EquipmentPricingPrototypeTest(unittest.TestCase):
     def test_compare_simulates_time_custody_currency_and_strategy_outcomes(self):
         result = compare(demo_trace(), "balanced-v1")
 
-        self.assertEqual(result["metrics"]["sell_through_count"], 1)
+        self.assertEqual(result["metrics"]["sell_through_units"], 1)
         self.assertEqual(result["metrics"]["average_sell_through_days"], 7)
-        self.assertEqual(result["metrics"]["aged_unsold_count"], 0)
-        self.assertEqual(result["metrics"]["ending_stock_concentration_bps"], 10000)
+        self.assertEqual(result["metrics"]["aged_unsold_units"], 0)
+        self.assertEqual(result["metrics"]["ending_unit_stock_concentration_bps"], 10000)
         self.assertEqual(result["metrics"]["projected_actor_wealth_copper"], 256)
         self.assertEqual(
             result["metrics"]["upgrade_distribution"],
-            {"Mellis": {"items": 1, "utility_gain": 8}},
+            {"Mellis": {"equipped_units": 1, "utility_gain": 8}},
         )
         self.assertEqual(result["metrics"]["rejected_actions"], 1)
         self.assertEqual(
@@ -337,10 +382,10 @@ class EquipmentPricingPrototypeTest(unittest.TestCase):
         item["market_outcome"]["sold_after_days"] = 14
         expired = compare([item], "balanced-v1")
 
-        self.assertEqual(sold["metrics"]["sell_through_count"], 1)
+        self.assertEqual(sold["metrics"]["sell_through_units"], 1)
         self.assertEqual(sold["metrics"]["projected_actor_wealth_copper"], 164)
-        self.assertEqual(expired["metrics"]["sell_through_count"], 0)
-        self.assertEqual(expired["metrics"]["aged_unsold_count"], 1)
+        self.assertEqual(expired["metrics"]["sell_through_units"], 0)
+        self.assertEqual(expired["metrics"]["aged_unsold_units"], 1)
         self.assertEqual(expired["metrics"]["projected_actor_wealth_copper"], 100)
         self.assertEqual(expired["custody_ledger"][0]["to"], "merchant:Rivervale Merchant")
 
@@ -356,12 +401,26 @@ class EquipmentPricingPrototypeTest(unittest.TestCase):
         item["market_outcome"]["sold_after_days"] = 30
         expired = compare([item], "patient-v1")
 
-        self.assertEqual(sold["metrics"]["sell_through_count"], 1)
+        self.assertEqual(sold["metrics"]["sell_through_units"], 1)
         self.assertEqual(sold["metrics"]["projected_actor_wealth_copper"], 200)
-        self.assertEqual(expired["metrics"]["sell_through_count"], 0)
-        self.assertEqual(expired["metrics"]["aged_unsold_count"], 1)
+        self.assertEqual(expired["metrics"]["sell_through_units"], 0)
+        self.assertEqual(expired["metrics"]["aged_unsold_units"], 1)
         self.assertEqual(expired["metrics"]["projected_actor_wealth_copper"], 100)
         self.assertEqual(expired["custody_ledger"][0]["to"], "merchant:Rivervale Merchant")
+
+    def test_multi_unit_market_metrics_use_quantity_units_for_sale_and_expiry(self):
+        item = demo_trace()[2]
+        item["quantity"] = 3
+        sold = compare([item], "balanced-v1")
+        item["market_outcome"]["sold_after_days"] = 14
+        expired = compare([item], "balanced-v1")
+
+        self.assertEqual(sold["metrics"]["sell_through_units"], 3)
+        self.assertEqual(sold["metrics"]["average_sell_through_days"], 7)
+        self.assertEqual(sold["metrics"]["aged_unsold_units"], 0)
+        self.assertEqual(expired["metrics"]["sell_through_units"], 0)
+        self.assertEqual(expired["metrics"]["aged_unsold_units"], 3)
+        self.assertEqual(expired["metrics"]["ending_unit_stock_concentration_bps"], 0)
 
     def test_projected_values_and_wallet_ledger_include_stack_quantity(self):
         stack = demo_trace()[1]

@@ -80,6 +80,19 @@ def _market_observation_valid(item):
     )
 
 
+def _market_outcome_valid(outcome):
+    return (
+        isinstance(outcome, dict)
+        and all(
+            type(outcome.get(field)) is int and outcome[field] >= 0
+            for field in (
+                "sold_after_days", "buyer_max_copper",
+                "settled_copper", "buyer_debited_copper",
+            )
+        )
+    )
+
+
 def _completed_party_evaluation():
     return {
         "snapshot_version": "bot-gear-value-party-v1",
@@ -98,6 +111,7 @@ def _upgrade_evaluation_complete(evaluation):
         evaluation.get("snapshot_version") == "bot-gear-value-party-v1"
         and isinstance(relevant, list)
         and isinstance(evaluated, list)
+        and bool(relevant)
         and all(isinstance(bot, str) and bot for bot in relevant + evaluated)
         and len(relevant) == len(set(relevant))
         and len(evaluated) == len(set(evaluated))
@@ -306,8 +320,9 @@ def _simulate(trace, recommendations):
     currency_ledger = []
     sell_days = []
     remaining = {}
-    aged_unsold = 0
+    aged_unsold_units = 0
     upgrade_distribution = {}
+    simulation_errors = []
 
     for item, result in zip(trace, recommendations):
         quantity = item.get("quantity", 1)
@@ -315,8 +330,10 @@ def _simulate(trace, recommendations):
         destination = item.get("custody")
         if action == "equip":
             destination = f"bot-equipment:{result['bot']}:{result['slot']}"
-            bot = upgrade_distribution.setdefault(result["bot"], {"items": 0, "utility_gain": 0})
-            bot["items"] += quantity
+            bot = upgrade_distribution.setdefault(
+                result["bot"], {"equipped_units": 0, "utility_gain": 0}
+            )
+            bot["equipped_units"] += quantity
             bot["utility_gain"] += result["utility_gain"]
         elif action == "vendor":
             destination = f"merchant:{result['merchant']}"
@@ -330,7 +347,10 @@ def _simulate(trace, recommendations):
                 "counterparty_delta_copper": None,
             })
         elif action == "offer_later":
-            outcome = item.get("market_outcome", {})
+            outcome = item.get("market_outcome")
+            if not _market_outcome_valid(outcome):
+                simulation_errors.append(f"invalid_market_outcome:{item.get('custody_id')}")
+                outcome = {}
             sold_after_days = outcome.get("sold_after_days")
             sold = (
                 type(sold_after_days) is int
@@ -349,10 +369,10 @@ def _simulate(trace, recommendations):
                     "actor_delta_copper": credited,
                     "counterparty_delta_copper": -debited,
                 })
-                sell_days.append(sold_after_days)
+                sell_days.extend([sold_after_days] * quantity)
             else:
                 destination = f"merchant:{result['expiry_merchant']}"
-                aged_unsold += quantity
+                aged_unsold_units += quantity
                 proceeds = result["vendor_floor_copper"] * quantity
                 currency_ledger.append({
                     "kind": "merchant_source_sink",
@@ -374,16 +394,17 @@ def _simulate(trace, recommendations):
             remaining[item["item_id"]] = remaining.get(item["item_id"], 0) + quantity
 
     accounting = _audit(trace, custody_ledger, currency_ledger)
+    accounting["errors"].extend(simulation_errors)
     remaining_total = sum(remaining.values())
     return {
         "accounting": accounting,
         "custody_ledger": custody_ledger,
         "currency_ledger": currency_ledger,
         "metrics": {
-            "sell_through_count": len(sell_days),
+            "sell_through_units": len(sell_days),
             "average_sell_through_days": sum(sell_days) // len(sell_days) if sell_days else None,
-            "aged_unsold_count": aged_unsold,
-            "ending_stock_concentration_bps": (
+            "aged_unsold_units": aged_unsold_units,
+            "ending_unit_stock_concentration_bps": (
                 max(remaining.values()) * 10000 // remaining_total if remaining_total else 0
             ),
             "projected_actor_wealth_copper": accounting["simulated_currency_copper"],

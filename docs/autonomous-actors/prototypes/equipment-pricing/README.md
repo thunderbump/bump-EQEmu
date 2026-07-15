@@ -25,15 +25,19 @@ race, class, deity, and Charisma inputs used by `Client::CalcPriceMod`. Incomple
 - `balanced-v1`: the programmatic default; offer scarce, demanded, young items up to 1.75 times vendor floor for days 0–13.
 - `patient-v1`: wait longer and allow prices up to twice vendor floor for days 0–29; otherwise vendor.
 
-Every strategy requires a complete, versioned Bot Gear Value evaluation of all relevant party Bots before it may treat
-the absence of a positive upgrade as evidence for another disposition. Upgrade records must be structurally complete;
+Every strategy requires a complete, versioned Bot Gear Value evaluation of a non-empty set of all relevant party Bots
+before it may treat the absence of a positive upgrade as evidence for another disposition. Relevant Bot identities must
+be valid, unique, and exactly covered by the evaluated set. Upgrade records must be structurally complete;
 an explicitly legal positive upgrade may equip only a quantity-one item. Incomplete evidence and multi-unit upgrade
 candidates are held. When there is no legal upgrade, the strategy holds an item if wallet authority, its captured quote,
 or its market observations are incomplete.
 Market demand and availability are fixed experimental observations on a 0–10 scale. The included five-item trace
 exposes an upgrade, common vendor good, scarce demanded item, missing-authority item, and aged item. A fixed 30-day
 market outcome simulation reports sell-through/aging, ending stock concentration, projected Actor wealth, upgrade
-distribution, and rejected actions. A separate custody/currency audit detects duplicate sources/transitions, invalid
+distribution, and rejected actions. These outcome metrics use item quantity units: `sell_through_units`,
+`aged_unsold_units`, `ending_unit_stock_concentration_bps`, and per-Bot `equipped_units`; average sell-through days is
+quantity-weighted. The plain `equip`, `hold`, `vendor`, and `offer_later` action totals count recommendations/listings,
+not units. A separate custody/currency audit detects duplicate sources/transitions, invalid
 quantity, and settlement imbalance instead of deriving conservation from the recommendation count.
 
 Simulated player/Actor market settlements record equal-and-opposite buyer and Actor wallet deltas. Vendor settlements
@@ -42,6 +46,8 @@ remain explicitly labeled merchant source/sink entries and are audited against t
 Offer expiry is exclusive: `balanced-v1` expires at the start of day 14 and `patient-v1` at the start of day 30. A sale
 counts only when `0 <= sold_after_days < offer_expires_after_days`. An item still unsold at expiry is counted as aged
 unsold and follows the accepted aged-item fallback to the captured vendor floor; later market outcomes do not sell it.
+Malformed outcome snapshots, including missing or non-integer/negative sale, buyer, settlement, or debit values, also
+follow that expiry fallback and add stable `invalid_market_outcome` audit evidence instead of entering arithmetic.
 
 Run all strategies:
 
