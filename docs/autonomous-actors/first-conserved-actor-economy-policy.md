@@ -46,9 +46,10 @@ For an item already in conserved Actor custody, `balanced-v1` recommends this or
    malformed evidence results in `hold`.
 2. Recommend equipping the best legal party upgrade whose existing Bot Gear Value gain is greater than zero. A
    positive upgrade always outranks liquidity or speculative value.
-3. If no upgrade exists, recommend retaining a scarce, demanded, young item as an **Actor Offer Intent** at no more than `1.75`
-   times its captured ordinary vendor floor for days `0` through `13`.
-4. Recommend ordinary vendor disposition for weak-demand, common, or aged goods.
+3. If no upgrade exists, apply the exact versioned market-signal and pricing calculation below. A positive demand gap
+   for an item younger than 14 days produces an **Actor Offer Intent**; otherwise recommend ordinary vendor disposition.
+4. Missing, malformed, stale, or incompatible authority, quote, or market evidence results in `hold`, never a guessed
+   recommendation or settlement.
 
 An Actor may purchase one ordinary equipment instance when it is the highest-score affordable legal positive upgrade
 for any current party member. It uses the authoritative live merchant price, reserves no cash floor, and re-evaluates
@@ -64,6 +65,32 @@ Actor Offer Intent is only a recommendation to retain the concrete item in Actor
 reservation, escrow, advertisement, or settlement authority. The first policy has no Actor-to-player or Actor-to-Actor
 market transaction. Each intent records the strategy version that produced it plus its creation and expiry boundary,
 so promoting a new default cannot rewrite an existing intent's window.
+
+`balanced-v1` consumes one immutable, versioned disposition snapshot. Its market inputs are fixed experimental integer
+observations of availability and demand on a `0` through `10` scale, plus a non-negative whole-number `age_days` from
+the persisted item disposition clock. The snapshot records the observation source, capture time and validity window,
+source revision and ruleset version, concrete item fingerprint, strategy version, and merchant identity. Its captured
+vendor floor is a positive-copper ordinary sell quote produced for that same item and merchant through the ordinary
+pricing path using the Actor Merchant Principal; the snapshot records that principal and pricing-path provenance.
+Market signals remain advisory observations, not merchant or settlement authority.
+
+After complete party evaluation finds no legal positive upgrade, `balanced-v1` calculates:
+
+```text
+demand_gap = demand - availability
+premium_percent = max(10, min(75, demand_gap * 10 - age_days * 2))
+intent_price_copper = vendor_floor_copper * (100 + premium_percent) // 100
+```
+
+If `demand_gap > 0` and `0 <= age_days < 14`, the result is Actor Offer Intent at `intent_price_copper`. If
+`demand_gap <= 0` or `age_days >= 14`, the result is an ordinary vendor recommendation. This integer calculation is
+the accepted prototype behavior; its 75-percent cap makes the maximum intent price `1.75` times the captured floor.
+
+The strategy returns `hold` when wallet authority is unavailable; the quote is missing, ineligible, non-positive, or
+incomplete; an observation is outside its type or range; or the observation source, validity window, revision/ruleset,
+item fingerprint, merchant, principal, or strategy version no longer matches the evaluation. If current live authority
+invalidates a previously prepared recommendation, execution defers without mutation. Neither a vendor recommendation
+nor `intent_price_copper` can replace the fresh authoritative quote required by live merchant settlement.
 
 At the start of day 14 under `balanced-v1`, or day 30 under `patient-v1`, the intent expires. Expiration clears the old
 intent and triggers a fresh complete-party and authority evaluation. If the item remains a non-upgrade and a live
