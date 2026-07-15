@@ -80,12 +80,38 @@ def _market_observation_valid(item):
     )
 
 
+def _completed_party_evaluation():
+    return {
+        "snapshot_version": "bot-gear-value-party-v1",
+        "complete": True,
+        "relevant_bots": ["Mellis", "Pipin"],
+        "evaluated_bots": ["Mellis", "Pipin"],
+    }
+
+
+def _upgrade_evaluation_complete(evaluation):
+    if not isinstance(evaluation, dict) or evaluation.get("complete") is not True:
+        return False
+    relevant = evaluation.get("relevant_bots")
+    evaluated = evaluation.get("evaluated_bots")
+    return (
+        evaluation.get("snapshot_version") == "bot-gear-value-party-v1"
+        and isinstance(relevant, list)
+        and isinstance(evaluated, list)
+        and all(isinstance(bot, str) and bot for bot in relevant + evaluated)
+        and len(relevant) == len(set(relevant))
+        and len(evaluated) == len(set(evaluated))
+        and set(relevant) == set(evaluated)
+    )
+
+
 def demo_trace():
     """Return fixed snapshots that expose the policy differences."""
     return [
         {
             "custody_id": "loot-101", "item_id": 101, "name": "Polished Short Sword", "quantity": 1,
             "custody": "actor-party", "wallet_authority": True,
+            "upgrade_evaluation": _completed_party_evaluation(),
             "upgrades": [{"bot": "Mellis", "slot": "primary", "gain": 8, "legal": True}],
             "merchant_quote": captured_quote(40),
             "availability": 2, "demand": 8, "age_days": 0,
@@ -93,25 +119,32 @@ def demo_trace():
         {
             "custody_id": "loot-102", "item_id": 102, "name": "Common Pelt", "quantity": 1,
             "custody": "actor-party", "wallet_authority": True, "upgrades": [],
+            "upgrade_evaluation": _completed_party_evaluation(),
             "merchant_quote": captured_quote(12),
             "availability": 9, "demand": 2, "age_days": 1,
         },
         {
             "custody_id": "loot-103", "item_id": 103, "name": "Rare Earring", "quantity": 1,
             "custody": "actor-party", "wallet_authority": True, "upgrades": [],
+            "upgrade_evaluation": _completed_party_evaluation(),
             "merchant_quote": captured_quote(100),
             "availability": 2, "demand": 9, "age_days": 3,
-            "market_outcome": {"sold_after_days": 7, "buyer_max_copper": 180, "settled_copper": 164},
+            "market_outcome": {
+                "sold_after_days": 7, "buyer_max_copper": 180,
+                "settled_copper": 164, "buyer_debited_copper": 164,
+            },
         },
         {
             "custody_id": "loot-104", "item_id": 104, "name": "Unpriced Relic", "quantity": 1,
             "custody": "actor-party", "wallet_authority": False, "upgrades": [],
+            "upgrade_evaluation": _completed_party_evaluation(),
             "merchant_quote": None,
             "availability": 1, "demand": 10, "age_days": 30,
         },
         {
             "custody_id": "loot-105", "item_id": 105, "name": "Aged Cloak", "quantity": 1,
             "custody": "actor-party", "wallet_authority": True, "upgrades": [],
+            "upgrade_evaluation": _completed_party_evaluation(),
             "merchant_quote": captured_quote(80),
             "availability": 3, "demand": 6, "age_days": 45,
         },
@@ -130,11 +163,28 @@ def recommend(item, strategy_version=DEFAULT_STRATEGY_VERSION):
     if not item.get("custody_id") or type(quantity) is not int or quantity <= 0:
         return {"action": "hold", "reason": "custody_invalid"}
 
-    upgrades = [
-        upgrade for upgrade in item.get("upgrades", [])
-        if upgrade.get("legal") is True and upgrade.get("gain", 0) > 0
-    ]
+    evaluation = item.get("upgrade_evaluation")
+    if not _upgrade_evaluation_complete(evaluation):
+        return {"action": "hold", "reason": "upgrade_evaluation_incomplete"}
+
+    upgrade_results = item.get("upgrades")
+    if not isinstance(upgrade_results, list) or any(
+        not isinstance(upgrade, dict)
+        or not isinstance(upgrade.get("bot"), str)
+        or not upgrade["bot"]
+        or upgrade["bot"] not in evaluation["evaluated_bots"]
+        or not isinstance(upgrade.get("slot"), str)
+        or not upgrade["slot"]
+        or type(upgrade.get("gain")) is not int
+        or type(upgrade.get("legal")) is not bool
+        for upgrade in upgrade_results
+    ):
+        return {"action": "hold", "reason": "upgrade_snapshot_invalid"}
+
+    upgrades = [upgrade for upgrade in upgrade_results if upgrade["legal"] and upgrade["gain"] > 0]
     if upgrades:
+        if quantity != 1:
+            return {"action": "hold", "reason": "equip_quantity_unsupported"}
         best = max(upgrades, key=lambda upgrade: upgrade["gain"])
         return {
             "action": "equip",
@@ -216,9 +266,21 @@ def _audit(trace, custody_ledger, currency_ledger):
             errors.append(f"custody_imbalance:{custody_id}")
 
     expected_currency = sum(entry["unit_copper"] * entry["quantity"] for entry in currency_ledger)
-    simulated_currency = sum(entry["credited_copper"] for entry in currency_ledger)
-    if expected_currency != simulated_currency:
+    simulated_currency = sum(entry["actor_delta_copper"] for entry in currency_ledger)
+    market_net = sum(
+        entry["actor_delta_copper"] + entry["counterparty_delta_copper"]
+        for entry in currency_ledger if entry["kind"] == "market_transfer"
+    )
+    if any(
+        entry["actor_delta_copper"] != entry["unit_copper"] * entry["quantity"]
+        for entry in currency_ledger
+    ):
         errors.append("currency_imbalance")
+    if market_net != 0 or any(
+        entry["counterparty_delta_copper"] != -entry["unit_copper"] * entry["quantity"]
+        for entry in currency_ledger if entry["kind"] == "market_transfer"
+    ):
+        errors.append("market_currency_imbalance")
 
     return {
         "initial_item_quantity": sum(
@@ -234,6 +296,7 @@ def _audit(trace, custody_ledger, currency_ledger):
         "wallet_before_copper": 0,
         "expected_wallet_after_copper": expected_currency,
         "wallet_after_copper": simulated_currency,
+        "market_net_copper": market_net,
         "errors": errors,
     }
 
@@ -259,10 +322,12 @@ def _simulate(trace, recommendations):
             destination = f"merchant:{result['merchant']}"
             proceeds = result["proceeds_copper"] * quantity
             currency_ledger.append({
-                "source": "merchant_quote",
+                "kind": "merchant_source_sink",
+                "source": f"merchant:{result['merchant']}",
                 "unit_copper": result["proceeds_copper"],
                 "quantity": quantity,
-                "credited_copper": proceeds,
+                "actor_delta_copper": proceeds,
+                "counterparty_delta_copper": None,
             })
         elif action == "offer_later":
             outcome = item.get("market_outcome", {})
@@ -275,11 +340,14 @@ def _simulate(trace, recommendations):
             if sold:
                 destination = "market-buyer"
                 credited = outcome.get("settled_copper", result["asking_copper"]) * quantity
+                debited = outcome.get("buyer_debited_copper", 0) * quantity
                 currency_ledger.append({
-                    "source": "market_offer",
+                    "kind": "market_transfer",
+                    "source": "market-buyer",
                     "unit_copper": result["asking_copper"],
                     "quantity": quantity,
-                    "credited_copper": credited,
+                    "actor_delta_copper": credited,
+                    "counterparty_delta_copper": -debited,
                 })
                 sell_days.append(sold_after_days)
             else:
@@ -287,10 +355,12 @@ def _simulate(trace, recommendations):
                 aged_unsold += quantity
                 proceeds = result["vendor_floor_copper"] * quantity
                 currency_ledger.append({
-                    "source": "expired_market_offer",
+                    "kind": "merchant_source_sink",
+                    "source": f"merchant:{result['expiry_merchant']}",
                     "unit_copper": result["vendor_floor_copper"],
                     "quantity": quantity,
-                    "credited_copper": proceeds,
+                    "actor_delta_copper": proceeds,
+                    "counterparty_delta_copper": None,
                 })
 
         custody_ledger.append({

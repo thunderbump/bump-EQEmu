@@ -35,6 +35,7 @@ class EquipmentPricingPrototypeTest(unittest.TestCase):
             "name": "Polished Short Sword",
             "custody": "actor-party",
             "custody_id": "loot-101",
+            "upgrade_evaluation": demo_trace()[0]["upgrade_evaluation"],
             "upgrades": [
                 {"bot": "Mellis", "slot": "primary", "gain": 8, "legal": True},
                 {"bot": "Pipin", "slot": "primary", "gain": 3, "legal": True},
@@ -60,6 +61,60 @@ class EquipmentPricingPrototypeTest(unittest.TestCase):
         ]
 
         self.assertEqual(recommend(snapshot)["action"], "offer_later")
+
+    def test_disposition_requires_complete_party_upgrade_evaluation(self):
+        snapshot = demo_trace()[1]
+        snapshot["upgrade_evaluation"]["evaluated_bots"] = ["Mellis"]
+
+        self.assertEqual(
+            recommend(snapshot),
+            {"action": "hold", "reason": "upgrade_evaluation_incomplete"},
+        )
+
+    def test_malformed_upgrade_snapshots_hold_without_crashing(self):
+        for upgrades in (None, [None], [{"legal": True, "gain": 1}]):
+            with self.subTest(upgrades=upgrades):
+                snapshot = demo_trace()[1]
+                snapshot["upgrades"] = upgrades
+                self.assertEqual(
+                    recommend(snapshot),
+                    {"action": "hold", "reason": "upgrade_snapshot_invalid"},
+                )
+
+    def test_multi_quantity_upgrade_is_held(self):
+        snapshot = demo_trace()[0]
+        snapshot["quantity"] = 3
+
+        result = compare([snapshot])
+
+        self.assertEqual(
+            result["recommendations"][0],
+            {
+                "item_id": 101,
+                "name": "Polished Short Sword",
+                "quantity": 3,
+                "action": "hold",
+                "reason": "equip_quantity_unsupported",
+            },
+        )
+        self.assertEqual(result["metrics"]["upgrade_distribution"], {})
+
+    def test_market_sale_has_equal_opposite_buyer_and_actor_deltas(self):
+        result = compare([demo_trace()[2]])
+
+        self.assertEqual(result["currency_ledger"], [{
+            "kind": "market_transfer",
+            "source": "market-buyer",
+            "unit_copper": 164,
+            "quantity": 1,
+            "actor_delta_copper": 164,
+            "counterparty_delta_copper": -164,
+        }])
+        self.assertEqual(result["accounting"]["market_net_copper"], 0)
+
+        mismatched = demo_trace()[2]
+        mismatched["market_outcome"]["buyer_debited_copper"] = 150
+        self.assertIn("market_currency_imbalance", compare([mismatched])["accounting"]["errors"])
 
     def test_unconfirmed_authority_holds_the_item(self):
         snapshot = {
@@ -115,6 +170,7 @@ class EquipmentPricingPrototypeTest(unittest.TestCase):
             "name": "Rare Earring",
             "custody": "actor-party",
             "custody_id": "loot-303",
+            "upgrade_evaluation": demo_trace()[0]["upgrade_evaluation"],
             "upgrades": [],
             "merchant_quote": captured_quote(100),
             "wallet_authority": True,
@@ -264,6 +320,7 @@ class EquipmentPricingPrototypeTest(unittest.TestCase):
                 "wallet_before_copper": 0,
                 "expected_wallet_after_copper": 256,
                 "wallet_after_copper": 256,
+                "market_net_copper": 0,
                 "errors": [],
             },
         )
@@ -274,6 +331,7 @@ class EquipmentPricingPrototypeTest(unittest.TestCase):
             "sold_after_days": 13,
             "buyer_max_copper": 180,
             "settled_copper": 164,
+            "buyer_debited_copper": 164,
         }
         sold = compare([item], "balanced-v1")
         item["market_outcome"]["sold_after_days"] = 14
@@ -292,6 +350,7 @@ class EquipmentPricingPrototypeTest(unittest.TestCase):
             "sold_after_days": 29,
             "buyer_max_copper": 220,
             "settled_copper": 200,
+            "buyer_debited_copper": 200,
         }
         sold = compare([item], "patient-v1")
         item["market_outcome"]["sold_after_days"] = 30
@@ -316,10 +375,12 @@ class EquipmentPricingPrototypeTest(unittest.TestCase):
         self.assertEqual(result["accounting"]["wallet_after_copper"], 36)
         self.assertEqual(result["accounting"]["expected_wallet_after_copper"], 36)
         self.assertEqual(result["currency_ledger"], [{
-            "source": "merchant_quote",
+            "kind": "merchant_source_sink",
+            "source": "merchant:Rivervale Merchant",
             "unit_copper": 12,
             "quantity": 3,
-            "credited_copper": 36,
+            "actor_delta_copper": 36,
+            "counterparty_delta_copper": None,
         }])
 
     def test_accounting_independently_detects_duplicate_custody_and_currency_imbalance(self):
@@ -337,9 +398,10 @@ class EquipmentPricingPrototypeTest(unittest.TestCase):
                 "duplicate_or_missing_source:loot-101",
                 "duplicate_transition:loot-101",
                 "currency_imbalance",
+                "market_currency_imbalance",
             ],
         )
-        self.assertEqual(result["metrics"]["conservation_failures"], 3)
+        self.assertEqual(result["metrics"]["conservation_failures"], 4)
 
     def test_accounting_does_not_invent_actor_custody_for_a_held_item(self):
         trace = demo_trace()
