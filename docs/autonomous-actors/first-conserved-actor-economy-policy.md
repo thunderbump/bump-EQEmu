@@ -113,9 +113,9 @@ inflation, a later policy may add a sink or tighten a faucet; the first implemen
 ## Evidence and interrupted outcomes
 
 Full-fidelity **Actor Economy Evidence** is mandatory throughout prototypes and tests and continues across test runs.
-Every observed asset mutation records the Actor, item or coin, source, destination, reason, strategy version, and
-outcome. Required aggregates include wallet balances, holdings value and concentration, gross and net coin flow,
-vendor proceeds, deferred/rejected actions, and conservation violations.
+Every Actor-economy asset mutation produces evidence recording the Actor, item or coin, source, destination, reason,
+strategy version, and outcome. Required aggregates include wallet balances, holdings value and concentration, gross
+and net coin flow, vendor proceeds, deferred/rejected actions, and conservation violations.
 
 Evidence volume is itself measured. Production retention or sampling is decided later from observed rates rather than
 pre-optimized now; conservation failures remain unsampled.
