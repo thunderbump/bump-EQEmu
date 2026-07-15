@@ -84,6 +84,19 @@ started   -> progress* -> terminal
 Actor Event before treating an accepted target or speech request as complete
 ([request/observation loop](https://github.com/thunderbump/bump-EQEmu/blob/60edb352d33101c22e24447cd6d5fddda032157e/docs/autonomous-actors/actor-action-event-control-plane-spike.md#L29-L45)).
 
+`action.started` is emitted exactly once, immediately before an accepted action first crosses from queued/validated
+work into its ordinary gameplay execution boundary. Claiming a queue row, validating authority, polling a retry, or
+recording later progress does not start the action. The start record cites the requested and accepted record IDs; keeps
+the same action identity, generation, attempt, idempotency key, and payload digest; records the current execution
+authority, Actor Evidence Sequencer authority generation, and zone/process epoch; and carries a monotonic logical start
+value from the action's time origin.
+The requested, accepted, and terminal records carry comparable logical values so durations never depend on wall time.
+
+An accepted action may reach a canonical terminal before it starts, for example when authority is interrupted or its
+request expires while queued. That terminal has no `started_record_id` and retains the ordinary canonical outcome and
+reason; it never fabricates a start. A started action terminal cites `started_record_id`. No tick, progress callback, or
+repeated execution attempt emits another start record.
+
 An **Actor Event** records authoritative or actor-observable world change. Events should arise at consequential
 gameplay boundaries, not from every internal callback. The current recorder demonstrates a sparse envelope and a
 bounded 512-record ring
@@ -253,7 +266,7 @@ Record in full:
 
 - `objective.instantiated`, `objective.phase_changed`, and `objective.terminal`;
 - `decision.made`, including emitted action or explicit no-action;
-- `action.requested`, `action.accepted`, `action.rejected`, and `action.terminal`;
+- `action.requested`, `action.accepted`, `action.rejected`, `action.started`, and `action.terminal`;
 - `objective.progress_lease_refreshed`, paused, resumed, and stalled only when the lease state changes;
 - `replan.requested`, `replan.accepted`, and rejected replacement classification; and
 - retry and Objective Viability consumption as before/after values on the decision that consumed them.
@@ -398,6 +411,10 @@ wallet currency, or merchant settlement. Operation and reason are bounded schema
 | action deferral rate | `deferred` action terminals / all action terminals |
 | action terminal outcome share | action terminals in one canonical outcome / all action terminals; report every `succeeded`, `deferred`, `blocked`, `failed`, `expired`, `interrupted`, and `death` outcome separately |
 | retry-consuming action failure rate | `blocked` + `failed` + `expired` action terminals / all action terminals; `interrupted` and `death` remain separate viability outcomes rather than action failures |
+| action request-to-start duration | `action.started` logical start minus its correlated `action.requested` logical value; report only started actions and count accepted actions that terminal before start separately |
+| action accepted-queue duration | `action.started` logical start minus its correlated `action.accepted` logical value; report only started actions |
+| action runtime duration | `action.terminal` logical value minus its correlated `action.started` logical start; report only started actions and split by canonical terminal outcome |
+| accepted-before-start terminal share | accepted actions reaching `action.terminal` without `started_record_id` / all accepted actions reaching a terminal; report every canonical outcome and bounded reason separately |
 | meaningful progress rate | Objective Progress Lease refreshes / active objective hour |
 | retry consumption | action attempts consumed / objective lifecycle terminal; report distribution by objective terminal, template, and strategy |
 | active objective duration | active elapsed time excluding explicitly paused capacity deferral |
