@@ -41,9 +41,9 @@ do not cite the proposed movement, damage, heal, death, handoff, economy, perfor
 below as implemented capabilities. The durable `actor_events` shape also lacks objective/action correlation columns;
 those fields currently belong in the logical contract until a later schema decision.
 
-There is no pushed Actor cross-zone handoff, Actor wallet/holdings settlement, tick-percentile sampler, evidence-drop
-counter, or Actor Experiment Manifest schema. This research names the evidence each later proof needs; it does not
-declare those gameplay capabilities available.
+There is no pushed Actor cross-zone handoff, Actor wallet/holdings settlement, durable **Actor Evidence Sequencer**,
+tick-percentile sampler, evidence-drop counter, or Actor Experiment Manifest schema. This research names the evidence
+each later proof needs; it does not declare those gameplay capabilities available.
 
 ## Evidence classes
 
@@ -139,7 +139,7 @@ Every immutable record has these fields, regardless of physical storage:
 | `observed_at_utc` | Wall time for operator correlation; never the sole ordering authority. |
 | `source` | Bounded producer name and source version. |
 | `actor_id` | Durable Autonomous Actor identity when actor-scoped. |
-| `actor_sequence` | Monotonic per-Actor evidence sequence when actor-scoped. |
+| `actor_sequence` | Unique monotonic position assigned by the Actor Evidence Sequencer when actor-scoped. |
 | `authority` | `live`, `coarse`, or `derived`; payload cannot promote its own authority. |
 | `provenance_ref` | Immutable strategy/config/content provenance identity and digest. |
 | `payload` | Bounded, schema-versioned type-specific content. |
@@ -163,6 +163,48 @@ Add the following correlation and fencing fields whenever that boundary exists:
 
 Names and free-form text belong in bounded payloads, not correlation keys. IDs are opaque. Timestamps help operators
 but never replace actor sequence, action generation, materialization generation, transaction fence, or event watermark.
+
+### Actor evidence sequencing authority
+
+One durable **Actor Evidence Sequencer** owns the next sequence and current evidence-authority generation for each
+Actor. Zone, world/coarse, and helper processes are evidence producers, not independent sequence authorities. The
+sequencer grants one exclusive append lease for an Actor to the producer that currently owns that Actor's execution
+authority: a materialized zone process for live execution or the world/coarse controller while dematerialized. A
+planner or other helper returns a source-local proposal to the current lease holder; accepting, rejecting, or ignoring
+that proposal becomes evidence only when the holder submits it through the sequencer.
+
+The durable sequencer state contains at least the Actor, last committed `actor_sequence`, evidence-authority
+generation, leased producer kind and process epoch, and lease state. It assigns consecutive sequences transactionally
+when a producer appends an ordered batch outside the zone tick. Each submitted record already has a globally unique
+`record_id`; retrying the same immutable `record_id` returns its original sequence, while reusing that identity with
+different content is rejected. The sequencer rejects a sequence supplied by a producer, a second record for an
+occupied Actor/sequence pair, any value at or below the durable watermark, and every append from a stale authority
+generation or process epoch. Producers may preserve source-local order before append, but neither their counters nor
+database auto-increment order are Actor replay order.
+
+An exclusive append lease avoids cross-producer races without a coordination call on every zone tick. Producers
+capture only consequential records into their bounded local queue and append bounded batches outside gameplay loops.
+No second producer may append for the Actor concurrently; world routing and helper results enter through the current
+holder until an explicit authority transfer. Batch persistence and capacity still obey the required-versus-sampled
+evidence rules below; the sequencer does not make a dropped record complete merely by advancing a counter.
+
+Cross-zone or live/coarse handoff uses this ordering fence:
+
+1. the source stops accepting new consequential work, appends through its final required-evidence watermark, and
+   appends `handoff.source_released` in its current evidence-authority generation;
+2. the sequencer durably closes that lease and records its terminal sequence before advancing the evidence-authority
+   generation and leasing the destination; and
+3. the destination appends `handoff.destination_claimed` as the next Actor sequence before it may emit consequential
+   work.
+
+If the source cannot prove its release and final watermark, the destination lease is not granted. On process restart,
+the sequencer reloads the durable Actor watermark and fences the old process epoch before granting a recovery lease.
+An append whose acknowledgement was lost is retried with the same `record_id` and recovers the same sequence; an
+uncommitted record is never reconstructed with a guessed order. A lost required record invalidates the affected
+experiment run and keeps any capability whose safety depends on that evidence deferred. Late batches from the old
+generation are fenced without consuming a sequence. Thus gaps cannot masquerade as committed evidence, sequences
+cannot regress or be assigned twice, and replay sorts one Actor's committed records by `actor_sequence` while using
+explicit causation/correlation for relationships between Actors.
 
 ## Terminal vocabulary
 
@@ -226,7 +268,7 @@ Use bounded checkpoint progress rather than coordinate spam:
 - `travel.requested` and `travel.checkpoint_reached` for authored checkpoint identity;
 - `travel.terminal` with the common terminal vocabulary;
 - `handoff.prepared`, `handoff.source_released`, `handoff.destination_claimed`, and `handoff.terminal` sharing one
-  handoff identity and materialization generation;
+  handoff identity, materialization generation, and the source/destination Actor Evidence Sequencer generations;
 - `materialization.requested`, `materialized`, `dematerialized`, `reconciliation_selected`, and terminal deferral;
 - source/destination zone process epochs and conserved Actor/party state digests at handoff boundaries.
 
@@ -488,7 +530,8 @@ The minimum replay bundle is:
 - the `experiment.run_started` record that binds this replay execution to its exact inputs and provenance;
 - initial Actor Profile/objective/party/holdings snapshots and their digests;
 - ordered decision-bearing observations and authoritative action outcomes;
-- per-Actor event sequence plus objective/action generations and watermarks;
+- the Actor Evidence Sequencer watermark and evidence-authority generation, plus objective/action generations and
+  input watermarks;
 - deterministic seed and time inputs represented as logical elapsed values;
 - expected per-step Actor Decision Record, emitted action identity, action-outcome classification when an action
   terminates, objective lifecycle terminal when the objective terminates, and next-state digest; and
@@ -498,9 +541,9 @@ Replay consumes observations/outcomes, not derived metrics or performance sample
 watermarks, before-state digest, decision reason, zero-or-one emitted action, action generation, after-state digest, and
 unconsumed stale/duplicate input behavior. A mismatch stops the replay at the first divergent decision sequence.
 
-Wall-clock timestamps, entity pointer identity, database auto-increment order across Actors, CPU timing, asynchronous
-delivery order not admitted by the recorded actor sequence, and performance samples are nondeterministic context. They
-must not decide replay equality.
+Wall-clock timestamps, entity pointer identity, database auto-increment order across Actors, producer-local sequence,
+CPU timing, asynchronous delivery order not admitted by the sequencer-assigned Actor sequence, and performance samples
+are nondeterministic context. They must not decide replay equality.
 
 Economy replay can compare recommendations from conserved snapshots, but it cannot recreate a live asset mutation.
 Asset correctness is checked by settlement keys, custody versions, receipts, and ledger reconciliation. Likewise,
@@ -587,9 +630,10 @@ per-tick snapshots
 
 ## Implementation sequence implied by the research
 
-1. Publish logical schemas for Actor Experiment Manifest, Actor Decision Record, action/event correlation, and runtime
-   windows before expanding durable tables.
-2. Prototype a bounded asynchronous evidence sink with explicit required-versus-sampled classes, overload injection,
+1. Publish logical schemas for Actor Experiment Manifest, Actor Decision Record, action/event correlation, Actor
+   Evidence Sequencer state/leases, and runtime windows before expanding durable tables.
+2. Prototype a bounded asynchronous evidence sink and durable Actor Evidence Sequencer with explicit
+   required-versus-sampled classes, authority-transfer and crash injection, duplicate/fenced append checks,
    byte/rate accounting, and zone-loop overhead measurements.
 3. Extend only the event types needed by the first hunt and chatter prototypes; do not implement the entire vocabulary
    at once.
