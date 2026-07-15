@@ -16,8 +16,9 @@ every consequential item or currency transfer. Coarse execution may plan and age
 
 ## Ownership and initial asset scope
 
-Each Autonomous Actor owns one persistent **Actor Holdings** account containing its wallet and unequipped items. Bot
-followers own only their equipped items. A reserved owner character, temporary party, Bot wallet, or global treasury
+Each Autonomous Actor owns one persistent **Actor Holdings** account containing its wallet and unequipped items. The
+Actor leader and each Bot follower keep equipped items in their authoritative gameplay-body equipment slots; Bot
+followers own only those equipped items. A reserved owner character, temporary party, Bot wallet, or global treasury
 does not own Actor assets. Actor Holdings persist across follower changes and Actor Death Recovery.
 
 The first party begins with:

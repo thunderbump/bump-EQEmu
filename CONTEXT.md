@@ -193,7 +193,7 @@ The conserved rematerialization of a defeated **Actor-led Party** at its configu
 _Avoid_: Corpse run, item recovery, resurrection penalty
 
 **Actor Holdings**:
-The persistent conserved items and currency owned by one **Autonomous Actor** but not currently equipped by a Bot follower. Ownership remains with the Actor across party changes and **Actor Death Recovery**.
+The persistent conserved unequipped items and currency owned by one **Autonomous Actor**. Items equipped by the Actor gameplay body or a Bot follower remain in authoritative equipment-slot custody rather than **Actor Holdings**. Ownership remains with the Actor across party changes and **Actor Death Recovery**.
 _Avoid_: Party treasury, reserved-owner inventory, Bot bank
 
 **Actor Merchant Principal**:
@@ -233,7 +233,7 @@ _Avoid_: Autonomous Actor runtime, test actor system, production sidecar
 - **Fallback Dialogue** must not replace **Authored Dialogue**.
 - **Actor Death Recovery** is separate from an **Autonomous Actor** acquiring an item from an ordinary NPC corpse.
 - **Actor Death Recovery** preserves equipped and carried possessions; death is not an item or currency sink.
-- Bot followers own their equipped items; unequipped items and currency belong to their directing Actor's **Actor Holdings**.
+- The Actor leader and Bot followers keep equipped items in their authoritative equipment slots; Bot followers own only their equipped items, while unequipped Actor-owned items and currency belong to **Actor Holdings**.
 - A reserved owner character does not own or store **Actor Holdings**.
 - A vendor or resupply recommendation does not authorize settlement until the **Actor Merchant Principal** and conserved item/currency transfer have authoritative proof.
 - Merchant settlement requires the **Actor-led Party** to be materialized in the merchant's live zone and within ordinary interaction range; coarse progress may prepare intent but cannot move assets.
