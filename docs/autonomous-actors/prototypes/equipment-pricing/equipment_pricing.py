@@ -42,19 +42,40 @@ def captured_quote(sell_copper):
 
 
 def _quote_complete(quote):
+    if not isinstance(quote, dict):
+        return False
     principal = quote.get("principal", {})
     merchant = quote.get("merchant", {})
     provenance = quote.get("provenance", {})
     return (
         quote.get("snapshot_version") == "client-merchant-quote-v1"
         and quote.get("authority") == "player-compatible-baseline"
-        and all(field in principal for field in (
-            "character_id", "name", "faction_level", "race", "class", "deity", "charisma"
+        and isinstance(principal, dict)
+        and isinstance(merchant, dict)
+        and isinstance(provenance, dict)
+        and all(type(principal.get(field)) is int for field in (
+            "character_id", "faction_level", "race", "class", "deity", "charisma"
         ))
-        and all(field in merchant for field in ("npc_type_id", "name", "primary_faction"))
-        and all(field in provenance for field in ("pricing_path", "source_revision", "ruleset_version"))
-        and "sell_copper" in quote
-        and "eligible" in quote
+        and isinstance(principal.get("name"), str) and bool(principal["name"])
+        and all(type(merchant.get(field)) is int for field in ("npc_type_id", "primary_faction"))
+        and isinstance(merchant.get("name"), str) and bool(merchant["name"])
+        and all(isinstance(provenance.get(field), str) and provenance[field] for field in (
+            "pricing_path", "source_revision", "ruleset_version"
+        ))
+        and type(quote.get("sell_copper")) is int
+        and quote["sell_copper"] > 0
+        and type(quote.get("eligible")) is bool
+    )
+
+
+def _market_observation_valid(item):
+    return (
+        type(item.get("availability")) is int
+        and 0 <= item["availability"] <= 10
+        and type(item.get("demand")) is int
+        and 0 <= item["demand"] <= 10
+        and type(item.get("age_days")) is int
+        and item["age_days"] >= 0
     )
 
 
@@ -64,7 +85,7 @@ def demo_trace():
         {
             "custody_id": "loot-101", "item_id": 101, "name": "Polished Short Sword", "quantity": 1,
             "custody": "actor-party", "wallet_authority": True,
-            "upgrades": [{"bot": "Mellis", "slot": "primary", "gain": 8}],
+            "upgrades": [{"bot": "Mellis", "slot": "primary", "gain": 8, "legal": True}],
             "merchant_quote": captured_quote(40),
             "availability": 2, "demand": 8, "age_days": 0,
         },
@@ -104,10 +125,14 @@ def recommend(item, strategy_version=DEFAULT_STRATEGY_VERSION):
 
     if item.get("custody") != "actor-party":
         return {"action": "hold", "reason": "custody_unconfirmed"}
-    if not item.get("custody_id") or item.get("quantity", 1) <= 0:
+    quantity = item.get("quantity", 1)
+    if not item.get("custody_id") or type(quantity) is not int or quantity <= 0:
         return {"action": "hold", "reason": "custody_invalid"}
 
-    upgrades = [upgrade for upgrade in item["upgrades"] if upgrade["gain"] > 0]
+    upgrades = [
+        upgrade for upgrade in item.get("upgrades", [])
+        if upgrade.get("legal") is True and upgrade.get("gain", 0) > 0
+    ]
     if upgrades:
         best = max(upgrades, key=lambda upgrade: upgrade["gain"])
         return {
@@ -131,6 +156,9 @@ def recommend(item, strategy_version=DEFAULT_STRATEGY_VERSION):
 
     if not quote.get("eligible"):
         return {"action": "hold", "reason": "merchant_ineligible"}
+
+    if not _market_observation_valid(item):
+        return {"action": "hold", "reason": "market_observation_invalid"}
 
     vendor = {
         "action": "vendor",
@@ -167,7 +195,7 @@ def _audit(trace, custody_ledger, currency_ledger):
         quantity = item.get("quantity", 1)
         if not custody_id or custody_id in sources:
             errors.append(f"duplicate_or_missing_source:{custody_id}")
-        if quantity <= 0:
+        if type(quantity) is not int or quantity <= 0:
             errors.append(f"invalid_quantity:{custody_id}")
         sources[custody_id] = quantity
 
@@ -184,16 +212,25 @@ def _audit(trace, custody_ledger, currency_ledger):
         if transitions.get(custody_id) != quantity:
             errors.append(f"custody_imbalance:{custody_id}")
 
-    expected_currency = sum(entry["expected_copper"] for entry in currency_ledger)
+    expected_currency = sum(entry["unit_copper"] * entry["quantity"] for entry in currency_ledger)
     simulated_currency = sum(entry["credited_copper"] for entry in currency_ledger)
     if expected_currency != simulated_currency:
         errors.append("currency_imbalance")
 
     return {
-        "initial_item_quantity": sum(max(0, item.get("quantity", 1)) for item in trace),
-        "final_item_quantity": sum(max(0, entry["quantity"]) for entry in custody_ledger),
+        "initial_item_quantity": sum(
+            item.get("quantity", 1) for item in trace
+            if type(item.get("quantity", 1)) is int and item.get("quantity", 1) > 0
+        ),
+        "final_item_quantity": sum(
+            entry["quantity"] for entry in custody_ledger
+            if type(entry["quantity"]) is int and entry["quantity"] > 0
+        ),
         "expected_currency_copper": expected_currency,
         "simulated_currency_copper": simulated_currency,
+        "wallet_before_copper": 0,
+        "expected_wallet_after_copper": expected_currency,
+        "wallet_after_copper": simulated_currency,
         "errors": errors,
     }
 
@@ -218,7 +255,12 @@ def _simulate(trace, recommendations):
         elif action == "vendor":
             destination = f"merchant:{result['merchant']}"
             proceeds = result["proceeds_copper"] * quantity
-            currency_ledger.append({"expected_copper": proceeds, "credited_copper": proceeds})
+            currency_ledger.append({
+                "source": "merchant_quote",
+                "unit_copper": result["proceeds_copper"],
+                "quantity": quantity,
+                "credited_copper": proceeds,
+            })
         elif action == "offer_later":
             outcome = item.get("market_outcome", {})
             sold = (
@@ -227,9 +269,13 @@ def _simulate(trace, recommendations):
             )
             if sold:
                 destination = "market-buyer"
-                expected = result["asking_copper"] * quantity
                 credited = outcome.get("settled_copper", result["asking_copper"]) * quantity
-                currency_ledger.append({"expected_copper": expected, "credited_copper": credited})
+                currency_ledger.append({
+                    "source": "market_offer",
+                    "unit_copper": result["asking_copper"],
+                    "quantity": quantity,
+                    "credited_copper": credited,
+                })
                 sell_days.append(outcome["sold_after_days"])
             else:
                 destination = "market-offer"
@@ -241,7 +287,8 @@ def _simulate(trace, recommendations):
             "to": destination,
             "quantity": quantity,
         })
-        if destination in ("actor-party", "market-offer"):
+        if (destination in ("actor-party", "market-offer")
+                and type(quantity) is int and quantity > 0):
             remaining[item["item_id"]] = remaining.get(item["item_id"], 0) + quantity
 
     accounting = _audit(trace, custody_ledger, currency_ledger)
@@ -284,8 +331,14 @@ def compare(trace, strategy_version=DEFAULT_STRATEGY_VERSION):
         "vendor": sum(result["action"] == "vendor" for result in recommendations),
         "offer_later": sum(result["action"] == "offer_later" for result in recommendations),
         "utility_gain": sum(result.get("utility_gain", 0) for result in recommendations),
-        "projected_vendor_copper": sum(result.get("proceeds_copper", 0) for result in recommendations),
-        "projected_offer_copper": sum(result.get("asking_copper", 0) for result in recommendations),
+        "projected_vendor_copper": sum(
+            result.get("proceeds_copper", 0) * result["quantity"] for result in recommendations
+            if type(result["quantity"]) is int and result["quantity"] > 0
+        ),
+        "projected_offer_copper": sum(
+            result.get("asking_copper", 0) * result["quantity"] for result in recommendations
+            if type(result["quantity"]) is int and result["quantity"] > 0
+        ),
     } | simulation["metrics"]
     return {
         "strategy_version": strategy_version,
@@ -307,9 +360,12 @@ def main():
     parser.add_argument("--all", action="store_true")
     args = parser.parse_args()
 
-    if args.all or not sys.stdin.isatty():
-        for strategy in STRATEGY_VERSIONS if args.all or args.strategy is None else (args.strategy,):
-            _print(strategy)
+    if args.all or (not sys.stdin.isatty() and args.strategy is None):
+        print(json.dumps([compare(demo_trace(), strategy) for strategy in STRATEGY_VERSIONS], indent=2))
+        return
+
+    if not sys.stdin.isatty():
+        _print(args.strategy)
         return
 
     strategy = args.strategy or DEFAULT_STRATEGY_VERSION

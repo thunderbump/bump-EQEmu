@@ -1,3 +1,6 @@
+import json
+import subprocess
+import sys
 import unittest
 
 import equipment_pricing as pricing
@@ -5,6 +8,18 @@ from equipment_pricing import captured_quote, compare, demo_trace, recommend
 
 
 class EquipmentPricingPrototypeTest(unittest.TestCase):
+    def test_all_cli_emits_one_json_array(self):
+        output = subprocess.check_output(
+            [sys.executable, pricing.__file__, "--all"],
+            text=True,
+        )
+
+        results = json.loads(output)
+        self.assertEqual(
+            [result["strategy_version"] for result in results],
+            ["liquidate-v1", "balanced-v1", "patient-v1"],
+        )
+
     def test_balanced_v1_is_the_replayable_programmatic_default(self):
         implicit = pricing.compare(pricing.demo_trace())
         explicit = pricing.compare(pricing.demo_trace(), "balanced-v1")
@@ -21,8 +36,8 @@ class EquipmentPricingPrototypeTest(unittest.TestCase):
             "custody": "actor-party",
             "custody_id": "loot-101",
             "upgrades": [
-                {"bot": "Mellis", "slot": "primary", "gain": 8},
-                {"bot": "Pipin", "slot": "primary", "gain": 3},
+                {"bot": "Mellis", "slot": "primary", "gain": 8, "legal": True},
+                {"bot": "Pipin", "slot": "primary", "gain": 3, "legal": True},
             ],
             "merchant_quote": {"eligible": True, "sell_copper": 40, "principal": "baseline-client"},
             "availability": 2,
@@ -37,6 +52,14 @@ class EquipmentPricingPrototypeTest(unittest.TestCase):
                 self.assertEqual(result["bot"], "Mellis")
                 self.assertEqual(result["slot"], "primary")
                 self.assertEqual(result["utility_gain"], 8)
+
+    def test_positive_upgrade_requires_explicit_legality(self):
+        snapshot = demo_trace()[0]
+        snapshot["upgrades"] = [
+            {"bot": "Mellis", "slot": "primary", "gain": 99, "legal": False},
+        ]
+
+        self.assertEqual(recommend(snapshot)["action"], "offer_later")
 
     def test_unconfirmed_authority_holds_the_item(self):
         snapshot = {
@@ -145,6 +168,54 @@ class EquipmentPricingPrototypeTest(unittest.TestCase):
             {"action": "hold", "reason": "quote_snapshot_incomplete"},
         )
 
+    def test_malformed_quote_and_market_observations_are_held(self):
+        malformed_quote = demo_trace()[1]
+        malformed_quote["merchant_quote"] = {"eligible": True, "principal": None}
+        self.assertEqual(
+            recommend(malformed_quote),
+            {"action": "hold", "reason": "quote_snapshot_incomplete"},
+        )
+
+        nonpositive_quote = demo_trace()[1]
+        nonpositive_quote["merchant_quote"] = captured_quote(0)
+        self.assertEqual(
+            recommend(nonpositive_quote),
+            {"action": "hold", "reason": "quote_snapshot_incomplete"},
+        )
+
+        for section, field, value in (
+            ("principal", "charisma", None),
+            ("merchant", "name", ""),
+            ("provenance", "source_revision", ""),
+        ):
+            with self.subTest(section=section, field=field):
+                invalid = demo_trace()[1]
+                invalid["merchant_quote"][section][field] = value
+                self.assertEqual(
+                    recommend(invalid),
+                    {"action": "hold", "reason": "quote_snapshot_incomplete"},
+                )
+
+        for field, value in (("availability", 11), ("demand", -1), ("age_days", -1)):
+            with self.subTest(field=field):
+                invalid = demo_trace()[1]
+                invalid[field] = value
+                self.assertEqual(
+                    recommend(invalid),
+                    {"action": "hold", "reason": "market_observation_invalid"},
+                )
+
+        invalid_quantity = demo_trace()[1]
+        invalid_quantity["quantity"] = "three"
+        self.assertEqual(
+            recommend(invalid_quantity),
+            {"action": "hold", "reason": "custody_invalid"},
+        )
+        self.assertEqual(
+            compare([invalid_quantity])["accounting"]["errors"],
+            ["invalid_quantity:loot-102"],
+        )
+
     def test_compare_reports_deterministic_behavior_and_conservation_metrics(self):
         result = compare(demo_trace(), "balanced-v1")
 
@@ -190,9 +261,30 @@ class EquipmentPricingPrototypeTest(unittest.TestCase):
                 "final_item_quantity": 5,
                 "expected_currency_copper": 256,
                 "simulated_currency_copper": 256,
+                "wallet_before_copper": 0,
+                "expected_wallet_after_copper": 256,
+                "wallet_after_copper": 256,
                 "errors": [],
             },
         )
+
+    def test_projected_values_and_wallet_ledger_include_stack_quantity(self):
+        stack = demo_trace()[1]
+        stack["quantity"] = 3
+
+        result = compare([stack], "balanced-v1")
+
+        self.assertEqual(result["metrics"]["projected_vendor_copper"], 36)
+        self.assertEqual(result["metrics"]["projected_actor_wealth_copper"], 36)
+        self.assertEqual(result["accounting"]["wallet_before_copper"], 0)
+        self.assertEqual(result["accounting"]["wallet_after_copper"], 36)
+        self.assertEqual(result["accounting"]["expected_wallet_after_copper"], 36)
+        self.assertEqual(result["currency_ledger"], [{
+            "source": "merchant_quote",
+            "unit_copper": 12,
+            "quantity": 3,
+            "credited_copper": 36,
+        }])
 
     def test_accounting_independently_detects_duplicate_custody_and_currency_imbalance(self):
         trace = demo_trace()
