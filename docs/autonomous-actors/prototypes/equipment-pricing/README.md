@@ -43,11 +43,15 @@ Run the repository-required behavior checks:
 python3 -m unittest -v test_equipment_pricing.py
 ```
 
-## Evaluation pending
+## Accepted result
 
-The prototype is waiting for human judgment on three questions:
+Human evaluation on 2026-07-14 accepted the prototype's basic policy:
 
-1. Should party upgrades always outrank liquidity and market value?
-2. Is immediate vendor disposition a good default when demand is weak or an item has aged out?
-3. Are the `balanced` and `patient` price ceilings understandable starting points, or should pricing use a different
-   shape before the conserved economy policy is chosen?
+- a positive legal party upgrade always outranks liquidity or speculative market value;
+- weak-demand or aged goods default to ordinary vendor disposition;
+- `balanced` is the initial default, using a 14-day offer window and a price ceiling of 1.75 times vendor floor;
+- `patient` remains an experimental alternative with a 30-day window and twice-vendor ceiling; and
+- `liquidate` remains a comparison baseline rather than the initial live policy.
+
+These are versioned experiment seeds, not permanent economy balance. Real disposition remains disabled until conserved
+custody, wallet, merchant settlement, and later offer authorities exist.
