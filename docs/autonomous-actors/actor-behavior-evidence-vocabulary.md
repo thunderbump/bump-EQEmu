@@ -41,9 +41,9 @@ do not cite the proposed movement, damage, heal, death, handoff, economy, perfor
 below as implemented capabilities. The durable `actor_events` shape also lacks objective/action correlation columns;
 those fields currently belong in the logical contract until a later schema decision.
 
-There is no pushed Actor cross-zone handoff, Actor wallet/holdings settlement, durable **Actor Evidence Sequencer**,
-tick-percentile sampler, evidence-drop counter, or Actor Experiment Manifest schema. This research names the evidence
-each later proof needs; it does not declare those gameplay capabilities available.
+There is no pushed Actor cross-zone handoff, Actor wallet/holdings settlement, durable **Actor Evidence Sequencer** or
+producer outbox, tick-percentile sampler, evidence-drop counter, or Actor Experiment Manifest schema. This research
+names the evidence each later proof needs; it does not declare those gameplay capabilities available.
 
 ## Evidence classes
 
@@ -166,6 +166,7 @@ Add the following correlation and fencing fields whenever that boundary exists:
 | `action_id`, `action_generation`, `attempt`, `idempotency_key` | Requested actions and their results. |
 | `causation_record_id`, `correlation_id` | Linking a trigger to the records it caused without relying on timestamps. |
 | `input_event_watermark`, `input_status_revision` | Decisions based on bounded Actor Events or actor status. |
+| `evidence_authority_generation`, `sequence_lease_id` | Every actor-scoped record assigned by a leased producer. |
 | `zone_id`, `instance_id`, `zone_process_epoch` | Live-zone authority and entity references. |
 | `materialization_generation` | Materialization, dematerialization, and cross-zone handoff. |
 | `entity_ref`, `target_ref`, `target_generation` | Live targets whose numeric entity IDs can be reused. |
@@ -181,43 +182,69 @@ but never replace actor sequence, action generation, materialization generation,
 
 One durable **Actor Evidence Sequencer** owns the next sequence and current evidence-authority generation for each
 Actor. Zone, world/coarse, and helper processes are evidence producers, not independent sequence authorities. The
-sequencer grants one exclusive append lease for an Actor to the producer that currently owns that Actor's execution
-authority: a materialized zone process for live execution or the world/coarse controller while dematerialized. A
-planner or other helper returns a source-local proposal to the current lease holder; accepting, rejecting, or ignoring
-that proposal becomes evidence only when the holder submits it through the sequencer.
+sequencer grants one exclusive sequence-range lease for an Actor to the producer that currently owns that Actor's
+execution authority: a materialized zone process for live execution or the world/coarse controller while
+dematerialized. A planner or other helper returns a source-local proposal to the current lease holder; accepting,
+rejecting, or ignoring that proposal becomes evidence only when the holder submits it through the sequencer.
 
-The durable sequencer state contains at least the Actor, last committed `actor_sequence`, evidence-authority
-generation, leased producer kind and process epoch, and lease state. It assigns consecutive sequences transactionally
-when a producer appends an ordered batch outside the zone tick. Each submitted record already has a globally unique
-`record_id`; retrying the same immutable `record_id` returns its original sequence, while reusing that identity with
-different content is rejected. The sequencer rejects a sequence supplied by a producer, a second record for an
-occupied Actor/sequence pair, any value at or below the durable watermark, and every append from a stale authority
-generation or process epoch. Producers may preserve source-local order before append, but neither their counters nor
-database auto-increment order are Actor replay order.
+The durable sequencer state contains at least the Actor, committed-through and allocated-through `actor_sequence`
+watermarks, evidence-authority generation, leased producer kind and process epoch, bounded reserved range, and lease
+state. Outside the zone tick, it transactionally reserves one bounded contiguous range for the exclusive lease and
+advances `allocated_through` through the range end before returning it. A range is never shared, extended in place, or
+reused. The holder renews before exhaustion through the same out-of-tick path; lack of a usable range defers an
+evidence-dependent decision or action.
 
-An exclusive append lease avoids cross-producer races without a coordination call on every zone tick. Producers
-capture only consequential records into their bounded local queue and append bounded batches outside gameplay loops.
-No second producer may append for the Actor concurrently; world routing and helper results enter through the current
-holder until an explicit authority transfer. Batch persistence and capacity still obey the required-versus-sampled
-evidence rules below; the sequencer does not make a dropped record complete merely by advancing a counter.
+The holder has one serialized capture gate and a durable producer outbox. At a consequential capture boundary, the
+gate reserves the next position from the range and a globally unique `record_id`, preserving the exact accepted capture
+order without re-sorting by timestamp, callback type, or later batch arrival. The position becomes assigned only when
+the outbox atomically persists the compact immutable record, content digest, Actor, sequence, lease,
+evidence-authority generation, and process epoch. Multiple pending captures may enter one ordered outbox transaction,
+but a later capture cannot overtake an unresolved earlier position. Capture into the bounded in-memory queue remains
+constant-time; outbox persistence and acknowledgement occur outside Mob and zone tick loops.
+
+The durable outbox must acknowledge the assignment before a decision may consume that observation. A decision awaiting
+acknowledgement yields or defers rather than evaluating from an unsequenced input. A failed required outbox assignment
+is resolved under the evidence-loss policy and cannot be relabeled as an unused gap. The Actor Decision Record must
+likewise reach the durable outbox before the selected consequential action may be emitted.
+
+`input_event_watermark` is the highest sequencer position in the durable, gap-accounted Actor prefix visible to the
+decision. Every lower reserved position through that watermark must identify one immutable outbox/committed record or
+one durably declared unused position; the Decision Record also links the exact decision-bearing `record_id` values.
+Thus the watermark exists before evaluation, the Decision Record follows its inputs in Actor order, and eventual sink
+batching cannot rewrite the causal prefix used by replay.
+
+Outbox draining preserves `actor_sequence` order. The central sink advances `committed_through` only across a
+contiguous immutable record prefix or a durably declared unused range; it holds a later batch until the missing prefix
+is resolved. Retrying the same `record_id`, sequence, generation, and content digest returns its existing outbox or sink
+receipt. Reusing a record identity or Actor/sequence position with different content is rejected. New writes from a
+stale lease, authority generation, or process epoch are fenced; a receipt lookup for an already durable identical
+record remains safe after fencing and cannot create another sequence.
+
+An exclusive range lease avoids cross-producer races without a coordination call on every zone tick. No second
+producer may capture actor-scoped evidence for the Actor concurrently; world routing and helper results enter through
+the current holder until an explicit authority transfer. Unused positions are never silently collapsed or reassigned.
+On clean range renewal or lease close, the holder and sequencer durably record unused suffixes as gap metadata with the
+lease, range, close reason, and proof that no pending or assigned capture occupies those positions. A missing assigned
+position or failed required capture is evidence loss, not a gap, and cannot satisfy an input watermark.
 
 Cross-zone or live/coarse handoff uses this ordering fence:
 
-1. the source stops accepting new consequential work, appends through its final required-evidence watermark, and
-   appends `handoff.source_released` in its current evidence-authority generation;
-2. the sequencer durably closes that lease and records its terminal sequence before advancing the evidence-authority
-   generation and leasing the destination; and
-3. the destination appends `handoff.destination_claimed` as the next Actor sequence before it may emit consequential
-   work.
+1. the source stops accepting new consequential work, stages and drains its assigned outbox prefix, and commits
+   `handoff.source_released` in its current range and evidence-authority generation;
+2. the sequencer proves there is no unresolved pending or assigned position, durably declares the unused range suffix,
+   closes the lease, and advances the evidence-authority generation; and
+3. the destination receives a new range beginning after the source's reserved range and declared gaps, then commits
+   `handoff.destination_claimed` before it may emit consequential work.
 
-If the source cannot prove its release and final watermark, the destination lease is not granted. On process restart,
-the sequencer reloads the durable Actor watermark and fences the old process epoch before granting a recovery lease.
-An append whose acknowledgement was lost is retried with the same `record_id` and recovers the same sequence; an
-uncommitted record is never reconstructed with a guessed order. A lost required record invalidates the affected
-experiment run and keeps any capability whose safety depends on that evidence deferred. Late batches from the old
-generation are fenced without consuming a sequence. Thus gaps cannot masquerade as committed evidence, sequences
-cannot regress or be assigned twice, and replay sorts one Actor's committed records by `actor_sequence` while using
-explicit causation/correlation for relationships between Actors.
+If the source cannot prove its release, outbox prefix, and unused suffix, the destination lease is not granted. On
+process restart, the sequencer reloads its durable watermarks, fences the old process epoch, and recovers immutable
+records from the durable outbox before closing the old range or granting a recovery lease. An acknowledgement-lost
+write retries the same identity and position; an assigned record missing from the outbox is never reconstructed or
+filled with guessed content. Such required-evidence loss invalidates the affected experiment run and keeps any
+capability whose safety depends on that evidence deferred. Late new records from the old generation are fenced without
+consuming another sequence. Thus declared gaps cannot masquerade as committed evidence, sequences cannot regress or be
+assigned twice, and replay sorts one Actor's committed records by `actor_sequence` while using explicit
+causation/correlation for relationships between Actors.
 
 ## Terminal vocabulary
 
@@ -681,10 +708,11 @@ per-tick snapshots
 ## Implementation sequence implied by the research
 
 1. Publish logical schemas for Actor Experiment Manifest, Actor Decision Record, action/event correlation, Actor
-   Evidence Sequencer state/leases, and runtime windows before expanding durable tables.
-2. Prototype a bounded asynchronous evidence sink and durable Actor Evidence Sequencer with explicit
-   required-versus-sampled classes, authority-transfer and crash injection, duplicate/fenced append checks,
-   byte/rate accounting, and zone-loop overhead measurements.
+   Evidence Sequencer state/range leases, producer outbox, and runtime windows before expanding durable tables.
+2. Prototype a bounded asynchronous evidence sink, durable producer outbox, and Actor Evidence Sequencer with explicit
+   required-versus-sampled classes, range exhaustion and gap accounting, capture-to-watermark proof,
+   authority-transfer and crash injection, duplicate/fenced append checks, byte/rate accounting, and zone-loop overhead
+   measurements.
 3. Extend only the event types needed by the first hunt and chatter prototypes; do not implement the entire vocabulary
    at once.
 4. Build deterministic replay from exact manifests, initial snapshots, ordered inputs, seeds, and per-step digests.
