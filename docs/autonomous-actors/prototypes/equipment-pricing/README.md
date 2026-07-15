@@ -7,23 +7,30 @@ keeping experimental prices bounded by one captured merchant quote.
 The public seam is:
 
 ```text
-compare(ordered_item_trace, strategy_version)
+compare(ordered_item_trace, strategy_version="balanced-v1")
   -> ordered_recommendations, aggregate_metrics
 ```
 
-Inputs are immutable snapshots. Outputs are recommendations only; this prototype does not mutate inventory, currency,
-merchant stock, market listings, databases, or EQEmu runtime state. Merchant quotes are captured player-compatible
-baselines, not live Actor authority.
+Inputs are immutable snapshots. Outputs are recommendations plus a deterministic simulated ledger; this prototype does
+not mutate inventory, currency, merchant stock, market listings, databases, or EQEmu runtime state. Every item requires
+confirmed `actor-party` custody, a unique custody ID, and positive quantity before any equip or disposition recommendation.
+
+Merchant quotes are captured player-compatible baselines, not live Actor authority. Each fixture records its snapshot
+version, source revision/ruleset provenance, merchant identity/faction, and the Client character ID, name, faction level,
+race, class, deity, and Charisma inputs used by `Client::CalcPriceMod`. Incomplete snapshots are held rather than priced.
 
 ## Strategies
 
-- `liquidate`: equip the best positive party upgrade, then vendor every item with complete authority inputs.
-- `balanced`: equip first; offer scarce, demanded, young items up to 1.75 times vendor floor; otherwise vendor.
-- `patient`: equip first; wait longer and allow prices up to twice vendor floor; otherwise vendor.
+- `liquidate-v1`: equip the best positive party upgrade, then vendor every item with complete authority inputs.
+- `balanced-v1`: the programmatic default; offer scarce, demanded, young items up to 1.75 times vendor floor.
+- `patient-v1`: wait longer and allow prices up to twice vendor floor; otherwise vendor.
 
 Every strategy holds an item when custody, wallet authority, or its captured quote is incomplete. Market demand and
 availability are fixed experimental observations on a 0–10 scale. The included five-item trace exposes an upgrade,
-common vendor good, scarce demanded item, missing-authority item, and aged item.
+common vendor good, scarce demanded item, missing-authority item, and aged item. A fixed 30-day market outcome simulation
+reports sell-through/aging, ending stock concentration, projected Actor wealth, upgrade distribution, and rejected
+actions. A separate custody/currency audit detects duplicate sources/transitions, invalid quantity, and settlement
+imbalance instead of deriving conservation from the recommendation count.
 
 Run all strategies:
 
