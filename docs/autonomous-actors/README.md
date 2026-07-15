@@ -24,3 +24,5 @@
   - `central-dcq7.9` research on reusing ordinary loot, Bot equipment valuation, merchant, currency, and market rules behind session-independent conserved transaction seams for Actors.
 - `first-conserved-actor-economy-policy.md`
   - `central-dcq7.11` first implementation contract for Actor Holdings, upgrade-first `balanced-v1` disposition, live merchant settlement, offer intents, currency, and economy evidence.
+- `actor-behavior-evidence-vocabulary.md`
+  - `central-dcq7.15` linked evidence, event, terminal, metric, experiment-manifest, replay, volume, sampling, and zone-overhead vocabulary for explaining and comparing persistent Actor behavior.

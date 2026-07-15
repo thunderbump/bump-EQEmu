@@ -220,6 +220,22 @@ _Avoid_: Direct mutation, forced outcome, command injection
 An observable gameplay result used to understand what changed after **Actor Actions** and world processing.
 _Avoid_: Log line, debug trace, internal callback
 
+**Actor Decision Record**:
+An attributable explanation of one **Autonomous Actor** decision, including the exact strategy provenance and observed-state boundary used to choose an **Actor Action** or deliberately choose no action. It does not assert that a requested action succeeded.
+_Avoid_: Actor Event, planner log, action result
+
+**Actor Evidence Sequencer**:
+The durable ordering authority that assigns each actor-scoped evidence record its unique monotonic position while fencing stale producers across execution-authority changes.
+_Avoid_: Event timestamp, database row order, producer-local counter
+
+**Actor Experiment Manifest**:
+An immutable, versioned definition of one controlled Actor strategy comparison, including its hypothesis, strategy variants, fixed or windowed Actor assignment, replay inputs, world/configuration provenance, and observation window.
+_Avoid_: Test config, mutable experiment settings, strategy version
+
+**Actor Experiment Run**:
+An observable execution of one **Actor Experiment Manifest**, kept distinct across retries and exact repetitions so its start, terminal, provenance, evidence completeness, and produced artifacts remain attributable. It does not mutate the manifest.
+_Avoid_: Manifest revision, experiment result, anonymous repetition
+
 **Actor Economy Evidence**:
 An attributable account of item and currency custody changes and economy outcomes used to assess conservation and strategy behavior.
 _Avoid_: Economy debug log, aggregate-only metric, inferred transaction
