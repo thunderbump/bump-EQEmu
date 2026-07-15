@@ -229,7 +229,7 @@ The durable ordering authority that assigns each actor-scoped evidence record it
 _Avoid_: Event timestamp, database row order, producer-local counter
 
 **Actor Experiment Manifest**:
-An immutable, versioned definition of one controlled Actor strategy comparison, including its hypothesis, strategy variants, cohort assignment, replay inputs, world/configuration provenance, and observation window.
+An immutable, versioned definition of one controlled Actor strategy comparison, including its hypothesis, strategy variants, fixed or windowed Actor assignment, replay inputs, world/configuration provenance, and observation window.
 _Avoid_: Test config, mutable experiment settings, strategy version
 
 **Actor Experiment Run**:

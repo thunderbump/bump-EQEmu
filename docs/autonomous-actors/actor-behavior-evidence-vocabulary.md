@@ -172,7 +172,7 @@ Add the following correlation and fencing fields whenever that boundary exists:
 | `settlement_key`, `custody_version`, `item_fingerprint` | Item/currency mutations. |
 | `manifest_name`, `manifest_version`, `manifest_schema_version`, `manifest_digest` | Every Actor Experiment Run and every record it produces; the digest is the manifest's content identity. |
 | `experiment_run_id`, `run_iteration` | Every record produced by one **Actor Experiment Run**; the opaque run identity and manifest-scoped iteration distinguish repetitions of the same manifest. |
-| `variant_id`, `cohort_id`, `assignment_digest` | Variant- or cohort-scoped records within one controlled comparison. |
+| `variant_id`, `cohort_id`, `assignment_window_id`, `assignment_digest` | Variant-, cohort-, or crossover-window-scoped records within one controlled comparison. |
 
 Names and free-form text belong in bounded payloads, not correlation keys. IDs are opaque. Timestamps help operators
 but never replace actor sequence, action generation, materialization generation, transaction fence, or event watermark.
@@ -474,7 +474,7 @@ hypothesis and primary/guardrail metrics
 repository commit, schema, ruleset/config, content/data, and zone/nav revisions
 baseline and candidate variant IDs, roles, and exact immutable strategy-publication references/digests
 Actor roster/profile/party definitions
-cohort assignment algorithm, salt identity (not secret), assignment digest, and exclusions
+assignment mode, immutable fixed-cohort mapping or Actor-by-window crossover schedule, assignment digest, and exclusions
 initial snapshots, deterministic seed list, and replay ordering rules
 zones, anchors, objective templates, workload, observation window, and stop rules
 authority mode: live, coarse, hybrid, offline replay, or controlled zone
@@ -489,26 +489,46 @@ timestamps, run identities/state/timestamps, results, and produced artifacts. Th
 after the manifest content is frozen; changing any definition field publishes a new manifest version and digest.
 
 Each `variant_id` is unique only within that manifest and selects an exact set of immutable Actor Strategy Registry
-publications. `baseline` and `candidate` are roles assigned to variants, not independent manifest identities. Cohort
-assignment binds each included Actor to one variant before outcomes are observed.
+publications. `baseline` and `candidate` are roles assigned to variants, not independent manifest identities. Assignment
+binds Actors before outcomes are observed. The manifest selects exactly one assignment mode:
+
+- `fixed_cohort` assigns every included Actor one `variant_id` for the complete run using the declared mapping or
+  deterministic algorithm and non-secret salt; or
+- `crossover_schedule` contains an ordered immutable list of windows. Each window has a unique
+  `assignment_window_id`, planned half-open logical-time bounds from the run origin, an explicit Actor-to-variant table,
+  the safe activation rule, maximum transition delay, washout duration, and observation-exclusion rule. Windows cannot
+  overlap, and every included Actor has exactly one assignment in every window.
+
+For crossover mode, a planned boundary stops the Actor from beginning a new objective under the old variant. An active
+objective retains its published strategy versions until its next declared safe objective boundary, then
+`experiment.actor_variant_activated` records the Actor, old/new window and variant, planned and actual logical boundary,
+Actor Evidence Sequencer watermark, and exact strategy-publication digests. Washout begins at that actual activation;
+carryover and washout evidence remains attributable but is excluded from outcome comparison. Missing the manifest's
+maximum transition delay follows its predeclared Actor-exclusion or run-invalidation rule.
+
+The fixed mapping or complete crossover schedule and its boundary/washout rules are covered by `manifest_digest` and
+`assignment_digest`. Every decision, action, and outcome in crossover mode carries its actual `assignment_window_id`,
+`variant_id`, and assignment digest. An Actor cannot choose to select, skip, reorder, or extend a window, and the
+schedule cannot promote a strategy outside this experiment.
 
 An **Actor Experiment Run** is an observable execution of that definition, not a mutation of it. Each execution receives
 a new durable `experiment_run_id` and the next manifest-scoped `run_iteration`, including retries and exact
 repetitions. Record both boundaries at full fidelity:
 
 - `experiment.run_started` binds the **Actor Experiment Run** identity to the manifest name, version, schema version,
-  and digest; exact assigned variant IDs and strategy-publication digests; actual
+  and digest; assignment mode and digest; exact assigned window/variant IDs and strategy-publication digests; actual
   repository/config/content/schema and strategy provenance digests, authority and workload mode, initial snapshot and
-  ordered-input/replay-bundle digests, seed-set digest, actual cohort roster/exclusions and assignment digest, planned
+  ordered-input/replay-bundle digests, seed-set digest, actual Actor roster/exclusions and assignment digest, planned
   observation window and stop rules, start wall time and logical-time origin, and starting source/Actor watermarks. When
   human observation is used, it also references the rubric version, blinded run label, and opaque observation-session
   identity.
 - `experiment.run_terminal` links to the start record and records one stable **Actor Experiment Run** terminal
   (`completed`, `stopped`, `failed`, or `invalidated`) plus reason code; actual wall/logical timing and observation
-  window; terminal watermarks by source, Actor, and cohort; attempted/accepted/dropped/overwritten/rejected evidence
-  counts by class; required-evidence completeness; final state, output, replay-result, metric/report, and other produced
-  artifact digests; and the bounded human-observation artifact/session reference when used. Any required-evidence loss
-  or provenance/input mismatch makes the **Actor Experiment Run** `invalidated`, never a complete-looking comparison.
+  window; terminal watermarks by source, Actor, cohort, and assignment window; actual crossover transitions, delays,
+  washouts, and exclusions when applicable; attempted/accepted/dropped/overwritten/rejected evidence counts by class;
+  required-evidence completeness; final state, output, replay-result, metric/report, and other produced artifact digests;
+  and the bounded human-observation artifact/session reference when used. Any required-evidence loss or
+  provenance/input mismatch makes the **Actor Experiment Run** `invalidated`, never a complete-looking comparison.
 
 **Actor Experiment Run** records report observed execution facts. They cannot rewrite the manifest, assignment,
 strategy publication, input bundle, or expected stop rules. Artifact references are immutable identities and content
@@ -517,7 +537,8 @@ publication does not match its variant, is invalidated.
 
 Use paired replay over the same initial snapshot, ordered inputs, and seeds when comparing pure decisions. Use matched
 live cohorts or crossover windows when ordinary gameplay timing, players, pathing, or zone cost is part of the question.
-Assignment is deterministic from the manifest and stable Actor identity; no Actor self-selects or self-promotes.
+Fixed assignment is deterministic from the manifest and stable Actor identity. Crossover assignment follows only the
+manifest's Actor-by-window table and recorded safe-boundary activation rule. No Actor self-selects or self-promotes.
 
 Comparison reports must:
 
@@ -525,7 +546,10 @@ Comparison reports must:
   candidate `variant_id` plus their exact strategy-publication digests;
 - include only runs that reference that same manifest digest; comparing a different strategy or comparison definition
   requires a newly published manifest rather than treating two manifests as experiment arms;
-- show cohort balance and exclusions before outcomes;
+- show cohort/window balance and exclusions before outcomes;
+- for crossover runs, reconstruct each Actor's assignment from the immutable schedule and
+  `experiment.actor_variant_activated` records, show planned/actual boundaries and transition delays, and exclude the
+  declared carryover/washout intervals before grouping evidence by window and variant;
 - compare identical metric formulas and authority classes;
 - report denominators, missing evidence, effect size, and interval/dispersion rather than winner-only totals;
 - separate replay, controlled-zone, production-like, and human-observation results; and
@@ -580,8 +604,8 @@ the complete server combat simulation from a terminal summary.
 - party death and Actor Death Recovery terminals;
 - every Actor Economy Evidence mutation, settlement fence, receipt, and indeterminate result;
 - every conservation, duplicate-execution, double-materialization, or required-evidence-loss violation;
-- experiment cohort assignment, every `experiment.run_started` and `experiment.run_terminal` record, and their run
-  correlation fields; and
+- experiment cohort/window assignment, every `experiment.actor_variant_activated`, `experiment.run_started`, and
+  `experiment.run_terminal` record, and their run correlation fields; and
 - counters that disclose sampled-record drops or bounded-buffer overwrites.
 
 If the required-evidence path has no capacity, a consequential Actor capability whose safety depends on that evidence
