@@ -247,7 +247,10 @@ Record every asset mutation as Actor Economy Evidence. Also record non-mutating 
 
 - `economy.disposition_recommended` with complete-party evaluation digest and economy strategy version;
 - `economy.offer_intent_created`, expired, or cleared;
-- `economy.quote_observed` with Actor Merchant Principal, merchant, ruleset, validity, and authoritative price;
+- `economy.quote_observed` with the Actor Merchant Principal, merchant, validity, authoritative price, pricing-calculation
+  version, ruleset/config revision, and an immutable bounded quote-input snapshot and digest. The snapshot includes the
+  principal's quote-time faction standing, Charisma, race, class, and deity; merchant identity, faction, and bounded
+  pricing context; and item fingerprint, quantity, buy/sell direction;
 - `economy.settlement_attempted` and terminal receipt/indeterminate result;
 - `economy.asset_transfer` with equal and opposite custody/currency sides where conservation requires them; and
 - `economy.capacity_deferred` with Actor Holdings Capacity before/required values.
@@ -325,8 +328,8 @@ range, and missing/dropped evidence count.
 | recovery completion time | readiness/rematerialization terminal time minus recovery start |
 | wallet net flow | authoritative Actor Wallet credits minus debits in copper |
 | vendor proceeds | authoritative merchant-sale credits in copper |
-| authoritative quote price | authoritative quoted copper / quoted item quantity for valid `economy.quote_observed` records; report distributions by buy/sell direction, item fingerprint, merchant, ruleset, Actor Merchant Principal, and strategy version |
-| paired quote price difference | candidate authoritative quote copper per item minus baseline authoritative quote copper per item for quotes matched by buy/sell direction, item fingerprint, quantity, merchant, ruleset, Actor Merchant Principal, and validity boundary; also report `(candidate - baseline) / baseline` when baseline is nonzero |
+| authoritative quote price | authoritative quoted copper / quoted item quantity for valid `economy.quote_observed` records; report distributions by quote-input digest, pricing-calculation version, ruleset/config revision, and strategy version |
+| paired quote price difference | candidate authoritative quote copper per item minus baseline authoritative quote copper per item for valid quotes matched by quote-input digest, pricing-calculation version, ruleset/config revision, and validity boundary; also report `(candidate - baseline) / baseline` when baseline is nonzero |
 | holdings concentration | top-N Actors' holdings value / total Actor holdings value, with valuation formula version |
 | upgrade distribution | positive Bot Gear Value gained by Actor, party member, slot, and strategy |
 | conservation violations | unmatched or imbalanced authoritative asset deltas; never estimated or sampled |
