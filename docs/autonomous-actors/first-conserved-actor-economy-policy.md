@@ -120,6 +120,13 @@ item into available Actor Holdings capacity, and a durable receipt. A synthetic 
 direct inventory or currency helper calls, guessed success, item creation/deletion, or compensating mutation cannot
 stand in for either ordinary settlement.
 
+Every sale or purchase carries one durable unique settlement key bound to the Actor, Actor Action generation,
+operation, concrete item custody fingerprint, and merchant. The ordinary merchant transaction boundary must durably
+claim or reject that key before its first item, wallet, or stock mutation. A claimed key can return its existing
+terminal receipt or a stable already-attempted/indeterminate result, but it can never execute those mutations again.
+An indeterminate attempt cannot be assigned a replacement key for the same concrete custody version. If the ordinary
+merchant path cannot prove this persistent at-most-once fence, `SellOneItem` and `ResupplyOneItem` remain unavailable.
+
 Coarse city downtime may classify inventory, age an offer intent, prepare a request, or request zone capacity. It
 cannot transfer an item or coin. The Actor Resolution Zone Reserve may boot a city to resolve one transaction; when
 capacity is unavailable, the action defers without mutation.
@@ -148,10 +155,11 @@ and net coin flow, vendor proceeds, deferred/rejected actions, and conservation 
 Evidence volume is itself measured. Production retention or sampling is decided later from observed rates rather than
 pre-optimized now; conservation failures remain unsampled.
 
-Interrupted merchant recovery stays naive. Ordinary merchant state is authoritative, and after restart the Actor
-reloads current wallet and holdings and continues. The first implementation does not add compensation, forensic
-recovery, or a guessed repeat transaction. It must prevent duplication, but a rare item loss to a merchant in this
-corner case is acceptable and recorded when observable.
+Interrupted merchant recovery stays naive. The durable settlement key makes the attempt terminal before asset mutation,
+so restart cannot blindly repeat it or mint a replacement key for the same concrete custody version. The Actor reloads
+authoritative wallet and holdings state and continues with other work; it does not forensically reconstruct the missing
+outcome, compensate either side, or guess a repeat transaction. A partial item or currency loss to the merchant remains
+acceptable in this corner case and is recorded when observable, while the at-most-once fence prevents duplication.
 
 ## Capability gates and follow-on work
 

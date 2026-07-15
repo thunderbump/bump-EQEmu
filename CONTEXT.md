@@ -237,6 +237,7 @@ _Avoid_: Autonomous Actor runtime, test actor system, production sidecar
 - A reserved owner character does not own or store **Actor Holdings**.
 - A vendor or resupply recommendation does not authorize settlement until the **Actor Merchant Principal** and conserved item/currency transfer have authoritative proof.
 - Merchant settlement requires the **Actor-led Party** to be materialized in the merchant's live zone and within ordinary interaction range; coarse progress may prepare intent but cannot move assets.
+- Merchant settlement requires a durable unique key claimed by the ordinary transaction boundary before asset mutation; an interrupted attempt cannot execute again or receive a replacement key for the same concrete custody version, and without that fence selling and resupply remain unavailable.
 - An **Actor Offer Intent** leaves the item in **Actor Holdings** and cannot make it visible or available to another buyer.
 - Expiring an **Actor Offer Intent** clears that recommendation and requires fresh evaluation; it does not sell the item or extend stale market assumptions.
 - Corpse-coin acquisition remains independently unavailable until a live guarded operation proves correlated combat participation and loot entitlement, exact corpse coin debit, Actor Wallet credit, authoritative postcondition and receipt, and **Actor Economy Evidence**; it cannot be coupled to item acquisition or executed through coarse progress.
