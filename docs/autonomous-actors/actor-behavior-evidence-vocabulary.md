@@ -157,9 +157,9 @@ Add the following correlation and fencing fields whenever that boundary exists:
 | `materialization_generation` | Materialization, dematerialization, and cross-zone handoff. |
 | `entity_ref`, `target_ref`, `target_generation` | Live targets whose numeric entity IDs can be reused. |
 | `settlement_key`, `custody_version`, `item_fingerprint` | Item/currency mutations. |
-| `experiment_id`, `manifest_version`, `manifest_digest` | Controlled comparisons and every execution of an Actor Experiment Manifest. |
+| `manifest_name`, `manifest_version`, `manifest_schema_version`, `manifest_digest` | Every Actor Experiment Run and every record it produces; the digest is the manifest's content identity. |
 | `experiment_run_id`, `run_iteration` | Every record produced by one **Actor Experiment Run**; the opaque run identity and manifest-scoped iteration distinguish repetitions of the same manifest. |
-| `cohort_id`, `assignment_digest` | Cohort-scoped records and controlled comparisons. |
+| `variant_id`, `cohort_id`, `assignment_digest` | Variant- or cohort-scoped records within one controlled comparison. |
 
 Names and free-form text belong in bounded payloads, not correlation keys. IDs are opaque. Timestamps help operators
 but never replace actor sequence, action generation, materialization generation, transaction fence, or event watermark.
@@ -382,15 +382,16 @@ events.
 
 ## Actor Experiment Manifest
 
-An **Actor Experiment Manifest** is an immutable experiment definition once an **Actor Experiment Run** begins. Its
-digest is the experiment identity referenced by every **Actor Experiment Run** and every record it produces. It contains:
+An **Actor Experiment Manifest** is one published, immutable definition of a complete controlled comparison. It contains
+the baseline and candidate variants together; an experiment arm is never represented as a second manifest. Every
+**Actor Experiment Run** and every record produced by that run references the same manifest content identity. The
+manifest contains:
 
 ```text
-manifest schema/version and immutable digest
+manifest schema version, manifest name/version, and canonicalization/digest algorithm version
 hypothesis and primary/guardrail metrics
 repository commit, schema, ruleset/config, content/data, and zone/nav revisions
-all strategy names, exact versions, and content digests
-baseline and candidate labels
+baseline and candidate variant IDs, roles, and exact immutable strategy-publication references/digests
 Actor roster/profile/party definitions
 cohort assignment algorithm, salt identity (not secret), assignment digest, and exclusions
 initial snapshots, deterministic seed list, and replay ordering rules
@@ -400,11 +401,22 @@ sampling, aggregation, retention, and evidence-loss policy
 human-observation rubric and blinding, when applicable
 ```
 
+`manifest_digest` is SHA-256 over the canonical UTF-8 JSON serialization of every logical manifest field listed above.
+The declared canonicalization version fixes object-key ordering, array ordering, integer encoding, and treatment of
+optional fields. The serialized input excludes `manifest_digest` itself, signatures, storage paths, publication
+timestamps, run identities/state/timestamps, results, and produced artifacts. The digest is computed and attached only
+after the manifest content is frozen; changing any definition field publishes a new manifest version and digest.
+
+Each `variant_id` is unique only within that manifest and selects an exact set of immutable Actor Strategy Registry
+publications. `baseline` and `candidate` are roles assigned to variants, not independent manifest identities. Cohort
+assignment binds each included Actor to one variant before outcomes are observed.
+
 An **Actor Experiment Run** is an observable execution of that definition, not a mutation of it. Each execution receives
 a new durable `experiment_run_id` and the next manifest-scoped `run_iteration`, including retries and exact
 repetitions. Record both boundaries at full fidelity:
 
-- `experiment.run_started` binds the **Actor Experiment Run** identity to the manifest identity/digest, actual
+- `experiment.run_started` binds the **Actor Experiment Run** identity to the manifest name, version, schema version,
+  and digest; exact assigned variant IDs and strategy-publication digests; actual
   repository/config/content/schema and strategy provenance digests, authority and workload mode, initial snapshot and
   ordered-input/replay-bundle digests, seed-set digest, actual cohort roster/exclusions and assignment digest, planned
   observation window and stop rules, start wall time and logical-time origin, and starting source/Actor watermarks. When
@@ -419,7 +431,8 @@ repetitions. Record both boundaries at full fidelity:
 
 **Actor Experiment Run** records report observed execution facts. They cannot rewrite the manifest, assignment,
 strategy publication, input bundle, or expected stop rules. Artifact references are immutable identities and content
-digests, not mutable paths.
+digests, not mutable paths. A run whose manifest bytes do not reproduce `manifest_digest`, or whose assigned strategy
+publication does not match its variant, is invalidated.
 
 Use paired replay over the same initial snapshot, ordered inputs, and seeds when comparing pure decisions. Use matched
 live cohorts or crossover windows when ordinary gameplay timing, players, pathing, or zone cost is part of the question.
@@ -427,7 +440,10 @@ Assignment is deterministic from the manifest and stable Actor identity; no Acto
 
 Comparison reports must:
 
-- name exact baseline and candidate manifest digests and every included `experiment_run_id`;
+- name the one exact manifest name/version/digest, every included `experiment_run_id`, and the compared baseline and
+  candidate `variant_id` plus their exact strategy-publication digests;
+- include only runs that reference that same manifest digest; comparing a different strategy or comparison definition
+  requires a newly published manifest rather than treating two manifests as experiment arms;
 - show cohort balance and exclusions before outcomes;
 - compare identical metric formulas and authority classes;
 - report denominators, missing evidence, effect size, and interval/dispersion rather than winner-only totals;
