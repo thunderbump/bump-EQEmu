@@ -4,12 +4,13 @@
 import argparse
 import json
 import sys
+from types import MappingProxyType
 
 
 STRATEGY_VERSIONS = ("liquidate-v1", "balanced-v1", "patient-v1")
 DEFAULT_STRATEGY_VERSION = "balanced-v1"
+OFFER_EXPIRY_DAYS = MappingProxyType({"balanced-v1": 14, "patient-v1": 30})
 QUOTE_SOURCE_REVISION = "bcf3473671d7f3967a0727e70b883c9254d97cd3"
-SIMULATION_DAYS = 30
 
 
 def captured_quote(sell_copper):
@@ -170,7 +171,7 @@ def recommend(item, strategy_version=DEFAULT_STRATEGY_VERSION):
         return vendor
 
     demand_gap = item["demand"] - item["availability"]
-    max_age = 14 if strategy == "balanced" else 30
+    max_age = OFFER_EXPIRY_DAYS[strategy_version]
     if demand_gap <= 0 or item["age_days"] >= max_age:
         return vendor | {"reason": "weak_or_aged_market_signal"}
 
@@ -183,6 +184,8 @@ def recommend(item, strategy_version=DEFAULT_STRATEGY_VERSION):
         "action": "offer_later",
         "asking_copper": quote["sell_copper"] * (100 + premium) // 100,
         "vendor_floor_copper": quote["sell_copper"],
+        "offer_expires_after_days": max_age,
+        "expiry_merchant": quote["merchant"]["name"],
         "reason": "bounded_demand_availability_premium",
     }
 
@@ -263,8 +266,10 @@ def _simulate(trace, recommendations):
             })
         elif action == "offer_later":
             outcome = item.get("market_outcome", {})
+            sold_after_days = outcome.get("sold_after_days")
             sold = (
-                outcome.get("sold_after_days", SIMULATION_DAYS + 1) <= SIMULATION_DAYS
+                type(sold_after_days) is int
+                and 0 <= sold_after_days < result["offer_expires_after_days"]
                 and outcome.get("buyer_max_copper", 0) >= result["asking_copper"]
             )
             if sold:
@@ -276,10 +281,17 @@ def _simulate(trace, recommendations):
                     "quantity": quantity,
                     "credited_copper": credited,
                 })
-                sell_days.append(outcome["sold_after_days"])
+                sell_days.append(sold_after_days)
             else:
-                destination = "market-offer"
+                destination = f"merchant:{result['expiry_merchant']}"
                 aged_unsold += quantity
+                proceeds = result["vendor_floor_copper"] * quantity
+                currency_ledger.append({
+                    "source": "expired_market_offer",
+                    "unit_copper": result["vendor_floor_copper"],
+                    "quantity": quantity,
+                    "credited_copper": proceeds,
+                })
 
         custody_ledger.append({
             "custody_id": item.get("custody_id"),

@@ -268,6 +268,42 @@ class EquipmentPricingPrototypeTest(unittest.TestCase):
             },
         )
 
+    def test_balanced_offer_sells_on_day_13_and_expires_to_vendor_on_day_14(self):
+        item = demo_trace()[2]
+        item["market_outcome"] = {
+            "sold_after_days": 13,
+            "buyer_max_copper": 180,
+            "settled_copper": 164,
+        }
+        sold = compare([item], "balanced-v1")
+        item["market_outcome"]["sold_after_days"] = 14
+        expired = compare([item], "balanced-v1")
+
+        self.assertEqual(sold["metrics"]["sell_through_count"], 1)
+        self.assertEqual(sold["metrics"]["projected_actor_wealth_copper"], 164)
+        self.assertEqual(expired["metrics"]["sell_through_count"], 0)
+        self.assertEqual(expired["metrics"]["aged_unsold_count"], 1)
+        self.assertEqual(expired["metrics"]["projected_actor_wealth_copper"], 100)
+        self.assertEqual(expired["custody_ledger"][0]["to"], "merchant:Rivervale Merchant")
+
+    def test_patient_offer_sells_on_day_29_and_expires_to_vendor_on_day_30(self):
+        item = demo_trace()[2]
+        item["market_outcome"] = {
+            "sold_after_days": 29,
+            "buyer_max_copper": 220,
+            "settled_copper": 200,
+        }
+        sold = compare([item], "patient-v1")
+        item["market_outcome"]["sold_after_days"] = 30
+        expired = compare([item], "patient-v1")
+
+        self.assertEqual(sold["metrics"]["sell_through_count"], 1)
+        self.assertEqual(sold["metrics"]["projected_actor_wealth_copper"], 200)
+        self.assertEqual(expired["metrics"]["sell_through_count"], 0)
+        self.assertEqual(expired["metrics"]["aged_unsold_count"], 1)
+        self.assertEqual(expired["metrics"]["projected_actor_wealth_copper"], 100)
+        self.assertEqual(expired["custody_ledger"][0]["to"], "merchant:Rivervale Merchant")
+
     def test_projected_values_and_wallet_ledger_include_stack_quantity(self):
         stack = demo_trace()[1]
         stack["quantity"] = 3

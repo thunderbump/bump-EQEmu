@@ -22,8 +22,8 @@ race, class, deity, and Charisma inputs used by `Client::CalcPriceMod`. Incomple
 ## Strategies
 
 - `liquidate-v1`: equip the best positive party upgrade, then vendor every item with complete authority inputs.
-- `balanced-v1`: the programmatic default; offer scarce, demanded, young items up to 1.75 times vendor floor.
-- `patient-v1`: wait longer and allow prices up to twice vendor floor; otherwise vendor.
+- `balanced-v1`: the programmatic default; offer scarce, demanded, young items up to 1.75 times vendor floor for days 0–13.
+- `patient-v1`: wait longer and allow prices up to twice vendor floor for days 0–29; otherwise vendor.
 
 Every strategy requires an explicitly legal positive upgrade before recommending equipment. When there is no legal
 upgrade, the strategy holds an item if wallet authority, its captured quote, or its market observations are incomplete.
@@ -32,6 +32,10 @@ exposes an upgrade, common vendor good, scarce demanded item, missing-authority 
 market outcome simulation reports sell-through/aging, ending stock concentration, projected Actor wealth, upgrade
 distribution, and rejected actions. A separate custody/currency audit detects duplicate sources/transitions, invalid
 quantity, and settlement imbalance instead of deriving conservation from the recommendation count.
+
+Offer expiry is exclusive: `balanced-v1` expires at the start of day 14 and `patient-v1` at the start of day 30. A sale
+counts only when `0 <= sold_after_days < offer_expires_after_days`. An item still unsold at expiry is counted as aged
+unsold and follows the accepted aged-item fallback to the captured vendor floor; later market outcomes do not sell it.
 
 Run all strategies:
 
