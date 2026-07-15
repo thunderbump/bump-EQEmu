@@ -166,9 +166,20 @@ but never replace actor sequence, action generation, materialization generation,
 
 ## Terminal vocabulary
 
-Use the objective contract's existing terminal outcomes everywhere an Actor Action feeds an Actor Objective:
+Objective lifecycle terminals remain distinct from the action outcomes that led to them. An `objective.terminal` record
+uses exactly one of these classifications:
 
-| Terminal | Meaning |
+| Objective terminal | Meaning |
+| --- | --- |
+| `completed` | The objective's desired postcondition was authoritatively observed. |
+| `abandoned` | The objective became non-viable and returned conserved state to the Actor Routine. |
+
+Every objective terminal also records its bounded terminal reason. Action deferral, retry exhaustion, interruption, or
+death can contribute to that reason, but none of them is itself an objective lifecycle terminal.
+
+Use the objective contract's existing action outcomes everywhere an Actor Action feeds an Actor Objective:
+
+| Action outcome | Meaning |
 | --- | --- |
 | `succeeded` | The correlated authoritative postcondition was observed. |
 | `deferred` | The current concrete plan cannot proceed now; replan without spending retry or viability. |
@@ -186,11 +197,11 @@ Keep delivery classifications separate:
 - `stale`, `duplicate`, `mismatched`, and `fenced` mean an input was ignored without changing objective budgets;
 - `accepted` and `started` are nonterminal action lifecycle states;
 - `indeterminate` is an asset-operation observation requiring its existing settlement fence, not objective success;
-- `cancelled` is an execution fact and must map explicitly to one canonical objective terminal; and
+- `cancelled` is an execution fact and must map explicitly to one canonical action outcome; and
 - `dropped_evidence` describes telemetry loss and can never be an Actor Action terminal.
 
-Every terminal records a stable reason code plus bounded human-readable detail. Metrics group by reason code, never by
-free-form detail.
+Every objective lifecycle terminal and every action terminal records a stable reason code plus bounded human-readable
+detail. Metrics group by reason code, never by free-form detail.
 
 ## Domain event vocabulary
 
@@ -314,12 +325,13 @@ range, and missing/dropped evidence count.
 | --- | --- |
 | materialized presence share | materialized Actor seconds / enabled Actor seconds |
 | visible activity share | seconds in materialized travel, combat, economy, chatter, or city-downtime activity / materialized Actor seconds |
-| objective success rate | `succeeded` objective terminals / all objective terminals |
-| objective deferral rate | `deferred` action terminals / all action terminals |
+| objective completion rate | `completed` objective lifecycle terminals / all objective lifecycle terminals |
+| objective abandonment rate | `abandoned` objective lifecycle terminals / all objective lifecycle terminals; report by bounded terminal reason |
+| action deferral rate | `deferred` action terminals / all action terminals |
 | action terminal outcome share | action terminals in one canonical outcome / all action terminals; report every `succeeded`, `deferred`, `blocked`, `failed`, `expired`, `interrupted`, and `death` outcome separately |
 | retry-consuming action failure rate | `blocked` + `failed` + `expired` action terminals / all action terminals; `interrupted` and `death` remain separate viability outcomes rather than action failures |
 | meaningful progress rate | Objective Progress Lease refreshes / active objective hour |
-| retry consumption | action attempts consumed / objective terminal; report distribution by template and strategy |
+| retry consumption | action attempts consumed / objective lifecycle terminal; report distribution by objective terminal, template, and strategy |
 | active objective duration | active elapsed time excluding explicitly paused capacity deferral |
 | travel completion rate | `succeeded` travel terminals / all travel terminals; report the remaining canonical terminal outcomes separately |
 | travel completion duration | correlated logical elapsed time from `travel.requested` to `travel.terminal`; report distribution by terminal outcome, authored route/checkpoint set, and strategy version |
@@ -423,7 +435,8 @@ The minimum replay bundle is:
 - ordered decision-bearing observations and authoritative action outcomes;
 - per-Actor event sequence plus objective/action generations and watermarks;
 - deterministic seed and time inputs represented as logical elapsed values;
-- expected per-step Actor Decision Record, emitted action identity, terminal classification, and next-state digest; and
+- expected per-step Actor Decision Record, emitted action identity, action-outcome classification when an action
+  terminates, objective lifecycle terminal when the objective terminates, and next-state digest; and
 - the resulting `experiment.run_terminal` record with terminal watermarks, completeness, and replay-result digest.
 
 Replay consumes observations/outcomes, not derived metrics or performance samples. At each step it verifies input
