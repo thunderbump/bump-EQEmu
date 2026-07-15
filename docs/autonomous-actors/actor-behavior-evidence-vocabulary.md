@@ -436,6 +436,25 @@ and sampling method. For pair `i`, `cpu_delta_i = actor_on_cpu_seconds_i - actor
 materialized Actor hour. A zero or missing summed denominator makes the result undefined and reported with its invalid
 denominator; negative deltas remain observable and are never clamped to zero.
 
+Marginal memory canonically uses proportional set size (**PSS**) in bytes. The manifest declares one bounded set of
+process roles, and each sample sums PSS across the live processes in exactly those roles; PID and Actor identities stay
+out of live metric labels. Actor-on and actor-off windows in pair `i` must use the same host/container placement,
+resource limits, build, process-role scope, duration, workload, warm-up, fixed sample cadence, and planned logical
+sample offsets. An unexpected process restart, missing role, or scope change invalidates the pair.
+
+At every offset `j` for which both sides have complete samples,
+`memory_delta_ij = actor_on_pss_bytes_ij - actor_off_pss_bytes_ij`. Aggregate all valid matched offsets as
+`sum(memory_delta_ij) / count(memory_delta_ij)`: a sample-weighted arithmetic mean in bytes, not an unweighted mean of
+per-pair means. Report matched and missing offset counts, coverage, duration, process-role scope, sampler/version, and
+materialized Actor count. Offsets missing either side are excluded and counted; zero matched offsets or coverage below
+the manifest's predeclared threshold makes the result undefined. Keep negative deltas and never clamp them to zero.
+Stratify different configured materialized-Actor counts rather than pooling them into one value.
+
+If PSS is unavailable on either side, the same formula may produce a separately named
+`marginal_memory_rss_fallback_bytes` from resident set size (**RSS**) only. Never mix RSS and PSS samples in one pair or
+aggregate, and never compare an RSS fallback result as though it were canonical PSS. Cgroup memory is likewise a
+separately named metric, not a PSS substitute.
+
 | Metric | Definition |
 | --- | --- |
 | materialized presence share | materialized Actor seconds / enabled Actor seconds |
@@ -486,7 +505,7 @@ denominator; negative deltas remain observable and are never clamped to zero.
 | zone loop p50/p95/p99 | quantiles of loop wall time from the same fixed sampling windows |
 | loop overrun rate | loops above the configured budget / measured loops |
 | marginal CPU | `(sum(matched actor-on CPU seconds - matched actor-off CPU seconds)) / sum(materialized Actor hours in actor-on windows)`, in CPU seconds per materialized Actor hour |
-| marginal memory | matched actor-on RSS/PSS minus actor-off RSS/PSS at equivalent workload |
+| marginal memory | sample-weighted mean of aligned matched `actor_on_pss_bytes - actor_off_pss_bytes`, in bytes, for one fixed process-role scope and materialized-Actor-count stratum |
 | evidence volume | records and serialized bytes / Actor hour, by evidence class and record type |
 | evidence loss rate | dropped or overwritten eligible records / attempted eligible records; required evidence loss is a violation |
 
