@@ -157,7 +157,9 @@ Add the following correlation and fencing fields whenever that boundary exists:
 | `materialization_generation` | Materialization, dematerialization, and cross-zone handoff. |
 | `entity_ref`, `target_ref`, `target_generation` | Live targets whose numeric entity IDs can be reused. |
 | `settlement_key`, `custody_version`, `item_fingerprint` | Item/currency mutations. |
-| `experiment_id`, `manifest_version`, `cohort_id`, `assignment_digest` | Controlled comparisons. |
+| `experiment_id`, `manifest_version`, `manifest_digest` | Controlled comparisons and every execution of an Actor Experiment Manifest. |
+| `experiment_run_id`, `run_iteration` | Every record produced by one observable execution; the opaque run identity and manifest-scoped iteration distinguish repetitions of the same manifest. |
+| `cohort_id`, `assignment_digest` | Cohort-scoped records and controlled comparisons. |
 
 Names and free-form text belong in bounded payloads, not correlation keys. IDs are opaque. Timestamps help operators
 but never replace actor sequence, action generation, materialization generation, transaction fence, or event watermark.
@@ -350,8 +352,8 @@ the rubric version and blinded run label; do not convert subjective notes into f
 
 ## Actor Experiment Manifest
 
-An **Actor Experiment Manifest** is immutable once a run begins. Its digest is the experiment identity used by every
-record. It contains:
+An **Actor Experiment Manifest** is an immutable experiment definition once a run begins. Its digest is the experiment
+identity referenced by every run and run-produced record. It contains:
 
 ```text
 manifest schema/version and immutable digest
@@ -368,13 +370,32 @@ sampling, aggregation, retention, and evidence-loss policy
 human-observation rubric and blinding, when applicable
 ```
 
+An experiment run is an observable execution of that definition, not a mutation of it. Each execution receives a new
+durable `experiment_run_id` and the next manifest-scoped `run_iteration`, including retries and exact repetitions.
+Record both boundaries at full fidelity:
+
+- `experiment.run_started` binds the run identity to the manifest identity/digest, actual repository/config/content/
+  schema and strategy provenance digests, authority and workload mode, initial snapshot and ordered-input/replay-bundle
+  digests, seed-set digest, actual cohort roster/exclusions and assignment digest, planned observation window and stop
+  rules, start wall time and logical-time origin, and starting source/Actor watermarks. When human observation is used,
+  it also references the rubric version, blinded run label, and opaque observation-session identity.
+- `experiment.run_terminal` links to the start record and records one stable run terminal (`completed`, `stopped`,
+  `failed`, or `invalidated`) plus reason code; actual wall/logical timing and observation window; terminal watermarks by
+  source, Actor, and cohort; attempted/accepted/dropped/overwritten/rejected evidence counts by class; required-evidence
+  completeness; final state, output, replay-result, metric/report, and other produced artifact digests; and the bounded
+  human-observation artifact/session reference when used. Any required-evidence loss or provenance/input mismatch makes
+  the run `invalidated`, never a complete-looking comparison.
+
+Run records report observed execution facts. They cannot rewrite the manifest, assignment, strategy publication, input
+bundle, or expected stop rules. Artifact references are immutable identities and content digests, not mutable paths.
+
 Use paired replay over the same initial snapshot, ordered inputs, and seeds when comparing pure decisions. Use matched
 live cohorts or crossover windows when ordinary gameplay timing, players, pathing, or zone cost is part of the question.
 Assignment is deterministic from the manifest and stable Actor identity; no Actor self-selects or self-promotes.
 
 Comparison reports must:
 
-- name exact baseline and candidate manifest digests;
+- name exact baseline and candidate manifest digests and every included `experiment_run_id`;
 - show cohort balance and exclusions before outcomes;
 - compare identical metric formulas and authority classes;
 - report denominators, missing evidence, effect size, and interval/dispersion rather than winner-only totals;
@@ -394,11 +415,13 @@ state into the game domain.
 The minimum replay bundle is:
 
 - Actor Experiment Manifest and immutable strategy publications;
+- the `experiment.run_started` record that binds this replay execution to its exact inputs and provenance;
 - initial Actor Profile/objective/party/holdings snapshots and their digests;
 - ordered decision-bearing observations and authoritative action outcomes;
 - per-Actor event sequence plus objective/action generations and watermarks;
-- deterministic seed and time inputs represented as logical elapsed values; and
-- expected per-step Actor Decision Record, emitted action identity, terminal classification, and next-state digest.
+- deterministic seed and time inputs represented as logical elapsed values;
+- expected per-step Actor Decision Record, emitted action identity, terminal classification, and next-state digest; and
+- the resulting `experiment.run_terminal` record with terminal watermarks, completeness, and replay-result digest.
 
 Replay consumes observations/outcomes, not derived metrics or performance samples. At each step it verifies input
 watermarks, before-state digest, decision reason, zero-or-one emitted action, action generation, after-state digest, and
@@ -424,7 +447,8 @@ the complete server combat simulation from a terminal summary.
 - party death and Actor Death Recovery terminals;
 - every Actor Economy Evidence mutation, settlement fence, receipt, and indeterminate result;
 - every conservation, duplicate-execution, double-materialization, or required-evidence-loss violation;
-- experiment cohort assignment and run boundaries; and
+- experiment cohort assignment, every `experiment.run_started` and `experiment.run_terminal` record, and their run
+  correlation fields; and
 - counters that disclose sampled-record drops or bounded-buffer overwrites.
 
 If the required-evidence path has no capacity, a consequential Actor capability whose safety depends on that evidence
