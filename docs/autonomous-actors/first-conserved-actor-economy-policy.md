@@ -33,9 +33,10 @@ ordinary disposition policy. A replacement requires room for displaced gear. Oth
 when holdings are full, the item remains at its authoritative source or the action defers. Nothing is deleted,
 overflowed, or automatically sold to make room.
 
-Initial acquisition is limited to one ordinary, non-container, non-stackable equipment instance at a time, plus
-separately proven corpse coin. Bags, stacks, consumables, tradeskill materials, quest items, and special No Drop
-exception paths remain unavailable until their custody and eligibility rules are proven.
+Initial item acquisition is limited to one ordinary, non-container, non-stackable equipment instance at a time.
+Corpse coin is a separate capability and remains unavailable until its independent authority and conservation gate is
+proven. Bags, stacks, consumables, tradeskill materials, quest items, and special No Drop exception paths remain
+unavailable until their custody and eligibility rules are proven.
 
 ## `balanced-v1` disposition and purchasing
 
@@ -102,9 +103,9 @@ scan every merchant they pass. Once live and in range, transactions proceed one 
 
 ## Currency and inflation posture
 
-All authorized corpse coin earned from combat the first Actor-led Party actually engaged in goes to the directing
-Actor Wallet. Bot followers do not have wallets or coin shares. Coarse or off-zone progress cannot invent loot or
-currency.
+Once independently proven, all authorized corpse coin earned from combat the first Actor-led Party actually engaged
+in goes to the directing Actor Wallet. Bot followers do not have wallets or coin shares. Until then corpse coin remains
+unavailable. Coarse or off-zone progress cannot claim corpse coin or invent loot or currency.
 
 The first policy imposes no artificial inflation ceiling, vendor-proceeds budget, or mandatory money sink. Actors may
 accumulate combat loot and proceeds from proven merchant settlements. If evidence later shows materially harmful
@@ -130,6 +131,11 @@ corner case is acceptable and recorded when observable.
 `AcquireOneItem`, `SellOneItem`, and `ResupplyOneItem` become available independently only after their ordinary
 gameplay action, authoritative postcondition, custody, and evidence requirements are proven. A strategy recommendation
 does not authorize a mutation.
+
+Corpse-coin acquisition is independently unavailable until a live guarded operation proves the Actor-led Party's
+correlated combat participation and ordinary loot entitlement, the exact coin debit from authoritative corpse custody,
+the matching Actor Wallet credit, a correlated authoritative postcondition and receipt, and Actor Economy Evidence.
+It cannot be coupled to `AcquireOneItem`, inferred from item acquisition, or executed through coarse progress.
 
 An equip recommendation is likewise inert until a guarded conserved replacement proves the exact item leaving Actor
 Holdings for the authorized equipment slot, any displaced item entering reserved Holdings capacity, the confirmed

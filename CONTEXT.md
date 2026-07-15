@@ -239,12 +239,12 @@ _Avoid_: Autonomous Actor runtime, test actor system, production sidecar
 - Merchant settlement requires the **Actor-led Party** to be materialized in the merchant's live zone and within ordinary interaction range; coarse progress may prepare intent but cannot move assets.
 - An **Actor Offer Intent** leaves the item in **Actor Holdings** and cannot make it visible or available to another buyer.
 - Expiring an **Actor Offer Intent** clears that recommendation and requires fresh evaluation; it does not sell the item or extend stale market assumptions.
-- **Actor Holdings** may receive conserved coin from authoritative combat loot the Actor-led Party actually earned; coarse progress cannot invent loot or currency.
+- Corpse-coin acquisition remains independently unavailable until a live guarded operation proves correlated combat participation and loot entitlement, exact corpse coin debit, Actor Wallet credit, authoritative postcondition and receipt, and **Actor Economy Evidence**; it cannot be coupled to item acquisition or executed through coarse progress.
 - The directing Actor Wallet receives the first Actor-led Party's authorized coin; Bot followers do not own wallets or separate coin shares.
 - The **Actor Merchant Principal** is the Autonomous Actor's own gameplay identity; reserved owner characters and Bot followers cannot supply or modify its merchant access or price.
 - A first-slice Actor begins with an empty Actor Wallet and explicitly sourced equipped gear; replaced provisioned gear becomes ordinary **Actor Holdings**, and no asset replenishes automatically.
 - The first **Actor Holdings Capacity** is eight flat item-stack slots; bags, nested containers, weight, and encumbrance require later evidence.
-- Initial Actor acquisition covers ordinary single-instance equipment and separately proven corpse coin; broader item classes remain unavailable until their custody rules are proven.
+- Initial Actor item acquisition covers ordinary single-instance equipment; corpse coin and broader item classes remain unavailable until their independent custody and authority rules are proven.
 - A player interaction can produce zero or more **Authored Dialogue** responses.
 - A player interaction can produce at most one **Fallback Dialogue** response.
 - The first **Fallback Dialogue** iteration applies only to **Targeted Say**.
