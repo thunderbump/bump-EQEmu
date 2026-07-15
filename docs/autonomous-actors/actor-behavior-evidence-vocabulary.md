@@ -665,8 +665,14 @@ Every string payload has a type-specific byte cap. Every repeated collection has
 attempted records, accepted records, serialized bytes, rejected oversize records, queue high-water marks, persistence
 failures, drops, and overwrites by evidence class.
 
-The present durable `actor_events.event_json` limit is 16 KiB and its indexes support Actor cursor and zone/time reads
+The present durable `actor_events` DDL validates JSON and enforces
+`CHAR_LENGTH(event_json) <= 16384`; under `utf8mb4` that is a limit of 16,384 characters, not 16 KiB. Because one
+`utf8mb4` character may occupy up to four encoded bytes, a valid payload may occupy substantially more than 16,384
+serialized bytes, so the current check is not a byte-volume bound. The same schema's indexes support Actor cursor and
+zone/time reads
 ([manifest schema](https://github.com/thunderbump/bump-EQEmu/blob/60edb352d33101c22e24447cd6d5fddda032157e/common/database/database_update_manifest.h#L7274-L7300)).
+The type-specific serialized-byte caps and byte accounting required above are proposed evidence-sink behavior; they do
+not exist merely because this character-count check exists.
 The in-memory recorder overwrites its oldest entries at 512 records but exposes no overwrite counter
 ([bounded overwrite](https://github.com/thunderbump/bump-EQEmu/blob/60edb352d33101c22e24447cd6d5fddda032157e/zone/harness/actor_event_recorder.cpp#L304-L340)).
 Therefore `events_dropped_total`, payload-byte accounting, and cursor-gap accounting are prerequisites for claiming a
