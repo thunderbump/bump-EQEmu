@@ -321,6 +321,15 @@ Measure matched actor-off and actor-on windows. Label workload shape (`idle`, `c
 Every report includes numerator, denominator, observation duration, cohort size, formula version, source-watermark
 range, and missing/dropped evidence count.
 
+Economy metrics are derived only from complete, unsampled Actor Economy Evidence within that watermark range plus
+authoritative opening and closing custody snapshots. A missing mutation, opening/closing snapshot, or valuation input
+makes the affected metric incomplete; a report cannot infer it from a success result or silently treat missing value as
+zero. Actor, item, action, and transaction identities remain event fields and offline report keys, never live
+time-series labels.
+
+An economy-scoped action is one whose bounded operation requests a change to Actor item custody, equipment custody,
+wallet currency, or merchant settlement. Operation and reason are bounded schema vocabulary for offline grouping.
+
 | Metric | Definition |
 | --- | --- |
 | materialized presence share | materialized Actor seconds / enabled Actor seconds |
@@ -340,11 +349,19 @@ range, and missing/dropped evidence count.
 | engagement success rate | selected-target succeeded combat terminals / Committed Engagements |
 | party death rate | party deaths / materialized party hour and / Committed Engagement |
 | recovery completion time | readiness/rematerialization terminal time minus recovery start |
-| wallet net flow | authoritative Actor Wallet credits minus debits in copper |
-| vendor proceeds | authoritative merchant-sale credits in copper |
+| Actor Wallet balance | authoritative closing Actor Wallet copper for each Actor at the terminal watermark; report cohort total and per-Actor distribution, and reconcile opening balance + gross inflow - gross outflow = closing balance |
+| Actor Holdings value | sum of the manifest-declared valuation formula over every item in each Actor's authoritative closing Holdings snapshot; report cohort total and per-Actor distribution with valuation formula/input versions, and mark the metric incomplete if any held item lacks a value |
+| holdings concentration | top-N Actors' Actor Holdings value / total Actor Holdings value from the same closing snapshot and valuation formula; N is declared by the report formula, and a zero total produces an undefined result with its zero denominator reported |
+| gross Actor coin inflow | sum of positive authoritative copper credits whose destination is an Actor Wallet; count each completed asset side once by settlement key or custody version and report bounded source category offline |
+| gross Actor coin outflow | sum of the absolute value of authoritative copper debits whose source is an Actor Wallet; count each completed asset side once by settlement key or custody version and report bounded sink category offline |
+| Actor wallet net flow | gross Actor coin inflow minus gross Actor coin outflow; report the two gross components beside the net value |
+| vendor proceeds | subset of gross Actor coin inflow credited by completed ordinary merchant-sale settlements with a terminal receipt; deduplicate by settlement key |
+| economy deferred count | count of unique economy-scoped action identity/generation/attempt tuples whose `action.terminal` outcome is `deferred`; report by bounded operation and reason offline |
+| economy deferral rate | economy deferred count / all unique economy-scoped action terminals in the same watermark range |
+| economy rejected count | count of unique economy-scoped action identity/generation/attempt tuples whose request ended at `action.rejected`; report by bounded operation and reason offline |
+| economy rejection rate | economy rejected count / all unique economy-scoped `action.requested` records in the same watermark range |
 | authoritative quote price | authoritative quoted copper / quoted item quantity for valid `economy.quote_observed` records; report distributions by quote-input digest, pricing-calculation version, ruleset/config revision, and strategy version |
 | paired quote price difference | candidate authoritative quote copper per item minus baseline authoritative quote copper per item for valid quotes matched by quote-input digest, pricing-calculation version, ruleset/config revision, and validity boundary; also report `(candidate - baseline) / baseline` when baseline is nonzero |
-| holdings concentration | top-N Actors' holdings value / total Actor holdings value, with valuation formula version |
 | upgrade distribution | positive Bot Gear Value gained by Actor, party member, slot, and strategy |
 | conservation violations | unmatched or imbalanced authoritative asset deltas; never estimated or sampled |
 | chatter delivery rate | delivered messages / materialized Actor hour, split by Actor/Bot/NPC speaker kind |
