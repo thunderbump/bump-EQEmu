@@ -188,6 +188,26 @@ _Avoid_: Universal objective timeout, wall-clock failure, action expiry
 The bounded allowance for replanning, danger interruption, and death recovery before an **Actor Objective** is abandoned as no longer worthwhile.
 _Avoid_: Action retry count, actor health, global failure limit
 
+**Actor Death Recovery**:
+The conserved rematerialization of a defeated **Actor-led Party** at its configured bind or home anchor, preserving possessions without a lootable Actor corpse or death penalty.
+_Avoid_: Corpse run, item recovery, resurrection penalty
+
+**Actor Holdings**:
+The persistent conserved items and currency owned by one **Autonomous Actor** but not currently equipped by a Bot follower. Ownership remains with the Actor across party changes and **Actor Death Recovery**.
+_Avoid_: Party treasury, reserved-owner inventory, Bot bank
+
+**Actor Merchant Principal**:
+The gameplay identity whose authoritative faction standing, race, class, deity, and Charisma determine ordinary merchant access and pricing for an **Autonomous Actor**.
+_Avoid_: Reserved-owner quote, neutral Actor price, strategy price
+
+**Actor Offer Intent**:
+A versioned recommendation to retain an item in **Actor Holdings** for possible future market listing. It is not a listing, reservation, escrow, or settlement authority.
+_Avoid_: Actor listing, market order, reserved item
+
+**Actor Holdings Capacity**:
+The bounded amount of unequipped item custody available to one **Autonomous Actor**. Full capacity blocks acquisition or equipment replacement rather than deleting, overflowing, or automatically selling assets.
+_Avoid_: Unlimited Actor inventory, overflow storage, Bot bags
+
 **Actor Perception**:
 The gameplay state visible or inferable to an **Autonomous Actor** at a decision point.
 _Avoid_: Actor context, AI context, full world state
@@ -200,6 +220,10 @@ _Avoid_: Direct mutation, forced outcome, command injection
 An observable gameplay result used to understand what changed after **Actor Actions** and world processing.
 _Avoid_: Log line, debug trace, internal callback
 
+**Actor Economy Evidence**:
+An attributable account of item and currency custody changes and economy outcomes used to assess conservation and strategy behavior.
+_Avoid_: Economy debug log, aggregate-only metric, inferred transaction
+
 **Zone Harness**:
 Test infrastructure that controls and observes a zone runtime so gameplay behavior can be validated without relying on a manual client for every scenario.
 _Avoid_: Autonomous Actor runtime, test actor system, production sidecar
@@ -207,6 +231,20 @@ _Avoid_: Autonomous Actor runtime, test actor system, production sidecar
 ## Relationships
 
 - **Fallback Dialogue** must not replace **Authored Dialogue**.
+- **Actor Death Recovery** is separate from an **Autonomous Actor** acquiring an item from an ordinary NPC corpse.
+- **Actor Death Recovery** preserves equipped and carried possessions; death is not an item or currency sink.
+- Bot followers own their equipped items; unequipped items and currency belong to their directing Actor's **Actor Holdings**.
+- A reserved owner character does not own or store **Actor Holdings**.
+- A vendor or resupply recommendation does not authorize settlement until the **Actor Merchant Principal** and conserved item/currency transfer have authoritative proof.
+- Merchant settlement requires the **Actor-led Party** to be materialized in the merchant's live zone and within ordinary interaction range; coarse progress may prepare intent but cannot move assets.
+- An **Actor Offer Intent** leaves the item in **Actor Holdings** and cannot make it visible or available to another buyer.
+- Expiring an **Actor Offer Intent** clears that recommendation and requires fresh evaluation; it does not sell the item or extend stale market assumptions.
+- **Actor Holdings** may receive conserved coin from authoritative combat loot the Actor-led Party actually earned; coarse progress cannot invent loot or currency.
+- The directing Actor Wallet receives the first Actor-led Party's authorized coin; Bot followers do not own wallets or separate coin shares.
+- The **Actor Merchant Principal** is the Autonomous Actor's own gameplay identity; reserved owner characters and Bot followers cannot supply or modify its merchant access or price.
+- A first-slice Actor begins with an empty Actor Wallet and explicitly sourced equipped gear; replaced provisioned gear becomes ordinary **Actor Holdings**, and no asset replenishes automatically.
+- The first **Actor Holdings Capacity** is eight flat item-stack slots; bags, nested containers, weight, and encumbrance require later evidence.
+- Initial Actor acquisition covers ordinary single-instance equipment and separately proven corpse coin; broader item classes remain unavailable until their custody rules are proven.
 - A player interaction can produce zero or more **Authored Dialogue** responses.
 - A player interaction can produce at most one **Fallback Dialogue** response.
 - The first **Fallback Dialogue** iteration applies only to **Targeted Say**.

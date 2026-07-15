@@ -22,3 +22,5 @@
   - `central-lhy.13` persistence note for bounded queue controls: duplicate suppression, stale-intent expiry, claim safety, and queue buildup limits for `actor_action_queue`.
 - `conserved-inventory-economy-seams.md`
   - `central-dcq7.9` research on reusing ordinary loot, Bot equipment valuation, merchant, currency, and market rules behind session-independent conserved transaction seams for Actors.
+- `first-conserved-actor-economy-policy.md`
+  - `central-dcq7.11` first implementation contract for Actor Holdings, upgrade-first `balanced-v1` disposition, live merchant settlement, offer intents, currency, and economy evidence.
