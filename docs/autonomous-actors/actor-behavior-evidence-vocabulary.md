@@ -402,6 +402,13 @@ time-series labels.
 An economy-scoped action is one whose bounded operation requests a change to Actor item custody, equipment custody,
 wallet currency, or merchant settlement. Operation and reason are bounded schema vocabulary for offline grouping.
 
+Marginal CPU uses matched actor-on/actor-off window pairs with identical process or cgroup scope, duration, workload,
+and sampling method. For pair `i`, `cpu_delta_i = actor_on_cpu_seconds_i - actor_off_cpu_seconds_i` and
+`actor_hours_i` is materialized Actor seconds in its actor-on window divided by 3,600. Aggregate matched pairs as
+`sum(cpu_delta_i) / sum(actor_hours_i)`, not as an unweighted mean of pair ratios. The unit is CPU seconds per
+materialized Actor hour. A zero or missing summed denominator makes the result undefined and reported with its invalid
+denominator; negative deltas remain observable and are never clamped to zero.
+
 | Metric | Definition |
 | --- | --- |
 | materialized presence share | materialized Actor seconds / enabled Actor seconds |
@@ -451,7 +458,7 @@ wallet currency, or merchant settlement. Operation and reason are bounded schema
 | contention-affected selection-only count | contention-affected opportunities ending in `no_action`; report separately from rejected requests and canonical action outcomes |
 | zone loop p50/p95/p99 | quantiles of loop wall time from the same fixed sampling windows |
 | loop overrun rate | loops above the configured budget / measured loops |
-| marginal CPU | matched actor-on CPU seconds minus actor-off CPU seconds / materialized Actor hour |
+| marginal CPU | `(sum(matched actor-on CPU seconds - matched actor-off CPU seconds)) / sum(materialized Actor hours in actor-on windows)`, in CPU seconds per materialized Actor hour |
 | marginal memory | matched actor-on RSS/PSS minus actor-off RSS/PSS at equivalent workload |
 | evidence volume | records and serialized bytes / Actor hour, by evidence class and record type |
 | evidence loss rate | dropped or overwritten eligible records / attempted eligible records; required evidence loss is a violation |
