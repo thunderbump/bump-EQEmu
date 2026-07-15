@@ -311,9 +311,13 @@ range, and missing/dropped evidence count.
 | visible activity share | seconds in materialized travel, combat, economy, chatter, or city-downtime activity / materialized Actor seconds |
 | objective success rate | `succeeded` objective terminals / all objective terminals |
 | objective deferral rate | `deferred` action terminals / all action terminals |
+| action terminal outcome share | action terminals in one canonical outcome / all action terminals; report every `succeeded`, `deferred`, `blocked`, `failed`, `expired`, `interrupted`, and `death` outcome separately |
+| retry-consuming action failure rate | `blocked` + `failed` + `expired` action terminals / all action terminals; `interrupted` and `death` remain separate viability outcomes rather than action failures |
 | meaningful progress rate | Objective Progress Lease refreshes / active objective hour |
 | retry consumption | action attempts consumed / objective terminal; report distribution by template and strategy |
 | active objective duration | active elapsed time excluding explicitly paused capacity deferral |
+| travel completion rate | `succeeded` travel terminals / all travel terminals; report the remaining canonical terminal outcomes separately |
+| travel completion duration | correlated logical elapsed time from `travel.requested` to `travel.terminal`; report distribution by terminal outcome, authored route/checkpoint set, and strategy version |
 | handoff success rate | succeeded handoffs / handoff terminals |
 | double-materialization violations | handoffs with simultaneous authoritative source and destination claim; target is zero |
 | engagement success rate | selected-target succeeded combat terminals / Committed Engagements |
@@ -321,6 +325,8 @@ range, and missing/dropped evidence count.
 | recovery completion time | readiness/rematerialization terminal time minus recovery start |
 | wallet net flow | authoritative Actor Wallet credits minus debits in copper |
 | vendor proceeds | authoritative merchant-sale credits in copper |
+| authoritative quote price | authoritative quoted copper / quoted item quantity for valid `economy.quote_observed` records; report distributions by buy/sell direction, item fingerprint, merchant, ruleset, Actor Merchant Principal, and strategy version |
+| paired quote price difference | candidate authoritative quote copper per item minus baseline authoritative quote copper per item for quotes matched by buy/sell direction, item fingerprint, quantity, merchant, ruleset, Actor Merchant Principal, and validity boundary; also report `(candidate - baseline) / baseline` when baseline is nonzero |
 | holdings concentration | top-N Actors' holdings value / total Actor holdings value, with valuation formula version |
 | upgrade distribution | positive Bot Gear Value gained by Actor, party member, slot, and strategy |
 | conservation violations | unmatched or imbalanced authoritative asset deltas; never estimated or sampled |
