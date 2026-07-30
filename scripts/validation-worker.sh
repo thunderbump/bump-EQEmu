@@ -662,6 +662,118 @@ verify_checkout_submodules() {
   return 0
 }
 
+validate_submodule_config() {
+  local config_path="$1" allow_production="$2"
+  local key name path url entry_count=0 test_path=
+  local -a keys
+
+  [[ -f "$config_path" ]] || return 0
+  mapfile -t keys < <(git config -f "$config_path" --name-only --list)
+  for key in "${keys[@]}"; do
+    case "$key" in
+      submodule.*.path|submodule.*.url) ;;
+      *)
+        printf 'unapproved submodule config key: %s\n' "$key"
+        return 1
+        ;;
+    esac
+  done
+  mapfile -t keys < <(git config -f "$config_path" --name-only --get-regexp '^submodule\..*\.path$')
+  for key in "${keys[@]}"; do
+    name="${key#submodule.}"
+    name="${name%.path}"
+    path="$(git config -f "$config_path" --get "$key")"
+    url="$(git config -f "$config_path" --get "submodule.$name.url")"
+    [[ -n "$path" && -n "$url" && "$path" != /* \
+      && "$path" != ".." && "$path" != ../* && "$path" != */../* && "$path" != */.. ]] || return 1
+    entry_count=$((entry_count + 1))
+    if [[ "$allow_production" == "1" ]]; then
+      case "$path|$url" in
+        "submodules/websocketpp|https://github.com/zaphoyd/websocketpp.git") continue ;;
+        "submodules/vcpkg|https://github.com/microsoft/vcpkg.git") continue ;;
+      esac
+    fi
+    if [[ "${VALIDATION_WORKER_VALIDATE_DRY_RUN:-0}" == "1" \
+      && -n "${VALIDATION_WORKER_TEST_FILE_SUBMODULE_ROOT:-}" ]]; then
+      case "$url" in
+        file://*) test_path="${url#file://}" ;;
+        /*) test_path="$url" ;;
+        *) test_path= ;;
+      esac
+      if [[ -n "$test_path" \
+        && "$(resolve_path "$test_path")" == "$(resolve_path "$VALIDATION_WORKER_TEST_FILE_SUBMODULE_ROOT")"/* ]]; then
+        continue
+      fi
+    fi
+    printf 'unapproved submodule path or URL: %s -> %s\n' "$path" "$url"
+    return 1
+  done
+  [[ "${#keys[@]}" -eq "$entry_count" ]] || return 1
+  [[ "$(git config -f "$config_path" --name-only --get-regexp '^submodule\..*\.url$' | wc -l)" -eq "$entry_count" ]]
+}
+
+initialize_checkout_submodules() {
+  local checkout_dir="$1" evidence_dir="$2" status nested_config
+  local -a transport_config=(-c protocol.allow=never -c protocol.https.allow=always)
+
+  if ! validate_submodule_config "$checkout_dir/.gitmodules" 1 >>"$evidence_dir/logs/submodule.log" 2>&1; then
+    PREPARE_ERROR_CATEGORY=submodule_failed
+    PREPARE_ERROR_MESSAGE="checkout contains an unapproved submodule configuration"
+    return 1
+  fi
+  if [[ "${VALIDATION_WORKER_VALIDATE_DRY_RUN:-0}" == "1" \
+    && -n "${VALIDATION_WORKER_TEST_FILE_SUBMODULE_ROOT:-}" ]]; then
+    transport_config+=(-c protocol.file.allow=always)
+  fi
+
+  set +e
+  env -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+    GIT_TERMINAL_PROMPT=0 GIT_ASKPASS= SSH_ASKPASS= \
+    timeout "$timeout_seconds" git -C "$checkout_dir" "${transport_config[@]}" submodule update --init \
+    >>"$evidence_dir/logs/submodule.log" 2>&1
+  status=$?
+  set -e
+  if [[ "$status" -ne 0 ]]; then
+    if [[ "$status" -eq 124 ]]; then
+      PREPARE_ERROR_CATEGORY=timeout
+      PREPARE_ERROR_MESSAGE="submodule initialization timed out"
+    else
+      PREPARE_ERROR_CATEGORY=submodule_failed
+      PREPARE_ERROR_MESSAGE="failed to initialize checkout submodules"
+    fi
+    return 1
+  fi
+
+  while IFS= read -r nested_config; do
+    [[ "$nested_config" == "$checkout_dir/.gitmodules" ]] && continue
+    if ! validate_submodule_config "$nested_config" 0 >>"$evidence_dir/logs/submodule.log" 2>&1; then
+      PREPARE_ERROR_CATEGORY=submodule_failed
+      PREPARE_ERROR_MESSAGE="checkout contains an unapproved recursive submodule configuration"
+      return 1
+    fi
+  done < <(find "$checkout_dir" -mindepth 2 -name .gitmodules -type f -print)
+
+  set +e
+  env -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+    GIT_TERMINAL_PROMPT=0 GIT_ASKPASS= SSH_ASKPASS= \
+    timeout "$timeout_seconds" git -C "$checkout_dir" "${transport_config[@]}" submodule update --init --recursive \
+    >>"$evidence_dir/logs/submodule.log" 2>&1
+  status=$?
+  set -e
+  if [[ "$status" -ne 0 ]]; then
+    if [[ "$status" -eq 124 ]]; then
+      PREPARE_ERROR_CATEGORY=timeout
+      PREPARE_ERROR_MESSAGE="submodule initialization timed out"
+    else
+      PREPARE_ERROR_CATEGORY=submodule_failed
+      PREPARE_ERROR_MESSAGE="failed to initialize checkout submodules"
+    fi
+    return 1
+  fi
+}
+
 prepare_checkout() {
   local checkout_dir="$1" evidence_dir="$2"
   local status
@@ -676,19 +788,7 @@ prepare_checkout() {
       return 1
     fi
 
-    set +e
-    env GIT_TERMINAL_PROMPT=0 GIT_ASKPASS= SSH_ASKPASS= timeout "$timeout_seconds" git -C "$checkout_dir" -c protocol.file.allow=always submodule update --init --recursive >>"$evidence_dir/logs/submodule.log" 2>&1
-    status=$?
-    set -e
-
-    if [[ "$status" -eq 124 ]]; then
-      PREPARE_ERROR_CATEGORY=timeout
-      PREPARE_ERROR_MESSAGE="submodule initialization timed out"
-      return 1
-    fi
-    if [[ "$status" -ne 0 ]]; then
-      PREPARE_ERROR_CATEGORY=submodule_failed
-      PREPARE_ERROR_MESSAGE="failed to initialize checkout submodules"
+    if ! initialize_checkout_submodules "$checkout_dir" "$evidence_dir"; then
       return 1
     fi
   fi

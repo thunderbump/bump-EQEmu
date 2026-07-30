@@ -61,6 +61,7 @@ make_source_repo() {
   local -n source_ref="$1"
   local suffix="${2:-}"
   source_ref="$tmp_root/source-repo${suffix:+-$suffix}"
+  rm -rf "$source_ref"
   mkdir -p "$source_ref/scripts"
   cat >"$source_ref/scripts/validate.sh" <<'SCRIPT'
 #!/usr/bin/env bash
@@ -115,8 +116,8 @@ SCRIPT
 
 make_afk_contract_repo() {
   local -n source_ref="$1"
-  local fixture_source
-  make_source_repo fixture_source
+  local suffix="${2:-}" fixture_source
+  make_source_repo fixture_source "$suffix"
   source_ref="$fixture_source"
   cp "$repo_root/scripts/validation-worker.sh" "$source_ref/scripts/validation-worker.sh"
   chmod +x "$source_ref/scripts/validation-worker.sh"
@@ -124,6 +125,35 @@ make_afk_contract_repo() {
   printf 'ENV=development\n' >"$tmp_root/bump-akk-stack-validation/.env"
   git -C "$source_ref" add scripts/validation-worker.sh
   git -C "$source_ref" commit -m 'add validation worker' >/dev/null 2>&1
+}
+
+add_submodule_gitlink() {
+  local source="$1" path="$2" url="$3" commit="$4"
+  cat >"$source/.gitmodules" <<EOF
+[submodule "$path"]
+	path = $path
+	url = $url
+EOF
+  git -C "$source" update-index --add --cacheinfo "160000,$commit,$path"
+  git -C "$source" add .gitmodules
+  git -C "$source" commit -m 'add candidate submodule config' >/dev/null 2>&1
+}
+
+make_submodule_update_observer() {
+  local fake_bin="$1" marker="$2" skip_update="${3:-0}" real_git
+  real_git="$(command -v git)"
+  mkdir -p "$fake_bin"
+  cat >"$fake_bin/git" <<SCRIPT
+#!/usr/bin/env bash
+if [[ " \$* " == *" submodule update "* ]]; then
+  : >"$marker"
+  if [[ "$skip_update" == "1" ]]; then
+    exit 0
+  fi
+fi
+exec "$real_git" "\$@"
+SCRIPT
+  chmod +x "$fake_bin/git"
 }
 
 make_source_repo_with_real_validation_scripts() {
@@ -343,7 +373,7 @@ test_fetch_checkout_initializes_submodules_before_validation() {
   request="$tmp_root/submodule.json"
   write_request "$request" "$source" "$evidence" HEAD "$head"
 
-  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TEST_ASSERT_SUBMODULE=1 "$repo_root/scripts/validation-worker.sh" run --request "$request"
+  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TEST_FILE_SUBMODULE_ROOT="$tmp_root" VALIDATION_WORKER_TEST_ASSERT_SUBMODULE=1 "$repo_root/scripts/validation-worker.sh" run --request "$request"
 
   [[ "$status" -eq 0 ]] || return 1
   [[ -f "$evidence/logs/submodule.log" ]] || return 1
@@ -373,7 +403,7 @@ exec "$real_git" "\$@"
 SCRIPT
   chmod +x "$fake_bin/git"
 
-  capture_run status output env PATH="$fake_bin:$PATH" VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 "$repo_root/scripts/validation-worker.sh" run --request "$request"
+  capture_run status output env PATH="$fake_bin:$PATH" VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TEST_FILE_SUBMODULE_ROOT="$tmp_root" "$repo_root/scripts/validation-worker.sh" run --request "$request"
 
   [[ "$status" -eq 1 ]] || return 1
   assert_json_equals "$evidence/result.json" .category timeout
@@ -397,7 +427,7 @@ test_stack_lock_is_not_held_during_submodule_initialization() {
   stack_lock="$stack/.validation-worker-code.lock"
   mkdir "$stack_lock"
 
-  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 "$repo_root/scripts/validation-worker.sh" run --request "$request"
+  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TEST_FILE_SUBMODULE_ROOT="$tmp_root" "$repo_root/scripts/validation-worker.sh" run --request "$request"
 
   [[ "$status" -eq 1 ]] || return 1
   assert_json_equals "$evidence/result.json" .category stack_busy
@@ -770,7 +800,7 @@ test_afk_contract_fetches_a_self_contained_checkout_from_a_linked_worktree() {
   mkdir "$evidence"
   write_afk_request "$request" "$head" "$evidence"
 
-  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home-linked" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TEST_ASSERT_SUBMODULE=1 VALIDATION_WORKER_TEST_ASSERT_SELF_CONTAINED_GIT=1 "$linked_worktree/scripts/validation-worker.sh" run --request "$request"
+  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home-linked" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TEST_FILE_SUBMODULE_ROOT="$tmp_root" VALIDATION_WORKER_TEST_ASSERT_SUBMODULE=1 VALIDATION_WORKER_TEST_ASSERT_SELF_CONTAINED_GIT=1 "$linked_worktree/scripts/validation-worker.sh" run --request "$request"
 
   [[ "$status" -eq 0 ]] || return 1
   assert_json_equals "$evidence/result.json" .status passed
@@ -806,6 +836,81 @@ SCRIPT
   assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,passed,inconclusive"
 }
 
+test_afk_contract_rejects_unapproved_submodule_transports_before_initialization() {
+  local kind source target url head request evidence status output fake_bin marker target_head
+  for kind in absolute file ext; do
+    make_afk_contract_repo source "transport-$kind"
+    target="$tmp_root/transport-target-$kind"
+    mkdir "$target"
+    git -C "$target" init >/dev/null 2>&1
+    git -C "$target" config user.email worker-test@example.com
+    git -C "$target" config user.name 'Worker Test'
+    printf 'host data\n' >"$target/host-data"
+    git -C "$target" add host-data
+    git -C "$target" commit -m 'host data' >/dev/null 2>&1
+    target_head="$(git -C "$target" rev-parse HEAD)"
+    case "$kind" in
+      absolute) url="$target" ;;
+      file) url="file://$target" ;;
+      ext) url="ext::sh -c 'exit 0'" ;;
+    esac
+    add_submodule_gitlink "$source" vendor/candidate-controlled "$url" "$target_head"
+    head="$(git -C "$source" rev-parse HEAD)"
+    request="$tmp_root/afk-transport-$kind.json"
+    evidence="$tmp_root/afk-transport-$kind"
+    fake_bin="$tmp_root/afk-transport-$kind-bin"
+    marker="$tmp_root/afk-transport-$kind-submodule-update"
+    mkdir "$evidence"
+    write_afk_request "$request" "$head" "$evidence" "afk-transport-$kind"
+    make_submodule_update_observer "$fake_bin" "$marker"
+
+    capture_run status output env PATH="$fake_bin:$PATH" VALIDATION_WORKER_HOME="$tmp_root/worker-home-transport-$kind" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 "$source/scripts/validation-worker.sh" run --request "$request"
+
+    [[ "$status" -eq 2 ]] || return 1
+    [[ ! -e "$marker" ]] || return 1
+    [[ ! -e "$tmp_root/worker-home-transport-$kind/checkouts/afk-${head:0:16}/vendor/candidate-controlled/.git" ]] || return 1
+    [[ ! -e "$tmp_root/worker-home-transport-$kind/checkouts/afk-${head:0:16}/vendor/candidate-controlled/host-data" ]] || return 1
+    assert_json_equals "$evidence/worker/result.json" .category submodule_failed
+  done
+}
+
+test_afk_contract_accepts_the_approved_production_submodule_urls() {
+  local source request evidence status output head fake_bin marker fake_commit
+  make_afk_contract_repo source approved-submodules
+  fake_commit="$(git -C "$source" rev-parse HEAD)"
+  cat >"$source/.gitmodules" <<'EOF'
+[submodule "submodules/websocketpp"]
+	path = submodules/websocketpp
+	url = https://github.com/zaphoyd/websocketpp.git
+[submodule "submodules/vcpkg"]
+	path = submodules/vcpkg
+	url = https://github.com/microsoft/vcpkg.git
+EOF
+  git -C "$source" update-index --add --cacheinfo "160000,$fake_commit,submodules/websocketpp"
+  git -C "$source" update-index --add --cacheinfo "160000,$fake_commit,submodules/vcpkg"
+  git -C "$source" add .gitmodules
+  git -C "$source" commit -m 'add approved submodule config' >/dev/null 2>&1
+  head="$(git -C "$source" rev-parse HEAD)"
+  request="$tmp_root/afk-approved-submodules.json"
+  evidence="$tmp_root/afk-approved-submodules"
+  fake_bin="$tmp_root/afk-approved-submodules-bin"
+  marker="$tmp_root/afk-approved-submodules-update"
+  rm -rf "$tmp_root/bump-akk-stack-validation/.validation-worker-code.lock"
+  mkdir "$evidence"
+  write_afk_request "$request" "$head" "$evidence"
+  make_submodule_update_observer "$fake_bin" "$marker" 1
+
+  capture_run status output env PATH="$fake_bin:$PATH" VALIDATION_WORKER_HOME="$tmp_root/worker-home-approved" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 "$source/scripts/validation-worker.sh" run --request "$request"
+
+  if [[ "$status" -ne 0 ]]; then
+    cat "$evidence/worker/result.json" >&2
+    cat "$evidence/worker/logs/submodule.log" >&2
+    return 1
+  fi
+  [[ -e "$marker" ]] || return 1
+  assert_json_equals "$evidence/result.json" .status passed
+}
+
 run_test "validation worker help mentions request contract" test_help
 run_test "AFK contract config selects the validation worker" test_afk_contract_config
 run_test "validation worker profiles discovery emits portable metadata" test_profiles_json
@@ -833,6 +938,8 @@ run_test "AFK contract rejects Tier 1 and stops" test_afk_contract_rejects_tier1
 run_test "AFK contract reports a missing prerequisite as inconclusive" test_afk_contract_reports_missing_prerequisite_as_inconclusive
 run_test "AFK contract fetches self-contained Git metadata from a linked worktree" test_afk_contract_fetches_a_self_contained_checkout_from_a_linked_worktree
 run_test "AFK contract rejects passed checks paired with a nonzero worker exit" test_afk_contract_treats_nonzero_inner_exit_after_passed_checks_as_inconclusive
+run_test "AFK contract rejects unapproved submodule transports before initialization" test_afk_contract_rejects_unapproved_submodule_transports_before_initialization
+run_test "AFK contract accepts approved production submodule URLs" test_afk_contract_accepts_the_approved_production_submodule_urls
 
 if [[ "$failures" -gt 0 ]]; then
   exit 1
