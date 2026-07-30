@@ -205,6 +205,15 @@ write_afk_checks() {
     }' >"$path"
 }
 
+write_inconclusive_afk_checks() {
+  local source="$1" destination="$2"
+  jq '
+    (.checks | [to_entries[] | select(.value.status != "not_run") | .key] | last) as $last
+    | .status = "inconclusive"
+    | .checks[$last].status = "inconclusive"
+  ' "$source" >"$destination"
+}
+
 write_afk_result() {
   local evidence_dir="$1" candidate_sha="$2" status="$3" summary="$4" checks_path="$5"
   jq -n \
@@ -234,7 +243,7 @@ is_afk_request() {
 
 run_afk_request() {
   local request_path="$1" candidate_sha evidence_dir afk_run_id worker_evidence worker_request checks_path stack_path
-  local worker_status overall_status summary
+  local worker_status expected_worker_status overall_status summary result_checks_path
 
   candidate_sha="$(json_get '.candidate_sha | strings' "$request_path")"
   evidence_dir="$(json_get '.evidence_dir | strings' "$request_path")"
@@ -286,21 +295,26 @@ run_afk_request() {
   fi
   overall_status="$(json_get '.status | strings' "$checks_path")"
   case "$overall_status" in
-    passed)
-      summary="Required repository validation passed."
-      worker_status=0
-      ;;
-    rejected)
-      summary="Required repository validation found a deterministic failure."
-      worker_status=1
-      ;;
-    *)
-      overall_status=inconclusive
-      summary="Required repository validation could not reach a trustworthy verdict."
-      worker_status=2
-      ;;
+    passed) expected_worker_status=0 ;;
+    rejected) expected_worker_status=1 ;;
+    inconclusive) expected_worker_status=2 ;;
+    *) expected_worker_status=-1 ;;
   esac
-  write_afk_result "$evidence_dir" "$candidate_sha" "$overall_status" "$summary" "$checks_path"
+  result_checks_path="$checks_path"
+  if [[ "$worker_status" -ne "$expected_worker_status" ]]; then
+    overall_status=inconclusive
+    summary="Required repository validation could not reach a trustworthy verdict."
+    worker_status=2
+    result_checks_path="$evidence_dir/inconclusive-checks.json"
+    write_inconclusive_afk_checks "$checks_path" "$result_checks_path"
+  else
+    case "$overall_status" in
+      passed) summary="Required repository validation passed." ;;
+      rejected) summary="Required repository validation found a deterministic failure." ;;
+      inconclusive) summary="Required repository validation could not reach a trustworthy verdict." ;;
+    esac
+  fi
+  write_afk_result "$evidence_dir" "$candidate_sha" "$overall_status" "$summary" "$result_checks_path"
   return "$worker_status"
 }
 

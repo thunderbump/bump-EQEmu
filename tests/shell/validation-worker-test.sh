@@ -778,6 +778,34 @@ test_afk_contract_fetches_a_self_contained_checkout_from_a_linked_worktree() {
   assert_json_equals "$evidence/worker/result.json" .actual_checkout_commit "$head"
 }
 
+test_afk_contract_treats_nonzero_inner_exit_after_passed_checks_as_inconclusive() {
+  local source request evidence status output head fake_bin real_rm
+  make_afk_contract_repo source
+  reset_worker_home
+  head="$(git -C "$source" rev-parse HEAD)"
+  request="$tmp_root/afk-cleanup-failure.json"
+  evidence="$tmp_root/afk-cleanup-failure"
+  fake_bin="$tmp_root/afk-cleanup-failure-bin"
+  real_rm="$(command -v rm)"
+  mkdir "$evidence" "$fake_bin"
+  write_afk_request "$request" "$head" "$evidence"
+  cat >"$fake_bin/rm" <<SCRIPT
+#!/usr/bin/env bash
+if [[ " \$* " == *".validation-worker-code.lock"* ]]; then
+  exit 1
+fi
+exec "$real_rm" "\$@"
+SCRIPT
+  chmod +x "$fake_bin/rm"
+
+  capture_run status output env PATH="$fake_bin:$PATH" VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 "$source/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 2 ]] || return 1
+  assert_json_equals "$evidence/worker/afk-checks.json" .status passed
+  assert_json_equals "$evidence/result.json" .status inconclusive
+  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,passed,inconclusive"
+}
+
 run_test "validation worker help mentions request contract" test_help
 run_test "AFK contract config selects the validation worker" test_afk_contract_config
 run_test "validation worker profiles discovery emits portable metadata" test_profiles_json
@@ -804,6 +832,7 @@ run_test "AFK contract reports stable passing checks" test_afk_contract_passes_w
 run_test "AFK contract rejects Tier 1 and stops" test_afk_contract_rejects_tier1_and_stops
 run_test "AFK contract reports a missing prerequisite as inconclusive" test_afk_contract_reports_missing_prerequisite_as_inconclusive
 run_test "AFK contract fetches self-contained Git metadata from a linked worktree" test_afk_contract_fetches_a_self_contained_checkout_from_a_linked_worktree
+run_test "AFK contract rejects passed checks paired with a nonzero worker exit" test_afk_contract_treats_nonzero_inner_exit_after_passed_checks_as_inconclusive
 
 if [[ "$failures" -gt 0 ]]; then
   exit 1
