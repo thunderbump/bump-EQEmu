@@ -52,6 +52,11 @@ now_utc() {
 }
 
 profile_names=(preflight safe tier3-harness tier1-tier3-harness)
+AFK_CHECK_PLAN='[
+  {"name":"preflight","profile":"preflight","log_path":"worker/logs/preflight.log","failure_status":"inconclusive","failure_message":"validation preflight was inconclusive","inconclusive_message":"validation preflight was inconclusive"},
+  {"name":"tier1-build-and-unit-tests","profile":"tier1","log_path":"worker/logs/tier1-build-and-unit-tests.log","failure_status":"rejected","failure_message":"Tier 1 validation failed","inconclusive_message":"Tier 1 validation was inconclusive"},
+  {"name":"tier2-read-only-database-tests","profile":"tier2-readonly","log_path":"worker/logs/tier2-read-only-database-tests.log","failure_status":"rejected","failure_message":"Tier 2 validation failed","inconclusive_message":"Tier 2 validation was inconclusive"}
+]'
 
 profile_description() {
   case "$1" in
@@ -189,20 +194,37 @@ write_result() {
 }
 
 write_afk_checks() {
-  local path="$1" overall_status="$2" preflight_status="$3" tier1_status="$4" tier2_status="$5"
+  local path="$1" overall_status="$2" statuses_json
+  statuses_json="$(jq -cn '$ARGS.positional' --args "${afk_check_statuses[@]}")"
   jq -n \
     --arg overall_status "$overall_status" \
-    --arg preflight_status "$preflight_status" \
-    --arg tier1_status "$tier1_status" \
-    --arg tier2_status "$tier2_status" \
+    --argjson plan "$AFK_CHECK_PLAN" \
+    --argjson statuses "$statuses_json" \
     '{
       status:$overall_status,
-      checks:[
-        {name:"preflight", status:$preflight_status, log_path:"worker/logs/preflight.log"},
-        {name:"tier1-build-and-unit-tests", status:$tier1_status, log_path:"worker/logs/tier1-build-and-unit-tests.log"},
-        {name:"tier2-read-only-database-tests", status:$tier2_status, log_path:"worker/logs/tier2-read-only-database-tests.log"}
-      ]
+      checks:[$plan | to_entries[] | {
+        name:.value.name,
+        status:$statuses[.key],
+        log_path:.value.log_path
+      }]
     }' >"$path"
+}
+
+initialize_afk_check_statuses() {
+  local status="${1:-not_run}" count
+  count="$(jq 'length' <<<"$AFK_CHECK_PLAN")"
+  afk_check_statuses=()
+  while [[ "${#afk_check_statuses[@]}" -lt "$count" ]]; do
+    afk_check_statuses+=("$status")
+  done
+}
+
+ensure_afk_check_logs() {
+  local evidence_root="$1" log_path
+  while IFS= read -r log_path; do
+    mkdir -p "$evidence_root/$(dirname "$log_path")"
+    : >>"$evidence_root/$log_path"
+  done < <(jq -r '.[].log_path' <<<"$AFK_CHECK_PLAN")
 }
 
 write_inconclusive_afk_checks() {
@@ -286,12 +308,11 @@ run_afk_request() {
   worker_status=$?
   set -e
 
-  mkdir -p "$worker_evidence/logs"
-  : >>"$worker_evidence/logs/preflight.log"
-  : >>"$worker_evidence/logs/tier1-build-and-unit-tests.log"
-  : >>"$worker_evidence/logs/tier2-read-only-database-tests.log"
+  ensure_afk_check_logs "$evidence_dir"
   if [[ ! -f "$checks_path" ]]; then
-    write_afk_checks "$checks_path" inconclusive inconclusive not_run not_run
+    initialize_afk_check_statuses
+    afk_check_statuses[0]=inconclusive
+    write_afk_checks "$checks_path" inconclusive
   fi
   overall_status="$(json_get '.status | strings' "$checks_path")"
   case "$overall_status" in
@@ -788,44 +809,33 @@ run_request() {
 
   if [[ "$profile" == "safe" && "${VALIDATION_WORKER_AFK_MODE:-0}" == "1" ]]; then
     local_checks_path="$evidence_dir/afk-checks.json"
-    : >"$evidence_dir/logs/preflight.log"
-    : >"$evidence_dir/logs/tier1-build-and-unit-tests.log"
-    : >"$evidence_dir/logs/tier2-read-only-database-tests.log"
-    if run_validation preflight "$evidence_dir/logs/preflight.log"; then
-      :
-    else
-      validation_status=$?
-      write_afk_checks "$local_checks_path" inconclusive inconclusive not_run not_run
-      write_result "$evidence_dir" failed prerequisite_unavailable 2 "validation preflight was inconclusive" "$checkout_dir" "$head_commit" "$stack_path_source"
-      return 2
-    fi
-    if run_validation tier1 "$evidence_dir/logs/tier1-build-and-unit-tests.log"; then
-      :
-    else
+    initialize_afk_check_statuses
+    ensure_afk_check_logs "$(dirname "$evidence_dir")"
+    mapfile -t afk_plan_rows < <(
+      jq -r '.[] | [.profile, .log_path, .failure_status, .failure_message, .inconclusive_message] | @tsv' <<<"$AFK_CHECK_PLAN"
+    )
+    for afk_check_index in "${!afk_plan_rows[@]}"; do
+      IFS=$'\t' read -r afk_profile afk_log_path afk_failure_status afk_failure_message afk_inconclusive_message <<<"${afk_plan_rows[$afk_check_index]}"
+      if run_validation "$afk_profile" "$(dirname "$evidence_dir")/$afk_log_path"; then
+        afk_check_statuses[$afk_check_index]=passed
+        continue
+      fi
       validation_status=$?
       if [[ "$validation_status" -eq 124 || "$validation_status" -eq 127 ]]; then
-        write_afk_checks "$local_checks_path" inconclusive passed inconclusive not_run
-        write_result "$evidence_dir" failed prerequisite_unavailable 2 "Tier 1 validation was inconclusive" "$checkout_dir" "$head_commit" "$stack_path_source"
+        afk_failure_status=inconclusive
+        afk_failure_message="$afk_inconclusive_message"
+      fi
+      afk_check_statuses[$afk_check_index]="$afk_failure_status"
+      if [[ "$afk_failure_status" == "inconclusive" ]]; then
+        write_afk_checks "$local_checks_path" inconclusive
+        write_result "$evidence_dir" failed prerequisite_unavailable 2 "$afk_failure_message" "$checkout_dir" "$head_commit" "$stack_path_source"
         return 2
       fi
-      write_afk_checks "$local_checks_path" rejected passed rejected not_run
-      write_result "$evidence_dir" failed validation_failed 1 "Tier 1 validation failed" "$checkout_dir" "$head_commit" "$stack_path_source"
+      write_afk_checks "$local_checks_path" rejected
+      write_result "$evidence_dir" failed validation_failed 1 "$afk_failure_message" "$checkout_dir" "$head_commit" "$stack_path_source"
       return 1
-    fi
-    if run_validation tier2-readonly "$evidence_dir/logs/tier2-read-only-database-tests.log"; then
-      :
-    else
-      validation_status=$?
-      if [[ "$validation_status" -eq 124 || "$validation_status" -eq 127 ]]; then
-        write_afk_checks "$local_checks_path" inconclusive passed passed inconclusive
-        write_result "$evidence_dir" failed prerequisite_unavailable 2 "Tier 2 validation was inconclusive" "$checkout_dir" "$head_commit" "$stack_path_source"
-        return 2
-      fi
-      write_afk_checks "$local_checks_path" rejected passed passed rejected
-      write_result "$evidence_dir" failed validation_failed 1 "Tier 2 validation failed" "$checkout_dir" "$head_commit" "$stack_path_source"
-      return 1
-    fi
-    write_afk_checks "$local_checks_path" passed passed passed passed
+    done
+    write_afk_checks "$local_checks_path" passed
     write_result "$evidence_dir" passed ok 0 "validation passed" "$checkout_dir" "$head_commit" "$stack_path_source"
     return 0
   fi
