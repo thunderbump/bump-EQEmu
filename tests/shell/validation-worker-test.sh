@@ -91,6 +91,18 @@ if [[ "${VALIDATION_WORKER_TEST_ASSERT_SUBMODULE:-0}" == "1" && ! -f "$repo_dir/
   printf 'submodule marker missing\n' >&2
   exit 1
 fi
+if [[ "${VALIDATION_WORKER_TEST_ASSERT_SELF_CONTAINED_GIT:-0}" == "1" ]]; then
+  repo_git_dir="$(git -C "$repo_dir" rev-parse --absolute-git-dir)"
+  submodule_git_dir="$(git -C "$repo_dir/vendor/submodule-fixture" rev-parse --absolute-git-dir)"
+  [[ "$repo_git_dir" == "$repo_dir/.git" ]] || {
+    printf 'checkout git directory is not self-contained: %s\n' "$repo_git_dir" >&2
+    exit 1
+  }
+  [[ "$submodule_git_dir" == "$repo_dir/.git/modules/"* ]] || {
+    printf 'submodule git directory is not self-contained: %s\n' "$submodule_git_dir" >&2
+    exit 1
+  }
+fi
 printf 'fake validate: %s\n' "$*"
 SCRIPT
   chmod +x "$source_ref/scripts/validate.sh"
@@ -738,6 +750,34 @@ test_afk_contract_reports_missing_prerequisite_as_inconclusive() {
   assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "inconclusive,not_run,not_run"
 }
 
+test_afk_contract_fetches_a_self_contained_checkout_from_a_linked_worktree() {
+  local source linked_root linked_worktree stack request evidence status output head
+  make_source_repo_with_submodule source afk-linked
+  cp "$repo_root/scripts/validation-worker.sh" "$source/scripts/validation-worker.sh"
+  chmod +x "$source/scripts/validation-worker.sh"
+  git -C "$source" add scripts/validation-worker.sh
+  git -C "$source" commit -m 'add validation worker' >/dev/null 2>&1
+  linked_root="$tmp_root/linked-root"
+  linked_worktree="$linked_root/candidate"
+  stack="$linked_root/bump-akk-stack-validation"
+  mkdir -p "$linked_root" "$stack"
+  printf 'ENV=development\n' >"$stack/.env"
+  git -C "$source" worktree add -b afk-linked-candidate "$linked_worktree" >/dev/null 2>&1
+  git -C "$linked_worktree" -c protocol.file.allow=always submodule update --init --recursive >/dev/null 2>&1
+  head="$(git -C "$linked_worktree" rev-parse HEAD)"
+  request="$tmp_root/afk-linked-worktree.json"
+  evidence="$tmp_root/afk-linked-worktree"
+  mkdir "$evidence"
+  write_afk_request "$request" "$head" "$evidence"
+
+  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home-linked" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TEST_ASSERT_SUBMODULE=1 VALIDATION_WORKER_TEST_ASSERT_SELF_CONTAINED_GIT=1 "$linked_worktree/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 0 ]] || return 1
+  assert_json_equals "$evidence/result.json" .status passed
+  assert_json_equals "$evidence/worker/result.json" .request_metadata.source.type fetch
+  assert_json_equals "$evidence/worker/result.json" .actual_checkout_commit "$head"
+}
+
 run_test "validation worker help mentions request contract" test_help
 run_test "AFK contract config selects the validation worker" test_afk_contract_config
 run_test "validation worker profiles discovery emits portable metadata" test_profiles_json
@@ -763,6 +803,7 @@ run_test "AKKSTACK_DIR real code directory fails fast" test_akkstack_dir_real_co
 run_test "AFK contract reports stable passing checks" test_afk_contract_passes_with_stable_checks
 run_test "AFK contract rejects Tier 1 and stops" test_afk_contract_rejects_tier1_and_stops
 run_test "AFK contract reports a missing prerequisite as inconclusive" test_afk_contract_reports_missing_prerequisite_as_inconclusive
+run_test "AFK contract fetches self-contained Git metadata from a linked worktree" test_afk_contract_fetches_a_self_contained_checkout_from_a_linked_worktree
 
 if [[ "$failures" -gt 0 ]]; then
   exit 1

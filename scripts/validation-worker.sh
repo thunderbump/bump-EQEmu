@@ -253,14 +253,15 @@ run_afk_request() {
   mkdir "$worker_evidence"
   jq -n \
     --arg project bump-eqemu \
-    --arg checkout_path "$repo_root" \
+    --arg repo "$repo_root" \
     --arg commit "$candidate_sha" \
     --arg run_id "afk-${candidate_sha:0:16}" \
     --arg evidence_dir "$worker_evidence" \
     --arg stack_path "$stack_path" \
     '{
       project:$project,
-      checkout:{path:$checkout_path},
+      repo:$repo,
+      ref:$commit,
       commit:$commit,
       profile:"safe",
       run_id:$run_id,
