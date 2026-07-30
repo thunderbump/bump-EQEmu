@@ -59,7 +59,8 @@ run_test() {
 
 make_source_repo() {
   local -n source_ref="$1"
-  source_ref="$tmp_root/source-repo"
+  local suffix="${2:-}"
+  source_ref="$tmp_root/source-repo${suffix:+-$suffix}"
   mkdir -p "$source_ref/scripts"
   cat >"$source_ref/scripts/validate.sh" <<'SCRIPT'
 #!/usr/bin/env bash
@@ -165,10 +166,10 @@ SCRIPT
 
 make_source_repo_with_submodule() {
   local -n source_ref="$1"
-  local base_source submodule_repo
-  make_source_repo base_source
+  local suffix="${2:-}" base_source submodule_repo
+  make_source_repo base_source "$suffix"
   source_ref="$base_source"
-  submodule_repo="$tmp_root/submodule-repo"
+  submodule_repo="$tmp_root/submodule-repo${suffix:+-$suffix}"
   mkdir -p "$submodule_repo"
   git -C "$submodule_repo" init >/dev/null 2>&1
   git -C "$submodule_repo" config user.email worker-test@example.com
@@ -436,6 +437,25 @@ test_local_checkout_request_works() {
   assert_json_equals "$evidence/result.json" .request_metadata.source.checkout_path "$source"
   assert_json_equals "$evidence/result.json" .request_metadata.source.ref ""
   assert_json_equals "$evidence/result.json" .actual_checkout_commit "$head"
+}
+
+test_local_checkout_rejects_drifting_submodule() {
+  local source request evidence status output
+  make_source_repo_with_submodule source drift
+  reset_worker_home
+  git -C "$source/vendor/submodule-fixture" config user.email worker-test@example.com
+  git -C "$source/vendor/submodule-fixture" config user.name 'Worker Test'
+  printf 'drifted submodule fixture\n' >"$source/vendor/submodule-fixture/marker.txt"
+  git -C "$source/vendor/submodule-fixture" add marker.txt
+  git -C "$source/vendor/submodule-fixture" commit -m 'drift submodule' >/dev/null 2>&1
+  evidence="$tmp_root/evidence-local-submodule-drift"
+  request="$tmp_root/local-submodule-drift.json"
+  write_local_checkout_request "$request" "$source" "$evidence"
+
+  capture_run status output worker_env "$repo_root/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 1 ]] || return 1
+  assert_json_equals "$evidence/result.json" .category submodule_failed
 }
 
 test_lock_contention() {
@@ -729,6 +749,7 @@ run_test "stack lock is not held during submodule initialization" test_stack_loc
 run_test "commit mismatch is categorized" test_commit_mismatch
 run_test "fetch failure is categorized" test_fetch_failure
 run_test "local-checkout request still works" test_local_checkout_request_works
+run_test "local-checkout request rejects a drifting submodule" test_local_checkout_rejects_drifting_submodule
 run_test "lock contention is worker_busy" test_lock_contention
 run_test "validation timeout is categorized" test_timeout
 run_test "tier3 harness failure is categorized with logs" test_tier3_harness_failure_is_categorized_with_logs

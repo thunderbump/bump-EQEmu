@@ -617,7 +617,7 @@ verify_checkout_submodules() {
     SUBMODULE_ERROR_MESSAGE="failed to inspect checkout submodules"
     return 1
   fi
-  if [[ "$mode" == "local-checkout" ]] && printf '%s\n' "$output" | grep -Eq '^[\-+U]'; then
+  if [[ "$mode" == "local-checkout" ]] && printf '%s\n' "$output" | grep -Eq '^[-+U]'; then
     SUBMODULE_ERROR_CATEGORY=submodule_failed
     SUBMODULE_ERROR_MESSAGE="local checkout submodules are not initialized and pinned to recorded commits"
     return 1
