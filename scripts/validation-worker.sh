@@ -712,15 +712,16 @@ validate_submodule_config() {
   [[ "$(git config -f "$config_path" --name-only --get-regexp '^submodule\..*\.url$' | wc -l)" -eq "$entry_count" ]]
 }
 
-initialize_checkout_submodules() {
-  local checkout_dir="$1" evidence_dir="$2" status nested_config
+run_isolated_submodule_update() {
+  local checkout_dir="$1" evidence_dir="$2" recursive="$3" status
   local -a transport_config=(-c protocol.allow=never -c protocol.https.allow=always)
+  local -a update_args=(submodule update --init)
 
-  if ! validate_submodule_config "$checkout_dir/.gitmodules" 1 >>"$evidence_dir/logs/submodule.log" 2>&1; then
-    PREPARE_ERROR_CATEGORY=submodule_failed
-    PREPARE_ERROR_MESSAGE="checkout contains an unapproved submodule configuration"
-    return 1
-  fi
+  case "$recursive" in
+    yes) update_args+=(--recursive) ;;
+    no) ;;
+    *) return 2 ;;
+  esac
   if [[ "${VALIDATION_WORKER_VALIDATE_DRY_RUN:-0}" == "1" \
     && -n "${VALIDATION_WORKER_TEST_FILE_SUBMODULE_ROOT:-}" ]]; then
     transport_config+=(-c protocol.file.allow=always)
@@ -730,7 +731,7 @@ initialize_checkout_submodules() {
   env -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT \
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 \
     GIT_TERMINAL_PROMPT=0 GIT_ASKPASS= SSH_ASKPASS= \
-    timeout "$timeout_seconds" git -C "$checkout_dir" "${transport_config[@]}" submodule update --init \
+    timeout "$timeout_seconds" git -C "$checkout_dir" "${transport_config[@]}" "${update_args[@]}" \
     >>"$evidence_dir/logs/submodule.log" 2>&1
   status=$?
   set -e
@@ -744,6 +745,17 @@ initialize_checkout_submodules() {
     fi
     return 1
   fi
+}
+
+initialize_checkout_submodules() {
+  local checkout_dir="$1" evidence_dir="$2" nested_config
+
+  if ! validate_submodule_config "$checkout_dir/.gitmodules" 1 >>"$evidence_dir/logs/submodule.log" 2>&1; then
+    PREPARE_ERROR_CATEGORY=submodule_failed
+    PREPARE_ERROR_MESSAGE="checkout contains an unapproved submodule configuration"
+    return 1
+  fi
+  run_isolated_submodule_update "$checkout_dir" "$evidence_dir" no || return 1
 
   while IFS= read -r nested_config; do
     [[ "$nested_config" == "$checkout_dir/.gitmodules" ]] && continue
@@ -754,24 +766,7 @@ initialize_checkout_submodules() {
     fi
   done < <(find "$checkout_dir" -mindepth 2 -name .gitmodules -type f -print)
 
-  set +e
-  env -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT \
-    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 \
-    GIT_TERMINAL_PROMPT=0 GIT_ASKPASS= SSH_ASKPASS= \
-    timeout "$timeout_seconds" git -C "$checkout_dir" "${transport_config[@]}" submodule update --init --recursive \
-    >>"$evidence_dir/logs/submodule.log" 2>&1
-  status=$?
-  set -e
-  if [[ "$status" -ne 0 ]]; then
-    if [[ "$status" -eq 124 ]]; then
-      PREPARE_ERROR_CATEGORY=timeout
-      PREPARE_ERROR_MESSAGE="submodule initialization timed out"
-    else
-      PREPARE_ERROR_CATEGORY=submodule_failed
-      PREPARE_ERROR_MESSAGE="failed to initialize checkout submodules"
-    fi
-    return 1
-  fi
+  run_isolated_submodule_update "$checkout_dir" "$evidence_dir" yes
 }
 
 prepare_checkout() {
