@@ -1,0 +1,5 @@
+schema_version = 1
+
+[validation]
+command = ["./scripts/validation-worker.sh", "run"]
+timeout_seconds = 2700

@@ -100,6 +100,19 @@ SCRIPT
   git -C "$source_ref" commit -m 'add fake validate' >/dev/null 2>&1
 }
 
+make_afk_contract_repo() {
+  local -n source_ref="$1"
+  local fixture_source
+  make_source_repo fixture_source
+  source_ref="$fixture_source"
+  cp "$repo_root/scripts/validation-worker.sh" "$source_ref/scripts/validation-worker.sh"
+  chmod +x "$source_ref/scripts/validation-worker.sh"
+  mkdir -p "$tmp_root/bump-akk-stack-validation"
+  printf 'ENV=development\n' >"$tmp_root/bump-akk-stack-validation/.env"
+  git -C "$source_ref" add scripts/validation-worker.sh
+  git -C "$source_ref" commit -m 'add validation worker' >/dev/null 2>&1
+}
+
 make_source_repo_with_real_validation_scripts() {
   local -n source_ref="$1"
   source_ref="$tmp_root/source-repo-real-validation"
@@ -200,6 +213,16 @@ write_local_checkout_request() {
     >"$path"
 }
 
+write_afk_request() {
+  local path="$1" candidate_sha="$2" evidence_dir="$3" run_id="${4:-afk-contract-test}"
+  jq -n \
+    --arg run_id "$run_id" \
+    --arg candidate_sha "$candidate_sha" \
+    --arg evidence_dir "$evidence_dir" \
+    '{schema_version:1, run_id:$run_id, candidate_sha:$candidate_sha, evidence_dir:$evidence_dir}' \
+    >"$path"
+}
+
 worker_env() {
   env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 "$@"
 }
@@ -217,6 +240,24 @@ test_help() {
   assert_contains "$output" "evidence_dir"
   assert_contains "$output" "lock_wait_seconds"
   assert_contains "$output" "tier1-tier3-harness"
+}
+
+test_afk_contract_config() {
+  python3 - "$repo_root/afk.toml" <<'PY'
+import sys
+import tomllib
+
+with open(sys.argv[1], "rb") as contract_file:
+    contract = tomllib.load(contract_file)
+
+assert contract == {
+    "schema_version": 1,
+    "validation": {
+        "command": ["./scripts/validation-worker.sh", "run"],
+        "timeout_seconds": 2700,
+    },
+}
+PY
 }
 
 test_profiles_json() {
@@ -622,7 +663,63 @@ test_akkstack_dir_real_code_directory_fails_fast() {
   [[ -d "$stack/code" && ! -L "$stack/code" ]] || return 1
 }
 
+test_afk_contract_passes_with_stable_checks() {
+  local source request evidence status output head
+  make_afk_contract_repo source
+  reset_worker_home
+  head="$(git -C "$source" rev-parse HEAD)"
+  request="$tmp_root/afk-passed.json"
+  evidence="$tmp_root/afk-passed"
+  mkdir "$evidence"
+  write_afk_request "$request" "$head" "$evidence"
+
+  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 "$source/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 0 ]] || return 1
+  assert_json_equals "$evidence/result.json" .schema_version 1
+  assert_json_equals "$evidence/result.json" .candidate_sha "$head"
+  assert_json_equals "$evidence/result.json" .status passed
+  assert_json_equals "$evidence/result.json" '.checks | map(.name) | join(",")' "preflight,tier1-build-and-unit-tests,tier2-read-only-database-tests"
+  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,passed,passed"
+}
+
+test_afk_contract_rejects_tier1_and_stops() {
+  local source request evidence status output head
+  make_afk_contract_repo source
+  reset_worker_home
+  head="$(git -C "$source" rev-parse HEAD)"
+  request="$tmp_root/afk-rejected.json"
+  evidence="$tmp_root/afk-rejected"
+  mkdir "$evidence"
+  write_afk_request "$request" "$head" "$evidence"
+
+  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TEST_FAIL_TIER1=1 "$source/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 1 ]] || return 1
+  assert_json_equals "$evidence/result.json" .status rejected
+  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,rejected,not_run"
+}
+
+test_afk_contract_reports_missing_prerequisite_as_inconclusive() {
+  local source request evidence status output head
+  make_afk_contract_repo source
+  reset_worker_home
+  head="$(git -C "$source" rev-parse HEAD)"
+  request="$tmp_root/afk-inconclusive.json"
+  evidence="$tmp_root/afk-inconclusive"
+  rm -rf "$tmp_root/bump-akk-stack-validation"
+  mkdir "$evidence"
+  write_afk_request "$request" "$head" "$evidence"
+
+  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 "$source/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 2 ]] || return 1
+  assert_json_equals "$evidence/result.json" .status inconclusive
+  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "inconclusive,not_run,not_run"
+}
+
 run_test "validation worker help mentions request contract" test_help
+run_test "AFK contract config selects the validation worker" test_afk_contract_config
 run_test "validation worker profiles discovery emits portable metadata" test_profiles_json
 run_test "invalid request writes structured evidence" test_invalid_request_writes_evidence
 run_test "fake repo fetch checkout writes evidence" test_fetch_checkout_and_evidence
@@ -642,6 +739,9 @@ run_test "validation worker binds requested validation stack to worker checkout"
 run_test "validation worker binds validation stack from AKKSTACK_DIR" test_validation_worker_binds_stack_from_akkstack_dir_environment
 run_test "stack lock blocks distinct worker homes on same stack" test_stack_lock_blocks_distinct_worker_homes_on_same_stack
 run_test "AKKSTACK_DIR real code directory fails fast" test_akkstack_dir_real_code_directory_fails_fast
+run_test "AFK contract reports stable passing checks" test_afk_contract_passes_with_stable_checks
+run_test "AFK contract rejects Tier 1 and stops" test_afk_contract_rejects_tier1_and_stops
+run_test "AFK contract reports a missing prerequisite as inconclusive" test_afk_contract_reports_missing_prerequisite_as_inconclusive
 
 if [[ "$failures" -gt 0 ]]; then
   exit 1

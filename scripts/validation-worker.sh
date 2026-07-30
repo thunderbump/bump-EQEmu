@@ -188,6 +188,121 @@ write_result() {
   cp "$result_json" "$evidence_dir/worker-output.json"
 }
 
+write_afk_checks() {
+  local path="$1" overall_status="$2" preflight_status="$3" tier1_status="$4" tier2_status="$5"
+  jq -n \
+    --arg overall_status "$overall_status" \
+    --arg preflight_status "$preflight_status" \
+    --arg tier1_status "$tier1_status" \
+    --arg tier2_status "$tier2_status" \
+    '{
+      status:$overall_status,
+      checks:[
+        {name:"preflight", status:$preflight_status, log_path:"worker/logs/preflight.log"},
+        {name:"tier1-build-and-unit-tests", status:$tier1_status, log_path:"worker/logs/tier1-build-and-unit-tests.log"},
+        {name:"tier2-read-only-database-tests", status:$tier2_status, log_path:"worker/logs/tier2-read-only-database-tests.log"}
+      ]
+    }' >"$path"
+}
+
+write_afk_result() {
+  local evidence_dir="$1" candidate_sha="$2" status="$3" summary="$4" checks_path="$5"
+  jq -n \
+    --arg candidate_sha "$candidate_sha" \
+    --arg status "$status" \
+    --arg summary "$summary" \
+    --slurpfile checks "$checks_path" \
+    '{
+      schema_version:1,
+      candidate_sha:$candidate_sha,
+      status:$status,
+      summary:$summary,
+      checks:$checks[0].checks
+    }' >"$evidence_dir/result.json"
+}
+
+is_afk_request() {
+  local request_path="$1"
+  jq -e '
+    type == "object"
+    and (.schema_version == 1)
+    and (.candidate_sha | type == "string")
+    and (.evidence_dir | type == "string")
+    and (.run_id | type == "string")
+  ' "$request_path" >/dev/null 2>&1
+}
+
+run_afk_request() {
+  local request_path="$1" candidate_sha evidence_dir afk_run_id worker_evidence worker_request checks_path stack_path
+  local worker_status overall_status summary
+
+  candidate_sha="$(json_get '.candidate_sha | strings' "$request_path")"
+  evidence_dir="$(json_get '.evidence_dir | strings' "$request_path")"
+  afk_run_id="$(json_get '.run_id | strings' "$request_path")"
+  if [[ ! "$candidate_sha" =~ ^[0-9a-fA-F]{40}$ ]] \
+    || [[ -z "$evidence_dir" || ! -d "$evidence_dir" ]] \
+    || [[ -z "$afk_run_id" ]]; then
+    printf 'invalid AFK validation request\n' >&2
+    return 2
+  fi
+
+  worker_evidence="$evidence_dir/worker"
+  worker_request="$evidence_dir/worker-request.json"
+  checks_path="$worker_evidence/afk-checks.json"
+  stack_path="$repo_root/../bump-akk-stack-validation"
+  mkdir "$worker_evidence"
+  jq -n \
+    --arg project bump-eqemu \
+    --arg checkout_path "$repo_root" \
+    --arg commit "$candidate_sha" \
+    --arg run_id "afk-${candidate_sha:0:16}" \
+    --arg evidence_dir "$worker_evidence" \
+    --arg stack_path "$stack_path" \
+    '{
+      project:$project,
+      checkout:{path:$checkout_path},
+      commit:$commit,
+      profile:"safe",
+      run_id:$run_id,
+      evidence_dir:$evidence_dir,
+      timeout_seconds:2600,
+      lock_wait_seconds:0,
+      stack:{role:"validation", path:$stack_path}
+    }' >"$worker_request"
+
+  set +e
+  VALIDATION_WORKER_AFK_MODE=1 \
+    "$script_dir/validation-worker.sh" run --request "$worker_request"
+  worker_status=$?
+  set -e
+
+  mkdir -p "$worker_evidence/logs"
+  : >>"$worker_evidence/logs/preflight.log"
+  : >>"$worker_evidence/logs/tier1-build-and-unit-tests.log"
+  : >>"$worker_evidence/logs/tier2-read-only-database-tests.log"
+  if [[ ! -f "$checks_path" ]]; then
+    write_afk_checks "$checks_path" inconclusive inconclusive not_run not_run
+  fi
+  overall_status="$(json_get '.status | strings' "$checks_path")"
+  case "$overall_status" in
+    passed)
+      summary="Required repository validation passed."
+      worker_status=0
+      ;;
+    rejected)
+      summary="Required repository validation found a deterministic failure."
+      worker_status=1
+      ;;
+    *)
+      overall_status=inconclusive
+      summary="Required repository validation could not reach a trustworthy verdict."
+      worker_status=2
+      ;;
+  esac
+  write_afk_result "$evidence_dir" "$candidate_sha" "$overall_status" "$summary" "$checks_path"
+  return "$worker_status"
+}
+
 copy_request_evidence() {
   local request_path="$1" evidence_dir="$2"
   mkdir -p "$evidence_dir"
@@ -631,7 +746,8 @@ run_request() {
 
   validation_started_at_ns="$(date +%s%N)"
   run_validation() {
-    local profile_name="$1" exit_code elapsed_ns remaining_ns remaining_ms remaining_duration
+    local profile_name="$1" log_path="${2:-$evidence_dir/logs/validation.log}"
+    local exit_code elapsed_ns remaining_ns remaining_ms remaining_duration
 
     elapsed_ns=$(( $(date +%s%N) - validation_started_at_ns ))
     remaining_ns=$(( (timeout_seconds * 1000000000) - elapsed_ns ))
@@ -643,17 +759,61 @@ run_request() {
 
     set +e
     if [[ -n "$stack_path" && -n "${STACK_BINDING_STATUS:-}" ]]; then
-      AKKSTACK_DIR="$stack_path" EXPECTED_EQEMU_CHECKOUT="$checkout_dir" timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$evidence_dir/logs/validation.log" 2>&1
+      AKKSTACK_DIR="$stack_path" EXPECTED_EQEMU_CHECKOUT="$checkout_dir" timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
     elif [[ -n "$stack_path" ]]; then
-      AKKSTACK_DIR="$stack_path" timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$evidence_dir/logs/validation.log" 2>&1
+      AKKSTACK_DIR="$stack_path" timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
     else
-      timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$evidence_dir/logs/validation.log" 2>&1
+      timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
     fi
     exit_code=$?
     set -e
 
     return "$exit_code"
   }
+
+  if [[ "$profile" == "safe" && "${VALIDATION_WORKER_AFK_MODE:-0}" == "1" ]]; then
+    local_checks_path="$evidence_dir/afk-checks.json"
+    : >"$evidence_dir/logs/preflight.log"
+    : >"$evidence_dir/logs/tier1-build-and-unit-tests.log"
+    : >"$evidence_dir/logs/tier2-read-only-database-tests.log"
+    if run_validation preflight "$evidence_dir/logs/preflight.log"; then
+      :
+    else
+      validation_status=$?
+      write_afk_checks "$local_checks_path" inconclusive inconclusive not_run not_run
+      write_result "$evidence_dir" failed prerequisite_unavailable 2 "validation preflight was inconclusive" "$checkout_dir" "$head_commit" "$stack_path_source"
+      return 2
+    fi
+    if run_validation tier1 "$evidence_dir/logs/tier1-build-and-unit-tests.log"; then
+      :
+    else
+      validation_status=$?
+      if [[ "$validation_status" -eq 124 || "$validation_status" -eq 127 ]]; then
+        write_afk_checks "$local_checks_path" inconclusive passed inconclusive not_run
+        write_result "$evidence_dir" failed prerequisite_unavailable 2 "Tier 1 validation was inconclusive" "$checkout_dir" "$head_commit" "$stack_path_source"
+        return 2
+      fi
+      write_afk_checks "$local_checks_path" rejected passed rejected not_run
+      write_result "$evidence_dir" failed validation_failed 1 "Tier 1 validation failed" "$checkout_dir" "$head_commit" "$stack_path_source"
+      return 1
+    fi
+    if run_validation tier2-readonly "$evidence_dir/logs/tier2-read-only-database-tests.log"; then
+      :
+    else
+      validation_status=$?
+      if [[ "$validation_status" -eq 124 || "$validation_status" -eq 127 ]]; then
+        write_afk_checks "$local_checks_path" inconclusive passed passed inconclusive
+        write_result "$evidence_dir" failed prerequisite_unavailable 2 "Tier 2 validation was inconclusive" "$checkout_dir" "$head_commit" "$stack_path_source"
+        return 2
+      fi
+      write_afk_checks "$local_checks_path" rejected passed passed rejected
+      write_result "$evidence_dir" failed validation_failed 1 "Tier 2 validation failed" "$checkout_dir" "$head_commit" "$stack_path_source"
+      return 1
+    fi
+    write_afk_checks "$local_checks_path" passed passed passed passed
+    write_result "$evidence_dir" passed ok 0 "validation passed" "$checkout_dir" "$head_commit" "$stack_path_source"
+    return 0
+  fi
 
   case "$profile" in
     tier1-tier3-harness)
@@ -743,7 +903,11 @@ case "$1" in
       esac
     done
     [[ -n "$request_path" ]] || { usage >&2; exit 2; }
-    run_request "$request_path"
+    if is_afk_request "$request_path"; then
+      run_afk_request "$request_path"
+    else
+      run_request "$request_path"
+    fi
     ;;
   *)
     usage >&2
