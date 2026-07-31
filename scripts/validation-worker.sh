@@ -919,7 +919,7 @@ run_request() {
       else
         validation_status=$?
       fi
-      if [[ "$validation_status" -eq 124 || "$validation_status" -eq 127 ]]; then
+      if [[ "$validation_status" -eq 124 || "$validation_status" -eq 125 || "$validation_status" -eq 127 ]]; then
         afk_failure_status=inconclusive
         afk_failure_message="$afk_inconclusive_message"
       fi
