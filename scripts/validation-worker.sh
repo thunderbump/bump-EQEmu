@@ -749,6 +749,7 @@ run_isolated_submodule_update() {
 
 initialize_checkout_submodules() {
   local checkout_dir="$1" evidence_dir="$2" submodule_key submodule_path nested_config
+  local index_entry index_metadata indexed_path submodule_dir nested_toplevel
 
   if ! validate_submodule_config "$checkout_dir/.gitmodules" 1 >>"$evidence_dir/logs/submodule.log" 2>&1; then
     PREPARE_ERROR_CATEGORY=submodule_failed
@@ -759,8 +760,15 @@ initialize_checkout_submodules() {
 
   while read -r submodule_key submodule_path; do
     [[ -n "$submodule_key" && -n "$submodule_path" ]] || continue
-    git -C "$checkout_dir/$submodule_path" rev-parse --is-inside-work-tree >/dev/null 2>&1 || continue
-    nested_config="$checkout_dir/$submodule_path/.gitmodules"
+    index_entry="$(git -C "$checkout_dir" ls-files --stage -- "$submodule_path")" || continue
+    [[ "$index_entry" != *$'\n'* && "$index_entry" == *$'\t'* ]] || continue
+    index_metadata="${index_entry%%$'\t'*}"
+    indexed_path="${index_entry#*$'\t'}"
+    [[ "${index_metadata%% *}" == "160000" && "$indexed_path" == "$submodule_path" ]] || continue
+    submodule_dir="$(resolve_path "$checkout_dir/$submodule_path")" || continue
+    nested_toplevel="$(git -C "$submodule_dir" rev-parse --show-toplevel 2>/dev/null)" || continue
+    [[ "$(resolve_path "$nested_toplevel")" == "$submodule_dir" ]] || continue
+    nested_config="$submodule_dir/.gitmodules"
     if ! validate_submodule_config "$nested_config" 0 >>"$evidence_dir/logs/submodule.log" 2>&1; then
       PREPARE_ERROR_CATEGORY=submodule_failed
       PREPARE_ERROR_MESSAGE="checkout contains an unapproved recursive submodule configuration"
