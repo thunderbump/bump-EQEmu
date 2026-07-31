@@ -911,6 +911,29 @@ EOF
   assert_json_equals "$evidence/result.json" .status passed
 }
 
+test_afk_contract_ignores_gitmodules_outside_initialized_submodules() {
+  local source request evidence status output head
+  make_afk_contract_repo source fixture-gitmodules
+  mkdir -p "$source/tests/fixtures"
+  cat >"$source/tests/fixtures/.gitmodules" <<'EOF'
+[submodule "not-a-real-submodule"]
+	path = escaped
+	url = ext::sh -c 'exit 1'
+EOF
+  git -C "$source" add tests/fixtures/.gitmodules
+  git -C "$source" commit -m 'add inert fixture gitmodules' >/dev/null 2>&1
+  head="$(git -C "$source" rev-parse HEAD)"
+  request="$tmp_root/afk-fixture-gitmodules.json"
+  evidence="$tmp_root/afk-fixture-gitmodules"
+  mkdir "$evidence"
+  write_afk_request "$request" "$head" "$evidence"
+
+  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home-fixture-gitmodules" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 "$source/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 0 ]] || return 1
+  assert_json_equals "$evidence/result.json" .status passed
+}
+
 run_test "validation worker help mentions request contract" test_help
 run_test "AFK contract config selects the validation worker" test_afk_contract_config
 run_test "validation worker profiles discovery emits portable metadata" test_profiles_json
@@ -940,6 +963,7 @@ run_test "AFK contract fetches self-contained Git metadata from a linked worktre
 run_test "AFK contract rejects passed checks paired with a nonzero worker exit" test_afk_contract_treats_nonzero_inner_exit_after_passed_checks_as_inconclusive
 run_test "AFK contract rejects unapproved submodule transports before initialization" test_afk_contract_rejects_unapproved_submodule_transports_before_initialization
 run_test "AFK contract accepts approved production submodule URLs" test_afk_contract_accepts_the_approved_production_submodule_urls
+run_test "AFK contract ignores inert fixture gitmodules" test_afk_contract_ignores_gitmodules_outside_initialized_submodules
 
 if [[ "$failures" -gt 0 ]]; then
   exit 1

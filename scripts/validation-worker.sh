@@ -748,7 +748,7 @@ run_isolated_submodule_update() {
 }
 
 initialize_checkout_submodules() {
-  local checkout_dir="$1" evidence_dir="$2" nested_config
+  local checkout_dir="$1" evidence_dir="$2" submodule_key submodule_path nested_config
 
   if ! validate_submodule_config "$checkout_dir/.gitmodules" 1 >>"$evidence_dir/logs/submodule.log" 2>&1; then
     PREPARE_ERROR_CATEGORY=submodule_failed
@@ -757,14 +757,16 @@ initialize_checkout_submodules() {
   fi
   run_isolated_submodule_update "$checkout_dir" "$evidence_dir" no || return 1
 
-  while IFS= read -r nested_config; do
-    [[ "$nested_config" == "$checkout_dir/.gitmodules" ]] && continue
+  while read -r submodule_key submodule_path; do
+    [[ -n "$submodule_key" && -n "$submodule_path" ]] || continue
+    git -C "$checkout_dir/$submodule_path" rev-parse --is-inside-work-tree >/dev/null 2>&1 || continue
+    nested_config="$checkout_dir/$submodule_path/.gitmodules"
     if ! validate_submodule_config "$nested_config" 0 >>"$evidence_dir/logs/submodule.log" 2>&1; then
       PREPARE_ERROR_CATEGORY=submodule_failed
       PREPARE_ERROR_MESSAGE="checkout contains an unapproved recursive submodule configuration"
       return 1
     fi
-  done < <(find "$checkout_dir" -mindepth 2 -name .gitmodules -type f -print)
+  done < <(git config -f "$checkout_dir/.gitmodules" --get-regexp '^submodule\..*\.path$' 2>/dev/null || true)
 
   run_isolated_submodule_update "$checkout_dir" "$evidence_dir" yes
 }
