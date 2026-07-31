@@ -79,6 +79,9 @@ if [[ "${VALIDATION_WORKER_TEST_FAIL_TIER1:-0}" == "1" && " $* " == *" tier1"* ]
   printf 'tier1 requested failure\n' >&2
   exit 1
 fi
+if [[ "${VALIDATION_WORKER_TEST_TIER1_EXIT_CODE:-0}" != "0" && " $* " == *" tier1"* ]]; then
+  exit "$VALIDATION_WORKER_TEST_TIER1_EXIT_CODE"
+fi
 if [[ "${VALIDATION_WORKER_TEST_ASSERT_STACK_BINDING:-0}" == "1" ]]; then
   [[ -n "${AKKSTACK_DIR:-}" ]] || { printf 'missing AKKSTACK_DIR\n' >&2; exit 1; }
   [[ -n "${EXPECTED_EQEMU_CHECKOUT:-}" ]] || { printf 'missing EXPECTED_EQEMU_CHECKOUT\n' >&2; exit 1; }
@@ -780,6 +783,24 @@ test_afk_contract_reports_missing_prerequisite_as_inconclusive() {
   assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "inconclusive,not_run,not_run"
 }
 
+test_afk_contract_maps_timeout_and_missing_command_to_inconclusive() {
+  local exit_code source request evidence status output head
+  for exit_code in 124 127; do
+    make_afk_contract_repo source "tier1-exit-$exit_code"
+    head="$(git -C "$source" rev-parse HEAD)"
+    request="$tmp_root/afk-tier1-exit-$exit_code.json"
+    evidence="$tmp_root/afk-tier1-exit-$exit_code"
+    mkdir "$evidence"
+    write_afk_request "$request" "$head" "$evidence" "afk-tier1-exit-$exit_code"
+
+    capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home-tier1-exit-$exit_code" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TEST_TIER1_EXIT_CODE="$exit_code" "$source/scripts/validation-worker.sh" run --request "$request"
+
+    [[ "$status" -eq 2 ]] || return 1
+    assert_json_equals "$evidence/result.json" .status inconclusive
+    assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,inconclusive,not_run"
+  done
+}
+
 test_afk_contract_fetches_a_self_contained_checkout_from_a_linked_worktree() {
   local source linked_root linked_worktree stack request evidence status output head
   make_source_repo_with_submodule source afk-linked
@@ -959,6 +980,7 @@ run_test "AKKSTACK_DIR real code directory fails fast" test_akkstack_dir_real_co
 run_test "AFK contract reports stable passing checks" test_afk_contract_passes_with_stable_checks
 run_test "AFK contract rejects Tier 1 and stops" test_afk_contract_rejects_tier1_and_stops
 run_test "AFK contract reports a missing prerequisite as inconclusive" test_afk_contract_reports_missing_prerequisite_as_inconclusive
+run_test "AFK contract maps timeout and missing command to inconclusive" test_afk_contract_maps_timeout_and_missing_command_to_inconclusive
 run_test "AFK contract fetches self-contained Git metadata from a linked worktree" test_afk_contract_fetches_a_self_contained_checkout_from_a_linked_worktree
 run_test "AFK contract rejects passed checks paired with a nonzero worker exit" test_afk_contract_treats_nonzero_inner_exit_after_passed_checks_as_inconclusive
 run_test "AFK contract rejects unapproved submodule transports before initialization" test_afk_contract_rejects_unapproved_submodule_transports_before_initialization

@@ -916,8 +916,9 @@ run_request() {
       if run_validation "$afk_profile" "$(dirname "$evidence_dir")/$afk_log_path"; then
         afk_check_statuses[$afk_check_index]=passed
         continue
+      else
+        validation_status=$?
       fi
-      validation_status=$?
       if [[ "$validation_status" -eq 124 || "$validation_status" -eq 127 ]]; then
         afk_failure_status=inconclusive
         afk_failure_message="$afk_inconclusive_message"
