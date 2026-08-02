@@ -59,7 +59,9 @@ run_test() {
 
 make_source_repo() {
   local -n source_ref="$1"
-  source_ref="$tmp_root/source-repo"
+  local suffix="${2:-}"
+  source_ref="$tmp_root/source-repo${suffix:+-$suffix}"
+  rm -rf "$source_ref"
   mkdir -p "$source_ref/scripts"
   cat >"$source_ref/scripts/validate.sh" <<'SCRIPT'
 #!/usr/bin/env bash
@@ -77,6 +79,9 @@ if [[ "${VALIDATION_WORKER_TEST_FAIL_TIER1:-0}" == "1" && " $* " == *" tier1"* ]
   printf 'tier1 requested failure\n' >&2
   exit 1
 fi
+if [[ "${VALIDATION_WORKER_TEST_TIER1_EXIT_CODE:-0}" != "0" && " $* " == *" tier1"* ]]; then
+  exit "$VALIDATION_WORKER_TEST_TIER1_EXIT_CODE"
+fi
 if [[ "${VALIDATION_WORKER_TEST_ASSERT_STACK_BINDING:-0}" == "1" ]]; then
   [[ -n "${AKKSTACK_DIR:-}" ]] || { printf 'missing AKKSTACK_DIR\n' >&2; exit 1; }
   [[ -n "${EXPECTED_EQEMU_CHECKOUT:-}" ]] || { printf 'missing EXPECTED_EQEMU_CHECKOUT\n' >&2; exit 1; }
@@ -90,6 +95,18 @@ if [[ "${VALIDATION_WORKER_TEST_ASSERT_SUBMODULE:-0}" == "1" && ! -f "$repo_dir/
   printf 'submodule marker missing\n' >&2
   exit 1
 fi
+if [[ "${VALIDATION_WORKER_TEST_ASSERT_SELF_CONTAINED_GIT:-0}" == "1" ]]; then
+  repo_git_dir="$(git -C "$repo_dir" rev-parse --absolute-git-dir)"
+  submodule_git_dir="$(git -C "$repo_dir/vendor/submodule-fixture" rev-parse --absolute-git-dir)"
+  [[ "$repo_git_dir" == "$repo_dir/.git" ]] || {
+    printf 'checkout git directory is not self-contained: %s\n' "$repo_git_dir" >&2
+    exit 1
+  }
+  [[ "$submodule_git_dir" == "$repo_dir/.git/modules/"* ]] || {
+    printf 'submodule git directory is not self-contained: %s\n' "$submodule_git_dir" >&2
+    exit 1
+  }
+fi
 printf 'fake validate: %s\n' "$*"
 SCRIPT
   chmod +x "$source_ref/scripts/validate.sh"
@@ -98,6 +115,48 @@ SCRIPT
   git -C "$source_ref" config user.name 'Worker Test'
   git -C "$source_ref" add scripts/validate.sh
   git -C "$source_ref" commit -m 'add fake validate' >/dev/null 2>&1
+}
+
+make_afk_contract_repo() {
+  local -n source_ref="$1"
+  local suffix="${2:-}" fixture_source
+  make_source_repo fixture_source "$suffix"
+  source_ref="$fixture_source"
+  cp "$repo_root/scripts/validation-worker.sh" "$source_ref/scripts/validation-worker.sh"
+  chmod +x "$source_ref/scripts/validation-worker.sh"
+  mkdir -p "$tmp_root/bump-akk-stack-validation"
+  printf 'ENV=development\n' >"$tmp_root/bump-akk-stack-validation/.env"
+  git -C "$source_ref" add scripts/validation-worker.sh
+  git -C "$source_ref" commit -m 'add validation worker' >/dev/null 2>&1
+}
+
+add_submodule_gitlink() {
+  local source="$1" path="$2" url="$3" commit="$4"
+  cat >"$source/.gitmodules" <<EOF
+[submodule "$path"]
+	path = $path
+	url = $url
+EOF
+  git -C "$source" update-index --add --cacheinfo "160000,$commit,$path"
+  git -C "$source" add .gitmodules
+  git -C "$source" commit -m 'add candidate submodule config' >/dev/null 2>&1
+}
+
+make_submodule_update_observer() {
+  local fake_bin="$1" marker="$2" skip_update="${3:-0}" real_git
+  real_git="$(command -v git)"
+  mkdir -p "$fake_bin"
+  cat >"$fake_bin/git" <<SCRIPT
+#!/usr/bin/env bash
+if [[ " \$* " == *" submodule update "* ]]; then
+  : >"$marker"
+  if [[ "$skip_update" == "1" ]]; then
+    exit 0
+  fi
+fi
+exec "$real_git" "\$@"
+SCRIPT
+  chmod +x "$fake_bin/git"
 }
 
 make_source_repo_with_real_validation_scripts() {
@@ -152,10 +211,10 @@ SCRIPT
 
 make_source_repo_with_submodule() {
   local -n source_ref="$1"
-  local base_source submodule_repo
-  make_source_repo base_source
+  local suffix="${2:-}" base_source submodule_repo
+  make_source_repo base_source "$suffix"
   source_ref="$base_source"
-  submodule_repo="$tmp_root/submodule-repo"
+  submodule_repo="$tmp_root/submodule-repo${suffix:+-$suffix}"
   mkdir -p "$submodule_repo"
   git -C "$submodule_repo" init >/dev/null 2>&1
   git -C "$submodule_repo" config user.email worker-test@example.com
@@ -200,6 +259,16 @@ write_local_checkout_request() {
     >"$path"
 }
 
+write_afk_request() {
+  local path="$1" candidate_sha="$2" evidence_dir="$3" run_id="${4:-afk-contract-test}"
+  jq -n \
+    --arg run_id "$run_id" \
+    --arg candidate_sha "$candidate_sha" \
+    --arg evidence_dir "$evidence_dir" \
+    '{schema_version:1, run_id:$run_id, candidate_sha:$candidate_sha, evidence_dir:$evidence_dir}' \
+    >"$path"
+}
+
 worker_env() {
   env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 "$@"
 }
@@ -217,6 +286,24 @@ test_help() {
   assert_contains "$output" "evidence_dir"
   assert_contains "$output" "lock_wait_seconds"
   assert_contains "$output" "tier1-tier3-harness"
+}
+
+test_afk_contract_config() {
+  python3 - "$repo_root/afk.toml" <<'PY'
+import sys
+import tomllib
+
+with open(sys.argv[1], "rb") as contract_file:
+    contract = tomllib.load(contract_file)
+
+assert contract == {
+    "schema_version": 1,
+    "validation": {
+        "command": ["./scripts/validation-worker.sh", "run"],
+        "timeout_seconds": 2700,
+    },
+}
+PY
 }
 
 test_profiles_json() {
@@ -289,7 +376,7 @@ test_fetch_checkout_initializes_submodules_before_validation() {
   request="$tmp_root/submodule.json"
   write_request "$request" "$source" "$evidence" HEAD "$head"
 
-  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TEST_ASSERT_SUBMODULE=1 "$repo_root/scripts/validation-worker.sh" run --request "$request"
+  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TEST_FILE_SUBMODULE_ROOT="$tmp_root" VALIDATION_WORKER_TEST_ASSERT_SUBMODULE=1 "$repo_root/scripts/validation-worker.sh" run --request "$request"
 
   [[ "$status" -eq 0 ]] || return 1
   [[ -f "$evidence/logs/submodule.log" ]] || return 1
@@ -319,7 +406,7 @@ exec "$real_git" "\$@"
 SCRIPT
   chmod +x "$fake_bin/git"
 
-  capture_run status output env PATH="$fake_bin:$PATH" VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 "$repo_root/scripts/validation-worker.sh" run --request "$request"
+  capture_run status output env PATH="$fake_bin:$PATH" VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TEST_FILE_SUBMODULE_ROOT="$tmp_root" "$repo_root/scripts/validation-worker.sh" run --request "$request"
 
   [[ "$status" -eq 1 ]] || return 1
   assert_json_equals "$evidence/result.json" .category timeout
@@ -343,7 +430,7 @@ test_stack_lock_is_not_held_during_submodule_initialization() {
   stack_lock="$stack/.validation-worker-code.lock"
   mkdir "$stack_lock"
 
-  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 "$repo_root/scripts/validation-worker.sh" run --request "$request"
+  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TEST_FILE_SUBMODULE_ROOT="$tmp_root" "$repo_root/scripts/validation-worker.sh" run --request "$request"
 
   [[ "$status" -eq 1 ]] || return 1
   assert_json_equals "$evidence/result.json" .category stack_busy
@@ -395,6 +482,25 @@ test_local_checkout_request_works() {
   assert_json_equals "$evidence/result.json" .request_metadata.source.checkout_path "$source"
   assert_json_equals "$evidence/result.json" .request_metadata.source.ref ""
   assert_json_equals "$evidence/result.json" .actual_checkout_commit "$head"
+}
+
+test_local_checkout_rejects_drifting_submodule() {
+  local source request evidence status output
+  make_source_repo_with_submodule source drift
+  reset_worker_home
+  git -C "$source/vendor/submodule-fixture" config user.email worker-test@example.com
+  git -C "$source/vendor/submodule-fixture" config user.name 'Worker Test'
+  printf 'drifted submodule fixture\n' >"$source/vendor/submodule-fixture/marker.txt"
+  git -C "$source/vendor/submodule-fixture" add marker.txt
+  git -C "$source/vendor/submodule-fixture" commit -m 'drift submodule' >/dev/null 2>&1
+  evidence="$tmp_root/evidence-local-submodule-drift"
+  request="$tmp_root/local-submodule-drift.json"
+  write_local_checkout_request "$request" "$source" "$evidence"
+
+  capture_run status output worker_env "$repo_root/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 1 ]] || return 1
+  assert_json_equals "$evidence/result.json" .category submodule_failed
 }
 
 test_lock_contention() {
@@ -622,7 +728,279 @@ test_akkstack_dir_real_code_directory_fails_fast() {
   [[ -d "$stack/code" && ! -L "$stack/code" ]] || return 1
 }
 
+test_afk_contract_passes_with_stable_checks() {
+  local source request evidence status output head
+  make_afk_contract_repo source
+  reset_worker_home
+  head="$(git -C "$source" rev-parse HEAD)"
+  request="$tmp_root/afk-passed.json"
+  evidence="$tmp_root/afk-passed"
+  mkdir "$evidence"
+  write_afk_request "$request" "$head" "$evidence"
+
+  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 "$source/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 0 ]] || return 1
+  assert_json_equals "$evidence/result.json" .schema_version 1
+  assert_json_equals "$evidence/result.json" .candidate_sha "$head"
+  assert_json_equals "$evidence/result.json" .status passed
+  assert_json_equals "$evidence/result.json" '.checks | map(.name) | join(",")' "preflight,tier1-build-and-unit-tests,tier2-read-only-database-tests"
+  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,passed,passed"
+}
+
+test_afk_contract_rejects_tier1_and_stops() {
+  local source request evidence status output head
+  make_afk_contract_repo source
+  reset_worker_home
+  head="$(git -C "$source" rev-parse HEAD)"
+  request="$tmp_root/afk-rejected.json"
+  evidence="$tmp_root/afk-rejected"
+  mkdir "$evidence"
+  write_afk_request "$request" "$head" "$evidence"
+
+  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TEST_FAIL_TIER1=1 "$source/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 1 ]] || return 1
+  assert_json_equals "$evidence/result.json" .status rejected
+  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,rejected,not_run"
+}
+
+test_afk_contract_reports_missing_prerequisite_as_inconclusive() {
+  local source request evidence status output head
+  make_afk_contract_repo source
+  reset_worker_home
+  head="$(git -C "$source" rev-parse HEAD)"
+  request="$tmp_root/afk-inconclusive.json"
+  evidence="$tmp_root/afk-inconclusive"
+  rm -rf "$tmp_root/bump-akk-stack-validation"
+  mkdir "$evidence"
+  write_afk_request "$request" "$head" "$evidence"
+
+  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 "$source/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 2 ]] || return 1
+  assert_json_equals "$evidence/result.json" .status inconclusive
+  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "inconclusive,not_run,not_run"
+}
+
+test_afk_contract_maps_timeout_and_missing_command_to_inconclusive() {
+  local exit_code source request evidence status output head
+  for exit_code in 124 127; do
+    make_afk_contract_repo source "tier1-exit-$exit_code"
+    head="$(git -C "$source" rev-parse HEAD)"
+    request="$tmp_root/afk-tier1-exit-$exit_code.json"
+    evidence="$tmp_root/afk-tier1-exit-$exit_code"
+    mkdir "$evidence"
+    write_afk_request "$request" "$head" "$evidence" "afk-tier1-exit-$exit_code"
+
+    capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home-tier1-exit-$exit_code" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TEST_TIER1_EXIT_CODE="$exit_code" "$source/scripts/validation-worker.sh" run --request "$request"
+
+    [[ "$status" -eq 2 ]] || return 1
+    assert_json_equals "$evidence/result.json" .status inconclusive
+    assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,inconclusive,not_run"
+  done
+}
+
+test_afk_contract_maps_timeout_infrastructure_failure_to_inconclusive() {
+  local source request evidence status output head
+  make_afk_contract_repo source "tier1-exit-125"
+  head="$(git -C "$source" rev-parse HEAD)"
+  request="$tmp_root/afk-tier1-exit-125.json"
+  evidence="$tmp_root/afk-tier1-exit-125"
+  mkdir "$evidence"
+  write_afk_request "$request" "$head" "$evidence" "afk-tier1-exit-125"
+
+  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home-tier1-exit-125" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TEST_TIER1_EXIT_CODE=125 "$source/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 2 ]] || return 1
+  assert_json_equals "$evidence/result.json" .status inconclusive
+  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,inconclusive,not_run"
+}
+
+test_afk_contract_fetches_a_self_contained_checkout_from_a_linked_worktree() {
+  local source linked_root linked_worktree stack request evidence status output head
+  make_source_repo_with_submodule source afk-linked
+  cp "$repo_root/scripts/validation-worker.sh" "$source/scripts/validation-worker.sh"
+  chmod +x "$source/scripts/validation-worker.sh"
+  git -C "$source" add scripts/validation-worker.sh
+  git -C "$source" commit -m 'add validation worker' >/dev/null 2>&1
+  linked_root="$tmp_root/linked-root"
+  linked_worktree="$linked_root/candidate"
+  stack="$linked_root/bump-akk-stack-validation"
+  mkdir -p "$linked_root" "$stack"
+  printf 'ENV=development\n' >"$stack/.env"
+  git -C "$source" worktree add -b afk-linked-candidate "$linked_worktree" >/dev/null 2>&1
+  git -C "$linked_worktree" -c protocol.file.allow=always submodule update --init --recursive >/dev/null 2>&1
+  head="$(git -C "$linked_worktree" rev-parse HEAD)"
+  request="$tmp_root/afk-linked-worktree.json"
+  evidence="$tmp_root/afk-linked-worktree"
+  mkdir "$evidence"
+  write_afk_request "$request" "$head" "$evidence"
+
+  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home-linked" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TEST_FILE_SUBMODULE_ROOT="$tmp_root" VALIDATION_WORKER_TEST_ASSERT_SUBMODULE=1 VALIDATION_WORKER_TEST_ASSERT_SELF_CONTAINED_GIT=1 "$linked_worktree/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 0 ]] || return 1
+  assert_json_equals "$evidence/result.json" .status passed
+  assert_json_equals "$evidence/worker/result.json" .request_metadata.source.type fetch
+  assert_json_equals "$evidence/worker/result.json" .actual_checkout_commit "$head"
+}
+
+test_afk_contract_treats_nonzero_inner_exit_after_passed_checks_as_inconclusive() {
+  local source request evidence status output head fake_bin real_rm
+  make_afk_contract_repo source
+  reset_worker_home
+  head="$(git -C "$source" rev-parse HEAD)"
+  request="$tmp_root/afk-cleanup-failure.json"
+  evidence="$tmp_root/afk-cleanup-failure"
+  fake_bin="$tmp_root/afk-cleanup-failure-bin"
+  real_rm="$(command -v rm)"
+  mkdir "$evidence" "$fake_bin"
+  write_afk_request "$request" "$head" "$evidence"
+  cat >"$fake_bin/rm" <<SCRIPT
+#!/usr/bin/env bash
+if [[ " \$* " == *".validation-worker-code.lock"* ]]; then
+  exit 1
+fi
+exec "$real_rm" "\$@"
+SCRIPT
+  chmod +x "$fake_bin/rm"
+
+  capture_run status output env PATH="$fake_bin:$PATH" VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 "$source/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 2 ]] || return 1
+  assert_json_equals "$evidence/worker/afk-checks.json" .status passed
+  assert_json_equals "$evidence/result.json" .status inconclusive
+  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,passed,inconclusive"
+}
+
+test_afk_contract_rejects_unapproved_submodule_transports_before_initialization() {
+  local kind source target url head request evidence status output fake_bin marker target_head
+  for kind in absolute file ext; do
+    make_afk_contract_repo source "transport-$kind"
+    target="$tmp_root/transport-target-$kind"
+    mkdir "$target"
+    git -C "$target" init >/dev/null 2>&1
+    git -C "$target" config user.email worker-test@example.com
+    git -C "$target" config user.name 'Worker Test'
+    printf 'host data\n' >"$target/host-data"
+    git -C "$target" add host-data
+    git -C "$target" commit -m 'host data' >/dev/null 2>&1
+    target_head="$(git -C "$target" rev-parse HEAD)"
+    case "$kind" in
+      absolute) url="$target" ;;
+      file) url="file://$target" ;;
+      ext) url="ext::sh -c 'exit 0'" ;;
+    esac
+    add_submodule_gitlink "$source" vendor/candidate-controlled "$url" "$target_head"
+    head="$(git -C "$source" rev-parse HEAD)"
+    request="$tmp_root/afk-transport-$kind.json"
+    evidence="$tmp_root/afk-transport-$kind"
+    fake_bin="$tmp_root/afk-transport-$kind-bin"
+    marker="$tmp_root/afk-transport-$kind-submodule-update"
+    mkdir "$evidence"
+    write_afk_request "$request" "$head" "$evidence" "afk-transport-$kind"
+    make_submodule_update_observer "$fake_bin" "$marker"
+
+    capture_run status output env PATH="$fake_bin:$PATH" VALIDATION_WORKER_HOME="$tmp_root/worker-home-transport-$kind" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 "$source/scripts/validation-worker.sh" run --request "$request"
+
+    [[ "$status" -eq 2 ]] || return 1
+    [[ ! -e "$marker" ]] || return 1
+    [[ ! -e "$tmp_root/worker-home-transport-$kind/checkouts/afk-${head:0:16}/vendor/candidate-controlled/.git" ]] || return 1
+    [[ ! -e "$tmp_root/worker-home-transport-$kind/checkouts/afk-${head:0:16}/vendor/candidate-controlled/host-data" ]] || return 1
+    assert_json_equals "$evidence/worker/result.json" .category submodule_failed
+  done
+}
+
+test_afk_contract_accepts_the_approved_production_submodule_urls() {
+  local source request evidence status output head fake_bin marker fake_commit
+  make_afk_contract_repo source approved-submodules
+  fake_commit="$(git -C "$source" rev-parse HEAD)"
+  cat >"$source/.gitmodules" <<'EOF'
+[submodule "submodules/websocketpp"]
+	path = submodules/websocketpp
+	url = https://github.com/zaphoyd/websocketpp.git
+[submodule "submodules/vcpkg"]
+	path = submodules/vcpkg
+	url = https://github.com/microsoft/vcpkg.git
+EOF
+  git -C "$source" update-index --add --cacheinfo "160000,$fake_commit,submodules/websocketpp"
+  git -C "$source" update-index --add --cacheinfo "160000,$fake_commit,submodules/vcpkg"
+  git -C "$source" add .gitmodules
+  git -C "$source" commit -m 'add approved submodule config' >/dev/null 2>&1
+  head="$(git -C "$source" rev-parse HEAD)"
+  request="$tmp_root/afk-approved-submodules.json"
+  evidence="$tmp_root/afk-approved-submodules"
+  fake_bin="$tmp_root/afk-approved-submodules-bin"
+  marker="$tmp_root/afk-approved-submodules-update"
+  rm -rf "$tmp_root/bump-akk-stack-validation/.validation-worker-code.lock"
+  mkdir "$evidence"
+  write_afk_request "$request" "$head" "$evidence"
+  make_submodule_update_observer "$fake_bin" "$marker" 1
+
+  capture_run status output env PATH="$fake_bin:$PATH" VALIDATION_WORKER_HOME="$tmp_root/worker-home-approved" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 "$source/scripts/validation-worker.sh" run --request "$request"
+
+  if [[ "$status" -ne 0 ]]; then
+    cat "$evidence/worker/result.json" >&2
+    cat "$evidence/worker/logs/submodule.log" >&2
+    return 1
+  fi
+  [[ -e "$marker" ]] || return 1
+  assert_json_equals "$evidence/result.json" .status passed
+}
+
+test_afk_contract_ignores_gitmodules_outside_initialized_submodules() {
+  local source request evidence status output head
+  make_afk_contract_repo source fixture-gitmodules
+  mkdir -p "$source/tests/fixtures"
+  cat >"$source/tests/fixtures/.gitmodules" <<'EOF'
+[submodule "not-a-real-submodule"]
+	path = escaped
+	url = ext::sh -c 'exit 1'
+EOF
+  git -C "$source" add tests/fixtures/.gitmodules
+  git -C "$source" commit -m 'add inert fixture gitmodules' >/dev/null 2>&1
+  head="$(git -C "$source" rev-parse HEAD)"
+  request="$tmp_root/afk-fixture-gitmodules.json"
+  evidence="$tmp_root/afk-fixture-gitmodules"
+  mkdir "$evidence"
+  write_afk_request "$request" "$head" "$evidence"
+
+  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home-fixture-gitmodules" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 "$source/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 0 ]] || return 1
+  assert_json_equals "$evidence/result.json" .status passed
+}
+
+test_afk_contract_ignores_nested_config_in_ordinary_declared_directory() {
+  local source request evidence status output head
+  make_afk_contract_repo source ordinary-declared-directory
+  mkdir -p "$source/submodules/vcpkg"
+  cat >"$source/.gitmodules" <<'EOF'
+[submodule "submodules/vcpkg"]
+	path = submodules/vcpkg
+	url = https://github.com/microsoft/vcpkg.git
+EOF
+  cat >"$source/submodules/vcpkg/.gitmodules" <<'EOF'
+[submodule "hostile-fixture"]
+	path = escaped
+	url = ext::sh -c 'exit 1'
+EOF
+  git -C "$source" add .gitmodules submodules/vcpkg/.gitmodules
+  git -C "$source" commit -m 'add ordinary declared directory fixture' >/dev/null 2>&1
+  head="$(git -C "$source" rev-parse HEAD)"
+  request="$tmp_root/afk-ordinary-declared-directory.json"
+  evidence="$tmp_root/afk-ordinary-declared-directory"
+  mkdir "$evidence"
+  write_afk_request "$request" "$head" "$evidence"
+
+  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home-ordinary-declared-directory" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 "$source/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 0 ]] || return 1
+  assert_json_equals "$evidence/result.json" .status passed
+}
+
 run_test "validation worker help mentions request contract" test_help
+run_test "AFK contract config selects the validation worker" test_afk_contract_config
 run_test "validation worker profiles discovery emits portable metadata" test_profiles_json
 run_test "invalid request writes structured evidence" test_invalid_request_writes_evidence
 run_test "fake repo fetch checkout writes evidence" test_fetch_checkout_and_evidence
@@ -632,6 +1010,7 @@ run_test "stack lock is not held during submodule initialization" test_stack_loc
 run_test "commit mismatch is categorized" test_commit_mismatch
 run_test "fetch failure is categorized" test_fetch_failure
 run_test "local-checkout request still works" test_local_checkout_request_works
+run_test "local-checkout request rejects a drifting submodule" test_local_checkout_rejects_drifting_submodule
 run_test "lock contention is worker_busy" test_lock_contention
 run_test "validation timeout is categorized" test_timeout
 run_test "tier3 harness failure is categorized with logs" test_tier3_harness_failure_is_categorized_with_logs
@@ -642,6 +1021,17 @@ run_test "validation worker binds requested validation stack to worker checkout"
 run_test "validation worker binds validation stack from AKKSTACK_DIR" test_validation_worker_binds_stack_from_akkstack_dir_environment
 run_test "stack lock blocks distinct worker homes on same stack" test_stack_lock_blocks_distinct_worker_homes_on_same_stack
 run_test "AKKSTACK_DIR real code directory fails fast" test_akkstack_dir_real_code_directory_fails_fast
+run_test "AFK contract reports stable passing checks" test_afk_contract_passes_with_stable_checks
+run_test "AFK contract rejects Tier 1 and stops" test_afk_contract_rejects_tier1_and_stops
+run_test "AFK contract reports a missing prerequisite as inconclusive" test_afk_contract_reports_missing_prerequisite_as_inconclusive
+run_test "AFK contract maps timeout and missing command to inconclusive" test_afk_contract_maps_timeout_and_missing_command_to_inconclusive
+run_test "AFK contract maps timeout infrastructure failure to inconclusive" test_afk_contract_maps_timeout_infrastructure_failure_to_inconclusive
+run_test "AFK contract fetches self-contained Git metadata from a linked worktree" test_afk_contract_fetches_a_self_contained_checkout_from_a_linked_worktree
+run_test "AFK contract rejects passed checks paired with a nonzero worker exit" test_afk_contract_treats_nonzero_inner_exit_after_passed_checks_as_inconclusive
+run_test "AFK contract rejects unapproved submodule transports before initialization" test_afk_contract_rejects_unapproved_submodule_transports_before_initialization
+run_test "AFK contract accepts approved production submodule URLs" test_afk_contract_accepts_the_approved_production_submodule_urls
+run_test "AFK contract ignores inert fixture gitmodules" test_afk_contract_ignores_gitmodules_outside_initialized_submodules
+run_test "AFK contract ignores nested config in an ordinary declared directory" test_afk_contract_ignores_nested_config_in_ordinary_declared_directory
 
 if [[ "$failures" -gt 0 ]]; then
   exit 1

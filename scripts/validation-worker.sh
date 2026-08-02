@@ -52,6 +52,11 @@ now_utc() {
 }
 
 profile_names=(preflight safe tier3-harness tier1-tier3-harness)
+AFK_CHECK_PLAN='[
+  {"name":"preflight","profile":"preflight","log_path":"worker/logs/preflight.log","failure_status":"inconclusive","failure_message":"validation preflight was inconclusive","inconclusive_message":"validation preflight was inconclusive"},
+  {"name":"tier1-build-and-unit-tests","profile":"tier1","log_path":"worker/logs/tier1-build-and-unit-tests.log","failure_status":"rejected","failure_message":"Tier 1 validation failed","inconclusive_message":"Tier 1 validation was inconclusive"},
+  {"name":"tier2-read-only-database-tests","profile":"tier2-readonly","log_path":"worker/logs/tier2-read-only-database-tests.log","failure_status":"rejected","failure_message":"Tier 2 validation failed","inconclusive_message":"Tier 2 validation was inconclusive"}
+]'
 
 profile_description() {
   case "$1" in
@@ -186,6 +191,152 @@ write_result() {
     >"$result_json"
 
   cp "$result_json" "$evidence_dir/worker-output.json"
+}
+
+write_afk_checks() {
+  local path="$1" overall_status="$2" statuses_json
+  statuses_json="$(jq -cn '$ARGS.positional' --args "${afk_check_statuses[@]}")"
+  jq -n \
+    --arg overall_status "$overall_status" \
+    --argjson plan "$AFK_CHECK_PLAN" \
+    --argjson statuses "$statuses_json" \
+    '{
+      status:$overall_status,
+      checks:[$plan | to_entries[] | {
+        name:.value.name,
+        status:$statuses[.key],
+        log_path:.value.log_path
+      }]
+    }' >"$path"
+}
+
+initialize_afk_check_statuses() {
+  local status="${1:-not_run}" count
+  count="$(jq 'length' <<<"$AFK_CHECK_PLAN")"
+  afk_check_statuses=()
+  while [[ "${#afk_check_statuses[@]}" -lt "$count" ]]; do
+    afk_check_statuses+=("$status")
+  done
+}
+
+ensure_afk_check_logs() {
+  local evidence_root="$1" log_path
+  while IFS= read -r log_path; do
+    mkdir -p "$evidence_root/$(dirname "$log_path")"
+    : >>"$evidence_root/$log_path"
+  done < <(jq -r '.[].log_path' <<<"$AFK_CHECK_PLAN")
+}
+
+write_inconclusive_afk_checks() {
+  local source="$1" destination="$2"
+  jq '
+    (.checks | [to_entries[] | select(.value.status != "not_run") | .key] | last) as $last
+    | .status = "inconclusive"
+    | .checks[$last].status = "inconclusive"
+  ' "$source" >"$destination"
+}
+
+write_afk_result() {
+  local evidence_dir="$1" candidate_sha="$2" status="$3" summary="$4" checks_path="$5"
+  jq -n \
+    --arg candidate_sha "$candidate_sha" \
+    --arg status "$status" \
+    --arg summary "$summary" \
+    --slurpfile checks "$checks_path" \
+    '{
+      schema_version:1,
+      candidate_sha:$candidate_sha,
+      status:$status,
+      summary:$summary,
+      checks:$checks[0].checks
+    }' >"$evidence_dir/result.json"
+}
+
+is_afk_request() {
+  local request_path="$1"
+  jq -e '
+    type == "object"
+    and (.schema_version == 1)
+    and (.candidate_sha | type == "string")
+    and (.evidence_dir | type == "string")
+    and (.run_id | type == "string")
+  ' "$request_path" >/dev/null 2>&1
+}
+
+run_afk_request() {
+  local request_path="$1" candidate_sha evidence_dir afk_run_id worker_evidence worker_request checks_path stack_path
+  local worker_status expected_worker_status overall_status summary result_checks_path
+
+  candidate_sha="$(json_get '.candidate_sha | strings' "$request_path")"
+  evidence_dir="$(json_get '.evidence_dir | strings' "$request_path")"
+  afk_run_id="$(json_get '.run_id | strings' "$request_path")"
+  if [[ ! "$candidate_sha" =~ ^[0-9a-fA-F]{40}$ ]] \
+    || [[ -z "$evidence_dir" || ! -d "$evidence_dir" ]] \
+    || [[ -z "$afk_run_id" ]]; then
+    printf 'invalid AFK validation request\n' >&2
+    return 2
+  fi
+
+  worker_evidence="$evidence_dir/worker"
+  worker_request="$evidence_dir/worker-request.json"
+  checks_path="$worker_evidence/afk-checks.json"
+  stack_path="$repo_root/../bump-akk-stack-validation"
+  mkdir "$worker_evidence"
+  jq -n \
+    --arg project bump-eqemu \
+    --arg repo "$repo_root" \
+    --arg commit "$candidate_sha" \
+    --arg run_id "afk-${candidate_sha:0:16}" \
+    --arg evidence_dir "$worker_evidence" \
+    --arg stack_path "$stack_path" \
+    '{
+      project:$project,
+      repo:$repo,
+      ref:$commit,
+      commit:$commit,
+      profile:"safe",
+      run_id:$run_id,
+      evidence_dir:$evidence_dir,
+      timeout_seconds:2600,
+      lock_wait_seconds:0,
+      stack:{role:"validation", path:$stack_path}
+    }' >"$worker_request"
+
+  set +e
+  VALIDATION_WORKER_AFK_MODE=1 \
+    "$script_dir/validation-worker.sh" run --request "$worker_request"
+  worker_status=$?
+  set -e
+
+  ensure_afk_check_logs "$evidence_dir"
+  if [[ ! -f "$checks_path" ]]; then
+    initialize_afk_check_statuses
+    afk_check_statuses[0]=inconclusive
+    write_afk_checks "$checks_path" inconclusive
+  fi
+  overall_status="$(json_get '.status | strings' "$checks_path")"
+  case "$overall_status" in
+    passed) expected_worker_status=0 ;;
+    rejected) expected_worker_status=1 ;;
+    inconclusive) expected_worker_status=2 ;;
+    *) expected_worker_status=-1 ;;
+  esac
+  result_checks_path="$checks_path"
+  if [[ "$worker_status" -ne "$expected_worker_status" ]]; then
+    overall_status=inconclusive
+    summary="Required repository validation could not reach a trustworthy verdict."
+    worker_status=2
+    result_checks_path="$evidence_dir/inconclusive-checks.json"
+    write_inconclusive_afk_checks "$checks_path" "$result_checks_path"
+  else
+    case "$overall_status" in
+      passed) summary="Required repository validation passed." ;;
+      rejected) summary="Required repository validation found a deterministic failure." ;;
+      inconclusive) summary="Required repository validation could not reach a trustworthy verdict." ;;
+    esac
+  fi
+  write_afk_result "$evidence_dir" "$candidate_sha" "$overall_status" "$summary" "$result_checks_path"
+  return "$worker_status"
 }
 
 copy_request_evidence() {
@@ -502,13 +653,130 @@ verify_checkout_submodules() {
     SUBMODULE_ERROR_MESSAGE="failed to inspect checkout submodules"
     return 1
   fi
-  if [[ "$mode" == "local-checkout" ]] && printf '%s\n' "$output" | grep -Eq '^[\-+U]'; then
+  if [[ "$mode" == "local-checkout" ]] && printf '%s\n' "$output" | grep -Eq '^[-+U]'; then
     SUBMODULE_ERROR_CATEGORY=submodule_failed
     SUBMODULE_ERROR_MESSAGE="local checkout submodules are not initialized and pinned to recorded commits"
     return 1
   fi
 
   return 0
+}
+
+validate_submodule_config() {
+  local config_path="$1" allow_production="$2"
+  local key name path url entry_count=0 test_path=
+  local -a keys
+
+  [[ -f "$config_path" ]] || return 0
+  mapfile -t keys < <(git config -f "$config_path" --name-only --list)
+  for key in "${keys[@]}"; do
+    case "$key" in
+      submodule.*.path|submodule.*.url) ;;
+      *)
+        printf 'unapproved submodule config key: %s\n' "$key"
+        return 1
+        ;;
+    esac
+  done
+  mapfile -t keys < <(git config -f "$config_path" --name-only --get-regexp '^submodule\..*\.path$')
+  for key in "${keys[@]}"; do
+    name="${key#submodule.}"
+    name="${name%.path}"
+    path="$(git config -f "$config_path" --get "$key")"
+    url="$(git config -f "$config_path" --get "submodule.$name.url")"
+    [[ -n "$path" && -n "$url" && "$path" != /* \
+      && "$path" != ".." && "$path" != ../* && "$path" != */../* && "$path" != */.. ]] || return 1
+    entry_count=$((entry_count + 1))
+    if [[ "$allow_production" == "1" ]]; then
+      case "$path|$url" in
+        "submodules/websocketpp|https://github.com/zaphoyd/websocketpp.git") continue ;;
+        "submodules/vcpkg|https://github.com/microsoft/vcpkg.git") continue ;;
+      esac
+    fi
+    if [[ "${VALIDATION_WORKER_VALIDATE_DRY_RUN:-0}" == "1" \
+      && -n "${VALIDATION_WORKER_TEST_FILE_SUBMODULE_ROOT:-}" ]]; then
+      case "$url" in
+        file://*) test_path="${url#file://}" ;;
+        /*) test_path="$url" ;;
+        *) test_path= ;;
+      esac
+      if [[ -n "$test_path" \
+        && "$(resolve_path "$test_path")" == "$(resolve_path "$VALIDATION_WORKER_TEST_FILE_SUBMODULE_ROOT")"/* ]]; then
+        continue
+      fi
+    fi
+    printf 'unapproved submodule path or URL: %s -> %s\n' "$path" "$url"
+    return 1
+  done
+  [[ "${#keys[@]}" -eq "$entry_count" ]] || return 1
+  [[ "$(git config -f "$config_path" --name-only --get-regexp '^submodule\..*\.url$' | wc -l)" -eq "$entry_count" ]]
+}
+
+run_isolated_submodule_update() {
+  local checkout_dir="$1" evidence_dir="$2" recursive="$3" status
+  local -a transport_config=(-c protocol.allow=never -c protocol.https.allow=always)
+  local -a update_args=(submodule update --init)
+
+  case "$recursive" in
+    yes) update_args+=(--recursive) ;;
+    no) ;;
+    *) return 2 ;;
+  esac
+  if [[ "${VALIDATION_WORKER_VALIDATE_DRY_RUN:-0}" == "1" \
+    && -n "${VALIDATION_WORKER_TEST_FILE_SUBMODULE_ROOT:-}" ]]; then
+    transport_config+=(-c protocol.file.allow=always)
+  fi
+
+  set +e
+  env -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+    GIT_TERMINAL_PROMPT=0 GIT_ASKPASS= SSH_ASKPASS= \
+    timeout "$timeout_seconds" git -C "$checkout_dir" "${transport_config[@]}" "${update_args[@]}" \
+    >>"$evidence_dir/logs/submodule.log" 2>&1
+  status=$?
+  set -e
+  if [[ "$status" -ne 0 ]]; then
+    if [[ "$status" -eq 124 ]]; then
+      PREPARE_ERROR_CATEGORY=timeout
+      PREPARE_ERROR_MESSAGE="submodule initialization timed out"
+    else
+      PREPARE_ERROR_CATEGORY=submodule_failed
+      PREPARE_ERROR_MESSAGE="failed to initialize checkout submodules"
+    fi
+    return 1
+  fi
+}
+
+initialize_checkout_submodules() {
+  local checkout_dir="$1" evidence_dir="$2" submodule_key submodule_path nested_config
+  local index_entry index_metadata indexed_path submodule_dir nested_toplevel
+
+  if ! validate_submodule_config "$checkout_dir/.gitmodules" 1 >>"$evidence_dir/logs/submodule.log" 2>&1; then
+    PREPARE_ERROR_CATEGORY=submodule_failed
+    PREPARE_ERROR_MESSAGE="checkout contains an unapproved submodule configuration"
+    return 1
+  fi
+  run_isolated_submodule_update "$checkout_dir" "$evidence_dir" no || return 1
+
+  while read -r submodule_key submodule_path; do
+    [[ -n "$submodule_key" && -n "$submodule_path" ]] || continue
+    index_entry="$(git -C "$checkout_dir" ls-files --stage -- "$submodule_path")" || continue
+    [[ "$index_entry" != *$'\n'* && "$index_entry" == *$'\t'* ]] || continue
+    index_metadata="${index_entry%%$'\t'*}"
+    indexed_path="${index_entry#*$'\t'}"
+    [[ "${index_metadata%% *}" == "160000" && "$indexed_path" == "$submodule_path" ]] || continue
+    submodule_dir="$(resolve_path "$checkout_dir/$submodule_path")" || continue
+    nested_toplevel="$(git -C "$submodule_dir" rev-parse --show-toplevel 2>/dev/null)" || continue
+    [[ "$(resolve_path "$nested_toplevel")" == "$submodule_dir" ]] || continue
+    nested_config="$submodule_dir/.gitmodules"
+    if ! validate_submodule_config "$nested_config" 0 >>"$evidence_dir/logs/submodule.log" 2>&1; then
+      PREPARE_ERROR_CATEGORY=submodule_failed
+      PREPARE_ERROR_MESSAGE="checkout contains an unapproved recursive submodule configuration"
+      return 1
+    fi
+  done < <(git config -f "$checkout_dir/.gitmodules" --get-regexp '^submodule\..*\.path$' 2>/dev/null || true)
+
+  run_isolated_submodule_update "$checkout_dir" "$evidence_dir" yes
 }
 
 prepare_checkout() {
@@ -525,19 +793,7 @@ prepare_checkout() {
       return 1
     fi
 
-    set +e
-    env GIT_TERMINAL_PROMPT=0 GIT_ASKPASS= SSH_ASKPASS= timeout "$timeout_seconds" git -C "$checkout_dir" -c protocol.file.allow=always submodule update --init --recursive >>"$evidence_dir/logs/submodule.log" 2>&1
-    status=$?
-    set -e
-
-    if [[ "$status" -eq 124 ]]; then
-      PREPARE_ERROR_CATEGORY=timeout
-      PREPARE_ERROR_MESSAGE="submodule initialization timed out"
-      return 1
-    fi
-    if [[ "$status" -ne 0 ]]; then
-      PREPARE_ERROR_CATEGORY=submodule_failed
-      PREPARE_ERROR_MESSAGE="failed to initialize checkout submodules"
+    if ! initialize_checkout_submodules "$checkout_dir" "$evidence_dir"; then
       return 1
     fi
   fi
@@ -631,7 +887,8 @@ run_request() {
 
   validation_started_at_ns="$(date +%s%N)"
   run_validation() {
-    local profile_name="$1" exit_code elapsed_ns remaining_ns remaining_ms remaining_duration
+    local profile_name="$1" log_path="${2:-$evidence_dir/logs/validation.log}"
+    local exit_code elapsed_ns remaining_ns remaining_ms remaining_duration
 
     elapsed_ns=$(( $(date +%s%N) - validation_started_at_ns ))
     remaining_ns=$(( (timeout_seconds * 1000000000) - elapsed_ns ))
@@ -643,17 +900,51 @@ run_request() {
 
     set +e
     if [[ -n "$stack_path" && -n "${STACK_BINDING_STATUS:-}" ]]; then
-      AKKSTACK_DIR="$stack_path" EXPECTED_EQEMU_CHECKOUT="$checkout_dir" timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$evidence_dir/logs/validation.log" 2>&1
+      AKKSTACK_DIR="$stack_path" EXPECTED_EQEMU_CHECKOUT="$checkout_dir" timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
     elif [[ -n "$stack_path" ]]; then
-      AKKSTACK_DIR="$stack_path" timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$evidence_dir/logs/validation.log" 2>&1
+      AKKSTACK_DIR="$stack_path" timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
     else
-      timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$evidence_dir/logs/validation.log" 2>&1
+      timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
     fi
     exit_code=$?
     set -e
 
     return "$exit_code"
   }
+
+  if [[ "$profile" == "safe" && "${VALIDATION_WORKER_AFK_MODE:-0}" == "1" ]]; then
+    local_checks_path="$evidence_dir/afk-checks.json"
+    initialize_afk_check_statuses
+    ensure_afk_check_logs "$(dirname "$evidence_dir")"
+    mapfile -t afk_plan_rows < <(
+      jq -r '.[] | [.profile, .log_path, .failure_status, .failure_message, .inconclusive_message] | @tsv' <<<"$AFK_CHECK_PLAN"
+    )
+    for afk_check_index in "${!afk_plan_rows[@]}"; do
+      IFS=$'\t' read -r afk_profile afk_log_path afk_failure_status afk_failure_message afk_inconclusive_message <<<"${afk_plan_rows[$afk_check_index]}"
+      if run_validation "$afk_profile" "$(dirname "$evidence_dir")/$afk_log_path"; then
+        afk_check_statuses[$afk_check_index]=passed
+        continue
+      else
+        validation_status=$?
+      fi
+      if [[ "$validation_status" -eq 124 || "$validation_status" -eq 125 || "$validation_status" -eq 127 ]]; then
+        afk_failure_status=inconclusive
+        afk_failure_message="$afk_inconclusive_message"
+      fi
+      afk_check_statuses[$afk_check_index]="$afk_failure_status"
+      if [[ "$afk_failure_status" == "inconclusive" ]]; then
+        write_afk_checks "$local_checks_path" inconclusive
+        write_result "$evidence_dir" failed prerequisite_unavailable 2 "$afk_failure_message" "$checkout_dir" "$head_commit" "$stack_path_source"
+        return 2
+      fi
+      write_afk_checks "$local_checks_path" rejected
+      write_result "$evidence_dir" failed validation_failed 1 "$afk_failure_message" "$checkout_dir" "$head_commit" "$stack_path_source"
+      return 1
+    done
+    write_afk_checks "$local_checks_path" passed
+    write_result "$evidence_dir" passed ok 0 "validation passed" "$checkout_dir" "$head_commit" "$stack_path_source"
+    return 0
+  fi
 
   case "$profile" in
     tier1-tier3-harness)
@@ -743,7 +1034,11 @@ case "$1" in
       esac
     done
     [[ -n "$request_path" ]] || { usage >&2; exit 2; }
-    run_request "$request_path"
+    if is_afk_request "$request_path"; then
+      run_afk_request "$request_path"
+    else
+      run_request "$request_path"
+    fi
     ;;
   *)
     usage >&2
