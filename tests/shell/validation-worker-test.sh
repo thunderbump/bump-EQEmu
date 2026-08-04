@@ -300,6 +300,12 @@ assert contract == {
     "schema_version": 1,
     "validation": {
         "command": ["./scripts/validation-worker.sh", "run"],
+        "trusted_files": [
+            "scripts/validation-worker.sh",
+            "scripts/validate.sh",
+            "scripts/check-akkstack-contract.sh",
+            "scripts/lib/akkstack-routing.sh",
+        ],
         "timeout_seconds": 2700,
     },
 }
