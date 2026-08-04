@@ -428,6 +428,26 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 				.size(),
 			static_cast<size_t>(0), "expiry should not emit a contradictory lifecycle event");
 
+		fixture.OwnedBot()->Sit();
+		const auto ownership_race = enqueue("stand", stand_body, fmt::format("ownership-race-{}", run_nonce));
+		Expect(ownership_race.action_id != 0, "ownership-race action should enqueue");
+		auto disabled_profile = inserted_profile;
+		disabled_profile.enabled = false;
+		int ownership_clock_read = 0;
+		ActorActionExecutor ownership_race_executor(
+			database, zone->GetZoneID(), zone->GetInstanceID(), zone->GetZoneServerId(), [&]() {
+				if (ownership_clock_read++ == 1) {
+					ActorProfilesRepository::UpsertBotBackedProfile(database, disabled_profile);
+				}
+				return now;
+			});
+		ownership_race_executor.ProcessOne();
+		ExpectEqual(ActorActionQueueRepository::FindOne(database, ownership_race.action_id).state,
+					std::string("pending"), "an ownership change before execution should release the claim");
+		Expect(fixture.OwnedBot()->IsSitting(), "an ownership change before execution must not mutate gameplay state");
+		ActorActionQueueRepository::DeleteOne(database, ownership_race.action_id);
+		ActorProfilesRepository::UpsertBotBackedProfile(database, inserted_profile);
+
 		const auto enqueue_raw = [&](const std::string& metadata_json, const std::string& action_json,
 									 const std::string& key) {
 			return ActorActionQueueRepository::Enqueue(database, {

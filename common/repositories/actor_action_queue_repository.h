@@ -50,6 +50,18 @@ public:
 		time_t now = 0;
 		uint32_t freshness_seconds = 30;
 	};
+	struct ExecutionClaimRequest {
+		uint64_t action_id = 0;
+		uint32_t actor_id = 0;
+		uint32_t bot_id = 0;
+		uint32_t owner_character_id = 0;
+		uint32_t zone_id = 0;
+		uint32_t instance_id = 0;
+		uint32_t entity_id = 0;
+		std::string claimed_by;
+		time_t now = 0;
+		uint32_t freshness_seconds = 30;
+	};
 
 	struct CompletionRecord {
 		uint64_t action_id = 0;
@@ -370,14 +382,32 @@ WHERE action_id = {}
 		return results.Success() && results.RowsAffected() == 1;
 	}
 
-	static bool LockClaimForExecution(Database& db, uint64_t action_id, const std::string& claimed_by, time_t now) {
-		if (!action_id || claimed_by.empty() || now <= 0) {
+	static bool LockClaimForExecution(Database& db, ExecutionClaimRequest request) {
+		if (!request.action_id || !request.actor_id || !request.bot_id || !request.owner_character_id ||
+			!request.zone_id || !request.entity_id || request.claimed_by.empty() ||
+			request.claimed_by.size() > kClaimedByMaxLength || request.now <= 0) {
 			return false;
 		}
-		auto results = db.QueryDatabase(
-			fmt::format("SELECT action_id FROM {} WHERE action_id = {} AND state = 'claimed' AND claimed_by = '{}' "
-						"AND (expires_at IS NULL OR expires_at > FROM_UNIXTIME({})) FOR UPDATE",
-						TableName(), action_id, Strings::Escape(claimed_by), now));
+		const auto freshness = std::clamp<uint32_t>(request.freshness_seconds, 1, 3600);
+		auto results =
+			db.QueryDatabase(fmt::format(R"SQL(
+SELECT q.action_id
+FROM actor_action_queue q
+JOIN actor_profiles p ON p.actor_id = q.actor_id
+JOIN actor_status s ON s.actor_id = q.actor_id
+WHERE q.action_id = {}
+  AND q.actor_id = {}
+  AND q.state = 'claimed' AND q.claimed_by = '{}'
+  AND p.enabled = 1 AND p.actor_type = 'autonomous_actor' AND p.actor_substrate = 'bot'
+  AND p.bot_id = {} AND p.owner_character_id = {}
+  AND s.zone_id = {} AND COALESCE(s.instance_id, 0) = {} AND s.entity_id = {}
+  AND s.state IN ('active', 'idle') AND s.heartbeat_at >= FROM_UNIXTIME({} - {})
+  AND (q.expires_at IS NULL OR q.expires_at > FROM_UNIXTIME({}))
+FOR UPDATE
+)SQL",
+										 request.action_id, request.actor_id, Strings::Escape(request.claimed_by),
+										 request.bot_id, request.owner_character_id, request.zone_id,
+										 request.instance_id, request.entity_id, request.now, freshness, request.now));
 		return results.Success() && results.RowCount() == 1;
 	}
 

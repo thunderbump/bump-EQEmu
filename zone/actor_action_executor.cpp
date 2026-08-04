@@ -181,9 +181,21 @@ void ActorActionExecutor::ProcessOne() {
 		return;
 	}
 	database_.TransactionBegin();
-	if (!ActorActionQueueRepository::LockClaimForExecution(database_, action->action_id, claimant_, applied_at)) {
+	if (!ActorActionQueueRepository::LockClaimForExecution(database_,
+														   {
+															   .action_id = action->action_id,
+															   .actor_id = action->actor_id,
+															   .bot_id = *profile->bot_id,
+															   .owner_character_id = *profile->owner_character_id,
+															   .zone_id = zone_id_,
+															   .instance_id = instance_id_,
+															   .entity_id = *status->entity_id,
+															   .claimed_by = claimant_,
+															   .now = applied_at,
+														   })) {
 		database_.TransactionRollback();
 		ActorActionQueueRepository::ExpireDue(database_, applied_at, action->actor_id);
+		ActorActionQueueRepository::ReleaseClaim(database_, action->action_id, claimant_);
 		return;
 	}
 	if (action->action_type == "target") {
