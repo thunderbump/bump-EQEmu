@@ -265,7 +265,7 @@ is_afk_request() {
 
 run_afk_request() {
   local request_path="$1" candidate_sha evidence_dir afk_run_id worker_evidence worker_request checks_path stack_path
-  local worker_status expected_worker_status overall_status summary result_checks_path
+  local worker_status expected_worker_status overall_status summary result_checks_path source_repo
 
   candidate_sha="$(json_get '.candidate_sha | strings' "$request_path")"
   evidence_dir="$(json_get '.evidence_dir | strings' "$request_path")"
@@ -280,11 +280,12 @@ run_afk_request() {
   worker_evidence="$evidence_dir/worker"
   worker_request="$evidence_dir/worker-request.json"
   checks_path="$worker_evidence/afk-checks.json"
-  stack_path="$repo_root/../bump-akk-stack-validation"
+  source_repo="$HOME/Projects/bump-eqemu/bump-EQEmu"
+  stack_path="$HOME/Projects/bump-eqemu/bump-akk-stack-validation"
   mkdir "$worker_evidence"
   jq -n \
     --arg project bump-eqemu \
-    --arg repo "$repo_root" \
+    --arg repo "$source_repo" \
     --arg commit "$candidate_sha" \
     --arg run_id "afk-${candidate_sha:0:16}" \
     --arg evidence_dir "$worker_evidence" \
