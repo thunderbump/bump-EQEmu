@@ -3,6 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 tmp_root="$(mktemp -d)"
+test_filter="${1:-}"
 
 cleanup() {
   rm -rf "$tmp_root"
@@ -11,6 +12,7 @@ trap cleanup EXIT
 
 failures=0
 assertion_failed=0
+tests_run=0
 
 fail() {
   printf 'FAIL: %s\n' "$*" >&2
@@ -49,6 +51,10 @@ run_test() {
   local name="$1"
   shift
 
+  if [[ -n "$test_filter" && "$name" != "$test_filter" ]]; then
+    return
+  fi
+  tests_run=$((tests_run + 1))
   assertion_failed=0
   if "$@" && [[ "$assertion_failed" -eq 0 ]]; then
     printf 'ok - %s\n' "$name"
@@ -1039,6 +1045,10 @@ run_test "AFK contract accepts approved production submodule URLs" test_afk_cont
 run_test "AFK contract ignores inert fixture gitmodules" test_afk_contract_ignores_gitmodules_outside_initialized_submodules
 run_test "AFK contract ignores nested config in an ordinary declared directory" test_afk_contract_ignores_nested_config_in_ordinary_declared_directory
 
+if [[ -n "$test_filter" && "$tests_run" -eq 0 ]]; then
+  printf 'unknown test: %s\n' "$test_filter" >&2
+  exit 2
+fi
 if [[ "$failures" -gt 0 ]]; then
   exit 1
 fi
