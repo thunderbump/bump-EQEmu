@@ -96,9 +96,10 @@ void ActorActionExecutor::ProcessOne() {
 	const auto profile = ActorProfilesRepository::FindByActorId(database_, action->actor_id);
 	const auto status = ActorStatusRepository::FindByActorId(database_, action->actor_id);
 	auto reject = [&](const std::string& reason) {
-		const auto terminal = ActorActionQueueRepository::MarkFailed(database_, {action->action_id, reason, now});
+		const auto terminal_at = std::time(nullptr);
+		const auto terminal = ActorActionQueueRepository::MarkFailed(database_, {action->action_id, reason, terminal_at});
 		if (terminal.has_value() && terminal->state == "failed" && profile.has_value() && status.has_value()) {
-			AppendOutcome(database_, *action, *profile, *status, "action_rejected", reason, now);
+			AppendOutcome(database_, *action, *profile, *status, "action_rejected", reason, terminal_at);
 		}
 	};
 
@@ -159,12 +160,13 @@ void ActorActionExecutor::ProcessOne() {
 	result["applied"] = true;
 	Json::StreamWriterBuilder writer;
 	writer["indentation"] = "";
+	const auto terminal_at = std::time(nullptr);
 	const auto terminal = ActorActionQueueRepository::MarkCompleted(database_, {
 		action->action_id,
 		Json::writeString(writer, result),
-		now,
+		terminal_at,
 	});
 	if (terminal.has_value() && terminal->state == "completed") {
-		AppendOutcome(database_, *action, *profile, *status, "action_completed", "applied", now);
+		AppendOutcome(database_, *action, *profile, *status, "action_completed", "applied", terminal_at);
 	}
 }

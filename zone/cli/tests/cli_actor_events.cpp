@@ -21,11 +21,14 @@
 #include "common/actor_reserved_owners.h"
 #include "common/eqemu_logsys.h"
 #include "common/json/json.h"
+#include "common/repositories/actor_action_queue_repository.h"
 #include "common/repositories/actor_events_repository.h"
 #include "common/repositories/actor_profiles_repository.h"
+#include "common/repositories/actor_status_repository.h"
 #include "common/repositories/player_event_logs_repository.h"
 #include "common/strings.h"
 #include "zone/bot.h"
+#include "zone/actor_action_executor.h"
 #include "zone/harness/actor_event_persistence_sink.h"
 #include "zone/harness/actor_event_recorder.h"
 #include "zone/harness/owned_bot_actor_fixture.h"
@@ -124,7 +127,9 @@ public:
 	~ActorEventPersistenceCleanup()
 	{
 		for (auto actor_id: actor_ids_) {
+			ActorActionQueueRepository::DeleteByActorId(database, actor_id);
 			ActorEventsRepository::DeleteByActorId(database, actor_id);
+			ActorStatusRepository::DeleteOne(database, actor_id);
 		}
 
 		for (auto it = actor_ids_.rbegin(); it != actor_ids_.rend(); ++it) {
@@ -321,6 +326,73 @@ void ZoneCLI::TestActorEvents(int argc, char **argv, argh::parser &cmd, std::str
 		ExpectEqual(payload["channel"].asString(), std::string("say"), "persisted runtime actor event should keep speech channel");
 		ExpectEqual(payload["text"].asString(), speech_marker, "persisted runtime actor event should keep speech text");
 		ExpectEqual(payload["audible_radius"].asUInt(), 200u, "persisted runtime actor event should keep say audible radius");
+
+		const auto now = std::time(nullptr);
+		const auto status = ActorStatusRepository::UpsertOne(database, {
+			.actor_id = inserted_profile.actor_id,
+			.zone_id = zone->GetZoneID(),
+			.instance_id = zone->GetInstanceID(),
+			.entity_id = fixture.OwnedBot()->GetID(),
+			.state = "active",
+			.heartbeat_at = now,
+		});
+		Expect(status.actor_id == inserted_profile.actor_id, "actor status should persist for queue execution");
+
+		const auto enqueue = [&](const std::string &type, const Json::Value &body, const std::string &key,
+		                         std::optional<time_t> expires_at = std::nullopt) {
+			Json::StreamWriterBuilder writer;
+			writer["indentation"] = "";
+			Json::Value metadata;
+			metadata["expected_event_id"] = Json::UInt64(persisted_events[0].event_id);
+			return ActorActionQueueRepository::Enqueue(database, {
+				.actor_id = inserted_profile.actor_id,
+				.source = "actor-events-test",
+				.source_metadata_json = Json::writeString(writer, metadata),
+				.action_type = type,
+				.action_json = Json::writeString(writer, body),
+				.idempotency_key = key,
+				.expires_at = expires_at,
+				.created_at = now,
+			});
+		};
+
+		Json::Value stand_body(Json::objectValue);
+		const auto first_action = enqueue("stand", stand_body, fmt::format("stand-a-{}", run_nonce));
+		const auto second_action = enqueue("stand", stand_body, fmt::format("stand-b-{}", run_nonce));
+		Expect(first_action.action_id && second_action.action_id, "fresh actor actions should enqueue");
+		ActorActionExecutor executor(database, zone->GetZoneID(), zone->GetInstanceID(), zone->GetZoneServerId());
+		executor.ProcessOne();
+		executor.ProcessOne();
+		ExpectEqual(ActorActionQueueRepository::FindOne(database, first_action.action_id).state,
+		            std::string("completed"), "first action should complete");
+		ExpectEqual(ActorActionQueueRepository::FindOne(database, second_action.action_id).state,
+		            std::string("completed"), "lifecycle events must not stale a sibling action watermark");
+		executor.ProcessOne();
+		const auto completed_events = ActorEventsRepository::ReadCursor(database, inserted_profile.actor_id,
+		                                                               persisted_events[0].event_id, 8);
+		ExpectEqual(completed_events.size(), static_cast<size_t>(2), "duplicate processing should not emit another completion");
+		for (const auto &event: completed_events) {
+			ExpectEqual(event.event_type, std::string("action_completed"), "successful actions should emit completion events");
+			Expect(ParseJson(event.event_json)["action_id"].asUInt64() != 0, "completion event should correlate action_id");
+		}
+
+		const auto rejected = enqueue("unsupported", stand_body, fmt::format("reject-{}", run_nonce));
+		executor.ProcessOne();
+		ExpectEqual(ActorActionQueueRepository::FindOne(database, rejected.action_id).state,
+		            std::string("failed"), "illegal actions should be rejected");
+		const auto rejected_events = ActorEventsRepository::ReadCursor(database, inserted_profile.actor_id,
+		                                                              completed_events.back().event_id, 8);
+		ExpectEqual(rejected_events.size(), static_cast<size_t>(1), "rejection should emit one event");
+		ExpectEqual(ParseJson(rejected_events[0].event_json)["action_id"].asUInt64(), rejected.action_id,
+		            "rejection event should correlate action_id");
+
+		const auto expired = enqueue("stand", stand_body, fmt::format("expired-{}", run_nonce), now - 1);
+		executor.ProcessOne();
+		ExpectEqual(ActorActionQueueRepository::FindOne(database, expired.action_id).state,
+		            std::string("expired"), "expired actions should never be claimed or completed");
+		ExpectEqual(ActorEventsRepository::ReadCursor(database, inserted_profile.actor_id,
+		                                                 rejected_events[0].event_id, 8).size(), static_cast<size_t>(0),
+		            "expiry should not emit a contradictory lifecycle event");
 
 		ExpectEqual(
 			CountPlayerEventLogRowsWithMarker(speech_marker),
