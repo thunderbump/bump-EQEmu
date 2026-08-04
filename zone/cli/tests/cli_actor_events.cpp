@@ -428,6 +428,41 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 				.size(),
 			static_cast<size_t>(0), "expiry should not emit a contradictory lifecycle event");
 
+		const auto enqueue_raw = [&](const std::string& metadata_json, const std::string& action_json,
+									 const std::string& key) {
+			return ActorActionQueueRepository::Enqueue(database, {
+				.actor_id = inserted_profile.actor_id,
+				.source = "actor-events-test",
+				.source_metadata_json = metadata_json,
+				.action_type = "target",
+				.action_json = action_json,
+				.idempotency_key = key,
+				.created_at = now,
+			});
+		};
+		const auto malformed_watermark = enqueue_raw(
+			R"json({"expected_event_id":"not-a-number"})json", R"json({"entity_id":1})json",
+			fmt::format("bad-watermark-{}", run_nonce));
+		executor.ProcessOne();
+		ExpectEqual(ActorActionQueueRepository::FindOne(database, malformed_watermark.action_id).failure_reason,
+			std::optional<std::string>("stale_event_watermark"),
+			"non-numeric event watermarks should reject without coercion or exceptions");
+
+		Json::Value valid_metadata;
+		valid_metadata["expected_event_id"] = Json::UInt64(persisted_events[0].event_id);
+		const auto metadata_json = Json::writeString(stale_writer, valid_metadata);
+		for (const auto& [body_json, suffix] : std::vector<std::pair<std::string, std::string>>{
+				 {R"json({"entity_id":"1"})json", "string"},
+				 {R"json({"entity_id":-1})json", "negative"},
+				 {R"json({"entity_id":65536})json", "oversized"}}) {
+			const auto malformed_target = enqueue_raw(
+				metadata_json, body_json, fmt::format("bad-target-{}-{}", suffix, run_nonce));
+			executor.ProcessOne();
+			ExpectEqual(ActorActionQueueRepository::FindOne(database, malformed_target.action_id).failure_reason,
+				std::optional<std::string>("invalid_action_json"),
+				"malformed target entity ids should reject without coercion or exceptions");
+		}
+
 		ExpectEqual(CountPlayerEventLogRowsWithMarker(speech_marker), int64_t(0),
 					"runtime actor event persistence should not write marker rows to player_event_logs");
 

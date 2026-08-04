@@ -1521,7 +1521,11 @@ uint32 Zone::CountAuth() {
 
 bool Zone::Process() {
 	if (actor_action_timer.Check()) {
-		ActorActionExecutor(database, GetZoneID(), GetInstanceID(), GetZoneServerId()).ProcessOne();
+		if (!actor_action_executor) {
+			actor_action_executor = std::make_unique<ActorActionExecutor>(
+				database, GetZoneID(), GetInstanceID(), GetZoneServerId());
+		}
+		actor_action_executor->ProcessOne();
 	}
 	spawn_conditions.Process();
 

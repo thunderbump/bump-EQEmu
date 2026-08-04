@@ -359,6 +359,17 @@ WHERE action_id = {}
 		return DeleteWhere(db, fmt::format("actor_id = {}", actor_id));
 	}
 
+	static bool ReleaseClaim(Database& db, uint64_t action_id, const std::string& claimed_by) {
+		if (!action_id || claimed_by.empty() || claimed_by.size() > kClaimedByMaxLength) {
+			return false;
+		}
+		auto results = db.QueryDatabase(fmt::format(
+			"UPDATE {} SET state = 'pending', claimed_by = NULL, claimed_at = NULL "
+			"WHERE action_id = {} AND state = 'claimed' AND claimed_by = '{}'",
+			TableName(), action_id, Strings::Escape(claimed_by)));
+		return results.Success() && results.RowsAffected() == 1;
+	}
+
 private:
 	template <typename RowType> static ActorActionRecord FromRow(RowType& row) {
 		return {

@@ -25,7 +25,7 @@ bool ParseObject(const std::string& document, Json::Value& root) {
 	return reader->parse(document.data(), document.data() + document.size(), &root, &errors) && root.isObject();
 }
 
-void AppendOutcome(ZoneDatabase& database, const ActorActionQueueRepository::ActorActionRecord& action,
+bool AppendOutcome(ZoneDatabase& database, const ActorActionQueueRepository::ActorActionRecord& action,
 				   const ActorProfilesRepository::ActorProfileRecord& profile,
 				   const ActorStatusRepository::ActorStatusRecord& status, const std::string& event_type,
 				   const std::string& reason, time_t now) {
@@ -35,7 +35,7 @@ void AppendOutcome(ZoneDatabase& database, const ActorActionQueueRepository::Act
 	payload["reason"] = reason;
 	Json::StreamWriterBuilder writer;
 	writer["indentation"] = "";
-	ActorEventsRepository::AppendEvent(database, {
+	return ActorEventsRepository::AppendEvent(database, {
 													 .actor_id = action.actor_id,
 													 .bot_id = profile.bot_id,
 													 .owner_character_id = profile.owner_character_id,
@@ -45,7 +45,7 @@ void AppendOutcome(ZoneDatabase& database, const ActorActionQueueRepository::Act
 													 .event_type = event_type,
 													 .event_json = Json::writeString(writer, payload),
 													 .created_at = now,
-												 });
+											 }).event_id != 0;
 }
 
 } // namespace
@@ -127,8 +127,9 @@ void ActorActionExecutor::ProcessOne() {
 			return;
 		}
 		if (metadata.isMember("expected_event_id") &&
-			metadata["expected_event_id"].asUInt64() !=
-				ActorEventsRepository::LatestGameplayEventId(database_, action->actor_id)) {
+			(!metadata["expected_event_id"].isUInt64() ||
+			 metadata["expected_event_id"].asUInt64() !=
+				 ActorEventsRepository::LatestGameplayEventId(database_, action->actor_id))) {
 			reject("stale_event_watermark");
 			return;
 		}
@@ -141,8 +142,16 @@ void ActorActionExecutor::ProcessOne() {
 	}
 	Mob* target = nullptr;
 	if (action->action_type == "target") {
-		const auto target_id = body.get("entity_id", 0).asUInt();
-		target = target_id <= UINT16_MAX ? entity_list.GetMob(static_cast<uint16_t>(target_id)) : nullptr;
+		if (!body.isMember("entity_id") || !body["entity_id"].isUInt()) {
+			reject("invalid_action_json");
+			return;
+		}
+		const auto target_id = body["entity_id"].asUInt();
+		if (target_id == 0 || target_id > UINT16_MAX) {
+			reject("invalid_action_json");
+			return;
+		}
+		target = entity_list.GetMob(static_cast<uint16_t>(target_id));
 		if (!target || target == bot) {
 			reject("illegal_target");
 			return;
@@ -157,12 +166,8 @@ void ActorActionExecutor::ProcessOne() {
 	Json::StreamWriterBuilder writer;
 	writer["indentation"] = "";
 	const auto applied_at = clock_();
-	const auto terminal = ActorActionQueueRepository::MarkCompleted(database_, {
-																				   action->action_id,
-																				   Json::writeString(writer, result),
-																				   applied_at,
-																			   });
-	if (!terminal.has_value() || terminal->state != "completed") {
+	if (action->expires_at.has_value() && *action->expires_at <= applied_at) {
+		ActorActionQueueRepository::ExpireDue(database_, applied_at, action->actor_id);
 		return;
 	}
 	if (action->action_type == "target") {
@@ -170,5 +175,14 @@ void ActorActionExecutor::ProcessOne() {
 	} else {
 		bot->Stand();
 	}
-	AppendOutcome(database_, *action, *profile, *status, "action_completed", "applied", applied_at);
+	if (!ActorEventsRepository::HasActionOutcome(database_, action->actor_id, action->action_id) &&
+		!AppendOutcome(database_, *action, *profile, *status, "action_completed", "applied", applied_at)) {
+		ActorActionQueueRepository::ReleaseClaim(database_, action->action_id, claimant_);
+		return;
+	}
+	const auto terminal = ActorActionQueueRepository::MarkCompleted(
+		database_, {action->action_id, Json::writeString(writer, result), applied_at});
+	if (!terminal.has_value() || terminal->state != "completed") {
+		ActorActionQueueRepository::ReleaseClaim(database_, action->action_id, claimant_);
+	}
 }
