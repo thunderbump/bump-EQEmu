@@ -16,6 +16,7 @@
 	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 #include "zone.h"
+#include "actor_action_executor.h"
 
 #include "common/data_verification.h"
 #include "common/eqemu_logsys.h"
@@ -1519,6 +1520,9 @@ uint32 Zone::CountAuth() {
 }
 
 bool Zone::Process() {
+	if (actor_action_timer.Check()) {
+		ActorActionExecutor(database, GetZoneID(), GetInstanceID(), GetZoneServerId()).ProcessOne();
+	}
 	spawn_conditions.Process();
 
 	if (spawn2_timer.Check()) {
