@@ -554,7 +554,7 @@ private:
 	Timer                               clientauth_timer;
 	Timer                               initgrids_timer;
 	Timer                               qglobal_purge_timer;
-	Timer                               actor_action_timer{1000};
+	Timer                               actor_action_timer{5000};
 	ZoneSpellsBlocked                   *blocked_spells;
 
 	// Factions

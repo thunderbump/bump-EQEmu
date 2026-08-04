@@ -58,9 +58,28 @@ ActorActionExecutor::ActorActionExecutor(ZoneDatabase& database, uint32_t zone_i
 
 void ActorActionExecutor::ProcessOne() {
 	const auto now = clock_();
+	const auto candidate = ActorActionQueueRepository::FindNextEligibleForZone(database_, zone_id_, instance_id_, now);
+	if (!candidate.has_value()) {
+		return;
+	}
+	const auto candidate_profile = ActorProfilesRepository::FindByActorId(database_, candidate->actor_id);
+	const auto candidate_status = ActorStatusRepository::FindByActorId(database_, candidate->actor_id);
+	if (!candidate_profile.has_value() || !candidate_status.has_value() || !candidate_profile->bot_id.has_value() ||
+		!candidate_profile->owner_character_id.has_value() || !candidate_status->entity_id.has_value()) {
+		return;
+	}
+	auto* candidate_bot = entity_list.GetBotByBotID(*candidate_profile->bot_id);
+	if (!candidate_bot || candidate_bot->GetID() != *candidate_status->entity_id ||
+		candidate_bot->GetBotOwnerCharacterID() != *candidate_profile->owner_character_id) {
+		return;
+	}
 	const auto action = ActorActionQueueRepository::ClaimNextEligibleForZone(database_, {
+		.actor_id = candidate->actor_id,
+		.bot_id = *candidate_profile->bot_id,
+		.owner_character_id = *candidate_profile->owner_character_id,
 		.zone_id = zone_id_,
 		.instance_id = instance_id_,
+		.entity_id = *candidate_status->entity_id,
 		.claimed_by = claimant_,
 		.now = now,
 	});
