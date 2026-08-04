@@ -463,6 +463,45 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 				"malformed target entity ids should reject without coercion or exceptions");
 		}
 
+		const auto rollback_action = enqueue("stand", stand_body, fmt::format("rollback-{}", run_nonce));
+		const auto rollback_claim = ActorActionQueueRepository::ClaimNextEligibleForZone(
+			database, {
+						  .actor_id = inserted_profile.actor_id,
+						  .bot_id = *inserted_profile.bot_id,
+						  .owner_character_id = *inserted_profile.owner_character_id,
+						  .zone_id = zone->GetZoneID(),
+						  .instance_id = zone->GetInstanceID(),
+						  .entity_id = fixture.OwnedBot()->GetID(),
+						  .claimed_by = "actor-events-rollback-test",
+						  .now = now,
+					  });
+		Expect(rollback_claim.has_value() && rollback_claim->action_id == rollback_action.action_id,
+			   "failure protocol test should claim its action");
+		database.TransactionBegin();
+		Expect(ActorActionQueueRepository::MarkCompleted(
+				   database, {rollback_action.action_id, std::string(R"json({"applied":true})json"), now})
+				   .has_value(),
+			   "failure protocol test should stage completion");
+		Json::Value rollback_payload;
+		rollback_payload["action_id"] = Json::UInt64(rollback_action.action_id);
+		Expect(ActorEventsRepository::AppendEvent(database,
+												  {
+													  .actor_id = inserted_profile.actor_id,
+													  .event_type = "action_completed",
+													  .event_json = Json::writeString(stale_writer, rollback_payload),
+													  .created_at = now,
+												  })
+					   .event_id != 0,
+			   "failure protocol test should stage its correlated event");
+		database.TransactionRollback();
+		ExpectEqual(ActorActionQueueRepository::FindOne(database, rollback_action.action_id).state,
+					std::string("claimed"), "rolled-back terminalization should remain recoverable");
+		Expect(!ActorEventsRepository::HasActionOutcome(database, inserted_profile.actor_id, rollback_action.action_id),
+			   "rolled-back completion must not leave a contradictory event");
+		Expect(
+			ActorActionQueueRepository::ReleaseClaim(database, rollback_action.action_id, "actor-events-rollback-test"),
+			"rolled-back terminalization should release for retry");
+
 		ExpectEqual(CountPlayerEventLogRowsWithMarker(speech_marker), int64_t(0),
 					"runtime actor event persistence should not write marker rows to player_event_logs");
 

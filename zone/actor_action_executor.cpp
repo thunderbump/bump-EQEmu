@@ -26,8 +26,8 @@ bool ParseObject(const std::string& document, Json::Value& root) {
 }
 
 bool AppendOutcome(ZoneDatabase& database, const ActorActionQueueRepository::ActorActionRecord& action,
-				   const ActorProfilesRepository::ActorProfileRecord& profile,
-				   const ActorStatusRepository::ActorStatusRecord& status, const std::string& event_type,
+				   const ActorProfilesRepository::ActorProfileRecord* profile,
+				   const ActorStatusRepository::ActorStatusRecord* status, const std::string& event_type,
 				   const std::string& reason, time_t now) {
 	Json::Value payload;
 	payload["action_id"] = Json::UInt64(action.action_id);
@@ -35,17 +35,20 @@ bool AppendOutcome(ZoneDatabase& database, const ActorActionQueueRepository::Act
 	payload["reason"] = reason;
 	Json::StreamWriterBuilder writer;
 	writer["indentation"] = "";
-	return ActorEventsRepository::AppendEvent(database, {
-													 .actor_id = action.actor_id,
-													 .bot_id = profile.bot_id,
-													 .owner_character_id = profile.owner_character_id,
-													 .zone_id = status.zone_id,
-													 .instance_id = status.instance_id,
-													 .entity_id = status.entity_id,
-													 .event_type = event_type,
-													 .event_json = Json::writeString(writer, payload),
-													 .created_at = now,
-											 }).event_id != 0;
+	return ActorEventsRepository::AppendEvent(
+			   database,
+			   {
+				   .actor_id = action.actor_id,
+				   .bot_id = profile ? profile->bot_id : std::nullopt,
+				   .owner_character_id = profile ? profile->owner_character_id : std::nullopt,
+				   .zone_id = status ? status->zone_id : std::nullopt,
+				   .instance_id = status ? status->instance_id : std::nullopt,
+				   .entity_id = status ? status->entity_id : std::nullopt,
+				   .event_type = event_type,
+				   .event_json = Json::writeString(writer, payload),
+				   .created_at = now,
+			   })
+			   .event_id != 0;
 }
 
 } // namespace
@@ -99,10 +102,17 @@ void ActorActionExecutor::ProcessOne() {
 	const auto status = ActorStatusRepository::FindByActorId(database_, action->actor_id);
 	auto reject = [&](const std::string& reason) {
 		const auto terminal_at = clock_();
+		database_.TransactionBegin();
 		const auto terminal =
 			ActorActionQueueRepository::MarkFailed(database_, {action->action_id, reason, terminal_at});
-		if (terminal.has_value() && terminal->state == "failed" && profile.has_value() && status.has_value()) {
-			AppendOutcome(database_, *action, *profile, *status, "action_rejected", reason, terminal_at);
+		const auto outcome_persisted =
+			terminal.has_value() && terminal->state == "failed" &&
+			(ActorEventsRepository::HasActionOutcome(database_, action->actor_id, action->action_id) ||
+			 AppendOutcome(database_, *action, profile ? &*profile : nullptr, status ? &*status : nullptr,
+						   "action_rejected", reason, terminal_at));
+		if (!outcome_persisted || !database_.TransactionCommit().Success()) {
+			database_.TransactionRollback();
+			ActorActionQueueRepository::ReleaseClaim(database_, action->action_id, claimant_);
 		}
 	};
 
@@ -170,19 +180,25 @@ void ActorActionExecutor::ProcessOne() {
 		ActorActionQueueRepository::ExpireDue(database_, applied_at, action->actor_id);
 		return;
 	}
+	database_.TransactionBegin();
+	if (!ActorActionQueueRepository::LockClaimForExecution(database_, action->action_id, claimant_, applied_at)) {
+		database_.TransactionRollback();
+		ActorActionQueueRepository::ExpireDue(database_, applied_at, action->actor_id);
+		return;
+	}
 	if (action->action_type == "target") {
 		bot->SetTarget(target);
 	} else {
 		bot->Stand();
 	}
-	if (!ActorEventsRepository::HasActionOutcome(database_, action->actor_id, action->action_id) &&
-		!AppendOutcome(database_, *action, *profile, *status, "action_completed", "applied", applied_at)) {
-		ActorActionQueueRepository::ReleaseClaim(database_, action->action_id, claimant_);
-		return;
-	}
 	const auto terminal = ActorActionQueueRepository::MarkCompleted(
 		database_, {action->action_id, Json::writeString(writer, result), applied_at});
-	if (!terminal.has_value() || terminal->state != "completed") {
+	const auto outcome_persisted =
+		terminal.has_value() && terminal->state == "completed" &&
+		(ActorEventsRepository::HasActionOutcome(database_, action->actor_id, action->action_id) ||
+		 AppendOutcome(database_, *action, &*profile, &*status, "action_completed", "applied", applied_at));
+	if (!outcome_persisted || !database_.TransactionCommit().Success()) {
+		database_.TransactionRollback();
 		ActorActionQueueRepository::ReleaseClaim(database_, action->action_id, claimant_);
 	}
 }

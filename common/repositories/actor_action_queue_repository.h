@@ -370,6 +370,17 @@ WHERE action_id = {}
 		return results.Success() && results.RowsAffected() == 1;
 	}
 
+	static bool LockClaimForExecution(Database& db, uint64_t action_id, const std::string& claimed_by, time_t now) {
+		if (!action_id || claimed_by.empty() || now <= 0) {
+			return false;
+		}
+		auto results = db.QueryDatabase(
+			fmt::format("SELECT action_id FROM {} WHERE action_id = {} AND state = 'claimed' AND claimed_by = '{}' "
+						"AND (expires_at IS NULL OR expires_at > FROM_UNIXTIME({})) FOR UPDATE",
+						TableName(), action_id, Strings::Escape(claimed_by), now));
+		return results.Success() && results.RowCount() == 1;
+	}
+
 private:
 	template <typename RowType> static ActorActionRecord FromRow(RowType& row) {
 		return {
