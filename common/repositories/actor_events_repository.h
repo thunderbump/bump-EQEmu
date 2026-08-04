@@ -109,6 +109,18 @@ LIMIT {}
 		return DeleteWhere(db, fmt::format("actor_id = {}", actor_id));
 	}
 
+	static uint64_t LatestGameplayEventId(Database &db, uint32_t actor_id)
+	{
+		auto results = db.QueryDatabase(fmt::format(
+			"SELECT COALESCE(MAX(event_id), 0) FROM actor_events WHERE actor_id = {} "
+			"AND event_type NOT IN ('action_completed', 'action_rejected')", actor_id));
+		if (!results.Success() || results.RowCount() != 1) {
+			return 0;
+		}
+		auto row = results.begin();
+		return row[0] ? strtoull(row[0], nullptr, 10) : 0;
+	}
+
 private:
 	template <typename RowType>
 	static ActorEventRecord FromRow(RowType &row)
