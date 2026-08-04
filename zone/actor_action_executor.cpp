@@ -23,7 +23,6 @@ bool ParseObject(const std::string& document, Json::Value& root) {
 	std::string errors;
 	return reader->parse(document.data(), document.data() + document.size(), &root, &errors) && root.isObject();
 }
-
 void AppendOutcome(ZoneDatabase& database, const ActorActionQueueRepository::ActorActionRecord& action,
 				   const ActorProfilesRepository::ActorProfileRecord& profile,
 				   const ActorStatusRepository::ActorStatusRecord& status, const std::string& event_type,
@@ -58,12 +57,37 @@ ActorActionExecutor::ActorActionExecutor(ZoneDatabase& database, uint32_t zone_i
 void ActorActionExecutor::ProcessOne() {
 	const auto now = std::time(nullptr);
 	ActorActionQueueRepository::ExpireDue(database_, now);
-	const auto action = ActorActionQueueRepository::ClaimNextEligibleForZone(database_, {
-																							.zone_id = zone_id_,
-																							.instance_id = instance_id_,
-																							.claimed_by = claimant_,
-																							.now = now,
-																						});
+	std::optional<ActorActionQueueRepository::ActorActionRecord> action;
+	for (const auto &[entity_id, bot]: entity_list.GetBotList()) {
+		if (!bot) {
+			continue;
+		}
+		const auto profile = ActorProfilesRepository::FindByBotId(database_, bot->GetBotID());
+		if (!profile.has_value() || !profile->enabled || profile->actor_type != "autonomous_actor" ||
+			profile->actor_substrate != "bot" || !profile->owner_character_id.has_value() ||
+			bot->GetBotOwnerCharacterID() != *profile->owner_character_id) {
+			continue;
+		}
+		const auto status = ActorStatusRepository::FindByActorId(database_, profile->actor_id);
+		if (!status.has_value() || status->zone_id != zone_id_ || status->instance_id.value_or(0) != instance_id_ ||
+			status->entity_id != entity_id || !status->heartbeat_at.has_value() || *status->heartbeat_at < now - 30 ||
+			(status->state != "active" && status->state != "idle")) {
+			continue;
+		}
+		action = ActorActionQueueRepository::ClaimNextEligibleForZone(database_, {
+			.actor_id = profile->actor_id,
+			.bot_id = bot->GetBotID(),
+			.owner_character_id = *profile->owner_character_id,
+			.zone_id = zone_id_,
+			.instance_id = instance_id_,
+			.entity_id = entity_id,
+			.claimed_by = claimant_,
+			.now = now,
+		});
+		if (action.has_value()) {
+			break;
+		}
+	}
 	if (!action.has_value()) {
 		return;
 	}
