@@ -280,7 +280,7 @@ run_afk_request() {
   worker_evidence="$evidence_dir/worker"
   worker_request="$evidence_dir/worker-request.json"
   checks_path="$worker_evidence/afk-checks.json"
-  source_repo=https://github.com/thunderbump/bump-EQEmu.git
+  source_repo="$HOME/Projects/bump-eqemu/bump-EQEmu"
   stack_path="$HOME/Projects/bump-eqemu/bump-akk-stack-validation"
   mkdir "$worker_evidence"
   jq -n \

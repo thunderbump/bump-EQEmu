@@ -136,14 +136,15 @@ make_afk_contract_repo() {
 }
 
 configure_afk_host() {
-  local source="$1" operator_home stack
+  local source="$1" operator_home canonical_repo stack
   operator_home="$tmp_root/operator-home"
+  canonical_repo="$operator_home/Projects/bump-eqemu/bump-EQEmu"
   stack="$operator_home/Projects/bump-eqemu/bump-akk-stack-validation"
   mkdir -p "$stack"
   printf 'ENV=development\n' >"$stack/.env"
   rm -f "$operator_home/.gitconfig"
-  git config --file "$operator_home/.gitconfig" \
-    url."file://$source".insteadOf https://github.com/thunderbump/bump-EQEmu.git
+  rm -rf "$canonical_repo"
+  git clone "$source" "$canonical_repo" >/dev/null 2>&1
 }
 
 add_submodule_gitlink() {
@@ -771,21 +772,39 @@ test_afk_contract_passes_with_stable_checks() {
 }
 
 test_afk_contract_is_independent_of_the_trusted_harness_location() {
-  local source harness_root operator_home stack request evidence status output head worker_request
+  local source canonical_repo candidate_checkout harness_root operator_home stack request evidence status output head worker_request
   make_afk_contract_repo source unrelated-harness
   reset_worker_home
-  head="$(git -C "$source" rev-parse HEAD)"
-  harness_root="$tmp_root/materialized/trusted-harness"
+  mkdir -p "$source/scripts/lib"
+  cp "$repo_root/scripts/check-akkstack-contract.sh" "$source/scripts/check-akkstack-contract.sh"
+  cp "$repo_root/scripts/lib/akkstack-routing.sh" "$source/scripts/lib/akkstack-routing.sh"
+  git -C "$source" add scripts/check-akkstack-contract.sh scripts/lib/akkstack-routing.sh
+  git -C "$source" commit -m 'add trusted validation closure' >/dev/null 2>&1
   operator_home="$tmp_root/operator-home"
+  canonical_repo="$operator_home/Projects/bump-eqemu/bump-EQEmu"
+  candidate_checkout="$tmp_root/unpushed-candidate"
+  configure_afk_host "$source"
+  git -C "$canonical_repo" config user.email worker-test@example.com
+  git -C "$canonical_repo" config user.name 'Worker Test'
+  git -C "$canonical_repo" worktree add -b afk-unpushed-candidate "$candidate_checkout" >/dev/null 2>&1
+  printf 'unpushed candidate\n' >"$candidate_checkout/candidate-marker.txt"
+  git -C "$candidate_checkout" add candidate-marker.txt
+  git -C "$candidate_checkout" commit -m 'add unpushed candidate marker' >/dev/null 2>&1
+  head="$(git -C "$candidate_checkout" rev-parse HEAD)"
+  if git -C "$source" cat-file -e "$head^{commit}" 2>/dev/null; then
+    printf 'Candidate fixture was unexpectedly available from its source remote\n' >&2
+    return 1
+  fi
+  harness_root="$tmp_root/materialized/trusted-harness"
   stack="$operator_home/Projects/bump-eqemu/bump-akk-stack-validation"
   request="$tmp_root/afk-unrelated-harness.json"
   evidence="$tmp_root/afk-unrelated-harness"
   worker_request="$evidence/worker-request.json"
   mkdir -p "$harness_root/scripts/lib" "$stack" "$evidence"
-  cp "$repo_root/scripts/validation-worker.sh" "$harness_root/scripts/validation-worker.sh"
-  cp "$repo_root/scripts/validate.sh" "$harness_root/scripts/validate.sh"
-  cp "$repo_root/scripts/check-akkstack-contract.sh" "$harness_root/scripts/check-akkstack-contract.sh"
-  cp "$repo_root/scripts/lib/akkstack-routing.sh" "$harness_root/scripts/lib/akkstack-routing.sh"
+  cp "$candidate_checkout/scripts/validation-worker.sh" "$harness_root/scripts/validation-worker.sh"
+  cp "$candidate_checkout/scripts/validate.sh" "$harness_root/scripts/validate.sh"
+  cp "$candidate_checkout/scripts/check-akkstack-contract.sh" "$harness_root/scripts/check-akkstack-contract.sh"
+  cp "$candidate_checkout/scripts/lib/akkstack-routing.sh" "$harness_root/scripts/lib/akkstack-routing.sh"
   chmod +x "$harness_root/scripts/validation-worker.sh"
   write_afk_request "$request" "$head" "$evidence"
 
@@ -793,14 +812,14 @@ test_afk_contract_is_independent_of_the_trusted_harness_location() {
     "$harness_root/scripts/validation-worker.sh" run --request "$request"
 
   [[ "$status" -eq 0 ]] || return 1
-  assert_json_equals "$worker_request" .repo https://github.com/thunderbump/bump-EQEmu.git
+  assert_json_equals "$worker_request" .repo "$canonical_repo"
   assert_json_equals "$worker_request" .ref "$head"
   assert_json_equals "$worker_request" .commit "$head"
   assert_json_equals "$worker_request" .profile safe
   assert_json_equals "$worker_request" .stack.role validation
   assert_json_equals "$worker_request" .stack.path "$stack"
-  if grep -Fq "$source" "$worker_request" || grep -Fq "$harness_root" "$worker_request"; then
-    printf 'nested request exposed a fixture checkout or trusted-harness path\n' >&2
+  if grep -Fq "$candidate_checkout" "$worker_request" || grep -Fq "$harness_root" "$worker_request"; then
+    printf 'nested request exposed the Candidate checkout or trusted-harness path\n' >&2
     return 1
   fi
   assert_json_equals "$evidence/result.json" '.checks | map(.name) | join(",")' "preflight,tier1-build-and-unit-tests,tier2-read-only-database-tests"
