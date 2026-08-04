@@ -386,6 +386,26 @@ void ZoneCLI::TestActorEvents(int argc, char **argv, argh::parser &cmd, std::str
 		ExpectEqual(ParseJson(rejected_events[0].event_json)["action_id"].asUInt64(), rejected.action_id,
 		            "rejection event should correlate action_id");
 
+		fixture.OwnedBot()->Sit();
+		Expect(fixture.OwnedBot()->IsSitting(), "expiry race precondition should put the actor in a sitting state");
+		const auto expiring = enqueue("stand", stand_body, fmt::format("expiring-{}", run_nonce), now + 1);
+		Expect(expiring.action_id != 0, "action expiring after claim should enqueue");
+		int clock_read = 0;
+		ActorActionExecutor expiring_executor(
+			database,
+			zone->GetZoneID(),
+			zone->GetInstanceID(),
+			zone->GetZoneServerId(),
+			[&]() { return clock_read++ == 0 ? now : now + 1; }
+		);
+		expiring_executor.ProcessOne();
+		ExpectEqual(ActorActionQueueRepository::FindOne(database, expiring.action_id).state,
+		            std::string("expired"), "action expiring between claim and execution should expire");
+		Expect(fixture.OwnedBot()->IsSitting(), "expired action should not mutate actor gameplay state");
+		ExpectEqual(ActorEventsRepository::ReadCursor(database, inserted_profile.actor_id,
+		                                                 rejected_events[0].event_id, 8).size(), static_cast<size_t>(0),
+		            "claim-to-execution expiry should not emit a contradictory lifecycle event");
+
 		const auto expired = enqueue("stand", stand_body, fmt::format("expired-{}", run_nonce), now - 1);
 		executor.ProcessOne();
 		ExpectEqual(ActorActionQueueRepository::FindOne(database, expired.action_id).state,

@@ -12,6 +12,7 @@
 
 #include <ctime>
 #include <memory>
+#include <utility>
 
 extern EntityList entity_list;
 
@@ -50,13 +51,13 @@ void AppendOutcome(ZoneDatabase& database, const ActorActionQueueRepository::Act
 } // namespace
 
 ActorActionExecutor::ActorActionExecutor(ZoneDatabase& database, uint32_t zone_id, uint32_t instance_id,
-										 uint32_t zone_server_id)
+										 uint32_t zone_server_id, Clock clock)
 	: database_(database), zone_id_(zone_id), instance_id_(instance_id),
-	  claimant_(fmt::format("zone:{}:{}:{}", zone_server_id, zone_id, instance_id)) {
+	  claimant_(fmt::format("zone:{}:{}:{}", zone_server_id, zone_id, instance_id)), clock_(std::move(clock)) {
 }
 
 void ActorActionExecutor::ProcessOne() {
-	const auto now = std::time(nullptr);
+	const auto now = clock_();
 	ActorActionQueueRepository::ExpireDue(database_, now);
 	std::optional<ActorActionQueueRepository::ActorActionRecord> action;
 	for (const auto &[entity_id, bot]: entity_list.GetBotList()) {
@@ -96,7 +97,7 @@ void ActorActionExecutor::ProcessOne() {
 	const auto profile = ActorProfilesRepository::FindByActorId(database_, action->actor_id);
 	const auto status = ActorStatusRepository::FindByActorId(database_, action->actor_id);
 	auto reject = [&](const std::string& reason) {
-		const auto terminal_at = std::time(nullptr);
+		const auto terminal_at = clock_();
 		const auto terminal = ActorActionQueueRepository::MarkFailed(database_, {action->action_id, reason, terminal_at});
 		if (terminal.has_value() && terminal->state == "failed" && profile.has_value() && status.has_value()) {
 			AppendOutcome(database_, *action, *profile, *status, "action_rejected", reason, terminal_at);
@@ -137,21 +138,15 @@ void ActorActionExecutor::ProcessOne() {
 		reject("invalid_action_json");
 		return;
 	}
+	Mob* target = nullptr;
 	if (action->action_type == "target") {
 		const auto target_id = body.get("entity_id", 0).asUInt();
-		auto* target = target_id <= UINT16_MAX ? entity_list.GetMob(static_cast<uint16_t>(target_id)) : nullptr;
+		target = target_id <= UINT16_MAX ? entity_list.GetMob(static_cast<uint16_t>(target_id)) : nullptr;
 		if (!target || target == bot) {
 			reject("illegal_target");
 			return;
 		}
-		bot->SetTarget(target);
-		if (bot->GetTarget() != target) {
-			reject("target_not_set");
-			return;
-		}
-	} else if (action->action_type == "stand") {
-		bot->Stand();
-	} else {
+	} else if (action->action_type != "stand") {
 		reject("unsupported_action_type");
 		return;
 	}
@@ -160,13 +155,20 @@ void ActorActionExecutor::ProcessOne() {
 	result["applied"] = true;
 	Json::StreamWriterBuilder writer;
 	writer["indentation"] = "";
-	const auto terminal_at = std::time(nullptr);
+	const auto terminal_at = clock_();
 	const auto terminal = ActorActionQueueRepository::MarkCompleted(database_, {
 		action->action_id,
 		Json::writeString(writer, result),
 		terminal_at,
 	});
-	if (terminal.has_value() && terminal->state == "completed") {
-		AppendOutcome(database_, *action, *profile, *status, "action_completed", "applied", terminal_at);
+	if (!terminal.has_value() || terminal->state != "completed") {
+		return;
 	}
+
+	if (action->action_type == "target") {
+		bot->SetTarget(target);
+	} else {
+		bot->Stand();
+	}
+	AppendOutcome(database_, *action, *profile, *status, "action_completed", "applied", terminal_at);
 }
