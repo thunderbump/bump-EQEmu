@@ -38,6 +38,17 @@ public:
 		std::string             claimed_by;
 		time_t                  now = 0;
 	};
+	struct ZoneClaimRequest {
+		uint32_t actor_id = 0;
+		uint32_t bot_id = 0;
+		uint32_t owner_character_id = 0;
+		uint32_t zone_id = 0;
+		uint32_t instance_id = 0;
+		uint32_t entity_id = 0;
+		std::string claimed_by;
+		time_t now = 0;
+		uint32_t freshness_seconds = 30;
+	};
 
 	struct CompletionRecord {
 		uint64_t                   action_id = 0;
@@ -209,6 +220,38 @@ LIMIT 1
 		}
 
 		return claimed;
+	}
+
+	static std::optional<ActorActionRecord> ClaimNextEligibleForZone(Database &db, ZoneClaimRequest request)
+	{
+		if (!request.actor_id || !request.bot_id || !request.owner_character_id || !request.zone_id ||
+			!request.entity_id || request.claimed_by.empty() || request.claimed_by.size() > kClaimedByMaxLength) {
+			return std::nullopt;
+		}
+		const auto now = request.now > 0 ? request.now : std::time(nullptr);
+		const auto freshness = std::clamp<uint32_t>(request.freshness_seconds, 1, 3600);
+		auto results = db.QueryDatabase(fmt::format(R"SQL(
+UPDATE actor_action_queue q
+JOIN actor_profiles p ON p.actor_id = q.actor_id
+JOIN actor_status s ON s.actor_id = q.actor_id
+SET q.action_id = LAST_INSERT_ID(q.action_id), q.state = 'claimed', q.claimed_by = '{}',
+    q.claimed_at = FROM_UNIXTIME({}), q.updated_at = FROM_UNIXTIME({})
+WHERE q.state = 'pending'
+  AND q.actor_id = {}
+  AND p.enabled = 1 AND p.actor_type = 'autonomous_actor' AND p.actor_substrate = 'bot'
+  AND p.bot_id = {} AND p.owner_character_id = {}
+  AND s.zone_id = {} AND COALESCE(s.instance_id, 0) = {} AND s.entity_id = {}
+  AND s.state IN ('active', 'idle') AND s.heartbeat_at >= FROM_UNIXTIME({} - {})
+  AND (q.not_before IS NULL OR q.not_before <= FROM_UNIXTIME({}))
+  AND (q.expires_at IS NULL OR q.expires_at > FROM_UNIXTIME({}))
+ORDER BY COALESCE(q.not_before, FROM_UNIXTIME(0)), q.action_id LIMIT 1
+)SQL", Strings::Escape(request.claimed_by), now, now, request.actor_id, request.bot_id,
+			request.owner_character_id, request.zone_id, request.instance_id, request.entity_id, now, freshness, now, now));
+		if (!results.Success() || results.RowsAffected() != 1 || !results.LastInsertedID()) {
+			return std::nullopt;
+		}
+		const auto claimed = FindOne(db, results.LastInsertedID());
+		return claimed.action_id ? std::optional<ActorActionRecord>(claimed) : std::nullopt;
 	}
 
 	static int ExpireDue(Database &db, time_t now, std::optional<uint32_t> actor_id = std::nullopt)
