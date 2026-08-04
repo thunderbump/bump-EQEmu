@@ -36,16 +36,16 @@ void AppendOutcome(ZoneDatabase& database, const ActorActionQueueRepository::Act
 	Json::StreamWriterBuilder writer;
 	writer["indentation"] = "";
 	ActorEventsRepository::AppendEvent(database, {
-		.actor_id = action.actor_id,
-		.bot_id = profile.bot_id,
-		.owner_character_id = profile.owner_character_id,
-		.zone_id = status.zone_id,
-		.instance_id = status.instance_id,
-		.entity_id = status.entity_id,
-		.event_type = event_type,
-		.event_json = Json::writeString(writer, payload),
-		.created_at = now,
-	});
+													 .actor_id = action.actor_id,
+													 .bot_id = profile.bot_id,
+													 .owner_character_id = profile.owner_character_id,
+													 .zone_id = status.zone_id,
+													 .instance_id = status.instance_id,
+													 .entity_id = status.entity_id,
+													 .event_type = event_type,
+													 .event_json = Json::writeString(writer, payload),
+													 .created_at = now,
+												 });
 }
 
 } // namespace
@@ -58,50 +58,58 @@ ActorActionExecutor::ActorActionExecutor(ZoneDatabase& database, uint32_t zone_i
 
 void ActorActionExecutor::ProcessOne() {
 	const auto now = clock_();
-	const auto candidate = ActorActionQueueRepository::FindNextEligibleForZone(database_, zone_id_, instance_id_, now);
-	if (!candidate.has_value()) {
-		return;
+	ActorActionQueueRepository::ExpireDue(database_, now);
+	std::optional<ActorActionQueueRepository::ActorActionRecord> action;
+	const auto candidates =
+		ActorActionQueueRepository::FindEligibleForZone(database_, zone_id_, instance_id_, now, 32, candidate_offset_);
+	for (const auto& candidate : candidates) {
+		const auto candidate_profile = ActorProfilesRepository::FindByActorId(database_, candidate.actor_id);
+		const auto candidate_status = ActorStatusRepository::FindByActorId(database_, candidate.actor_id);
+		if (!candidate_profile.has_value() || !candidate_status.has_value() || !candidate_profile->bot_id.has_value() ||
+			!candidate_profile->owner_character_id.has_value() || !candidate_status->entity_id.has_value()) {
+			continue;
+		}
+		auto* candidate_bot = entity_list.GetBotByBotID(*candidate_profile->bot_id);
+		if (!candidate_bot || candidate_bot->GetID() != *candidate_status->entity_id ||
+			candidate_bot->GetBotOwnerCharacterID() != *candidate_profile->owner_character_id) {
+			continue;
+		}
+		action = ActorActionQueueRepository::ClaimNextEligibleForZone(
+			database_, {
+						   .actor_id = candidate.actor_id,
+						   .bot_id = *candidate_profile->bot_id,
+						   .owner_character_id = *candidate_profile->owner_character_id,
+						   .zone_id = zone_id_,
+						   .instance_id = instance_id_,
+						   .entity_id = *candidate_status->entity_id,
+						   .claimed_by = claimant_,
+						   .now = now,
+					   });
+		if (action.has_value()) {
+			break;
+		}
 	}
-	const auto candidate_profile = ActorProfilesRepository::FindByActorId(database_, candidate->actor_id);
-	const auto candidate_status = ActorStatusRepository::FindByActorId(database_, candidate->actor_id);
-	if (!candidate_profile.has_value() || !candidate_status.has_value() || !candidate_profile->bot_id.has_value() ||
-		!candidate_profile->owner_character_id.has_value() || !candidate_status->entity_id.has_value()) {
-		return;
-	}
-	auto* candidate_bot = entity_list.GetBotByBotID(*candidate_profile->bot_id);
-	if (!candidate_bot || candidate_bot->GetID() != *candidate_status->entity_id ||
-		candidate_bot->GetBotOwnerCharacterID() != *candidate_profile->owner_character_id) {
-		return;
-	}
-	const auto action = ActorActionQueueRepository::ClaimNextEligibleForZone(database_, {
-		.actor_id = candidate->actor_id,
-		.bot_id = *candidate_profile->bot_id,
-		.owner_character_id = *candidate_profile->owner_character_id,
-		.zone_id = zone_id_,
-		.instance_id = instance_id_,
-		.entity_id = *candidate_status->entity_id,
-		.claimed_by = claimant_,
-		.now = now,
-	});
 	if (!action.has_value()) {
+		candidate_offset_ = candidates.empty() ? 0 : candidate_offset_ + candidates.size();
 		return;
 	}
+	candidate_offset_ = 0;
 
 	const auto profile = ActorProfilesRepository::FindByActorId(database_, action->actor_id);
 	const auto status = ActorStatusRepository::FindByActorId(database_, action->actor_id);
 	auto reject = [&](const std::string& reason) {
 		const auto terminal_at = clock_();
-		const auto terminal = ActorActionQueueRepository::MarkFailed(database_, {action->action_id, reason, terminal_at});
+		const auto terminal =
+			ActorActionQueueRepository::MarkFailed(database_, {action->action_id, reason, terminal_at});
 		if (terminal.has_value() && terminal->state == "failed" && profile.has_value() && status.has_value()) {
 			AppendOutcome(database_, *action, *profile, *status, "action_rejected", reason, terminal_at);
 		}
 	};
 
-	if (!profile.has_value() || !status.has_value() || !profile->enabled ||
-		profile->actor_type != "autonomous_actor" || profile->actor_substrate != "bot" ||
-		!profile->bot_id.has_value() || !profile->owner_character_id.has_value() || !status->zone_id.has_value() ||
-		!status->entity_id.has_value() || !status->heartbeat_at.has_value() || *status->heartbeat_at < now - 30 ||
-		(status->state != "active" && status->state != "idle")) {
+	if (!profile.has_value() || !status.has_value() || !profile->enabled || profile->actor_type != "autonomous_actor" ||
+		profile->actor_substrate != "bot" || !profile->bot_id.has_value() || !profile->owner_character_id.has_value() ||
+		!status->zone_id.has_value() || !status->entity_id.has_value() || !status->heartbeat_at.has_value() ||
+		*status->heartbeat_at < now - 30 || (status->state != "active" && status->state != "idle")) {
 		reject("actor_binding_changed");
 		return;
 	}
@@ -149,23 +157,18 @@ void ActorActionExecutor::ProcessOne() {
 	Json::StreamWriterBuilder writer;
 	writer["indentation"] = "";
 	const auto applied_at = clock_();
-	if (action->expires_at.has_value() && *action->expires_at <= applied_at) {
-		ActorActionQueueRepository::MarkCompleted(database_, {action->action_id, std::nullopt, applied_at});
+	const auto terminal = ActorActionQueueRepository::MarkCompleted(database_, {
+																				   action->action_id,
+																				   Json::writeString(writer, result),
+																				   applied_at,
+																			   });
+	if (!terminal.has_value() || terminal->state != "completed") {
 		return;
 	}
-
 	if (action->action_type == "target") {
 		bot->SetTarget(target);
 	} else {
 		bot->Stand();
-	}
-	const auto terminal = ActorActionQueueRepository::MarkCompleted(database_, {
-		action->action_id,
-		Json::writeString(writer, result),
-		applied_at,
-	});
-	if (!terminal.has_value() || terminal->state != "completed") {
-		return;
 	}
 	AppendOutcome(database_, *action, *profile, *status, "action_completed", "applied", applied_at);
 }
