@@ -54,9 +54,11 @@ bool AppendOutcome(ZoneDatabase& database, const ActorActionQueueRepository::Act
 } // namespace
 
 ActorActionExecutor::ActorActionExecutor(ZoneDatabase& database, uint32_t zone_id, uint32_t instance_id,
-										 uint32_t zone_server_id, Clock clock)
+										 uint32_t zone_server_id, Clock clock,
+										 GameplayEventWatermarkReader watermark_reader)
 	: database_(database), zone_id_(zone_id), instance_id_(instance_id),
-	  claimant_(fmt::format("zone:{}:{}:{}", zone_server_id, zone_id, instance_id)), clock_(std::move(clock)) {
+	  claimant_(fmt::format("zone:{}:{}:{}", zone_server_id, zone_id, instance_id)), clock_(std::move(clock)),
+	  watermark_reader_(std::move(watermark_reader)) {
 }
 
 void ActorActionExecutor::ProcessOne() {
@@ -138,12 +140,22 @@ void ActorActionExecutor::ProcessOne() {
 			reject("invalid_source_metadata");
 			return;
 		}
-		if (metadata.isMember("expected_event_id") &&
-			(!metadata["expected_event_id"].isUInt64() ||
-			 metadata["expected_event_id"].asUInt64() !=
-				 ActorEventsRepository::LatestGameplayEventId(database_, action->actor_id))) {
-			reject("stale_event_watermark");
-			return;
+		if (metadata.isMember("expected_event_id")) {
+			if (!metadata["expected_event_id"].isUInt64()) {
+				reject("stale_event_watermark");
+				return;
+			}
+			const auto latest_event_id =
+				watermark_reader_ ? watermark_reader_(action->actor_id)
+								  : ActorEventsRepository::LatestGameplayEventId(database_, action->actor_id);
+			if (!latest_event_id.has_value()) {
+				ActorActionQueueRepository::ReleaseClaim(database_, action->action_id, claimant_);
+				return;
+			}
+			if (metadata["expected_event_id"].asUInt64() != *latest_event_id) {
+				reject("stale_event_watermark");
+				return;
+			}
 		}
 	}
 

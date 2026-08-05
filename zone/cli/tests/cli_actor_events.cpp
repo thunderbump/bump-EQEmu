@@ -457,6 +457,33 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 				.size(),
 			static_cast<size_t>(0), "expiry should not emit a contradictory lifecycle event");
 
+		Json::Value zero_watermark_metadata;
+		zero_watermark_metadata["expected_event_id"] = Json::UInt64(0);
+		Json::StreamWriterBuilder zero_watermark_writer;
+		zero_watermark_writer["indentation"] = "";
+		const auto watermark_read_failure = ActorActionQueueRepository::Enqueue(
+			database, {
+						  .actor_id = inserted_profile.actor_id,
+						  .source = "actor-events-test",
+						  .source_metadata_json = Json::writeString(zero_watermark_writer, zero_watermark_metadata),
+						  .action_type = "stand",
+						  .action_json = Json::writeString(zero_watermark_writer, stand_body),
+						  .idempotency_key = fmt::format("watermark-read-failure-{}", run_nonce),
+						  .created_at = now,
+					  });
+		ActorActionExecutor watermark_failure_executor(
+			database, zone->GetZoneID(), zone->GetInstanceID(), zone->GetZoneServerId(), [&]() { return now; },
+			[](uint32_t) -> std::optional<uint64_t> { return std::nullopt; });
+		watermark_failure_executor.ProcessOne();
+		ExpectEqual(ActorActionQueueRepository::FindOne(database, watermark_read_failure.action_id).state,
+					std::string("pending"), "watermark read failure should release the claim for retry");
+		Expect(fixture.OwnedBot()->IsSitting(), "watermark read failure must not mutate actor gameplay state");
+		ExpectEqual(
+			ActorEventsRepository::ReadCursor(database, inserted_profile.actor_id, rejected_events[0].event_id, 8)
+				.size(),
+			static_cast<size_t>(0), "watermark read failure should not emit a terminal outcome");
+		ActorActionQueueRepository::DeleteOne(database, watermark_read_failure.action_id);
+
 		fixture.OwnedBot()->Sit();
 		const auto ownership_race = enqueue("stand", stand_body, fmt::format("ownership-race-{}", run_nonce));
 		Expect(ownership_race.action_id != 0, "ownership-race action should enqueue");
