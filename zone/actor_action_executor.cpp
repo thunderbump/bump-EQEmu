@@ -106,10 +106,12 @@ void ActorActionExecutor::ProcessOne() {
 		const auto terminal =
 			ActorActionQueueRepository::MarkFailed(database_, {action->action_id, reason, terminal_at});
 		const auto outcome_persisted =
-			terminal.has_value() && terminal->state == "failed" &&
-			(ActorEventsRepository::HasActionOutcome(database_, action->actor_id, action->action_id) ||
-			 AppendOutcome(database_, *action, profile ? &*profile : nullptr, status ? &*status : nullptr,
-						   "action_rejected", reason, terminal_at));
+			terminal.has_value() &&
+			(terminal->state == "expired" ||
+			 (terminal->state == "failed" &&
+			  (ActorEventsRepository::HasActionOutcome(database_, action->actor_id, action->action_id) ||
+			   AppendOutcome(database_, *action, profile ? &*profile : nullptr, status ? &*status : nullptr,
+							 "action_rejected", reason, terminal_at))));
 		if (!outcome_persisted || !database_.TransactionCommit().Success()) {
 			database_.TransactionRollback();
 			ActorActionQueueRepository::ReleaseClaim(database_, action->action_id, claimant_);

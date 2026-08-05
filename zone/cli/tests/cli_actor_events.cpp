@@ -402,6 +402,20 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 		ExpectEqual(ParseJson(rejected_events[0].event_json)["action_id"].asUInt64(), rejected.action_id,
 					"rejection event should correlate action_id");
 
+		const auto expiring_rejection =
+			enqueue("unsupported", stand_body, fmt::format("expiring-rejection-{}", run_nonce), now + 1);
+		int rejection_clock_read = 0;
+		ActorActionExecutor rejection_expiry_executor(database, zone->GetZoneID(), zone->GetInstanceID(),
+													  zone->GetZoneServerId(),
+													  [&]() { return rejection_clock_read++ == 0 ? now : now + 1; });
+		rejection_expiry_executor.ProcessOne();
+		ExpectEqual(ActorActionQueueRepository::FindOne(database, expiring_rejection.action_id).state,
+					std::string("expired"), "an action expiring at rejection time should remain terminally expired");
+		ExpectEqual(
+			ActorEventsRepository::ReadCursor(database, inserted_profile.actor_id, rejected_events[0].event_id, 8)
+				.size(),
+			static_cast<size_t>(0), "expiry at rejection time should not emit a contradictory rejection event");
+
 		fixture.OwnedBot()->Sit();
 		Expect(fixture.OwnedBot()->IsSitting(), "expiry race precondition should put the actor in a sitting state");
 		const auto expiring = enqueue("stand", stand_body, fmt::format("expiring-{}", run_nonce), now + 1);
