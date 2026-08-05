@@ -23,21 +23,21 @@ public:
 	static constexpr size_t kResultJsonMaxLength = 16384;
 
 	struct EnqueueRecord {
-		uint32_t actor_id = 0;
-		std::string source;
+		uint32_t                   actor_id = 0;
+		std::string                source;
 		std::optional<std::string> source_metadata_json;
-		std::string action_type;
-		std::string action_json;
-		std::string idempotency_key;
-		std::optional<time_t> not_before;
-		std::optional<time_t> expires_at;
-		time_t created_at = 0;
+		std::string                action_type;
+		std::string                action_json;
+		std::string                idempotency_key;
+		std::optional<time_t>      not_before;
+		std::optional<time_t>      expires_at;
+		time_t                     created_at = 0;
 	};
 
 	struct ClaimRequest {
 		std::optional<uint32_t> actor_id;
-		std::string claimed_by;
-		time_t now = 0;
+		std::string             claimed_by;
+		time_t                  now = 0;
 	};
 	struct ZoneClaimRequest {
 		uint32_t actor_id = 0;
@@ -64,25 +64,27 @@ public:
 	};
 
 	struct CompletionRecord {
-		uint64_t action_id = 0;
+		uint64_t                   action_id = 0;
 		std::optional<std::string> result_json;
-		time_t completed_at = 0;
+		time_t                     completed_at = 0;
 	};
 
 	struct FailureRecord {
-		uint64_t action_id = 0;
+		uint64_t    action_id = 0;
 		std::string failure_reason;
-		time_t completed_at = 0;
+		time_t      completed_at = 0;
 	};
 
-	static ActorActionRecord Enqueue(Database& db, EnqueueRecord record) {
+	static ActorActionRecord Enqueue(Database &db, EnqueueRecord record)
+	{
 		if (!IsValidEnqueueRecord(record)) {
 			return NewEntity();
 		}
 
 		const auto created_at = record.created_at > 0 ? record.created_at : std::time(nullptr);
-		auto results = db.QueryDatabase(fmt::format(
-			R"SQL(
+		auto results = db.QueryDatabase(
+			fmt::format(
+				R"SQL(
 INSERT INTO {} (
 	actor_id,
 	source,
@@ -121,10 +123,19 @@ INSERT INTO {} (
 ON DUPLICATE KEY UPDATE
 	action_id = LAST_INSERT_ID(action_id)
 )SQL",
-			TableName(), record.actor_id, Strings::Escape(record.source),
-			NullableStringSql(record.source_metadata_json), Strings::Escape(record.action_type),
-			Strings::Escape(record.action_json), Strings::Escape(record.idempotency_key),
-			NullableTimeSql(record.not_before), NullableTimeSql(record.expires_at), created_at, created_at));
+				TableName(),
+				record.actor_id,
+				Strings::Escape(record.source),
+				NullableStringSql(record.source_metadata_json),
+				Strings::Escape(record.action_type),
+				Strings::Escape(record.action_json),
+				Strings::Escape(record.idempotency_key),
+				NullableTimeSql(record.not_before),
+				NullableTimeSql(record.expires_at),
+				created_at,
+				created_at
+			)
+		);
 
 		if (!results.Success()) {
 			return NewEntity();
@@ -133,7 +144,8 @@ ON DUPLICATE KEY UPDATE
 		return FindOne(db, results.LastInsertedID());
 	}
 
-	static std::optional<ActorActionRecord> FindByActionId(Database& db, uint64_t action_id) {
+	static std::optional<ActorActionRecord> FindByActionId(Database &db, uint64_t action_id)
+	{
 		const auto action = FindOne(db, action_id);
 		if (!action.action_id) {
 			return std::nullopt;
@@ -142,14 +154,24 @@ ON DUPLICATE KEY UPDATE
 		return action;
 	}
 
-	static std::optional<ActorActionRecord> FindByActorAndIdempotencyKey(Database& db, uint32_t actor_id,
-																		 const std::string& idempotency_key) {
+	static std::optional<ActorActionRecord> FindByActorAndIdempotencyKey(
+		Database &db,
+		uint32_t actor_id,
+		const std::string &idempotency_key
+	)
+	{
 		if (!actor_id || idempotency_key.empty()) {
 			return std::nullopt;
 		}
 
-		auto results = db.QueryDatabase(fmt::format("{} WHERE actor_id = {} AND idempotency_key = '{}' LIMIT 1",
-													BaseSelect(), actor_id, Strings::Escape(idempotency_key)));
+		auto results = db.QueryDatabase(
+			fmt::format(
+				"{} WHERE actor_id = {} AND idempotency_key = '{}' LIMIT 1",
+				BaseSelect(),
+				actor_id,
+				Strings::Escape(idempotency_key)
+			)
+		);
 
 		if (!results.Success() || results.RowCount() != 1) {
 			return std::nullopt;
@@ -158,17 +180,20 @@ ON DUPLICATE KEY UPDATE
 		return FromRow(results.begin());
 	}
 
-	static std::optional<ActorActionRecord> ClaimNextPending(Database& db, ClaimRequest request) {
+	static std::optional<ActorActionRecord> ClaimNextPending(Database &db, ClaimRequest request)
+	{
 		if (request.claimed_by.empty() || request.claimed_by.size() > kClaimedByMaxLength) {
 			return std::nullopt;
 		}
 
 		const auto now = request.now > 0 ? request.now : std::time(nullptr);
-		const auto actor_filter =
-			request.actor_id.has_value() ? fmt::format(" AND actor_id = {}", *request.actor_id) : "";
+		const auto actor_filter = request.actor_id.has_value()
+			? fmt::format(" AND actor_id = {}", *request.actor_id)
+			: "";
 
-		auto results = db.QueryDatabase(fmt::format(
-			R"SQL(
+		auto results = db.QueryDatabase(
+			fmt::format(
+				R"SQL(
 UPDATE {}
 SET
 	action_id = LAST_INSERT_ID(action_id),
@@ -183,7 +208,15 @@ WHERE state = 'pending'
 ORDER BY COALESCE(not_before, FROM_UNIXTIME(0)) ASC, action_id ASC
 LIMIT 1
 )SQL",
-			TableName(), Strings::Escape(request.claimed_by), now, now, actor_filter, now, now));
+				TableName(),
+				Strings::Escape(request.claimed_by),
+				now,
+				now,
+				actor_filter,
+				now,
+				now
+			)
+		);
 		// First-slice portability: the current validation DB contract cannot assume a
 		// portable SKIP LOCKED path here, so concurrent claimers may block and lose a
 		// turn instead of immediately skipping to another eligible row. central-lhy.14
@@ -267,15 +300,19 @@ ORDER BY COALESCE(q.not_before, FROM_UNIXTIME(0)), q.action_id LIMIT 1
 		return claimed.action_id ? std::optional<ActorActionRecord>(claimed) : std::nullopt;
 	}
 
-	static int ExpireDue(Database& db, time_t now, std::optional<uint32_t> actor_id = std::nullopt) {
+	static int ExpireDue(Database &db, time_t now, std::optional<uint32_t> actor_id = std::nullopt)
+	{
 		if (now <= 0) {
 			now = std::time(nullptr);
 		}
 
-		const auto actor_filter = actor_id.has_value() ? fmt::format(" AND actor_id = {}", *actor_id) : "";
+		const auto actor_filter = actor_id.has_value()
+			? fmt::format(" AND actor_id = {}", *actor_id)
+			: "";
 
-		auto results = db.QueryDatabase(fmt::format(
-			R"SQL(
+		auto results = db.QueryDatabase(
+			fmt::format(
+				R"SQL(
 UPDATE {}
 SET
 	state = 'expired',
@@ -286,21 +323,29 @@ WHERE state IN ('pending', 'claimed')
   AND expires_at IS NOT NULL
   AND expires_at <= FROM_UNIXTIME({})
 )SQL",
-			TableName(), now, now, actor_filter, now));
+				TableName(),
+				now,
+				now,
+				actor_filter,
+				now
+			)
+		);
 
 		return results.Success() ? results.RowsAffected() : 0;
 	}
 
-	static std::optional<ActorActionRecord> MarkCompleted(Database& db, CompletionRecord record) {
-		if (!record.action_id ||
-			(record.result_json.has_value() && !IsValidJson(*record.result_json, kResultJsonMaxLength))) {
+	static std::optional<ActorActionRecord> MarkCompleted(Database &db, CompletionRecord record)
+	{
+		if (!record.action_id || (record.result_json.has_value() && !IsValidJson(*record.result_json, kResultJsonMaxLength))) {
 			return std::nullopt;
 		}
 
 		const auto completed_at = record.completed_at > 0 ? record.completed_at : std::time(nullptr);
-		const auto transitioned = UpdateClaimedTerminalState(db, record.action_id,
-															 fmt::format(
-																 R"SQL(
+		const auto transitioned = UpdateClaimedTerminalState(
+			db,
+			record.action_id,
+			fmt::format(
+				R"SQL(
 UPDATE {}
 SET
 	state = CASE
@@ -317,10 +362,16 @@ SET
 WHERE action_id = {}
   AND state = 'claimed'
 )SQL",
-																 TableName(), completed_at, completed_at,
-																 NullableStringSql(record.result_json), completed_at,
-																 completed_at, record.action_id),
-															 "completed");
+				TableName(),
+				completed_at,
+				completed_at,
+				NullableStringSql(record.result_json),
+				completed_at,
+				completed_at,
+				record.action_id
+			),
+			"completed"
+		);
 
 		if (!transitioned.has_value()) {
 			return std::nullopt;
@@ -329,16 +380,18 @@ WHERE action_id = {}
 		return transitioned;
 	}
 
-	static std::optional<ActorActionRecord> MarkFailed(Database& db, FailureRecord record) {
-		if (!record.action_id || record.failure_reason.empty() ||
-			record.failure_reason.size() > kFailureReasonMaxLength) {
+	static std::optional<ActorActionRecord> MarkFailed(Database &db, FailureRecord record)
+	{
+		if (!record.action_id || record.failure_reason.empty() || record.failure_reason.size() > kFailureReasonMaxLength) {
 			return std::nullopt;
 		}
 
 		const auto completed_at = record.completed_at > 0 ? record.completed_at : std::time(nullptr);
-		const auto transitioned = UpdateClaimedTerminalState(db, record.action_id,
-															 fmt::format(
-																 R"SQL(
+		const auto transitioned = UpdateClaimedTerminalState(
+			db,
+			record.action_id,
+			fmt::format(
+				R"SQL(
 UPDATE {}
 SET
 	state = CASE
@@ -355,10 +408,16 @@ SET
 WHERE action_id = {}
   AND state = 'claimed'
 )SQL",
-																 TableName(), completed_at, completed_at,
-																 Strings::Escape(record.failure_reason), completed_at,
-																 completed_at, record.action_id),
-															 "failed");
+				TableName(),
+				completed_at,
+				completed_at,
+				Strings::Escape(record.failure_reason),
+				completed_at,
+				completed_at,
+				record.action_id
+			),
+			"failed"
+		);
 
 		if (!transitioned.has_value()) {
 			return std::nullopt;
@@ -367,7 +426,8 @@ WHERE action_id = {}
 		return transitioned;
 	}
 
-	static int DeleteByActorId(Database& db, uint32_t actor_id) {
+	static int DeleteByActorId(Database &db, uint32_t actor_id)
+	{
 		return DeleteWhere(db, fmt::format("actor_id = {}", actor_id));
 	}
 
@@ -412,7 +472,9 @@ FOR UPDATE
 	}
 
 private:
-	template <typename RowType> static ActorActionRecord FromRow(RowType& row) {
+	template <typename RowType>
+	static ActorActionRecord FromRow(RowType &row)
+	{
 		return {
 			.action_id = row[0] ? strtoull(row[0], nullptr, 10) : 0,
 			.actor_id = row[1] ? static_cast<uint32_t>(strtoul(row[1], nullptr, 10)) : 0,
@@ -434,19 +496,27 @@ private:
 		};
 	}
 
-	static bool IsValidEnqueueRecord(const EnqueueRecord& record) {
-		if (!record.actor_id || record.source.empty() || record.action_type.empty() || record.action_json.empty() ||
-			record.idempotency_key.empty()) {
+	static bool IsValidEnqueueRecord(const EnqueueRecord &record)
+	{
+		if (
+			!record.actor_id ||
+			record.source.empty() ||
+			record.action_type.empty() ||
+			record.action_json.empty() ||
+			record.idempotency_key.empty()
+		) {
 			return false;
 		}
 
-		if (record.source.size() > kSourceMaxLength || record.action_type.size() > kActionTypeMaxLength ||
-			record.idempotency_key.size() > kIdempotencyKeyMaxLength) {
+		if (
+			record.source.size() > kSourceMaxLength ||
+			record.action_type.size() > kActionTypeMaxLength ||
+			record.idempotency_key.size() > kIdempotencyKeyMaxLength
+		) {
 			return false;
 		}
 
-		if (record.source_metadata_json.has_value() &&
-			!IsValidJson(*record.source_metadata_json, kSourceMetadataJsonMaxLength)) {
+		if (record.source_metadata_json.has_value() && !IsValidJson(*record.source_metadata_json, kSourceMetadataJsonMaxLength)) {
 			return false;
 		}
 
@@ -454,17 +524,21 @@ private:
 			return false;
 		}
 
-		if (record.not_before.has_value() && record.expires_at.has_value() &&
-			*record.expires_at <= *record.not_before) {
+		if (record.not_before.has_value() && record.expires_at.has_value() && *record.expires_at <= *record.not_before) {
 			return false;
 		}
 
 		return true;
 	}
 
-	static bool IsValidJson(const std::string& document, size_t max_length) {
+	static bool IsValidJson(const std::string &document, size_t max_length)
+	{
 		size_t utf8_code_points = 0;
-		if (document.empty() || !TryCountUtf8CodePoints(document, utf8_code_points) || utf8_code_points > max_length) {
+		if (
+			document.empty() ||
+			!TryCountUtf8CodePoints(document, utf8_code_points) ||
+			utf8_code_points > max_length
+		) {
 			return false;
 		}
 
@@ -472,10 +546,16 @@ private:
 		std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
 		Json::Value root;
 		std::string errors;
-		return reader->parse(document.data(), document.data() + document.size(), &root, &errors);
+		return reader->parse(
+			document.data(),
+			document.data() + document.size(),
+			&root,
+			&errors
+		);
 	}
 
-	static bool TryCountUtf8CodePoints(const std::string& document, size_t& count) {
+	static bool TryCountUtf8CodePoints(const std::string &document, size_t &count)
+	{
 		count = 0;
 
 		for (size_t i = 0; i < document.size();) {
@@ -484,19 +564,23 @@ private:
 
 			if ((lead & 0x80) == 0x00) {
 				sequence_length = 1;
-			} else if ((lead & 0xe0) == 0xc0) {
+			}
+			else if ((lead & 0xe0) == 0xc0) {
 				if (lead < 0xc2) {
 					return false;
 				}
 				sequence_length = 2;
-			} else if ((lead & 0xf0) == 0xe0) {
+			}
+			else if ((lead & 0xf0) == 0xe0) {
 				sequence_length = 3;
-			} else if ((lead & 0xf8) == 0xf0) {
+			}
+			else if ((lead & 0xf8) == 0xf0) {
 				if (lead > 0xf4) {
 					return false;
 				}
 				sequence_length = 4;
-			} else {
+			}
+			else {
 				return false;
 			}
 
@@ -509,7 +593,8 @@ private:
 				if ((lead == 0xe0 && second < 0xa0) || (lead == 0xed && second >= 0xa0)) {
 					return false;
 				}
-			} else if (sequence_length == 4) {
+			}
+			else if (sequence_length == 4) {
 				const auto second = static_cast<unsigned char>(document[i + 1]);
 				if ((lead == 0xf0 && second < 0x90) || (lead == 0xf4 && second > 0x8f)) {
 					return false;
@@ -530,9 +615,13 @@ private:
 		return true;
 	}
 
-	static std::optional<ActorActionRecord> UpdateClaimedTerminalState(Database& db, uint64_t action_id,
-																	   const std::string& sql,
-																	   const std::string& expected_state) {
+	static std::optional<ActorActionRecord> UpdateClaimedTerminalState(
+		Database &db,
+		uint64_t action_id,
+		const std::string &sql,
+		const std::string &expected_state
+	)
+	{
 		auto results = db.QueryDatabase(sql);
 		if (!results.Success() || results.RowsAffected() != 1) {
 			return std::nullopt;
@@ -546,11 +635,15 @@ private:
 		return updated;
 	}
 
-	static std::string NullableStringSql(const std::optional<std::string>& value) {
+	static std::string NullableStringSql(const std::optional<std::string> &value)
+	{
 		return value.has_value() ? "'" + Strings::Escape(*value) + "'" : "NULL";
 	}
 
-	static std::string NullableTimeSql(const std::optional<time_t>& value) {
-		return value.has_value() ? "FROM_UNIXTIME(" + std::to_string(*value) + ")" : "NULL";
+	static std::string NullableTimeSql(const std::optional<time_t> &value)
+	{
+		return value.has_value()
+			? "FROM_UNIXTIME(" + std::to_string(*value) + ")"
+			: "NULL";
 	}
 };
