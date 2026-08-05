@@ -176,7 +176,7 @@ void ActorActionExecutor::ProcessOne() {
 			return;
 		}
 		target = entity_list.GetMob(static_cast<uint16_t>(target_id));
-		if (!target || target == bot) {
+		if (!target || target == bot || !target->IsTargetable() || target->IsInvisible(bot)) {
 			reject("illegal_target");
 			return;
 		}

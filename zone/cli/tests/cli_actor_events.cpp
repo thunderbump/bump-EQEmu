@@ -539,6 +539,44 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 				"malformed target entity ids should reject without coercion or exceptions");
 		}
 
+		auto* ineligible_target = fixture.AddHostileNPC({
+			.name = fmt::format("IneligibleTarget{}", run_nonce),
+			.position = glm::vec4(12.0f, 0.0f, 0.0f, 0.0f),
+		});
+		Expect(ineligible_target != nullptr, "target eligibility fixture should create an NPC");
+		Json::Value ineligible_target_body;
+		ineligible_target_body["entity_id"] = ineligible_target->GetID();
+		const auto expect_illegal_target_rejection = [&](const std::string& suffix) {
+			const auto prior_events = ActorEventsRepository::ReadCursor(database, inserted_profile.actor_id, 0, 1000);
+			const auto prior_event_id = prior_events.back().event_id;
+			fixture.OwnedBot()->SetTarget(nullptr);
+			const auto action =
+				enqueue("target", ineligible_target_body, fmt::format("ineligible-target-{}-{}", suffix, run_nonce));
+			executor.ProcessOne();
+			const auto terminal = ActorActionQueueRepository::FindOne(database, action.action_id);
+			ExpectEqual(terminal.state, std::string("failed"), "ineligible queued target should be rejected");
+			ExpectEqual(terminal.failure_reason, std::optional<std::string>("illegal_target"),
+						"ineligible queued target should record the rejection reason");
+			Expect(fixture.OwnedBot()->GetTarget() == nullptr,
+				   "ineligible queued target must not mutate actor target state");
+			const auto outcomes =
+				ActorEventsRepository::ReadCursor(database, inserted_profile.actor_id, prior_event_id, 8);
+			ExpectEqual(outcomes.size(), static_cast<size_t>(1), "ineligible target should emit one rejection event");
+			ExpectEqual(outcomes[0].event_type, std::string("action_rejected"),
+						"ineligible target outcome should be a rejection");
+			ExpectEqual(ParseJson(outcomes[0].event_json)["action_id"].asUInt64(), action.action_id,
+						"ineligible target rejection should correlate action_id");
+		};
+
+		ineligible_target->SetTargetable(false);
+		expect_illegal_target_rejection("untargetable");
+		ineligible_target->SetTargetable(true);
+		ineligible_target->SetInvisible(255);
+		Expect(ineligible_target->IsInvisible(fixture.OwnedBot()),
+			   "invisible target fixture should be outside actor perception");
+		expect_illegal_target_rejection("invisible");
+		ineligible_target->SetInvisible(0);
+
 		const auto rollback_action = enqueue("stand", stand_body, fmt::format("rollback-{}", run_nonce));
 		const auto rollback_claim = ActorActionQueueRepository::ClaimNextEligibleForZone(
 			database, {
