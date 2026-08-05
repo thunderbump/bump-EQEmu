@@ -3,10 +3,12 @@
 #include "common/json/json.h"
 #include "common/repositories/base/base_actor_action_queue_repository.h"
 
+#include <algorithm>
 #include <ctime>
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 class ActorActionQueueRepository : public BaseActorActionQueueRepository {
 public:
@@ -37,6 +39,29 @@ public:
 		std::optional<uint32_t> actor_id;
 		std::string             claimed_by;
 		time_t                  now = 0;
+	};
+	struct ZoneClaimRequest {
+		uint32_t actor_id = 0;
+		uint32_t bot_id = 0;
+		uint32_t owner_character_id = 0;
+		uint32_t zone_id = 0;
+		uint32_t instance_id = 0;
+		uint32_t entity_id = 0;
+		std::string claimed_by;
+		time_t now = 0;
+		uint32_t freshness_seconds = 30;
+	};
+	struct ExecutionClaimRequest {
+		uint64_t action_id = 0;
+		uint32_t actor_id = 0;
+		uint32_t bot_id = 0;
+		uint32_t owner_character_id = 0;
+		uint32_t zone_id = 0;
+		uint32_t instance_id = 0;
+		uint32_t entity_id = 0;
+		std::string claimed_by;
+		time_t now = 0;
+		uint32_t freshness_seconds = 30;
 	};
 
 	struct CompletionRecord {
@@ -211,6 +236,71 @@ LIMIT 1
 		return claimed;
 	}
 
+	static std::vector<ActorActionRecord> FindEligibleForZone(Database& db, uint32_t zone_id, uint32_t instance_id,
+															  time_t now, uint32_t limit = 32, uint32_t offset = 0) {
+		limit = std::clamp<uint32_t>(limit, 1, 256);
+		auto results = db.QueryDatabase(fmt::format(R"SQL(
+SELECT q.action_id, q.actor_id, q.source, q.source_metadata_json, q.action_type, q.action_json,
+       q.idempotency_key, q.state, UNIX_TIMESTAMP(q.not_before), UNIX_TIMESTAMP(q.expires_at),
+       q.claimed_by, UNIX_TIMESTAMP(q.claimed_at), UNIX_TIMESTAMP(q.completed_at), q.failure_reason,
+       q.result_json, UNIX_TIMESTAMP(q.created_at), UNIX_TIMESTAMP(q.updated_at)
+FROM actor_action_queue q
+JOIN actor_profiles p ON p.actor_id = q.actor_id
+JOIN actor_status s ON s.actor_id = q.actor_id
+WHERE q.state = 'pending'
+  AND p.enabled = 1 AND p.actor_type = 'autonomous_actor' AND p.actor_substrate = 'bot'
+  AND p.bot_id IS NOT NULL AND p.owner_character_id IS NOT NULL
+  AND s.zone_id = {} AND COALESCE(s.instance_id, 0) = {} AND s.entity_id IS NOT NULL
+  AND s.state IN ('active', 'idle') AND s.heartbeat_at >= FROM_UNIXTIME({} - 30)
+  AND (q.not_before IS NULL OR q.not_before <= FROM_UNIXTIME({}))
+  AND (q.expires_at IS NULL OR q.expires_at > FROM_UNIXTIME({}))
+ORDER BY COALESCE(q.not_before, FROM_UNIXTIME(0)), q.action_id LIMIT {} OFFSET {}
+)SQL",
+													zone_id, instance_id, now, now, now, limit, offset));
+		std::vector<ActorActionRecord> actions;
+		if (!results.Success()) {
+			return actions;
+		}
+		actions.reserve(results.RowCount());
+		for (auto row = results.begin(); row != results.end(); ++row) {
+			actions.emplace_back(FromRow(row));
+		}
+		return actions;
+	}
+
+	static std::optional<ActorActionRecord> ClaimNextEligibleForZone(Database& db, ZoneClaimRequest request) {
+		if (!request.actor_id || !request.bot_id || !request.owner_character_id || !request.zone_id ||
+			!request.entity_id || request.claimed_by.empty() || request.claimed_by.size() > kClaimedByMaxLength) {
+			return std::nullopt;
+		}
+		const auto now = request.now > 0 ? request.now : std::time(nullptr);
+		const auto freshness = std::clamp<uint32_t>(request.freshness_seconds, 1, 3600);
+		auto results = db.QueryDatabase(fmt::format(R"SQL(
+UPDATE actor_action_queue q
+JOIN actor_profiles p ON p.actor_id = q.actor_id
+JOIN actor_status s ON s.actor_id = q.actor_id
+SET q.action_id = LAST_INSERT_ID(q.action_id), q.state = 'claimed', q.claimed_by = '{}',
+    q.claimed_at = FROM_UNIXTIME({}), q.updated_at = FROM_UNIXTIME({})
+WHERE q.state = 'pending'
+  AND q.actor_id = {}
+  AND p.enabled = 1 AND p.actor_type = 'autonomous_actor' AND p.actor_substrate = 'bot'
+  AND p.bot_id = {} AND p.owner_character_id = {}
+  AND s.zone_id = {} AND COALESCE(s.instance_id, 0) = {} AND s.entity_id = {}
+  AND s.state IN ('active', 'idle') AND s.heartbeat_at >= FROM_UNIXTIME({} - {})
+  AND (q.not_before IS NULL OR q.not_before <= FROM_UNIXTIME({}))
+  AND (q.expires_at IS NULL OR q.expires_at > FROM_UNIXTIME({}))
+ORDER BY COALESCE(q.not_before, FROM_UNIXTIME(0)), q.action_id LIMIT 1
+)SQL",
+													Strings::Escape(request.claimed_by), now, now, request.actor_id,
+													request.bot_id, request.owner_character_id, request.zone_id,
+													request.instance_id, request.entity_id, now, freshness, now, now));
+		if (!results.Success() || results.RowsAffected() != 1 || !results.LastInsertedID()) {
+			return std::nullopt;
+		}
+		const auto claimed = FindOne(db, results.LastInsertedID());
+		return claimed.action_id ? std::optional<ActorActionRecord>(claimed) : std::nullopt;
+	}
+
 	static int ExpireDue(Database &db, time_t now, std::optional<uint32_t> actor_id = std::nullopt)
 	{
 		if (now <= 0) {
@@ -340,6 +430,46 @@ WHERE action_id = {}
 	static int DeleteByActorId(Database &db, uint32_t actor_id)
 	{
 		return DeleteWhere(db, fmt::format("actor_id = {}", actor_id));
+	}
+
+	static bool ReleaseClaim(Database& db, uint64_t action_id, const std::string& claimed_by) {
+		if (!action_id || claimed_by.empty() || claimed_by.size() > kClaimedByMaxLength) {
+			return false;
+		}
+		auto results = db.QueryDatabase(fmt::format(
+			"UPDATE {} SET state = 'pending', claimed_by = NULL, claimed_at = NULL "
+			"WHERE action_id = {} AND state = 'claimed' AND claimed_by = '{}'",
+			TableName(), action_id, Strings::Escape(claimed_by)));
+		return results.Success() && results.RowsAffected() == 1;
+	}
+
+	static bool LockClaimForExecution(Database& db, ExecutionClaimRequest request) {
+		if (!request.action_id || !request.actor_id || !request.bot_id || !request.owner_character_id ||
+			!request.zone_id || !request.entity_id || request.claimed_by.empty() ||
+			request.claimed_by.size() > kClaimedByMaxLength || request.now <= 0) {
+			return false;
+		}
+		const auto freshness = std::clamp<uint32_t>(request.freshness_seconds, 1, 3600);
+		auto results =
+			db.QueryDatabase(fmt::format(R"SQL(
+SELECT q.action_id
+FROM actor_action_queue q
+JOIN actor_profiles p ON p.actor_id = q.actor_id
+JOIN actor_status s ON s.actor_id = q.actor_id
+WHERE q.action_id = {}
+  AND q.actor_id = {}
+  AND q.state = 'claimed' AND q.claimed_by = '{}'
+  AND p.enabled = 1 AND p.actor_type = 'autonomous_actor' AND p.actor_substrate = 'bot'
+  AND p.bot_id = {} AND p.owner_character_id = {}
+  AND s.zone_id = {} AND COALESCE(s.instance_id, 0) = {} AND s.entity_id = {}
+  AND s.state IN ('active', 'idle') AND s.heartbeat_at >= FROM_UNIXTIME({} - {})
+  AND (q.expires_at IS NULL OR q.expires_at > FROM_UNIXTIME({}))
+FOR UPDATE
+)SQL",
+										 request.action_id, request.actor_id, Strings::Escape(request.claimed_by),
+										 request.bot_id, request.owner_character_id, request.zone_id,
+										 request.instance_id, request.entity_id, request.now, freshness, request.now));
+		return results.Success() && results.RowCount() == 1;
 	}
 
 private:
