@@ -3,6 +3,7 @@
 #include "common/json/json.h"
 #include "common/repositories/base/base_actor_action_queue_repository.h"
 
+#include <algorithm>
 #include <ctime>
 #include <memory>
 #include <optional>
