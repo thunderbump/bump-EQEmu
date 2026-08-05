@@ -433,6 +433,21 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 				.size(),
 			static_cast<size_t>(0), "claim-to-execution expiry should not emit a contradictory lifecycle event");
 
+		const auto lock_wait_expiring =
+			enqueue("stand", stand_body, fmt::format("lock-wait-expiring-{}", run_nonce), now + 1);
+		int lock_wait_clock_read = 0;
+		ActorActionExecutor lock_wait_executor(database, zone->GetZoneID(), zone->GetInstanceID(),
+											   zone->GetZoneServerId(),
+											   [&]() { return lock_wait_clock_read++ < 2 ? now : now + 1; });
+		lock_wait_executor.ProcessOne();
+		ExpectEqual(ActorActionQueueRepository::FindOne(database, lock_wait_expiring.action_id).state,
+					std::string("expired"), "execution lock wait must not allow post-expiry completion");
+		Expect(fixture.OwnedBot()->IsSitting(), "expiry while acquiring the execution lock must not mutate gameplay");
+		ExpectEqual(
+			ActorEventsRepository::ReadCursor(database, inserted_profile.actor_id, rejected_events[0].event_id, 8)
+				.size(),
+			static_cast<size_t>(0), "execution-lock expiry should not emit a contradictory lifecycle event");
+
 		const auto expired = enqueue("stand", stand_body, fmt::format("expired-{}", run_nonce), now - 1);
 		executor.ProcessOne();
 		ExpectEqual(ActorActionQueueRepository::FindOne(database, expired.action_id).state, std::string("expired"),

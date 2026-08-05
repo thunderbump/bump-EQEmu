@@ -177,9 +177,9 @@ void ActorActionExecutor::ProcessOne() {
 	result["applied"] = true;
 	Json::StreamWriterBuilder writer;
 	writer["indentation"] = "";
-	const auto applied_at = clock_();
-	if (action->expires_at.has_value() && *action->expires_at <= applied_at) {
-		ActorActionQueueRepository::ExpireDue(database_, applied_at, action->actor_id);
+	const auto lock_requested_at = clock_();
+	if (action->expires_at.has_value() && *action->expires_at <= lock_requested_at) {
+		ActorActionQueueRepository::ExpireDue(database_, lock_requested_at, action->actor_id);
 		return;
 	}
 	database_.TransactionBegin();
@@ -193,11 +193,20 @@ void ActorActionExecutor::ProcessOne() {
 															   .instance_id = instance_id_,
 															   .entity_id = *status->entity_id,
 															   .claimed_by = claimant_,
-															   .now = applied_at,
+															   .now = lock_requested_at,
 														   })) {
 		database_.TransactionRollback();
-		ActorActionQueueRepository::ExpireDue(database_, applied_at, action->actor_id);
+		ActorActionQueueRepository::ExpireDue(database_, lock_requested_at, action->actor_id);
 		ActorActionQueueRepository::ReleaseClaim(database_, action->action_id, claimant_);
+		return;
+	}
+	const auto applied_at = clock_();
+	if (action->expires_at.has_value() && *action->expires_at <= applied_at) {
+		const auto expired = ActorActionQueueRepository::ExpireDue(database_, applied_at, action->actor_id) > 0;
+		if (!expired || !database_.TransactionCommit().Success()) {
+			database_.TransactionRollback();
+			ActorActionQueueRepository::ReleaseClaim(database_, action->action_id, claimant_);
+		}
 		return;
 	}
 	if (action->action_type == "target") {
