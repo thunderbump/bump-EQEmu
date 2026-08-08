@@ -38,6 +38,7 @@ public:
 		TEST_ADD(PressureAwareHealingTest::FreshIncomingDamageSuppressesHoTSustain);
 		TEST_ADD(PressureAwareHealingTest::ExpiredIncomingDamageAllowsHoTSustain);
 		TEST_ADD(PressureAwareHealingTest::HealingAndNonPositiveDamageDoNotChangePressure);
+		TEST_ADD(PressureAwareHealingTest::ClearingIncomingDamageRemovesPressure);
 		TEST_ADD(PressureAwareHealingTest::EnvironmentalAndSelfDamageAreExcluded);
 		TEST_ADD(PressureAwareHealingTest::DisabledSettingsDoNotReportActivePressure);
 		TEST_ADD(PressureAwareHealingTest::RegularHealRemainsEligibleWhenDangerWindowIsSafe);
@@ -264,6 +265,17 @@ private:
 		PressureAwareHealing::RecordCombatDamage(pressure, -250, 1100);
 
 		TEST_ASSERT(!PressureAwareHealing::HasActiveDamagePressure(pressure, settings, 1200));
+	}
+
+	void ClearingIncomingDamageRemovesPressure()
+	{
+		PressureAwareHealing::IncomingDamagePressure pressure{};
+		PressureAwareHealing::RecordCombatDamage(pressure, 250, 1000);
+
+		PressureAwareHealing::ClearDamagePressure(pressure);
+
+		TEST_ASSERT_EQUALS(pressure.damage, 0);
+		TEST_ASSERT_EQUALS(pressure.updated_at_ms, 0);
 	}
 
 	void EnvironmentalAndSelfDamageAreExcluded()

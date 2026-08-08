@@ -429,6 +429,17 @@ bool OwnedBotActorFixture::RecordIncomingDamagePressure(Mob *mob, int64_t damage
 		mob->GetIncomingDamagePressure().updated_at_ms == current_time_ms;
 }
 
+bool OwnedBotActorFixture::ClearIncomingDamagePressure(Mob *mob)
+{
+	if (!mob) {
+		return false;
+	}
+
+	mob->ClearIncomingDamagePressure();
+	return mob->GetIncomingDamagePressure().damage == 0 &&
+		mob->GetIncomingDamagePressure().updated_at_ms == 0;
+}
+
 void OwnedBotActorFixture::RefreshPerception(Bot *actor)
 {
 	if (actor) {

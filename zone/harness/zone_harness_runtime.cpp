@@ -1224,6 +1224,9 @@ OwnedBotPressureHealingScenarioResult ZoneHarnessRuntime::RunOwnedBotPressureHea
 		}
 
 		for (int64_t damage = 50; damage <= 5000; damage += 50) {
+			if (!fixture.ClearIncomingDamagePressure(heal_target)) {
+				continue;
+			}
 			const uint32_t sample_time_ms = ::Timer::GetCurrentTime();
 			if (!fixture.RecordIncomingDamagePressure(heal_target, damage, sample_time_ms)) {
 				continue;
@@ -1266,6 +1269,12 @@ OwnedBotPressureHealingScenarioResult ZoneHarnessRuntime::RunOwnedBotPressureHea
 	for (uint32_t tick = 0; tick < result.max_ticks; ++tick) {
 		if (!booted || !zone || !is_zone_loaded || shutdown_requested) {
 			result.reason = "zone_unavailable_during_scenario";
+			break;
+		}
+
+		if (!fixture.ClearIncomingDamagePressure(heal_target) ||
+			!fixture.RecordIncomingDamagePressure(heal_target, result.pressure_damage, ::Timer::GetCurrentTime())) {
+			result.reason = "unable_to_refresh_incoming_damage_pressure";
 			break;
 		}
 

@@ -100,6 +100,7 @@ public:
 	void RefreshOwnedBotPerception();
 	bool SetCurrentHPPercent(Mob *mob, uint8_t hp_percent);
 	bool RecordIncomingDamagePressure(Mob *mob, int64_t damage, uint32_t current_time_ms);
+	bool ClearIncomingDamagePressure(Mob *mob);
 	void RefreshPerception(Bot *bot);
 	void RefreshPartyPerception();
 	void AssignBotID(Bot *bot, uint32_t bot_id);

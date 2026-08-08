@@ -69,6 +69,11 @@ void RecordCombatDamage(IncomingDamagePressure &pressure, int64_t damage, uint32
 	pressure.updated_at_ms = current_time_ms;
 }
 
+void ClearDamagePressure(IncomingDamagePressure &pressure)
+{
+	pressure = {};
+}
+
 bool HasActiveDamagePressure(
 	const IncomingDamagePressure &pressure,
 	const Settings &settings,
