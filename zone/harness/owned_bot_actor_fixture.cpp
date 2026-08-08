@@ -423,8 +423,9 @@ bool OwnedBotActorFixture::RecordIncomingDamagePressure(Mob *mob, int64_t damage
 		return false;
 	}
 
+	const auto previous_damage = mob->GetIncomingDamagePressure().damage;
 	mob->RecordIncomingDamagePressure(damage, current_time_ms);
-	return mob->GetIncomingDamagePressure().damage == damage &&
+	return mob->GetIncomingDamagePressure().damage == previous_damage + damage &&
 		mob->GetIncomingDamagePressure().updated_at_ms == current_time_ms;
 }
 

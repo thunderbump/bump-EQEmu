@@ -1104,6 +1104,7 @@ OwnedBotPressureHealingScenarioResult ZoneHarnessRuntime::RunOwnedBotPressureHea
 	uint32_t sleep_ms
 )
 {
+	std::lock_guard scenario_lock(scenario_mutex);
 	std::unique_lock lock(mutex);
 
 	OwnedBotPressureHealingScenarioResult result{
