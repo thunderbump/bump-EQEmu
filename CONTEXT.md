@@ -136,6 +136,10 @@ _Avoid_: AI actor, test actor, entity, mob
 A party with one **Autonomous Actor** as its gameplay-intent source and ordinary owned bots filling the remaining group roles.
 _Avoid_: Actor group, autonomous group, multi-actor party
 
+**Actor Live Slot**:
+Configurable permission for one **Actor-led Party** to run at live-zone fidelity; this is separate from permission to boot or retain a zone process.
+_Avoid_: Active zone slot, permanent actor process
+
 **Actor Objective**:
 A persistent desired state advanced by observing **Actor Perception** and **Actor Events**, requesting one bounded **Actor Action** at a time, and evaluating its postcondition before choosing the next step.
 _Avoid_: Goal command, queued plan, action script
@@ -187,6 +191,18 @@ _Avoid_: Universal objective timeout, wall-clock failure, action expiry
 **Objective Viability Allowance**:
 The bounded allowance for replanning, danger interruption, and death recovery before an **Actor Objective** is abandoned as no longer worthwhile.
 _Avoid_: Action retry count, actor health, global failure limit
+
+**Believable Downtime**:
+Persistent, lower-cost actor activity that maintains a plausible authored cycle while an **Actor-led Party** is not live, such as city recovery, resupply, trading, or coarse route progress.
+_Avoid_: Despawn, random teleport, frozen actor
+
+**Actor Resolution Zone Reserve**:
+A configurable portion of the active-zone budget, initially one zone, available to resolve one otherwise-deferred consequential actor action without displacing a player-visible zone.
+_Avoid_: Actor-only zone, permanently booted actor zone, guaranteed spare capacity
+
+**Materialization Reconciliation**:
+Choosing a plausible live placement and state for a coarsely progressing **Actor-led Party** when its zone becomes observable independently, such as when a player zones in.
+_Avoid_: Teleport catch-up, spawn guess, forced arrival
 
 **Actor Death Recovery**:
 The conserved rematerialization of a defeated **Actor-led Party** at its configured bind or home anchor, preserving possessions without a lootable Actor corpse or death penalty.
@@ -262,6 +278,16 @@ _Avoid_: Autonomous Actor runtime, test actor system, production sidecar
 - A first-slice Actor begins with an empty Actor Wallet and explicitly sourced equipped gear; replaced provisioned gear becomes ordinary **Actor Holdings**, and no asset replenishes automatically.
 - The first **Actor Holdings Capacity** is eight flat item-stack slots; bags, nested containers, weight, and encumbrance require later evidence.
 - Initial Actor item acquisition covers ordinary single-instance equipment; corpse coin and broader item classes remain unavailable until their independent custody and authority rules are proven.
+- The first world-population slice should use one **Autonomous Actor** per **Actor-led Party** rather than requiring every party member to plan independently.
+- Independently planning **Autonomous Actors** may form temporary parties later, after runtime evidence justifies the added coordination cost.
+- The first slice should use a configurable roster of four persistent **Actor-led Parties**, with one **Actor Live Slot** per player-present zone and an initial configurable global soft limit of two **Actor Live Slots**.
+- Player-visible population takes activation priority over off-screen consequential objectives; combat, loot, trade, and death must defer until authoritative execution is available rather than being invented by coarse progress.
+- Under capacity pressure, reclaim **Actor Live Slots** from unobserved city downtime first, then unobserved travel or hunting at a safe checkpoint; never dematerialize a player-visible party or one resolving a consequential action, and age deferred work to prevent starvation.
+- An unobserved party has an initial configurable two-minute live grace period, but capacity pressure may reclaim it sooner at a safe boundary.
+- **Believable Downtime** should follow a persistent city recovery/resupply, route travel, objective, and return cycle with configurable minimum dwell times. Begin with a tunable city-heavy weighting near half the roster rather than a hard city quota, then compare balanced and objective-heavy strategies using feel and runtime telemetry.
+- Active-zone capacity and **Actor Live Slots** are separate controls. Begin with an **Actor Resolution Zone Reserve** of one, do not keep its zone booted unnecessarily, never displace a player zone, and defer the actor action when the reserve cannot be used.
+- A nearby player implies that the player's zone is already live; an **Actor-led Party** becoming visible there does not require booting another zone process.
+- **Materialization Reconciliation** must preserve already-conserved actor state and must not invent combat, loot, death, trade, or currency outcomes merely to place the party in the live zone.
 - A player interaction can produce zero or more **Authored Dialogue** responses.
 - A player interaction can produce at most one **Fallback Dialogue** response.
 - The first **Fallback Dialogue** iteration applies only to **Targeted Say**.
