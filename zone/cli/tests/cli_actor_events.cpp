@@ -338,23 +338,30 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 		stale_writer["indentation"] = "";
 		Json::Value stale_metadata;
 		stale_metadata["expected_event_id"] = Json::UInt64(0);
-		const auto enqueue_ineligible = [&](bool enabled, std::optional<uint32_t> status_zone_id,
+		const auto enqueue_ineligible = [&](Bot* materialized_bot, bool enabled, std::optional<uint32_t> status_zone_id,
 											const std::string& suffix, time_t heartbeat_at) {
 			ActorProfilesRepository::ActorProfileRecord ineligible_profile{};
 			ineligible_profile.actor_type = "autonomous_actor";
 			ineligible_profile.actor_substrate = "bot";
 			ineligible_profile.bot_id =
 				next_free_bot_id(static_cast<uint32_t>(cleanup.reserved_owner_character_id + suffix.size()));
+			if (materialized_bot) {
+				fixture.AssignBotID(materialized_bot, *ineligible_profile.bot_id);
+			}
 			ineligible_profile.owner_character_id = reserved_owner.character_id;
 			ineligible_profile.enabled = enabled;
 			ineligible_profile = ActorProfilesRepository::UpsertBotBackedProfile(database, ineligible_profile);
 			cleanup.TrackActorId(ineligible_profile.actor_id);
 			if (status_zone_id.has_value()) {
+				Expect(materialized_bot != nullptr,
+					   "disabled, stale, and moved actor fixtures should have a matching materialized bot");
+				Expect(entity_list.GetBotByBotID(*ineligible_profile.bot_id) == materialized_bot,
+					   "disabled, stale, and moved actor profiles should identify their materialized bot");
 				ActorStatusRepository::UpsertOne(database, {
 															   .actor_id = ineligible_profile.actor_id,
 															   .zone_id = *status_zone_id,
 															   .instance_id = zone->GetInstanceID(),
-															   .entity_id = fixture.OwnedBot()->GetID(),
+															   .entity_id = materialized_bot->GetID(),
 															   .state = "active",
 															   .heartbeat_at = heartbeat_at,
 														   });
@@ -370,10 +377,28 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 							  .created_at = now,
 						  });
 		};
-		const auto missing_actor = enqueue_ineligible(true, std::nullopt, "missing-live-actor", now);
-		const auto disabled_actor = enqueue_ineligible(false, zone->GetZoneID(), "disabled-actor", now);
-		const auto stale_actor = enqueue_ineligible(true, zone->GetZoneID(), "stale-actor", now - 31);
-		const auto moved_actor = enqueue_ineligible(true, zone->GetZoneID() + 1, "moved-actor", now);
+		EQ::ZoneHarness::OwnedBotActorFixture disabled_fixture;
+		EQ::ZoneHarness::OwnedBotActorFixture stale_fixture;
+		EQ::ZoneHarness::OwnedBotActorFixture moved_fixture;
+		const auto set_up_ineligible_fixture = [&](EQ::ZoneHarness::OwnedBotActorFixture& ineligible_fixture,
+												   const std::string& suffix) {
+			return ineligible_fixture.SetUpOwnedBotSolo({
+				.owner_name = fmt::format("{}{}", reserved_owner.name, suffix),
+				.owner_character_id = reserved_owner.character_id,
+				.bot_name = fmt::format("{}{}", suffix, run_nonce),
+			});
+		};
+		Expect(set_up_ineligible_fixture(disabled_fixture, "Disabled") &&
+				   set_up_ineligible_fixture(stale_fixture, "Stale") &&
+				   set_up_ineligible_fixture(moved_fixture, "Moved"),
+			   "ineligible actor fixtures should create materialized bots");
+		auto* disabled_bot = disabled_fixture.OwnedBot();
+		auto* stale_bot = stale_fixture.OwnedBot();
+		auto* moved_bot = moved_fixture.OwnedBot();
+		const auto missing_actor = enqueue_ineligible(nullptr, true, std::nullopt, "missing-live-actor", now);
+		const auto disabled_actor = enqueue_ineligible(disabled_bot, false, zone->GetZoneID(), "disabled-actor", now);
+		const auto stale_actor = enqueue_ineligible(stale_bot, true, zone->GetZoneID(), "stale-actor", now - 31);
+		const auto moved_actor = enqueue_ineligible(moved_bot, true, zone->GetZoneID() + 1, "moved-actor", now);
 		ActorProfilesRepository::ActorProfileRecord stale_profile{};
 		stale_profile.actor_type = "autonomous_actor";
 		stale_profile.actor_substrate = "bot";
