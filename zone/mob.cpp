@@ -537,6 +537,11 @@ void Mob::RecordIncomingDamagePressure(int64 damage, uint32 current_time_ms)
 	PressureAwareHealing::RecordCombatDamage(incoming_damage_pressure, damage, current_time_ms);
 }
 
+void Mob::ClearIncomingDamagePressure()
+{
+	PressureAwareHealing::ClearDamagePressure(incoming_damage_pressure);
+}
+
 const PressureAwareHealing::IncomingDamagePressure &Mob::GetIncomingDamagePressure() const
 {
 	return incoming_damage_pressure;

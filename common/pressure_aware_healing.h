@@ -46,6 +46,7 @@ uint16_t DisabledModeSpellType(uint16_t current_spell_type, const Settings &sett
 uint16_t SustainHoTSpellTypeFor(uint16_t current_spell_type);
 bool ShouldRecordCombatDamage(int64_t damage, bool has_attacker, bool is_self_inflicted);
 void RecordCombatDamage(IncomingDamagePressure &pressure, int64_t damage, uint32_t current_time_ms);
+void ClearDamagePressure(IncomingDamagePressure &pressure);
 bool HasActiveDamagePressure(
 	const IncomingDamagePressure &pressure,
 	const Settings &settings,

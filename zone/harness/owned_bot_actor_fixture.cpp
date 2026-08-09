@@ -293,6 +293,26 @@ bool OwnedBotActorFixture::SetUpOwnedBotParty(const OwnedBotPartyConfig &config)
 	return true;
 }
 
+Bot *OwnedBotActorFixture::AddOwnedGroupBot(const OwnedBotActorConfig &config, const glm::vec4 &position)
+{
+	if (!owner || !group) {
+		return nullptr;
+	}
+
+	auto *added_bot = CreateOwnedBot(config);
+	if (!added_bot) {
+		return nullptr;
+	}
+	added_bot->GMMove(position.x, position.y, position.z, position.w);
+
+	if (!group->AddMember(added_bot)) {
+		entity_list.RemoveMob(added_bot->GetID());
+		return nullptr;
+	}
+
+	return added_bot;
+}
+
 NPC *OwnedBotActorFixture::AddHostileNPC(const HostileNpcConfig &config)
 {
 	auto *npc_type = content_db.LoadNPCTypesData(754008);
@@ -358,10 +378,24 @@ void OwnedBotActorFixture::EngageHostileWithParty(NPC *hostile, int32_t owner_ha
 	}
 }
 
+void OwnedBotActorFixture::EngageHostileWithGroupMember(NPC *hostile, Mob *member, int32_t hate)
+{
+	if (hostile && member && hate > 0) {
+		hostile->AddToHateList(member, hate, 1, false);
+	}
+}
+
 void OwnedBotActorFixture::OwnedBotEngages(Mob *hostile, int32_t hate)
 {
 	if (bot && hostile && hate > 0) {
 		bot->AddToHateList(hostile, hate, 1, false);
+	}
+}
+
+void OwnedBotActorFixture::GroupMemberEngages(Mob *member, Mob *hostile, int32_t hate)
+{
+	if (member && hostile && hate > 0) {
+		member->AddToHateList(hostile, hate, 1, false);
 	}
 }
 
@@ -370,6 +404,40 @@ void OwnedBotActorFixture::RefreshOwnedBotPerception()
 	if (bot) {
 		entity_list.ScanCloseMobs(bot);
 	}
+}
+
+bool OwnedBotActorFixture::SetCurrentHPPercent(Mob *mob, uint8_t hp_percent)
+{
+	if (!mob || hp_percent == 0 || hp_percent > 100) {
+		return false;
+	}
+
+	const int64_t new_hp = std::max<int64_t>(1, (mob->GetMaxHP() * hp_percent) / 100);
+	mob->SetHP(new_hp);
+	return mob->GetHP() == new_hp;
+}
+
+bool OwnedBotActorFixture::RecordIncomingDamagePressure(Mob *mob, int64_t damage, uint32_t current_time_ms)
+{
+	if (!mob || damage <= 0) {
+		return false;
+	}
+
+	const auto previous_damage = mob->GetIncomingDamagePressure().damage;
+	mob->RecordIncomingDamagePressure(damage, current_time_ms);
+	return mob->GetIncomingDamagePressure().damage == previous_damage + damage &&
+		mob->GetIncomingDamagePressure().updated_at_ms == current_time_ms;
+}
+
+bool OwnedBotActorFixture::ClearIncomingDamagePressure(Mob *mob)
+{
+	if (!mob) {
+		return false;
+	}
+
+	mob->ClearIncomingDamagePressure();
+	return mob->GetIncomingDamagePressure().damage == 0 &&
+		mob->GetIncomingDamagePressure().updated_at_ms == 0;
 }
 
 void OwnedBotActorFixture::RefreshPerception(Bot *actor)
