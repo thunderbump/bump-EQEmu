@@ -1,5 +1,13 @@
 # Autonomous Actor Spikes
 
+- `populated-world-existing-work-reconciliation.md`
+  - `central-dcq7.1` dated reconciliation of the merged actor substrate and the remaining populated-world execution work.
+- `first-living-world-two-zone-route.md`
+  - `central-dcq7.2` decision selecting unchanged Rivervale and Misty Thicket for the first bounded living-world route.
+- `actor-runtime-cost-baseline.md`
+  - `central-dcq7.3` dated host/database baseline and the measurement gaps that blocked an initial Actor-led Party budget.
+- `bounded-objective-gameplay-seams.md`
+  - `central-dcq7.6` mapping from persistent Actor Objectives to bounded ordinary-gameplay actions and required evidence.
 - `headless-client-viability-spike.md`
   - `central-lhy.5` spike on whether a synthetic headless `Client` can safely perform a bounded player-like action in the **Zone Harness** without an `EQStream` session or normal login lifecycle.
 - `actor-event-perception-expansion-spike.md`
