@@ -586,6 +586,43 @@ EOF
   assert_contains "$(cat "$payload_file")" '~/code/scripts/lib/prepare-zone-cli-runtime.sh "$runtime"'
 }
 
+test_zone_cli_runtime_rejects_unsafe_paths_before_deletion() {
+  local fixture_repo fixture_parent fake_bin fake_home victim runtime marker unsafe_runtime status output
+  local -a unsafe_runtimes
+  make_fixture fixture_repo fixture_parent
+  fake_bin="$(mktemp -d "$tmp_root/fake-runtime-path-bin.XXXXXX")"
+  fake_home="$tmp_root/fake-runtime-path-home"
+  victim="$tmp_root/victim-runtime"
+  runtime="/tmp/../${victim#/}"
+  marker="$tmp_root/mysqladmin-called"
+  unsafe_runtimes=(
+    "$runtime"
+    "/tmp/${tmp_root#/tmp/}/nested-runtime"
+    ""
+    "/tmp/-runtime"
+    "/tmp/.hidden-runtime"
+    "/tmp/name.runtime"
+    "/tmp/name runtime"
+  )
+  mkdir -p "$fake_home/server/shared" "$fake_home/server/plugins" "$fake_home/server/lua_modules" "$victim"
+  printf '%s\n' '{}' >"$fake_home/server/eqemu_config.json"
+  printf '%s\n' 'must survive' >"$victim/sentinel"
+
+  printf '#!/usr/bin/env bash\n: >"%s"\nexit 0\n' "$marker" >"$fake_bin/mysqladmin"
+  printf '#!/usr/bin/env bash\nprintf "{}\\n"\n' >"$fake_bin/jq"
+  chmod +x "$fake_bin/mysqladmin" "$fake_bin/jq"
+
+  for unsafe_runtime in "${unsafe_runtimes[@]}"; do
+    capture_run status output env HOME="$fake_home" EQEMU_DB_PASSWORD=fixture PATH="$fake_bin:/usr/bin:/bin" \
+      "$fixture_repo/scripts/lib/prepare-zone-cli-runtime.sh" "$unsafe_runtime"
+    [[ "$status" -eq 2 ]] || return 1
+    assert_contains "$output" "zone CLI runtime must be one safe /tmp basename ending in -runtime"
+  done
+
+  [[ ! -e "$marker" ]] || return 1
+  [[ -f "$victim/sentinel" ]] || return 1
+}
+
 test_help_mentions_stack_and_dry_run() {
   local fixture_repo fixture_parent status output script
   make_fixture fixture_repo fixture_parent
@@ -765,6 +802,7 @@ run_test "zone harness command exercises headless target twice with cursor clean
 run_test "validate tier3-harness delegates to smoke script" test_validate_tier3_harness_delegates_to_smoke_script
 run_test "actor queue Tier 3 dry run classifies mutation and cleanup" test_actor_queue_tier3_dry_run_classifies_mutation_and_cleanup
 run_test "zone CLI profiles share runtime setup" test_zone_cli_profiles_share_runtime_setup
+run_test "zone CLI runtime rejects unsafe paths before deletion" test_zone_cli_runtime_rejects_unsafe_paths_before_deletion
 run_test "help mentions stack and dry-run" test_help_mentions_stack_and_dry_run
 run_test "dry-run prints route and skips Docker" test_dry_run_prints_route_and_skips_docker
 run_test "tier2-readonly dry-run describes one-off container" test_tier2_readonly_dry_run_describes_single_one_off_container

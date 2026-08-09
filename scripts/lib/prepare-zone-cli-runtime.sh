@@ -2,8 +2,8 @@
 set -euo pipefail
 
 runtime="${1:-}"
-if [[ "$runtime" != /tmp/*-runtime ]]; then
-  printf 'error: zone CLI runtime must be a named /tmp/*-runtime directory\n' >&2
+if [[ ! "$runtime" =~ ^/tmp/[A-Za-z0-9][A-Za-z0-9_-]*-runtime$ ]]; then
+  printf 'error: zone CLI runtime must be one safe /tmp basename ending in -runtime\n' >&2
   exit 2
 fi
 
