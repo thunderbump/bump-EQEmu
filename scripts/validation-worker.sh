@@ -57,8 +57,8 @@ VALIDATION_PROFILES='[
   {"name":"tier1","portable":false},
   {"name":"tier2-readonly","portable":false},
   {"name":"tier3-harness","portable":true,"description":"Run the canonical Tier 3 Zone Harness smoke.","mutation_classification":"read-mostly/runtime-fixture","timeout_guidance":"Medium. Roughly 10-20 minutes including harness startup.","lock_guidance":"Takes the exclusive worker slot for the whole run. Also takes the stack binding lock when stack.path is used."},
-  {"name":"actor-queue-tier3","portable":true,"description":"Build Tier 1, then run the durable Autonomous Actor queue executor integration proof.","mutation_classification":"database-mutating/runtime-fixture","timeout_guidance":"Longer. Give one shared budget that covers Tier 1 and the actor queue runtime.","lock_guidance":"Takes the exclusive worker and stack binding locks; mutates the validation database and cleans scenario-owned rows."},
-  {"name":"tier1-tier3-harness","portable":true,"description":"Run Tier 1 first, then Tier 3 harness under one timeout budget.","mutation_classification":"read-mostly/runtime-fixture","timeout_guidance":"Longer. Give one shared budget that covers both Tier 1 and Tier 3.","lock_guidance":"Takes the exclusive worker slot for both tiers under one run. Also takes the stack binding lock when stack.path is used."}
+  {"name":"actor-queue-tier3","portable":true,"steps":["tier1","actor-queue-tier3"],"description":"Build Tier 1, then run the durable Autonomous Actor queue executor integration proof.","mutation_classification":"database-mutating/runtime-fixture","timeout_guidance":"Longer. Give one shared budget that covers Tier 1 and the actor queue runtime.","lock_guidance":"Takes the exclusive worker and stack binding locks; mutates the validation database and cleans scenario-owned rows."},
+  {"name":"tier1-tier3-harness","portable":true,"steps":["tier1","tier3-harness"],"description":"Run Tier 1 first, then Tier 3 harness under one timeout budget.","mutation_classification":"read-mostly/runtime-fixture","timeout_guidance":"Longer. Give one shared budget that covers both Tier 1 and Tier 3.","lock_guidance":"Takes the exclusive worker slot for both tiers under one run. Also takes the stack binding lock when stack.path is used."}
 ]'
 AFK_CHECK_PLAN='[
   {"name":"tier1-build-and-unit-tests","profile":"tier1","log_path":"worker/logs/tier1-build-and-unit-tests.log","failure_status":"rejected","failure_message":"Tier 1 validation failed","inconclusive_message":"Tier 1 validation was inconclusive"},
@@ -66,7 +66,7 @@ AFK_CHECK_PLAN='[
 ]'
 
 emit_profiles_json() {
-  jq '{profiles:[.[] | select(.portable) | del(.portable)]}' <<<"$VALIDATION_PROFILES"
+  jq '{profiles:[.[] | select(.portable) | del(.portable, .steps)]}' <<<"$VALIDATION_PROFILES"
 }
 
 ensure_log_files() {
@@ -766,7 +766,8 @@ prepare_checkout() {
 }
 
 run_request() {
-  local request_path="$1" validation_status lock_dir stack_lock_dir stack_lock checkout_dir head_commit stack_path_source
+  local request_path="$1" validation_status validation_step lock_dir stack_lock_dir stack_lock checkout_dir head_commit stack_path_source
+  local -a validation_steps=()
   project= repo= ref= commit= profile= run_id= evidence_dir= timeout_seconds= lock_wait_seconds= stack_role= stack_path=
   request_source_type= request_source_repo= request_source_ref= request_source_commit= request_source_checkout_path=
   stack_path_source=
@@ -904,69 +905,26 @@ run_request() {
     return 0
   fi
 
-  case "$profile" in
-    actor-queue-tier3)
-      if run_validation tier1; then
-        :
-      else
-        validation_status=$?
-        if [[ "$validation_status" -eq 124 ]]; then
-          write_result "$evidence_dir" failed timeout 1 "validation timed out" "$checkout_dir" "$head_commit" "$stack_path_source"
-          return 1
-        fi
-        write_result "$evidence_dir" failed validation_failed 1 "validation profile failed" "$checkout_dir" "$head_commit" "$stack_path_source"
-        return 1
-      fi
-      if run_validation actor-queue-tier3; then
-        :
-      else
-        validation_status=$?
-        if [[ "$validation_status" -eq 124 ]]; then
-          write_result "$evidence_dir" failed timeout 1 "validation timed out" "$checkout_dir" "$head_commit" "$stack_path_source"
-          return 1
-        fi
-        write_result "$evidence_dir" failed validation_failed 1 "validation profile failed" "$checkout_dir" "$head_commit" "$stack_path_source"
-        return 1
-      fi
-      ;;
-    tier1-tier3-harness)
-      if run_validation tier1; then
-        :
-      else
-        validation_status=$?
-        if [[ "$validation_status" -eq 124 ]]; then
-          write_result "$evidence_dir" failed timeout 1 "validation timed out" "$checkout_dir" "$head_commit" "$stack_path_source"
-          return 1
-        fi
-        write_result "$evidence_dir" failed validation_failed 1 "validation profile failed" "$checkout_dir" "$head_commit" "$stack_path_source"
-        return 1
-      fi
-      if run_validation tier3-harness; then
-        :
-      else
-        validation_status=$?
-        if [[ "$validation_status" -eq 124 ]]; then
-          write_result "$evidence_dir" failed timeout 1 "validation timed out" "$checkout_dir" "$head_commit" "$stack_path_source"
-          return 1
-        fi
-        write_result "$evidence_dir" failed validation_failed 1 "validation profile failed" "$checkout_dir" "$head_commit" "$stack_path_source"
-        return 1
-      fi
-      ;;
-    *)
-      if run_validation "$profile"; then
-        :
-      else
-        validation_status=$?
-        if [[ "$validation_status" -eq 124 ]]; then
-          write_result "$evidence_dir" failed timeout 1 "validation timed out" "$checkout_dir" "$head_commit" "$stack_path_source"
-          return 1
-        fi
-        write_result "$evidence_dir" failed validation_failed 1 "validation profile failed" "$checkout_dir" "$head_commit" "$stack_path_source"
-        return 1
-      fi
-      ;;
-  esac
+  mapfile -t validation_steps < <(
+    jq -r --arg profile "$profile" '.[] | select(.name == $profile) | .steps[]?' <<<"$VALIDATION_PROFILES"
+  )
+  if [[ "${#validation_steps[@]}" -eq 0 ]]; then
+    validation_steps=("$profile")
+  fi
+
+  for validation_step in "${validation_steps[@]}"; do
+    if run_validation "$validation_step"; then
+      continue
+    else
+      validation_status=$?
+    fi
+    if [[ "$validation_status" -eq 124 ]]; then
+      write_result "$evidence_dir" failed timeout 1 "validation timed out" "$checkout_dir" "$head_commit" "$stack_path_source"
+      return 1
+    fi
+    write_result "$evidence_dir" failed validation_failed 1 "validation profile failed" "$checkout_dir" "$head_commit" "$stack_path_source"
+    return 1
+  done
 
   write_result "$evidence_dir" passed ok 0 "validation passed" "$checkout_dir" "$head_commit" "$stack_path_source"
   return 0
