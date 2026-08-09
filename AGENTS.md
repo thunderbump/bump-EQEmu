@@ -21,6 +21,13 @@ Use the default Beads triage label vocabulary. See `docs/agents/triage-labels.md
 
 Single-context repo: read root `CONTEXT.md` and `docs/adr/` when present. See `docs/agents/domain.md`.
 
+### Sub-agents
+
+Whenever you use a sub-agent, choose a model you think would be appropriate for the task.
+
+- For implementation try to use gpt-5.4.
+- For very simple tasks like small updates or quick code searches use gpt-5.3-codex-spark
+
 ## Testing
 
 The repository-owned Validation Contract in `docs/testing/process.md` and `scripts/validation-worker.sh` is the
