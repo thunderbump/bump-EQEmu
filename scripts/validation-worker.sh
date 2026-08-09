@@ -24,7 +24,7 @@ Request JSON fields:
   checkout.path      Optional local-checkout request path. Also accepts local_checkout.path,
                      target_worktree_checkout, target_checkout_path, or repo.path without a ref.
   profile            Required validation profile: preflight, tier1, tier2-readonly,
-                     tier3-harness, tier1-tier3-harness, or safe.
+                     tier3-harness, actor-queue-tier3, tier1-tier3-harness, or safe.
   run_id             Required stable run identifier used for worker-owned checkout storage.
   evidence_dir       Required directory where request.json, result.json, and logs are written.
   timeout_seconds    Optional validation timeout in seconds. Defaults to 3600.
@@ -51,65 +51,22 @@ now_utc() {
   date -u +%Y-%m-%dT%H:%M:%SZ
 }
 
-profile_names=(preflight safe tier3-harness tier1-tier3-harness)
+VALIDATION_PROFILES='[
+  {"name":"preflight","portable":true,"description":"Verify the validation stack contract only.","mutation_classification":"read-only","timeout_guidance":"Short. Roughly 5-10 minutes is usually enough.","lock_guidance":"Takes the exclusive worker slot. Also takes the stack binding lock when stack.path is used."},
+  {"name":"safe","portable":true,"description":"Run preflight, Tier 1, and read-mostly Tier 2 checks.","mutation_classification":"read-mostly","timeout_guidance":"Medium. Roughly 15-30 minutes depending on build speed.","lock_guidance":"Takes the exclusive worker slot for the whole run. Also takes the stack binding lock when stack.path is used."},
+  {"name":"tier1","portable":false},
+  {"name":"tier2-readonly","portable":false},
+  {"name":"tier3-harness","portable":true,"description":"Run the canonical Tier 3 Zone Harness smoke.","mutation_classification":"read-mostly/runtime-fixture","timeout_guidance":"Medium. Roughly 10-20 minutes including harness startup.","lock_guidance":"Takes the exclusive worker slot for the whole run. Also takes the stack binding lock when stack.path is used."},
+  {"name":"actor-queue-tier3","portable":true,"steps":["tier1","actor-queue-tier3"],"description":"Build Tier 1, then run the durable Autonomous Actor queue executor integration proof.","mutation_classification":"database-mutating/runtime-fixture","timeout_guidance":"Longer. Give one shared budget that covers Tier 1 and the actor queue runtime.","lock_guidance":"Takes the exclusive worker and stack binding locks; mutates the validation database and cleans scenario-owned rows."},
+  {"name":"tier1-tier3-harness","portable":true,"steps":["tier1","tier3-harness"],"description":"Run Tier 1 first, then Tier 3 harness under one timeout budget.","mutation_classification":"read-mostly/runtime-fixture","timeout_guidance":"Longer. Give one shared budget that covers both Tier 1 and Tier 3.","lock_guidance":"Takes the exclusive worker slot for both tiers under one run. Also takes the stack binding lock when stack.path is used."}
+]'
 AFK_CHECK_PLAN='[
   {"name":"tier1-build-and-unit-tests","profile":"tier1","log_path":"worker/logs/tier1-build-and-unit-tests.log","failure_status":"rejected","failure_message":"Tier 1 validation failed","inconclusive_message":"Tier 1 validation was inconclusive"},
   {"name":"tier3-zone-harness","profile":"tier3-harness","log_path":"worker/logs/tier3-zone-harness.log","failure_status":"rejected","failure_message":"Tier 3 Zone Harness validation failed","inconclusive_message":"Tier 3 Zone Harness validation was inconclusive"}
 ]'
 
-profile_description() {
-  case "$1" in
-    preflight) printf '%s' 'Verify the validation stack contract only.' ;;
-    safe) printf '%s' 'Run preflight, Tier 1, and read-mostly Tier 2 checks.' ;;
-    tier3-harness) printf '%s' 'Run the canonical Tier 3 Zone Harness smoke.' ;;
-    tier1-tier3-harness) printf '%s' 'Run Tier 1 first, then Tier 3 harness under one timeout budget.' ;;
-    *) return 1 ;;
-  esac
-}
-
-profile_mutation_classification() {
-  case "$1" in
-    preflight) printf '%s' 'read-only' ;;
-    safe) printf '%s' 'read-mostly' ;;
-    tier3-harness) printf '%s' 'read-mostly/runtime-fixture' ;;
-    tier1-tier3-harness) printf '%s' 'read-mostly/runtime-fixture' ;;
-    *) return 1 ;;
-  esac
-}
-
-profile_timeout_guidance() {
-  case "$1" in
-    preflight) printf '%s' 'Short. Roughly 5-10 minutes is usually enough.' ;;
-    safe) printf '%s' 'Medium. Roughly 15-30 minutes depending on build speed.' ;;
-    tier3-harness) printf '%s' 'Medium. Roughly 10-20 minutes including harness startup.' ;;
-    tier1-tier3-harness) printf '%s' 'Longer. Give one shared budget that covers both Tier 1 and Tier 3.' ;;
-    *) return 1 ;;
-  esac
-}
-
-profile_lock_guidance() {
-  case "$1" in
-    preflight) printf '%s' 'Takes the exclusive worker slot. Also takes the stack binding lock when stack.path is used.' ;;
-    safe) printf '%s' 'Takes the exclusive worker slot for the whole run. Also takes the stack binding lock when stack.path is used.' ;;
-    tier3-harness) printf '%s' 'Takes the exclusive worker slot for the whole run. Also takes the stack binding lock when stack.path is used.' ;;
-    tier1-tier3-harness) printf '%s' 'Takes the exclusive worker slot for both tiers under one run. Also takes the stack binding lock when stack.path is used.' ;;
-    *) return 1 ;;
-  esac
-}
-
 emit_profiles_json() {
-  local name
-  {
-    for name in "${profile_names[@]}"; do
-      jq -n \
-        --arg name "$name" \
-        --arg description "$(profile_description "$name")" \
-        --arg mutation_classification "$(profile_mutation_classification "$name")" \
-        --arg timeout_guidance "$(profile_timeout_guidance "$name")" \
-        --arg lock_guidance "$(profile_lock_guidance "$name")" \
-        '{name:$name, description:$description, mutation_classification:$mutation_classification, timeout_guidance:$timeout_guidance, lock_guidance:$lock_guidance}'
-    done
-  } | jq -s '{profiles:.}'
+  jq '{profiles:[.[] | select(.portable) | del(.portable, .steps)]}' <<<"$VALIDATION_PROFILES"
 }
 
 ensure_log_files() {
@@ -462,7 +419,8 @@ validate_request() {
   [[ "$project" == "bump-eqemu" || "$project" == "bump-EQEmu" ]] || { printf 'invalid or missing project\n'; return 1; }
   resolve_request_source "$request_path" || return 1
   [[ -z "$commit" || "$commit" =~ ^[0-9a-fA-F]{7,40}$ ]] || { printf 'invalid commit\n'; return 1; }
-  case "$profile" in preflight|tier1|tier2-readonly|tier3-harness|tier1-tier3-harness|safe) ;; *) printf 'invalid or missing profile\n'; return 1 ;; esac
+  jq -e --arg profile "$profile" 'any(.[]; .name == $profile)' <<<"$VALIDATION_PROFILES" >/dev/null \
+    || { printf 'invalid or missing profile\n'; return 1; }
   [[ -n "$run_id" ]] || { printf 'missing run_id\n'; return 1; }
   sanitize_run_id "$run_id" || { printf 'run_id may contain only letters, digits, dot, underscore, and dash\n'; return 1; }
   [[ -n "$evidence_dir" ]] || { printf 'missing evidence_dir\n'; return 1; }
@@ -808,7 +766,8 @@ prepare_checkout() {
 }
 
 run_request() {
-  local request_path="$1" validation_status lock_dir stack_lock_dir stack_lock checkout_dir head_commit stack_path_source
+  local request_path="$1" validation_status validation_step lock_dir stack_lock_dir stack_lock checkout_dir head_commit stack_path_source
+  local -a validation_steps=()
   project= repo= ref= commit= profile= run_id= evidence_dir= timeout_seconds= lock_wait_seconds= stack_role= stack_path=
   request_source_type= request_source_repo= request_source_ref= request_source_commit= request_source_checkout_path=
   stack_path_source=
@@ -946,45 +905,26 @@ run_request() {
     return 0
   fi
 
-  case "$profile" in
-    tier1-tier3-harness)
-      if run_validation tier1; then
-        :
-      else
-        validation_status=$?
-        if [[ "$validation_status" -eq 124 ]]; then
-          write_result "$evidence_dir" failed timeout 1 "validation timed out" "$checkout_dir" "$head_commit" "$stack_path_source"
-          return 1
-        fi
-        write_result "$evidence_dir" failed validation_failed 1 "validation profile failed" "$checkout_dir" "$head_commit" "$stack_path_source"
-        return 1
-      fi
-      if run_validation tier3-harness; then
-        :
-      else
-        validation_status=$?
-        if [[ "$validation_status" -eq 124 ]]; then
-          write_result "$evidence_dir" failed timeout 1 "validation timed out" "$checkout_dir" "$head_commit" "$stack_path_source"
-          return 1
-        fi
-        write_result "$evidence_dir" failed validation_failed 1 "validation profile failed" "$checkout_dir" "$head_commit" "$stack_path_source"
-        return 1
-      fi
-      ;;
-    *)
-      if run_validation "$profile"; then
-        :
-      else
-        validation_status=$?
-        if [[ "$validation_status" -eq 124 ]]; then
-          write_result "$evidence_dir" failed timeout 1 "validation timed out" "$checkout_dir" "$head_commit" "$stack_path_source"
-          return 1
-        fi
-        write_result "$evidence_dir" failed validation_failed 1 "validation profile failed" "$checkout_dir" "$head_commit" "$stack_path_source"
-        return 1
-      fi
-      ;;
-  esac
+  mapfile -t validation_steps < <(
+    jq -r --arg profile "$profile" '.[] | select(.name == $profile) | .steps[]?' <<<"$VALIDATION_PROFILES"
+  )
+  if [[ "${#validation_steps[@]}" -eq 0 ]]; then
+    validation_steps=("$profile")
+  fi
+
+  for validation_step in "${validation_steps[@]}"; do
+    if run_validation "$validation_step"; then
+      continue
+    else
+      validation_status=$?
+    fi
+    if [[ "$validation_status" -eq 124 ]]; then
+      write_result "$evidence_dir" failed timeout 1 "validation timed out" "$checkout_dir" "$head_commit" "$stack_path_source"
+      return 1
+    fi
+    write_result "$evidence_dir" failed validation_failed 1 "validation profile failed" "$checkout_dir" "$head_commit" "$stack_path_source"
+    return 1
+  done
 
   write_result "$evidence_dir" passed ok 0 "validation passed" "$checkout_dir" "$head_commit" "$stack_path_source"
   return 0

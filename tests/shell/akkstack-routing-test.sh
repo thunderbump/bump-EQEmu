@@ -543,6 +543,86 @@ test_validate_tier3_harness_delegates_to_smoke_script() {
   [[ "$(cat "$calls")" == "--stack gameplay --dry-run" ]] || return 1
 }
 
+test_actor_queue_tier3_dry_run_classifies_mutation_and_cleanup() {
+  local fixture_repo fixture_parent status output
+  make_fixture fixture_repo fixture_parent
+
+  capture_run status output "$fixture_repo/scripts/validate.sh" --dry-run actor-queue-tier3
+
+  [[ "$status" -eq 0 ]] || return 1
+  assert_contains "$output" "tests:actor-events"
+  assert_contains "$output" "database-mutating runtime fixture"
+  assert_contains "$output" "scenario-owned rows are cleaned up"
+}
+
+test_zone_cli_profiles_share_runtime_setup() {
+  local fixture_repo fixture_parent fake_bin payload_file status output
+  make_fixture fixture_repo fixture_parent
+  fake_bin="$(mktemp -d "$tmp_root/fake-zone-cli-bin.XXXXXX")"
+  payload_file="$tmp_root/zone-cli-payload.txt"
+
+  cat >"$fake_bin/docker-compose" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ " \$* " == *" up "* ]]; then exit 0; fi
+previous=""
+for arg in "\$@"; do
+  if [[ "\$previous" == "-lc" ]]; then
+    printf '%s\n' "\$arg" >"$payload_file"
+    exit 0
+  fi
+  previous="\$arg"
+done
+exit 1
+EOF
+  chmod +x "$fake_bin/docker-compose"
+
+  capture_run status output env PATH="$fake_bin:$PATH" "$fixture_repo/scripts/validate.sh" tier2-readonly
+  [[ "$status" -eq 0 ]] || return 1
+  assert_contains "$(cat "$payload_file")" '~/code/scripts/lib/prepare-zone-cli-runtime.sh "$runtime"'
+
+  capture_run status output env PATH="$fake_bin:$PATH" "$fixture_repo/scripts/validate.sh" actor-queue-tier3
+  [[ "$status" -eq 0 ]] || return 1
+  assert_contains "$(cat "$payload_file")" '~/code/scripts/lib/prepare-zone-cli-runtime.sh "$runtime"'
+}
+
+test_zone_cli_runtime_rejects_unsafe_paths_before_deletion() {
+  local fixture_repo fixture_parent fake_bin fake_home victim runtime marker unsafe_runtime status output
+  local -a unsafe_runtimes
+  make_fixture fixture_repo fixture_parent
+  fake_bin="$(mktemp -d "$tmp_root/fake-runtime-path-bin.XXXXXX")"
+  fake_home="$tmp_root/fake-runtime-path-home"
+  victim="$tmp_root/victim-runtime"
+  runtime="/tmp/../${victim#/}"
+  marker="$tmp_root/mysqladmin-called"
+  unsafe_runtimes=(
+    "$runtime"
+    "/tmp/${tmp_root#/tmp/}/nested-runtime"
+    ""
+    "/tmp/-runtime"
+    "/tmp/.hidden-runtime"
+    "/tmp/name.runtime"
+    "/tmp/name runtime"
+  )
+  mkdir -p "$fake_home/server/shared" "$fake_home/server/plugins" "$fake_home/server/lua_modules" "$victim"
+  printf '%s\n' '{}' >"$fake_home/server/eqemu_config.json"
+  printf '%s\n' 'must survive' >"$victim/sentinel"
+
+  printf '#!/usr/bin/env bash\n: >"%s"\nexit 0\n' "$marker" >"$fake_bin/mysqladmin"
+  printf '#!/usr/bin/env bash\nprintf "{}\\n"\n' >"$fake_bin/jq"
+  chmod +x "$fake_bin/mysqladmin" "$fake_bin/jq"
+
+  for unsafe_runtime in "${unsafe_runtimes[@]}"; do
+    capture_run status output env HOME="$fake_home" EQEMU_DB_PASSWORD=fixture PATH="$fake_bin:/usr/bin:/bin" \
+      "$fixture_repo/scripts/lib/prepare-zone-cli-runtime.sh" "$unsafe_runtime"
+    [[ "$status" -eq 2 ]] || return 1
+    assert_contains "$output" "zone CLI runtime must be one safe /tmp basename ending in -runtime"
+  done
+
+  [[ ! -e "$marker" ]] || return 1
+  [[ -f "$victim/sentinel" ]] || return 1
+}
+
 test_help_mentions_stack_and_dry_run() {
   local fixture_repo fixture_parent status output script
   make_fixture fixture_repo fixture_parent
@@ -604,11 +684,19 @@ test_tier2_readonly_dry_run_describes_single_one_off_container() {
 }
 
 test_tier2_readonly_uses_service_dns_runtime_config() {
-  local fixture_repo fixture_parent fake_bin capture_file payload_file status output
+  local fixture_repo fixture_parent fake_bin fake_home fake_server capture_file payload_file source_hash status output
   make_fixture fixture_repo fixture_parent
   fake_bin="$(mktemp -d "$tmp_root/fake-tier2-bin.XXXXXX")"
+  fake_home="$tmp_root/fake-tier2-home"
+  fake_server="$fake_home/server"
   capture_file="$tmp_root/tier2-capture.txt"
   payload_file="$tmp_root/tier2-payload.txt"
+  mkdir -p "$fake_server/shared" "$fake_server/quests/plugins" "$fake_server/quests/lua_modules" "$fixture_repo/build/bin"
+  ln -s "$fixture_repo" "$fake_home/code"
+  printf '%s\n' '{"server":{"database":{"host":"127.0.0.1","port":"13306"},"qsdatabase":{"host":"127.0.0.1","port":"13306"}}}' >"$fake_server/eqemu_config.json"
+  source_hash="$(sha256sum "$fake_server/eqemu_config.json")"
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$fixture_repo/build/bin/zone"
+  chmod +x "$fixture_repo/build/bin/zone"
 
   cat >"$fake_bin/docker-compose" <<EOF
 #!/usr/bin/env bash
@@ -621,7 +709,8 @@ previous=""
 for arg in "\$@"; do
   if [[ "\$previous" == "-lc" ]]; then
     printf '%s\n' "\$arg" >"$payload_file"
-    exit 0
+    HOME="$fake_home" EQEMU_DB_PASSWORD=fixture PATH="$fake_bin:/usr/bin:/bin" bash -c "\$arg"
+    exit \$?
   fi
   previous="\$arg"
 done
@@ -640,12 +729,49 @@ EOF
 
   [[ "$status" -eq 0 ]] || return 1
   assert_contains "$(cat "$capture_file")" "run --rm --no-deps --entrypoint bash eqemu-server"
-  assert_contains "$(cat "$payload_file")" 'mysqladmin status -ueqemu -p"$EQEMU_DB_PASSWORD" -h mariadb --silent'
-  assert_contains "$(cat "$payload_file")" '.server.database.host = \"mariadb\"'
-  assert_contains "$(cat "$payload_file")" '.server.qsdatabase.host = \"mariadb\"'
-  assert_contains "$(cat "$payload_file")" 'link_runtime_dir plugins ~/server/quests/plugins ~/server/plugins'
-  assert_contains "$(cat "$payload_file")" 'link_runtime_dir lua_modules ~/server/quests/lua_modules ~/server/lua_modules'
+  [[ "$(jq -r '.server.database.host + ":" + .server.database.port' /tmp/zone-cli-validation-runtime/eqemu_config.json)" == "mariadb:3306" ]] || return 1
+  [[ "$(jq -r '.server.qsdatabase.host + ":" + .server.qsdatabase.port' /tmp/zone-cli-validation-runtime/eqemu_config.json)" == "mariadb:3306" ]] || return 1
+  [[ -L /tmp/zone-cli-validation-runtime/plugins ]] || return 1
+  [[ -L /tmp/zone-cli-validation-runtime/lua_modules ]] || return 1
+  [[ "$(sha256sum "$fake_server/eqemu_config.json")" == "$source_hash" ]] || return 1
+  assert_contains "$(cat "$payload_file")" '~/code/scripts/lib/prepare-zone-cli-runtime.sh "$runtime"'
   assert_contains "$(cat "$payload_file")" '~/code/build/bin/zone tests:npc-handins'
+}
+
+test_actor_queue_tier3_fails_when_mariadb_never_becomes_ready() {
+  local fixture_repo fixture_parent fake_bin fake_home status output
+  make_fixture fixture_repo fixture_parent
+  fake_bin="$(mktemp -d "$tmp_root/fake-db-timeout-bin.XXXXXX")"
+  fake_home="$tmp_root/fake-db-timeout-home"
+  mkdir -p "$fake_home/server" "$fixture_repo/build/bin"
+  ln -s "$fixture_repo" "$fake_home/code"
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$fixture_repo/build/bin/zone"
+  chmod +x "$fixture_repo/build/bin/zone"
+
+  cat >"$fake_bin/docker-compose" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ " \$* " == *" up "* ]]; then exit 0; fi
+previous=""
+for arg in "\$@"; do
+  if [[ "\$previous" == "-lc" ]]; then
+    HOME="$fake_home" EQEMU_DB_PASSWORD=fixture ZONE_CLI_DB_READY_TIMEOUT_SECONDS=1 PATH="$fake_bin:/usr/bin:/bin" bash -c "\$arg"
+    exit \$?
+  fi
+  previous="\$arg"
+done
+exit 1
+EOF
+  chmod +x "$fake_bin/docker-compose"
+
+  printf '#!/usr/bin/env bash\nexit 1\n' >"$fake_bin/mysqladmin"
+  chmod +x "$fake_bin/mysqladmin"
+
+  capture_run status output env PATH="$fake_bin:$PATH" timeout 5 "$fixture_repo/scripts/validate.sh" actor-queue-tier3
+
+  [[ "$status" -ne 0 && "$status" -ne 124 ]] || return 1
+  assert_contains "$output" "MariaDB service mariadb was not ready within 1 seconds"
+  assert_contains "$output" "inspect the selected AkkStack MariaDB service logs"
 }
 
 test_safe_dry_run_keeps_readonly_composition() {
@@ -674,10 +800,14 @@ run_test "zone harness command checks build artifacts before launch" test_zone_h
 run_test "zone harness uses service DNS runtime config without mutating source" test_zone_harness_uses_service_dns_runtime_config_without_mutating_source
 run_test "zone harness command exercises headless target twice with cursor cleanup checks" test_zone_harness_command_exercises_headless_target_twice_with_cursor_cleanup_checks
 run_test "validate tier3-harness delegates to smoke script" test_validate_tier3_harness_delegates_to_smoke_script
+run_test "actor queue Tier 3 dry run classifies mutation and cleanup" test_actor_queue_tier3_dry_run_classifies_mutation_and_cleanup
+run_test "zone CLI profiles share runtime setup" test_zone_cli_profiles_share_runtime_setup
+run_test "zone CLI runtime rejects unsafe paths before deletion" test_zone_cli_runtime_rejects_unsafe_paths_before_deletion
 run_test "help mentions stack and dry-run" test_help_mentions_stack_and_dry_run
 run_test "dry-run prints route and skips Docker" test_dry_run_prints_route_and_skips_docker
 run_test "tier2-readonly dry-run describes one-off container" test_tier2_readonly_dry_run_describes_single_one_off_container
 run_test "tier2-readonly runtime payload rewrites DB host to mariadb service DNS" test_tier2_readonly_uses_service_dns_runtime_config
+run_test "actor queue Tier 3 fails when MariaDB never becomes ready" test_actor_queue_tier3_fails_when_mariadb_never_becomes_ready
 run_test "safe dry-run keeps readonly composition" test_safe_dry_run_keeps_readonly_composition
 
 if [[ "$failures" -gt 0 ]]; then

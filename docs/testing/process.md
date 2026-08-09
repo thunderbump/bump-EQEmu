@@ -6,7 +6,15 @@ ADR 0006 defines the portable automation contract: automation should call `scrip
 
 Bootstrap from zero is a separate setup task. Do not fold `make install`, environment generation, data downloads, or first-time database setup into every validation pass.
 
-Use `scripts/validation-worker.sh profiles --json` to discover the portable AFK-facing profiles and their rough mutation, timeout, and locking guidance. Today that discovery surface exposes `preflight`, `safe`, `tier3-harness`, and `tier1-tier3-harness`.
+Use `scripts/validation-worker.sh profiles --json` to discover the portable AFK-facing profiles and their rough mutation, timeout, and locking guidance. Today that discovery surface exposes `preflight`, `safe`, `tier3-harness`, `actor-queue-tier3`, and `tier1-tier3-harness`.
+
+`actor-queue-tier3` is the target-owned durable Autonomous Actor queue proof. After a Tier 1 build, it runs
+`zone tests:actor-events` against the persistent validation database. The scenario provisions a reserved owner,
+Actor Profiles, Actor Status, queue rows, and Actor Events; its scope guard removes those scenario-owned rows and
+reserved-owner fixture on exit. It is therefore classified `database-mutating/runtime-fixture`, not read-only.
+The scenario uses the ordinary `stand` verb, which is independent of gameplay rule settings, and emits its detailed
+assertion failure or `[PASS] actor-events-runtime` to the worker validation log while the worker supplies structured
+`request.json` and `result.json` evidence.
 
 The repository-owned AFK adapter pins every AFK Candidate to `tier1-tier3-harness`. The v1 AFK request does not
 carry a trusted base commit or change classification, so the adapter cannot safely infer which Candidates affect

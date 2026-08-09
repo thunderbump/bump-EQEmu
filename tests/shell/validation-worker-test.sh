@@ -303,6 +303,7 @@ test_help() {
   assert_contains "$output" "evidence_dir"
   assert_contains "$output" "lock_wait_seconds"
   assert_contains "$output" "tier1-tier3-harness"
+  assert_contains "$output" "actor-queue-tier3"
 }
 
 test_afk_contract_config() {
@@ -333,11 +334,49 @@ test_profiles_json() {
   local status output
   capture_run status output "$repo_root/scripts/validation-worker.sh" profiles --json
   [[ "$status" -eq 0 ]] || return 1
-  jq -e '.profiles | length == 4' >/dev/null <<<"$output" || return 1
+  jq -e '.profiles | length == 5' >/dev/null <<<"$output" || return 1
   jq -e '.profiles[] | select(.name == "preflight") | .mutation_classification == "read-only"' >/dev/null <<<"$output" || return 1
   jq -e '.profiles[] | select(.name == "safe") | (.timeout_guidance | length > 0) and (.lock_guidance | length > 0)' >/dev/null <<<"$output" || return 1
   jq -e '.profiles[] | select(.name == "tier3-harness")' >/dev/null <<<"$output" || return 1
   jq -e '.profiles[] | select(.name == "tier1-tier3-harness")' >/dev/null <<<"$output" || return 1
+  jq -e '.profiles[] | select(.name == "actor-queue-tier3") | .mutation_classification == "database-mutating/runtime-fixture"' >/dev/null <<<"$output" || return 1
+}
+
+test_discovered_profiles_are_accepted_requests() {
+  local source profiles profile request evidence status output
+  make_source_repo source discovered-profiles
+  profiles="$($repo_root/scripts/validation-worker.sh profiles --json)"
+
+  while IFS= read -r profile; do
+    reset_worker_home
+    evidence="$tmp_root/evidence-discovered-$profile"
+    request="$tmp_root/discovered-$profile.json"
+    write_request "$request" "$source" "$evidence" HEAD "" 0 10 "" "$profile"
+
+    capture_run status output worker_env "$repo_root/scripts/validation-worker.sh" run --request "$request"
+
+    [[ "$status" -eq 0 ]] || return 1
+    assert_json_equals "$evidence/result.json" .profile "$profile"
+  done < <(jq -r '.profiles[].name' <<<"$profiles")
+}
+
+test_actor_queue_tier3_profile_builds_before_runtime_from_clean_fetch() {
+  local source request evidence status output validation_log first_tier1 first_actor_queue
+  make_source_repo source actor-queue-tier3
+  evidence="$tmp_root/evidence-actor-queue-tier3"
+  request="$tmp_root/actor-queue-tier3.json"
+  write_request "$request" "$source" "$evidence" HEAD "" 0 10 "" actor-queue-tier3
+
+  capture_run status output worker_env "$repo_root/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 0 ]] || return 1
+  assert_json_equals "$evidence/result.json" .status passed
+  assert_json_equals "$evidence/result.json" .profile actor-queue-tier3
+  validation_log="$evidence/logs/validation.log"
+  first_tier1="$(grep -n 'fake validate: --stack validation --dry-run tier1' "$validation_log" | head -n1 | cut -d: -f1)"
+  first_actor_queue="$(grep -n 'fake validate: --stack validation --dry-run actor-queue-tier3' "$validation_log" | head -n1 | cut -d: -f1)"
+  [[ -n "$first_tier1" && -n "$first_actor_queue" ]] || return 1
+  [[ "$first_tier1" -lt "$first_actor_queue" ]] || return 1
 }
 
 test_safe_profile_remains_available_for_non_afk_requests() {
@@ -1118,6 +1157,8 @@ EOF
 run_test "validation worker help mentions request contract" test_help
 run_test "AFK contract config selects the validation worker" test_afk_contract_config
 run_test "validation worker profiles discovery emits portable metadata" test_profiles_json
+run_test "discovered validation profiles are accepted requests" test_discovered_profiles_are_accepted_requests
+run_test "actor queue Tier 3 profile builds before runtime from a clean fetch" test_actor_queue_tier3_profile_builds_before_runtime_from_clean_fetch
 run_test "safe profile remains available for non-AFK requests" test_safe_profile_remains_available_for_non_afk_requests
 run_test "invalid request writes structured evidence" test_invalid_request_writes_evidence
 run_test "fake repo fetch checkout writes evidence" test_fetch_checkout_and_evidence
