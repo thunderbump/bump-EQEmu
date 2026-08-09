@@ -342,6 +342,24 @@ test_profiles_json() {
   jq -e '.profiles[] | select(.name == "actor-queue-tier3") | .mutation_classification == "database-mutating/runtime-fixture"' >/dev/null <<<"$output" || return 1
 }
 
+test_discovered_profiles_are_accepted_requests() {
+  local source profiles profile request evidence status output
+  make_source_repo source discovered-profiles
+  profiles="$($repo_root/scripts/validation-worker.sh profiles --json)"
+
+  while IFS= read -r profile; do
+    reset_worker_home
+    evidence="$tmp_root/evidence-discovered-$profile"
+    request="$tmp_root/discovered-$profile.json"
+    write_request "$request" "$source" "$evidence" HEAD "" 0 10 "" "$profile"
+
+    capture_run status output worker_env "$repo_root/scripts/validation-worker.sh" run --request "$request"
+
+    [[ "$status" -eq 0 ]] || return 1
+    assert_json_equals "$evidence/result.json" .profile "$profile"
+  done < <(jq -r '.profiles[].name' <<<"$profiles")
+}
+
 test_actor_queue_tier3_profile_builds_before_runtime_from_clean_fetch() {
   local source request evidence status output validation_log first_tier1 first_actor_queue
   make_source_repo source actor-queue-tier3
@@ -1139,6 +1157,7 @@ EOF
 run_test "validation worker help mentions request contract" test_help
 run_test "AFK contract config selects the validation worker" test_afk_contract_config
 run_test "validation worker profiles discovery emits portable metadata" test_profiles_json
+run_test "discovered validation profiles are accepted requests" test_discovered_profiles_are_accepted_requests
 run_test "actor queue Tier 3 profile builds before runtime from a clean fetch" test_actor_queue_tier3_profile_builds_before_runtime_from_clean_fetch
 run_test "safe profile remains available for non-AFK requests" test_safe_profile_remains_available_for_non_afk_requests
 run_test "invalid request writes structured evidence" test_invalid_request_writes_evidence
