@@ -8,6 +8,11 @@ Bootstrap from zero is a separate setup task. Do not fold `make install`, enviro
 
 Use `scripts/validation-worker.sh profiles --json` to discover the portable AFK-facing profiles and their rough mutation, timeout, and locking guidance. Today that discovery surface exposes `preflight`, `safe`, `tier3-harness`, and `tier1-tier3-harness`.
 
+The repository-owned AFK adapter pins every AFK Candidate to `tier1-tier3-harness`. The v1 AFK request does not
+carry a trusted base commit or change classification, so the adapter cannot safely infer which Candidates affect
+runtime harness behavior. Other automation may continue to request `safe` when Tier 3 is not required; that
+profile remains preflight, Tier 1, and read-mostly Tier 2.
+
 Submodule expectations are part of the worker contract. Fetch requests run `git submodule update --init --recursive` before validation. Local-checkout requests continue to work for diagnostics, but the worker treats missing or drifting submodules as request failures instead of mutating the caller-owned checkout.
 
 ## Environment Contract
