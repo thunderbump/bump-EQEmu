@@ -701,6 +701,42 @@ EOF
   assert_contains "$(cat "$payload_file")" '~/code/build/bin/zone tests:npc-handins'
 }
 
+test_actor_queue_tier3_fails_when_mariadb_never_becomes_ready() {
+  local fixture_repo fixture_parent fake_bin fake_home status output
+  make_fixture fixture_repo fixture_parent
+  fake_bin="$(mktemp -d "$tmp_root/fake-db-timeout-bin.XXXXXX")"
+  fake_home="$tmp_root/fake-db-timeout-home"
+  mkdir -p "$fake_home/server" "$fixture_repo/build/bin"
+  ln -s "$fixture_repo" "$fake_home/code"
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$fixture_repo/build/bin/zone"
+  chmod +x "$fixture_repo/build/bin/zone"
+
+  cat >"$fake_bin/docker-compose" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ " \$* " == *" up "* ]]; then exit 0; fi
+previous=""
+for arg in "\$@"; do
+  if [[ "\$previous" == "-lc" ]]; then
+    HOME="$fake_home" EQEMU_DB_PASSWORD=fixture ZONE_CLI_DB_READY_TIMEOUT_SECONDS=1 PATH="$fake_bin:/usr/bin:/bin" bash -c "\$arg"
+    exit \$?
+  fi
+  previous="\$arg"
+done
+exit 1
+EOF
+  chmod +x "$fake_bin/docker-compose"
+
+  printf '#!/usr/bin/env bash\nexit 1\n' >"$fake_bin/mysqladmin"
+  chmod +x "$fake_bin/mysqladmin"
+
+  capture_run status output env PATH="$fake_bin:$PATH" timeout 5 "$fixture_repo/scripts/validate.sh" actor-queue-tier3
+
+  [[ "$status" -ne 0 && "$status" -ne 124 ]] || return 1
+  assert_contains "$output" "MariaDB service mariadb was not ready within 1 seconds"
+  assert_contains "$output" "inspect the selected AkkStack MariaDB service logs"
+}
+
 test_safe_dry_run_keeps_readonly_composition() {
   local fixture_repo fixture_parent status output
   make_fixture fixture_repo fixture_parent
@@ -733,6 +769,7 @@ run_test "help mentions stack and dry-run" test_help_mentions_stack_and_dry_run
 run_test "dry-run prints route and skips Docker" test_dry_run_prints_route_and_skips_docker
 run_test "tier2-readonly dry-run describes one-off container" test_tier2_readonly_dry_run_describes_single_one_off_container
 run_test "tier2-readonly runtime payload rewrites DB host to mariadb service DNS" test_tier2_readonly_uses_service_dns_runtime_config
+run_test "actor queue Tier 3 fails when MariaDB never becomes ready" test_actor_queue_tier3_fails_when_mariadb_never_becomes_ready
 run_test "safe dry-run keeps readonly composition" test_safe_dry_run_keeps_readonly_composition
 
 if [[ "$failures" -gt 0 ]]; then

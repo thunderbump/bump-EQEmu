@@ -7,7 +7,18 @@ if [[ "$runtime" != /tmp/*-runtime ]]; then
   exit 2
 fi
 
-until mysqladmin status -ueqemu -p"$EQEMU_DB_PASSWORD" -h mariadb --silent; do
+db_ready_timeout_seconds="${ZONE_CLI_DB_READY_TIMEOUT_SECONDS:-60}"
+if [[ ! "$db_ready_timeout_seconds" =~ ^[1-9][0-9]*$ ]]; then
+  printf 'error: ZONE_CLI_DB_READY_TIMEOUT_SECONDS must be a positive integer\n' >&2
+  exit 2
+fi
+
+db_ready_deadline=$((SECONDS + db_ready_timeout_seconds))
+until mysqladmin status -ueqemu -p"$EQEMU_DB_PASSWORD" -h mariadb --connect-timeout=2 --silent; do
+  if (( SECONDS >= db_ready_deadline )); then
+    printf 'error: MariaDB service mariadb was not ready within %s seconds; inspect the selected AkkStack MariaDB service logs\n' "$db_ready_timeout_seconds" >&2
+    exit 1
+  fi
   sleep 1
 done
 
