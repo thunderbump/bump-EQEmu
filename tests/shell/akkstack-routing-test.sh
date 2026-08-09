@@ -555,6 +555,37 @@ test_actor_queue_tier3_dry_run_classifies_mutation_and_cleanup() {
   assert_contains "$output" "scenario-owned rows are cleaned up"
 }
 
+test_zone_cli_profiles_share_runtime_setup() {
+  local fixture_repo fixture_parent fake_bin payload_file status output
+  make_fixture fixture_repo fixture_parent
+  fake_bin="$(mktemp -d "$tmp_root/fake-zone-cli-bin.XXXXXX")"
+  payload_file="$tmp_root/zone-cli-payload.txt"
+
+  cat >"$fake_bin/docker-compose" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ " \$* " == *" up "* ]]; then exit 0; fi
+previous=""
+for arg in "\$@"; do
+  if [[ "\$previous" == "-lc" ]]; then
+    printf '%s\n' "\$arg" >"$payload_file"
+    exit 0
+  fi
+  previous="\$arg"
+done
+exit 1
+EOF
+  chmod +x "$fake_bin/docker-compose"
+
+  capture_run status output env PATH="$fake_bin:$PATH" "$fixture_repo/scripts/validate.sh" tier2-readonly
+  [[ "$status" -eq 0 ]] || return 1
+  assert_contains "$(cat "$payload_file")" '~/code/scripts/lib/prepare-zone-cli-runtime.sh "$runtime"'
+
+  capture_run status output env PATH="$fake_bin:$PATH" "$fixture_repo/scripts/validate.sh" actor-queue-tier3
+  [[ "$status" -eq 0 ]] || return 1
+  assert_contains "$(cat "$payload_file")" '~/code/scripts/lib/prepare-zone-cli-runtime.sh "$runtime"'
+}
+
 test_help_mentions_stack_and_dry_run() {
   local fixture_repo fixture_parent status output script
   make_fixture fixture_repo fixture_parent
@@ -616,11 +647,19 @@ test_tier2_readonly_dry_run_describes_single_one_off_container() {
 }
 
 test_tier2_readonly_uses_service_dns_runtime_config() {
-  local fixture_repo fixture_parent fake_bin capture_file payload_file status output
+  local fixture_repo fixture_parent fake_bin fake_home fake_server capture_file payload_file source_hash status output
   make_fixture fixture_repo fixture_parent
   fake_bin="$(mktemp -d "$tmp_root/fake-tier2-bin.XXXXXX")"
+  fake_home="$tmp_root/fake-tier2-home"
+  fake_server="$fake_home/server"
   capture_file="$tmp_root/tier2-capture.txt"
   payload_file="$tmp_root/tier2-payload.txt"
+  mkdir -p "$fake_server/shared" "$fake_server/quests/plugins" "$fake_server/quests/lua_modules" "$fixture_repo/build/bin"
+  ln -s "$fixture_repo" "$fake_home/code"
+  printf '%s\n' '{"server":{"database":{"host":"127.0.0.1","port":"13306"},"qsdatabase":{"host":"127.0.0.1","port":"13306"}}}' >"$fake_server/eqemu_config.json"
+  source_hash="$(sha256sum "$fake_server/eqemu_config.json")"
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$fixture_repo/build/bin/zone"
+  chmod +x "$fixture_repo/build/bin/zone"
 
   cat >"$fake_bin/docker-compose" <<EOF
 #!/usr/bin/env bash
@@ -633,7 +672,8 @@ previous=""
 for arg in "\$@"; do
   if [[ "\$previous" == "-lc" ]]; then
     printf '%s\n' "\$arg" >"$payload_file"
-    exit 0
+    HOME="$fake_home" EQEMU_DB_PASSWORD=fixture PATH="$fake_bin:/usr/bin:/bin" bash -c "\$arg"
+    exit \$?
   fi
   previous="\$arg"
 done
@@ -652,11 +692,12 @@ EOF
 
   [[ "$status" -eq 0 ]] || return 1
   assert_contains "$(cat "$capture_file")" "run --rm --no-deps --entrypoint bash eqemu-server"
-  assert_contains "$(cat "$payload_file")" 'mysqladmin status -ueqemu -p"$EQEMU_DB_PASSWORD" -h mariadb --silent'
-  assert_contains "$(cat "$payload_file")" '.server.database.host = \"mariadb\"'
-  assert_contains "$(cat "$payload_file")" '.server.qsdatabase.host = \"mariadb\"'
-  assert_contains "$(cat "$payload_file")" 'link_runtime_dir plugins ~/server/quests/plugins ~/server/plugins'
-  assert_contains "$(cat "$payload_file")" 'link_runtime_dir lua_modules ~/server/quests/lua_modules ~/server/lua_modules'
+  [[ "$(jq -r '.server.database.host + ":" + .server.database.port' /tmp/zone-cli-validation-runtime/eqemu_config.json)" == "mariadb:3306" ]] || return 1
+  [[ "$(jq -r '.server.qsdatabase.host + ":" + .server.qsdatabase.port' /tmp/zone-cli-validation-runtime/eqemu_config.json)" == "mariadb:3306" ]] || return 1
+  [[ -L /tmp/zone-cli-validation-runtime/plugins ]] || return 1
+  [[ -L /tmp/zone-cli-validation-runtime/lua_modules ]] || return 1
+  [[ "$(sha256sum "$fake_server/eqemu_config.json")" == "$source_hash" ]] || return 1
+  assert_contains "$(cat "$payload_file")" '~/code/scripts/lib/prepare-zone-cli-runtime.sh "$runtime"'
   assert_contains "$(cat "$payload_file")" '~/code/build/bin/zone tests:npc-handins'
 }
 
@@ -687,6 +728,7 @@ run_test "zone harness uses service DNS runtime config without mutating source" 
 run_test "zone harness command exercises headless target twice with cursor cleanup checks" test_zone_harness_command_exercises_headless_target_twice_with_cursor_cleanup_checks
 run_test "validate tier3-harness delegates to smoke script" test_validate_tier3_harness_delegates_to_smoke_script
 run_test "actor queue Tier 3 dry run classifies mutation and cleanup" test_actor_queue_tier3_dry_run_classifies_mutation_and_cleanup
+run_test "zone CLI profiles share runtime setup" test_zone_cli_profiles_share_runtime_setup
 run_test "help mentions stack and dry-run" test_help_mentions_stack_and_dry_run
 run_test "dry-run prints route and skips Docker" test_dry_run_prints_route_and_skips_docker
 run_test "tier2-readonly dry-run describes one-off container" test_tier2_readonly_dry_run_describes_single_one_off_container
