@@ -53,9 +53,8 @@ now_utc() {
 
 profile_names=(preflight safe tier3-harness tier1-tier3-harness)
 AFK_CHECK_PLAN='[
-  {"name":"preflight","profile":"preflight","log_path":"worker/logs/preflight.log","failure_status":"inconclusive","failure_message":"validation preflight was inconclusive","inconclusive_message":"validation preflight was inconclusive"},
   {"name":"tier1-build-and-unit-tests","profile":"tier1","log_path":"worker/logs/tier1-build-and-unit-tests.log","failure_status":"rejected","failure_message":"Tier 1 validation failed","inconclusive_message":"Tier 1 validation was inconclusive"},
-  {"name":"tier2-read-only-database-tests","profile":"tier2-readonly","log_path":"worker/logs/tier2-read-only-database-tests.log","failure_status":"rejected","failure_message":"Tier 2 validation failed","inconclusive_message":"Tier 2 validation was inconclusive"}
+  {"name":"tier3-zone-harness","profile":"tier3-harness","log_path":"worker/logs/tier3-zone-harness.log","failure_status":"rejected","failure_message":"Tier 3 Zone Harness validation failed","inconclusive_message":"Tier 3 Zone Harness validation was inconclusive"}
 ]'
 
 profile_description() {
@@ -295,7 +294,7 @@ run_afk_request() {
       repo:$repo,
       ref:$commit,
       commit:$commit,
-      profile:"safe",
+      profile:"tier1-tier3-harness",
       run_id:$run_id,
       evidence_dir:$evidence_dir,
       timeout_seconds:2600,
@@ -913,7 +912,7 @@ run_request() {
     return "$exit_code"
   }
 
-  if [[ "$profile" == "safe" && "${VALIDATION_WORKER_AFK_MODE:-0}" == "1" ]]; then
+  if [[ "$profile" == "tier1-tier3-harness" && "${VALIDATION_WORKER_AFK_MODE:-0}" == "1" ]]; then
     local_checks_path="$evidence_dir/afk-checks.json"
     initialize_afk_check_statuses
     ensure_afk_check_logs "$(dirname "$evidence_dir")"
