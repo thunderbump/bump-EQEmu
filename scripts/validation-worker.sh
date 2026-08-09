@@ -62,7 +62,7 @@ profile_description() {
     preflight) printf '%s' 'Verify the validation stack contract only.' ;;
     safe) printf '%s' 'Run preflight, Tier 1, and read-mostly Tier 2 checks.' ;;
     tier3-harness) printf '%s' 'Run the canonical Tier 3 Zone Harness smoke.' ;;
-    actor-queue-tier3) printf '%s' 'Run the durable Autonomous Actor queue executor integration proof.' ;;
+    actor-queue-tier3) printf '%s' 'Build Tier 1, then run the durable Autonomous Actor queue executor integration proof.' ;;
     tier1-tier3-harness) printf '%s' 'Run Tier 1 first, then Tier 3 harness under one timeout budget.' ;;
     *) return 1 ;;
   esac
@@ -84,7 +84,7 @@ profile_timeout_guidance() {
     preflight) printf '%s' 'Short. Roughly 5-10 minutes is usually enough.' ;;
     safe) printf '%s' 'Medium. Roughly 15-30 minutes depending on build speed.' ;;
     tier3-harness) printf '%s' 'Medium. Roughly 10-20 minutes including harness startup.' ;;
-    actor-queue-tier3) printf '%s' 'Medium. Roughly 10-20 minutes after a Tier 1 build.' ;;
+    actor-queue-tier3) printf '%s' 'Longer. Give one shared budget that covers Tier 1 and the actor queue runtime.' ;;
     tier1-tier3-harness) printf '%s' 'Longer. Give one shared budget that covers both Tier 1 and Tier 3.' ;;
     *) return 1 ;;
   esac
@@ -951,6 +951,30 @@ run_request() {
   fi
 
   case "$profile" in
+    actor-queue-tier3)
+      if run_validation tier1; then
+        :
+      else
+        validation_status=$?
+        if [[ "$validation_status" -eq 124 ]]; then
+          write_result "$evidence_dir" failed timeout 1 "validation timed out" "$checkout_dir" "$head_commit" "$stack_path_source"
+          return 1
+        fi
+        write_result "$evidence_dir" failed validation_failed 1 "validation profile failed" "$checkout_dir" "$head_commit" "$stack_path_source"
+        return 1
+      fi
+      if run_validation actor-queue-tier3; then
+        :
+      else
+        validation_status=$?
+        if [[ "$validation_status" -eq 124 ]]; then
+          write_result "$evidence_dir" failed timeout 1 "validation timed out" "$checkout_dir" "$head_commit" "$stack_path_source"
+          return 1
+        fi
+        write_result "$evidence_dir" failed validation_failed 1 "validation profile failed" "$checkout_dir" "$head_commit" "$stack_path_source"
+        return 1
+      fi
+      ;;
     tier1-tier3-harness)
       if run_validation tier1; then
         :

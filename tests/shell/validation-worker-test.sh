@@ -342,8 +342,8 @@ test_profiles_json() {
   jq -e '.profiles[] | select(.name == "actor-queue-tier3") | .mutation_classification == "database-mutating/runtime-fixture"' >/dev/null <<<"$output" || return 1
 }
 
-test_actor_queue_tier3_profile_delegates_with_machine_readable_evidence() {
-  local source request evidence status output
+test_actor_queue_tier3_profile_builds_before_runtime_from_clean_fetch() {
+  local source request evidence status output validation_log first_tier1 first_actor_queue
   make_source_repo source actor-queue-tier3
   evidence="$tmp_root/evidence-actor-queue-tier3"
   request="$tmp_root/actor-queue-tier3.json"
@@ -354,7 +354,11 @@ test_actor_queue_tier3_profile_delegates_with_machine_readable_evidence() {
   [[ "$status" -eq 0 ]] || return 1
   assert_json_equals "$evidence/result.json" .status passed
   assert_json_equals "$evidence/result.json" .profile actor-queue-tier3
-  assert_contains "$(cat "$evidence/logs/validation.log")" "fake validate: --stack validation --dry-run actor-queue-tier3"
+  validation_log="$evidence/logs/validation.log"
+  first_tier1="$(grep -n 'fake validate: --stack validation --dry-run tier1' "$validation_log" | head -n1 | cut -d: -f1)"
+  first_actor_queue="$(grep -n 'fake validate: --stack validation --dry-run actor-queue-tier3' "$validation_log" | head -n1 | cut -d: -f1)"
+  [[ -n "$first_tier1" && -n "$first_actor_queue" ]] || return 1
+  [[ "$first_tier1" -lt "$first_actor_queue" ]] || return 1
 }
 
 test_safe_profile_remains_available_for_non_afk_requests() {
@@ -1135,7 +1139,7 @@ EOF
 run_test "validation worker help mentions request contract" test_help
 run_test "AFK contract config selects the validation worker" test_afk_contract_config
 run_test "validation worker profiles discovery emits portable metadata" test_profiles_json
-run_test "actor queue Tier 3 profile delegates with machine-readable evidence" test_actor_queue_tier3_profile_delegates_with_machine_readable_evidence
+run_test "actor queue Tier 3 profile builds before runtime from a clean fetch" test_actor_queue_tier3_profile_builds_before_runtime_from_clean_fetch
 run_test "safe profile remains available for non-AFK requests" test_safe_profile_remains_available_for_non_afk_requests
 run_test "invalid request writes structured evidence" test_invalid_request_writes_evidence
 run_test "fake repo fetch checkout writes evidence" test_fetch_checkout_and_evidence
