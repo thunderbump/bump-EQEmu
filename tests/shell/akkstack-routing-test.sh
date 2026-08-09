@@ -543,6 +543,18 @@ test_validate_tier3_harness_delegates_to_smoke_script() {
   [[ "$(cat "$calls")" == "--stack gameplay --dry-run" ]] || return 1
 }
 
+test_actor_queue_tier3_dry_run_classifies_mutation_and_cleanup() {
+  local fixture_repo fixture_parent status output
+  make_fixture fixture_repo fixture_parent
+
+  capture_run status output "$fixture_repo/scripts/validate.sh" --dry-run actor-queue-tier3
+
+  [[ "$status" -eq 0 ]] || return 1
+  assert_contains "$output" "tests:actor-events"
+  assert_contains "$output" "database-mutating runtime fixture"
+  assert_contains "$output" "scenario-owned rows are cleaned up"
+}
+
 test_help_mentions_stack_and_dry_run() {
   local fixture_repo fixture_parent status output script
   make_fixture fixture_repo fixture_parent
@@ -674,6 +686,7 @@ run_test "zone harness command checks build artifacts before launch" test_zone_h
 run_test "zone harness uses service DNS runtime config without mutating source" test_zone_harness_uses_service_dns_runtime_config_without_mutating_source
 run_test "zone harness command exercises headless target twice with cursor cleanup checks" test_zone_harness_command_exercises_headless_target_twice_with_cursor_cleanup_checks
 run_test "validate tier3-harness delegates to smoke script" test_validate_tier3_harness_delegates_to_smoke_script
+run_test "actor queue Tier 3 dry run classifies mutation and cleanup" test_actor_queue_tier3_dry_run_classifies_mutation_and_cleanup
 run_test "help mentions stack and dry-run" test_help_mentions_stack_and_dry_run
 run_test "dry-run prints route and skips Docker" test_dry_run_prints_route_and_skips_docker
 run_test "tier2-readonly dry-run describes one-off container" test_tier2_readonly_dry_run_describes_single_one_off_container

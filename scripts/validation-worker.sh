@@ -24,7 +24,7 @@ Request JSON fields:
   checkout.path      Optional local-checkout request path. Also accepts local_checkout.path,
                      target_worktree_checkout, target_checkout_path, or repo.path without a ref.
   profile            Required validation profile: preflight, tier1, tier2-readonly,
-                     tier3-harness, tier1-tier3-harness, or safe.
+                     tier3-harness, actor-queue-tier3, tier1-tier3-harness, or safe.
   run_id             Required stable run identifier used for worker-owned checkout storage.
   evidence_dir       Required directory where request.json, result.json, and logs are written.
   timeout_seconds    Optional validation timeout in seconds. Defaults to 3600.
@@ -51,7 +51,7 @@ now_utc() {
   date -u +%Y-%m-%dT%H:%M:%SZ
 }
 
-profile_names=(preflight safe tier3-harness tier1-tier3-harness)
+profile_names=(preflight safe tier3-harness actor-queue-tier3 tier1-tier3-harness)
 AFK_CHECK_PLAN='[
   {"name":"tier1-build-and-unit-tests","profile":"tier1","log_path":"worker/logs/tier1-build-and-unit-tests.log","failure_status":"rejected","failure_message":"Tier 1 validation failed","inconclusive_message":"Tier 1 validation was inconclusive"},
   {"name":"tier3-zone-harness","profile":"tier3-harness","log_path":"worker/logs/tier3-zone-harness.log","failure_status":"rejected","failure_message":"Tier 3 Zone Harness validation failed","inconclusive_message":"Tier 3 Zone Harness validation was inconclusive"}
@@ -62,6 +62,7 @@ profile_description() {
     preflight) printf '%s' 'Verify the validation stack contract only.' ;;
     safe) printf '%s' 'Run preflight, Tier 1, and read-mostly Tier 2 checks.' ;;
     tier3-harness) printf '%s' 'Run the canonical Tier 3 Zone Harness smoke.' ;;
+    actor-queue-tier3) printf '%s' 'Run the durable Autonomous Actor queue executor integration proof.' ;;
     tier1-tier3-harness) printf '%s' 'Run Tier 1 first, then Tier 3 harness under one timeout budget.' ;;
     *) return 1 ;;
   esac
@@ -72,6 +73,7 @@ profile_mutation_classification() {
     preflight) printf '%s' 'read-only' ;;
     safe) printf '%s' 'read-mostly' ;;
     tier3-harness) printf '%s' 'read-mostly/runtime-fixture' ;;
+    actor-queue-tier3) printf '%s' 'database-mutating/runtime-fixture' ;;
     tier1-tier3-harness) printf '%s' 'read-mostly/runtime-fixture' ;;
     *) return 1 ;;
   esac
@@ -82,6 +84,7 @@ profile_timeout_guidance() {
     preflight) printf '%s' 'Short. Roughly 5-10 minutes is usually enough.' ;;
     safe) printf '%s' 'Medium. Roughly 15-30 minutes depending on build speed.' ;;
     tier3-harness) printf '%s' 'Medium. Roughly 10-20 minutes including harness startup.' ;;
+    actor-queue-tier3) printf '%s' 'Medium. Roughly 10-20 minutes after a Tier 1 build.' ;;
     tier1-tier3-harness) printf '%s' 'Longer. Give one shared budget that covers both Tier 1 and Tier 3.' ;;
     *) return 1 ;;
   esac
@@ -92,6 +95,7 @@ profile_lock_guidance() {
     preflight) printf '%s' 'Takes the exclusive worker slot. Also takes the stack binding lock when stack.path is used.' ;;
     safe) printf '%s' 'Takes the exclusive worker slot for the whole run. Also takes the stack binding lock when stack.path is used.' ;;
     tier3-harness) printf '%s' 'Takes the exclusive worker slot for the whole run. Also takes the stack binding lock when stack.path is used.' ;;
+    actor-queue-tier3) printf '%s' 'Takes the exclusive worker and stack binding locks; mutates the validation database and cleans scenario-owned rows.' ;;
     tier1-tier3-harness) printf '%s' 'Takes the exclusive worker slot for both tiers under one run. Also takes the stack binding lock when stack.path is used.' ;;
     *) return 1 ;;
   esac
@@ -462,7 +466,7 @@ validate_request() {
   [[ "$project" == "bump-eqemu" || "$project" == "bump-EQEmu" ]] || { printf 'invalid or missing project\n'; return 1; }
   resolve_request_source "$request_path" || return 1
   [[ -z "$commit" || "$commit" =~ ^[0-9a-fA-F]{7,40}$ ]] || { printf 'invalid commit\n'; return 1; }
-  case "$profile" in preflight|tier1|tier2-readonly|tier3-harness|tier1-tier3-harness|safe) ;; *) printf 'invalid or missing profile\n'; return 1 ;; esac
+  case "$profile" in preflight|tier1|tier2-readonly|tier3-harness|actor-queue-tier3|tier1-tier3-harness|safe) ;; *) printf 'invalid or missing profile\n'; return 1 ;; esac
   [[ -n "$run_id" ]] || { printf 'missing run_id\n'; return 1; }
   sanitize_run_id "$run_id" || { printf 'run_id may contain only letters, digits, dot, underscore, and dash\n'; return 1; }
   [[ -n "$evidence_dir" ]] || { printf 'missing evidence_dir\n'; return 1; }

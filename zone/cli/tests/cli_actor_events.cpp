@@ -334,6 +334,46 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 		};
 
 		Json::Value stand_body(Json::objectValue);
+		Json::StreamWriterBuilder stale_writer;
+		stale_writer["indentation"] = "";
+		Json::Value stale_metadata;
+		stale_metadata["expected_event_id"] = Json::UInt64(0);
+		const auto enqueue_ineligible = [&](bool enabled, std::optional<uint32_t> status_zone_id,
+											const std::string& suffix, time_t heartbeat_at) {
+			ActorProfilesRepository::ActorProfileRecord ineligible_profile{};
+			ineligible_profile.actor_type = "autonomous_actor";
+			ineligible_profile.actor_substrate = "bot";
+			ineligible_profile.bot_id =
+				next_free_bot_id(static_cast<uint32_t>(cleanup.reserved_owner_character_id + suffix.size()));
+			ineligible_profile.owner_character_id = reserved_owner.character_id;
+			ineligible_profile.enabled = enabled;
+			ineligible_profile = ActorProfilesRepository::UpsertBotBackedProfile(database, ineligible_profile);
+			cleanup.TrackActorId(ineligible_profile.actor_id);
+			if (status_zone_id.has_value()) {
+				ActorStatusRepository::UpsertOne(database, {
+															   .actor_id = ineligible_profile.actor_id,
+															   .zone_id = *status_zone_id,
+															   .instance_id = zone->GetInstanceID(),
+															   .entity_id = fixture.OwnedBot()->GetID(),
+															   .state = "active",
+															   .heartbeat_at = heartbeat_at,
+														   });
+			}
+			return ActorActionQueueRepository::Enqueue(
+				database, {
+							  .actor_id = ineligible_profile.actor_id,
+							  .source = "actor-events-test",
+							  .source_metadata_json = Json::writeString(stale_writer, stale_metadata),
+							  .action_type = "stand",
+							  .action_json = Json::writeString(stale_writer, stand_body),
+							  .idempotency_key = fmt::format("{}-{}", suffix, run_nonce),
+							  .created_at = now,
+						  });
+		};
+		const auto missing_actor = enqueue_ineligible(true, std::nullopt, "missing-live-actor", now);
+		const auto disabled_actor = enqueue_ineligible(false, zone->GetZoneID(), "disabled-actor", now);
+		const auto stale_actor = enqueue_ineligible(true, zone->GetZoneID(), "stale-actor", now - 31);
+		const auto moved_actor = enqueue_ineligible(true, zone->GetZoneID() + 1, "moved-actor", now);
 		ActorProfilesRepository::ActorProfileRecord stale_profile{};
 		stale_profile.actor_type = "autonomous_actor";
 		stale_profile.actor_substrate = "bot";
@@ -351,10 +391,6 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 													   .state = "active",
 													   .heartbeat_at = now,
 												   });
-		Json::StreamWriterBuilder stale_writer;
-		stale_writer["indentation"] = "";
-		Json::Value stale_metadata;
-		stale_metadata["expected_event_id"] = Json::UInt64(0);
 		const auto stale_first = ActorActionQueueRepository::Enqueue(
 			database, {
 						  .actor_id = stale_profile.actor_id,
@@ -371,6 +407,11 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 			   "actor actions should enqueue");
 		ActorActionExecutor executor(database, zone->GetZoneID(), zone->GetInstanceID(), zone->GetZoneServerId());
 		executor.ProcessOne();
+		for (const auto action_id :
+			 {missing_actor.action_id, disabled_actor.action_id, stale_actor.action_id, moved_actor.action_id}) {
+			ExpectEqual(ActorActionQueueRepository::FindOne(database, action_id).state, std::string("pending"),
+						"missing, disabled, stale, and moved actors must remain unclaimed");
+		}
 		ExpectEqual(ActorActionQueueRepository::FindOne(database, stale_first.action_id).state, std::string("pending"),
 					"a stale live binding should remain unclaimed");
 		ExpectEqual(ActorActionQueueRepository::FindOne(database, first_action.action_id).state,
@@ -507,36 +548,36 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 		const auto enqueue_raw = [&](const std::string& metadata_json, const std::string& action_json,
 									 const std::string& key) {
 			return ActorActionQueueRepository::Enqueue(database, {
-				.actor_id = inserted_profile.actor_id,
-				.source = "actor-events-test",
-				.source_metadata_json = metadata_json,
-				.action_type = "target",
-				.action_json = action_json,
-				.idempotency_key = key,
-				.created_at = now,
-			});
+																	 .actor_id = inserted_profile.actor_id,
+																	 .source = "actor-events-test",
+																	 .source_metadata_json = metadata_json,
+																	 .action_type = "target",
+																	 .action_json = action_json,
+																	 .idempotency_key = key,
+																	 .created_at = now,
+																 });
 		};
-		const auto malformed_watermark = enqueue_raw(
-			R"json({"expected_event_id":"not-a-number"})json", R"json({"entity_id":1})json",
-			fmt::format("bad-watermark-{}", run_nonce));
+		const auto malformed_watermark =
+			enqueue_raw(R"json({"expected_event_id":"not-a-number"})json", R"json({"entity_id":1})json",
+						fmt::format("bad-watermark-{}", run_nonce));
 		executor.ProcessOne();
 		ExpectEqual(ActorActionQueueRepository::FindOne(database, malformed_watermark.action_id).failure_reason,
-			std::optional<std::string>("stale_event_watermark"),
-			"non-numeric event watermarks should reject without coercion or exceptions");
+					std::optional<std::string>("stale_event_watermark"),
+					"non-numeric event watermarks should reject without coercion or exceptions");
 
 		Json::Value valid_metadata;
 		valid_metadata["expected_event_id"] = Json::UInt64(persisted_events[0].event_id);
 		const auto metadata_json = Json::writeString(stale_writer, valid_metadata);
-		for (const auto& [body_json, suffix] : std::vector<std::pair<std::string, std::string>>{
-				 {R"json({"entity_id":"1"})json", "string"},
-				 {R"json({"entity_id":-1})json", "negative"},
-				 {R"json({"entity_id":65536})json", "oversized"}}) {
-			const auto malformed_target = enqueue_raw(
-				metadata_json, body_json, fmt::format("bad-target-{}-{}", suffix, run_nonce));
+		for (const auto& [body_json, suffix] :
+			 std::vector<std::pair<std::string, std::string>>{{R"json({"entity_id":"1"})json", "string"},
+															  {R"json({"entity_id":-1})json", "negative"},
+															  {R"json({"entity_id":65536})json", "oversized"}}) {
+			const auto malformed_target =
+				enqueue_raw(metadata_json, body_json, fmt::format("bad-target-{}-{}", suffix, run_nonce));
 			executor.ProcessOne();
 			ExpectEqual(ActorActionQueueRepository::FindOne(database, malformed_target.action_id).failure_reason,
-				std::optional<std::string>("invalid_action_json"),
-				"malformed target entity ids should reject without coercion or exceptions");
+						std::optional<std::string>("invalid_action_json"),
+						"malformed target entity ids should reject without coercion or exceptions");
 		}
 
 		auto* ineligible_target = fixture.AddHostileNPC({

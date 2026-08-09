@@ -30,6 +30,8 @@ Commands:
   tier1           Run the container build and unit test tier.
   tier2-readonly  Run read-mostly DB-backed zone CLI tests.
   tier3-harness   Run the canonical Zone Harness smoke.
+  actor-queue-tier3
+                  Run the DB-mutating durable actor queue integration scenario.
   safe            Run preflight, tier1, and tier2-readonly.
 
 The safe command intentionally does not run DB-mutating Tier 2 checks or Tier 3
@@ -119,6 +121,42 @@ run_tier2_readonly() {
   run_tier2_readonly_zone_tests
 }
 
+run_actor_queue_tier3() {
+  run_preflight
+  run_mariadb
+  (
+    cd "$stack_dir"
+    "${compose[@]}" run --rm --no-deps --entrypoint bash eqemu-server -lc \
+      'set -euo pipefail
+test -x ~/code/build/bin/zone || { printf "error: actor-queue-tier3 requires a prior Tier 1 build; missing executable ~/code/build/bin/zone\n" >&2; exit 2; }
+until mysqladmin status -ueqemu -p"$EQEMU_DB_PASSWORD" -h mariadb --silent; do
+  sleep 1
+done
+runtime=/tmp/actor-queue-tier3-runtime
+rm -rf "$runtime"
+mkdir -p "$runtime"
+jq ".server.database.host = \"mariadb\" | .server.database.port = \"3306\" | .server.qsdatabase.host = \"mariadb\" | .server.qsdatabase.port = \"3306\"" ~/server/eqemu_config.json > "$runtime/eqemu_config.json"
+link_runtime_dir() {
+  local target="$1"
+  shift
+  local candidate
+  for candidate in "$@"; do
+    if [[ -d "$candidate" ]]; then
+      ln -s "$candidate" "$runtime/$target"
+      return 0
+    fi
+  done
+  printf "missing runtime directory for %s\n" "$target" >&2
+  return 1
+}
+link_runtime_dir shared ~/server/shared
+link_runtime_dir plugins ~/server/quests/plugins ~/server/plugins
+link_runtime_dir lua_modules ~/server/quests/lua_modules ~/server/lua_modules
+cd "$runtime"
+~/code/build/bin/zone tests:actor-events'
+  )
+}
+
 run_tier3_harness() {
   local smoke_args=(--stack "$AKKSTACK_STACK_ROLE")
 
@@ -142,7 +180,7 @@ fi
 command="${AKKSTACK_REMAINING_ARGS[0]}"
 
 case "$command" in
-  preflight|tier1|tier2-readonly|tier3-harness|safe)
+  preflight|tier1|tier2-readonly|tier3-harness|actor-queue-tier3|safe)
     ;;
   *)
     usage >&2
@@ -152,6 +190,11 @@ esac
 
 if [[ "$command" == "tier3-harness" ]]; then
   run_tier3_harness
+  exit 0
+fi
+
+if [[ "$AKKSTACK_DRY_RUN" -eq 1 && "$command" == "actor-queue-tier3" ]]; then
+  akkstack_print_dry_run "would run tests:actor-events as a database-mutating runtime fixture; scenario-owned rows are cleaned up" "${compose_files[@]}"
   exit 0
 fi
 
@@ -177,6 +220,9 @@ case "$command" in
   tier2-readonly)
     run_preflight
     run_tier2_readonly
+    ;;
+  actor-queue-tier3)
+    run_actor_queue_tier3
     ;;
   safe)
     run_preflight
