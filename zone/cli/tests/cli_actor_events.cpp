@@ -35,6 +35,7 @@
 #include "zone/zone.h"
 #include "zone/zonedb.h"
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -681,6 +682,30 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 		Expect(
 			ActorActionQueueRepository::ReleaseClaim(database, rollback_action.action_id, "actor-events-rollback-test"),
 			"rolled-back terminalization should release for retry");
+		ActorActionQueueRepository::DeleteOne(database, rollback_action.action_id);
+
+		auto* duplicate_probe_target = fixture.AddHostileNPC({
+			.name = fmt::format("DuplicateProbeTarget{}", run_nonce),
+			.position = glm::vec4(10.0f, 0.0f, 0.0f, 0.0f),
+		});
+		Expect(duplicate_probe_target != nullptr, "duplicate application probe should create a target");
+		Json::Value duplicate_probe_body;
+		duplicate_probe_body["entity_id"] = duplicate_probe_target->GetID();
+		const auto duplicate_probe =
+			enqueue("target", duplicate_probe_body, fmt::format("duplicate-probe-{}", run_nonce));
+		executor.ProcessOne();
+		executor.ProcessOne();
+		const auto duplicate_probe_events = recorder.Since(0, 32);
+		const auto duplicate_applications = std::count_if(
+			duplicate_probe_events.begin(), duplicate_probe_events.end(),
+			[actor_id = fixture.OwnedBot()->GetID(), target_id = duplicate_probe_target->GetID()](const auto& event) {
+				return event.type == "target_changed" && event.caster.entity_id == actor_id &&
+					   event.target.has_value() && event.target->entity_id == target_id;
+			});
+		ExpectEqual(ActorActionQueueRepository::FindOne(database, duplicate_probe.action_id).state,
+					std::string("completed"), "duplicate application probe should complete");
+		ExpectEqual(duplicate_applications, static_cast<decltype(duplicate_applications)>(1),
+					"retrying a completed action must not apply its gameplay effect twice");
 
 		ExpectEqual(CountPlayerEventLogRowsWithMarker(speech_marker), int64_t(0),
 					"runtime actor event persistence should not write marker rows to player_event_logs");
