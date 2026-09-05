@@ -831,8 +831,8 @@ test_current_afk_command_validates_exact_head_without_arguments() {
   assert_json_equals "$evidence/request.json" .stack.role validation
   assert_json_equals "$evidence/result.json" .actual_checkout_commit "$head"
   assert_json_equals "$evidence/result.json" .status passed
-  assert_contains "$(cat "$evidence/logs/validation.log")" "fake validate: --stack validation --dry-run tier1"
-  assert_contains "$(cat "$evidence/logs/validation.log")" "fake validate: --stack validation --dry-run tier3-harness"
+  assert_contains "$(cat "$evidence/logs/validation.log")" "fake validate: --stack validation tier1"
+  assert_contains "$(cat "$evidence/logs/validation.log")" "fake validate: --stack validation tier3-harness"
 }
 
 test_current_afk_command_rejects_arguments() {

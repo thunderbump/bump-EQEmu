@@ -62,4 +62,7 @@ printf 'Validating committed Candidate %s with Tier 1 and Tier 3 Zone Harness.\n
 printf 'Validation stack: %s\n' "$stack_path"
 printf 'Validation evidence: %s\n' "$evidence_dir"
 
-"$script_dir/validation-worker.sh" run --request "$request_path"
+# This entry point is the committed-Candidate gate, never a worker preview.
+# Do not allow an operator's ambient worker-only setting to skip validation.
+env -u VALIDATION_WORKER_VALIDATE_DRY_RUN \
+  "$script_dir/validation-worker.sh" run --request "$request_path"
