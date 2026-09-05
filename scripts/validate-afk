@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$#" -ne 0 ]]; then
+  printf 'error: scripts/validate-afk takes no arguments\n' >&2
+  exit 2
+fi
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+worker_home="${VALIDATION_WORKER_HOME:-$repo_root/.validation-worker}"
+stack_path="${AKKSTACK_DIR:-$HOME/Projects/bump-eqemu/bump-akk-stack-validation}"
+timeout_seconds="${VALIDATION_AFK_TIMEOUT_SECONDS:-2600}"
+
+if [[ ! "$timeout_seconds" =~ ^[0-9]+$ || "$timeout_seconds" -eq 0 ]]; then
+  printf 'error: VALIDATION_AFK_TIMEOUT_SECONDS must be a positive integer\n' >&2
+  exit 2
+fi
+
+candidate_sha="$(git -C "$repo_root" rev-parse --verify HEAD^{commit} 2>/dev/null)" || {
+  printf 'error: scripts/validate-afk must run from a committed Git checkout\n' >&2
+  exit 2
+}
+
+run_token="current-afk-${candidate_sha:0:16}-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+evidence_dir="${VALIDATION_AFK_EVIDENCE_DIR:-$worker_home/evidence/$run_token}"
+if [[ -e "$evidence_dir" ]]; then
+  printf 'error: validation evidence path already exists: %s\n' "$evidence_dir" >&2
+  exit 2
+fi
+
+mkdir -p "$worker_home/requests"
+request_path="$(mktemp "$worker_home/requests/$run_token.XXXXXX.json")"
+cleanup() {
+  rm -f "$request_path"
+}
+trap cleanup EXIT
+
+jq -n \
+  --arg project bump-eqemu \
+  --arg repo "$repo_root" \
+  --arg ref "$candidate_sha" \
+  --arg commit "$candidate_sha" \
+  --arg run_id "$run_token" \
+  --arg evidence_dir "$evidence_dir" \
+  --arg stack_path "$stack_path" \
+  --argjson timeout_seconds "$timeout_seconds" \
+  '{
+    project:$project,
+    repo:$repo,
+    ref:$ref,
+    commit:$commit,
+    profile:"tier1-tier3-harness",
+    run_id:$run_id,
+    evidence_dir:$evidence_dir,
+    timeout_seconds:$timeout_seconds,
+    lock_wait_seconds:0,
+    stack:{role:"validation", path:$stack_path}
+  }' >"$request_path"
+
+printf 'Validating committed Candidate %s with Tier 1 and Tier 3 Zone Harness.\n' "$candidate_sha"
+printf 'Validation stack: %s\n' "$stack_path"
+printf 'Validation evidence: %s\n' "$evidence_dir"
+
+# This entry point is the committed-Candidate gate, never a worker preview.
+# Do not allow an operator's ambient worker-only setting to skip validation.
+env -u VALIDATION_WORKER_VALIDATE_DRY_RUN \
+  "$script_dir/validation-worker.sh" run --request "$request_path"

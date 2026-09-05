@@ -129,9 +129,10 @@ make_afk_contract_repo() {
   make_source_repo fixture_source "$suffix"
   source_ref="$fixture_source"
   cp "$repo_root/scripts/validation-worker.sh" "$source_ref/scripts/validation-worker.sh"
-  chmod +x "$source_ref/scripts/validation-worker.sh"
-  git -C "$source_ref" add scripts/validation-worker.sh
-  git -C "$source_ref" commit -m 'add validation worker' >/dev/null 2>&1
+  cp "$repo_root/scripts/validate-afk" "$source_ref/scripts/validate-afk"
+  chmod +x "$source_ref/scripts/validation-worker.sh" "$source_ref/scripts/validate-afk"
+  git -C "$source_ref" add scripts/validation-worker.sh scripts/validate-afk
+  git -C "$source_ref" commit -m 'add validation worker entry points' >/dev/null 2>&1
   configure_afk_host "$source_ref"
 }
 
@@ -221,7 +222,11 @@ if [[ -z "$payload" ]]; then
   exit 1
 fi
 
-EQEMU_DB_PASSWORD=fixture bash -lc "$payload"
+fixture_home="$(mktemp -d)"
+trap 'rm -rf "$fixture_home"' EXIT
+mkdir -p "$fixture_home/server"
+printf '%s\n' '{"server":{"database":{},"qsdatabase":{}}}' >"$fixture_home/server/eqemu_config.json"
+HOME="$fixture_home" EQEMU_DB_PASSWORD=fixture bash -c "$payload"
 SCRIPT
   chmod +x "$fake_bin/docker-compose"
 }
@@ -804,6 +809,65 @@ test_akkstack_dir_real_code_directory_fails_fast() {
   [[ -d "$stack/code" && ! -L "$stack/code" ]] || return 1
 }
 
+test_current_afk_command_validates_exact_head_without_arguments() {
+  local source evidence status output head
+  make_afk_contract_repo source current-command
+  reset_worker_home
+  head="$(git -C "$source" rev-parse HEAD)"
+  evidence="$tmp_root/current-afk-evidence"
+
+  capture_run status output env HOME="$tmp_root/operator-home" \
+    VALIDATION_WORKER_HOME="$tmp_root/worker-home" \
+    VALIDATION_WORKER_VALIDATE_DRY_RUN=1 \
+    VALIDATION_AFK_EVIDENCE_DIR="$evidence" \
+    "$source/scripts/validate-afk"
+
+  [[ "$status" -eq 0 ]] || return 1
+  assert_contains "$output" "Validating committed Candidate $head"
+  assert_contains "$output" "Validation evidence: $evidence"
+  assert_json_equals "$evidence/request.json" .commit "$head"
+  assert_json_equals "$evidence/request.json" .ref "$head"
+  assert_json_equals "$evidence/request.json" .profile tier1-tier3-harness
+  assert_json_equals "$evidence/request.json" .stack.role validation
+  assert_json_equals "$evidence/result.json" .actual_checkout_commit "$head"
+  assert_json_equals "$evidence/result.json" .status passed
+  assert_contains "$(cat "$evidence/logs/validation.log")" "fake validate: --stack validation tier1"
+  assert_contains "$(cat "$evidence/logs/validation.log")" "fake validate: --stack validation tier3-harness"
+}
+
+test_current_afk_command_rejects_arguments() {
+  local status output
+  capture_run status output "$repo_root/scripts/validate-afk" unexpected
+  [[ "$status" -eq 2 ]] || return 1
+  assert_contains "$output" "takes no arguments"
+}
+
+test_current_afk_command_returns_nonzero_for_failure_and_missing_stack() {
+  local source evidence status output stack
+  make_afk_contract_repo source current-command-failure
+  stack="$tmp_root/operator-home/Projects/bump-eqemu/bump-akk-stack-validation"
+
+  evidence="$tmp_root/current-afk-failed-evidence"
+  capture_run status output env HOME="$tmp_root/operator-home" \
+    VALIDATION_WORKER_HOME="$tmp_root/worker-home-current-failed" \
+    VALIDATION_WORKER_VALIDATE_DRY_RUN=1 \
+    VALIDATION_WORKER_TEST_FAIL_TIER1=1 \
+    VALIDATION_AFK_EVIDENCE_DIR="$evidence" \
+    "$source/scripts/validate-afk"
+  [[ "$status" -eq 1 ]] || return 1
+  assert_json_equals "$evidence/result.json" .category validation_failed
+
+  rm -rf "$stack"
+  evidence="$tmp_root/current-afk-missing-stack-evidence"
+  capture_run status output env HOME="$tmp_root/operator-home" \
+    VALIDATION_WORKER_HOME="$tmp_root/worker-home-current-missing" \
+    VALIDATION_WORKER_VALIDATE_DRY_RUN=1 \
+    VALIDATION_AFK_EVIDENCE_DIR="$evidence" \
+    "$source/scripts/validate-afk"
+  [[ "$status" -ne 0 ]] || return 1
+  assert_json_equals "$evidence/result.json" .category invalid_request
+}
+
 test_afk_contract_passes_with_stable_checks() {
   local source request evidence status output head
   make_afk_contract_repo source
@@ -1179,6 +1243,9 @@ run_test "validation worker binds requested validation stack to worker checkout"
 run_test "validation worker binds validation stack from AKKSTACK_DIR" test_validation_worker_binds_stack_from_akkstack_dir_environment
 run_test "stack lock blocks distinct worker homes on same stack" test_stack_lock_blocks_distinct_worker_homes_on_same_stack
 run_test "AKKSTACK_DIR real code directory fails fast" test_akkstack_dir_real_code_directory_fails_fast
+run_test "current AFK command validates exact HEAD without arguments" test_current_afk_command_validates_exact_head_without_arguments
+run_test "current AFK command rejects arguments" test_current_afk_command_rejects_arguments
+run_test "current AFK command returns nonzero for failure and missing stack" test_current_afk_command_returns_nonzero_for_failure_and_missing_stack
 run_test "AFK contract reports stable passing checks" test_afk_contract_passes_with_stable_checks
 run_test "AFK contract binds Tier 1 and Tier 3 evidence to the Candidate" test_afk_contract_binds_tier1_tier3_evidence_to_the_candidate
 run_test "AFK contract is independent of the trusted harness location" test_afk_contract_is_independent_of_the_trusted_harness_location
