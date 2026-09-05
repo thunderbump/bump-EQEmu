@@ -2,7 +2,17 @@
 
 This repo is validated through local AkkStack environments. Automated validation should run against a validation stack, while client-facing play and live smoke checks should use a separate gameplay stack.
 
-ADR 0006 defines the portable automation contract: automation should call `scripts/validation-worker.sh run --request <request.json>` with a fetchable repo/ref or commit and an evidence directory. For local diagnostics, the same worker also accepts a local-checkout request path instead of a fetch source. Fetch requests clone into worker-owned storage, local-checkout requests validate the named checkout in place, and both paths acquire an exclusive validation slot, delegate to the project validation profile, and write mechanical evidence (`request.json`, `result.json`, and logs). Requests may include `stack.role: "validation"` and `stack.path` to select a validation AkkStack checkout; when present, the worker binds that stack's `code` symlink to the active checkout under the same exclusive lock and writes `stack-binding.json`. Direct path-based wrapper usage such as `scripts/validate.sh` remains supported for local diagnostics and narrowing failures, but it is not the portable automation contract because it assumes the caller can see the local checkout, AkkStack path, and Docker host.
+The **current AFK repository check** is the no-argument command:
+
+```sh
+./scripts/validate-afk
+```
+
+Run it from the committed Candidate checkout. It resolves that checkout's exact `HEAD`, asks the repository-owned Validation Worker to fetch that commit into worker-owned storage (including recursive submodule initialization), binds the separate validation AkkStack, and runs Tier 1 followed by the canonical Tier 3 Zone Harness under one 2600-second budget. It never selects the gameplay stack. The command prints its evidence directory; by default evidence and the isolated checkout live below ignored `.validation-worker/`. `VALIDATION_WORKER_HOME`, `VALIDATION_AFK_EVIDENCE_DIR`, `VALIDATION_AFK_TIMEOUT_SECONDS`, and `AKKSTACK_DIR` are operator overrides when the standard local paths are unsuitable. Missing prerequisites, lock contention, timeouts, and deterministic failures all return nonzero; success is returned only after both tiers pass.
+
+The tracked `afk.toml` is a **retained legacy contract** for the older request-driven AFK adapter. Its `validation.command` expects AFK to provide a request rather than being the current Run Preparer's no-argument repository check. Do not use `afk.toml` to infer the current invocation.
+
+ADR 0006 also defines the lower-level portable automation contract: automation may call `scripts/validation-worker.sh run --request <request.json>` with a fetchable repo/ref or commit and an evidence directory. For local diagnostics, the same worker also accepts a local-checkout request path instead of a fetch source. Fetch requests clone into worker-owned storage, local-checkout requests validate the named checkout in place, and both paths acquire an exclusive validation slot, delegate to the project validation profile, and write mechanical evidence (`request.json`, `result.json`, and logs). Requests may include `stack.role: "validation"` and `stack.path` to select a validation AkkStack checkout; when present, the worker binds that stack's `code` symlink to the active checkout under the same exclusive lock and writes `stack-binding.json`. Direct path-based wrapper usage such as `scripts/validate.sh` remains supported for local diagnostics and narrowing failures, but it is not the portable automation contract because it assumes the caller can see the local checkout, AkkStack path, and Docker host.
 
 Bootstrap from zero is a separate setup task. Do not fold `make install`, environment generation, data downloads, or first-time database setup into every validation pass.
 
@@ -16,10 +26,10 @@ The scenario uses the ordinary `stand` verb, which is independent of gameplay ru
 assertion failure or `[PASS] actor-events-runtime` to the worker validation log while the worker supplies structured
 `request.json` and `result.json` evidence.
 
-The repository-owned AFK adapter pins every AFK Candidate to `tier1-tier3-harness`. The v1 AFK request does not
-carry a trusted base commit or change classification, so the adapter cannot safely infer which Candidates affect
-runtime harness behavior. Other automation may continue to request `safe` when Tier 3 is not required; that
-profile remains preflight, Tier 1, and read-mostly Tier 2.
+Both the current `scripts/validate-afk` repository check and the retained legacy AFK adapter pin every AFK Candidate
+to `tier1-tier3-harness`. Neither entry point receives a trusted base commit or change classification, so it cannot
+safely infer which Candidates affect runtime harness behavior. Other automation may continue to request `safe` when
+Tier 3 is not required; that profile remains preflight, Tier 1, and read-mostly Tier 2.
 
 Submodule expectations are part of the worker contract. Fetch requests run `git submodule update --init --recursive` before validation. Local-checkout requests continue to work for diagnostics, but the worker treats missing or drifting submodules as request failures instead of mutating the caller-owned checkout.
 
