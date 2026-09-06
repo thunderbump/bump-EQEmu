@@ -36,6 +36,15 @@ assert_json_equals() {
   fi
 }
 
+assert_combined_checks_not_run() {
+  local evidence="$1" candidate_commit="$2"
+  [[ -f "$evidence/afk-checks.json" ]] || return 1
+  assert_json_equals "$evidence/result.json" '.checks | map(.scenario) | join(",")' "tier1-build-and-unit-tests,canonical-zone-harness,actor-events-runtime"
+  assert_json_equals "$evidence/result.json" '.checks | map(.profile) | join(",")' "tier1,tier3-harness,actor-queue-tier3"
+  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "not_run,not_run,not_run"
+  assert_json_equals "$evidence/result.json" '.checks | map(.candidate_commit) | unique | join(",")' "$candidate_commit"
+}
+
 capture_run() {
   local -n status_ref="$1"
   local -n output_ref="$2"
@@ -517,7 +526,7 @@ test_stack_lock_is_not_held_during_submodule_initialization() {
   mkdir -p "$stack" "$other_checkout"
   printf 'ENV=development\n' >"$stack/.env"
   ln -s "$other_checkout" "$stack/code"
-  write_request "$request" "$source" "$evidence" HEAD "$head" 0 10 "$stack"
+  write_request "$request" "$source" "$evidence" HEAD "$head" 0 10 "$stack" tier1-tier3-harness
   stack_lock="$stack/.validation-worker-code.lock"
   mkdir "$stack_lock"
 
@@ -525,6 +534,7 @@ test_stack_lock_is_not_held_during_submodule_initialization() {
 
   [[ "$status" -eq 1 ]] || return 1
   assert_json_equals "$evidence/result.json" .category stack_busy
+  assert_combined_checks_not_run "$evidence" "$head"
   [[ -f "$tmp_root/worker-home/checkouts/run-$(basename "$evidence")/vendor/submodule-fixture/marker.txt" ]] || return 1
 }
 
@@ -534,13 +544,14 @@ test_commit_mismatch() {
   reset_worker_home
   evidence="$tmp_root/evidence-mismatch"
   request="$tmp_root/mismatch.json"
-  write_request "$request" "$source" "$evidence" HEAD "0000000000000000000000000000000000000000"
+  write_request "$request" "$source" "$evidence" HEAD "0000000000000000000000000000000000000000" 0 10 "" tier1-tier3-harness
 
   capture_run status output worker_env "$repo_root/scripts/validation-worker.sh" run --request "$request"
 
   [[ "$status" -eq 1 ]] || return 1
   assert_json_equals "$evidence/result.json" .category commit_mismatch
   assert_json_equals "$evidence/result.json" .expected_commit 0000000000000000000000000000000000000000
+  assert_combined_checks_not_run "$evidence" 0000000000000000000000000000000000000000
 }
 
 test_fetch_failure() {
@@ -548,12 +559,13 @@ test_fetch_failure() {
   reset_worker_home
   evidence="$tmp_root/evidence-fetch-failure"
   request="$tmp_root/fetch-failure.json"
-  write_request "$request" "$tmp_root/no-such-repo" "$evidence" HEAD
+  write_request "$request" "$tmp_root/no-such-repo" "$evidence" HEAD aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 0 10 "" tier1-tier3-harness
 
   capture_run status output worker_env "$repo_root/scripts/validation-worker.sh" run --request "$request"
 
   [[ "$status" -eq 1 ]] || return 1
   assert_json_equals "$evidence/result.json" .category fetch_failed
+  assert_combined_checks_not_run "$evidence" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 }
 
 test_local_checkout_request_works() {
@@ -595,12 +607,13 @@ test_local_checkout_rejects_drifting_submodule() {
 }
 
 test_lock_contention() {
-  local source request evidence status output lock_dir existing_checkout
+  local source request evidence status output lock_dir existing_checkout head
   make_source_repo source
   reset_worker_home
   evidence="$tmp_root/evidence-busy"
   request="$tmp_root/busy.json"
-  write_request "$request" "$source" "$evidence" HEAD "" 0
+  head="$(git -C "$source" rev-parse HEAD)"
+  write_request "$request" "$source" "$evidence" HEAD "$head" 0 10 "" tier1-tier3-harness
   lock_dir="$tmp_root/worker-home/locks/validation-slot.lock"
   mkdir -p "$lock_dir"
   existing_checkout="$tmp_root/worker-home/checkouts/run-$(basename "$evidence")"
@@ -611,6 +624,7 @@ test_lock_contention() {
 
   [[ "$status" -eq 1 ]] || return 1
   assert_json_equals "$evidence/result.json" .category worker_busy
+  assert_combined_checks_not_run "$evidence" "$head"
   [[ -f "$evidence/logs/lock.log" ]] || return 1
   [[ -f "$existing_checkout/marker" ]] || return 1
   rm -rf "$lock_dir"
@@ -835,7 +849,7 @@ test_stack_lock_blocks_distinct_worker_homes_on_same_stack() {
 }
 
 test_akkstack_dir_real_code_directory_fails_fast() {
-  local source request evidence status output stack
+  local source request evidence status output stack head
   make_source_repo source
   reset_worker_home
   evidence="$tmp_root/evidence-env-real-code"
@@ -843,12 +857,14 @@ test_akkstack_dir_real_code_directory_fails_fast() {
   stack="$tmp_root/env-real-code-stack"
   mkdir -p "$stack/code"
   printf 'ENV=development\n' >"$stack/.env"
-  write_request "$request" "$source" "$evidence" HEAD "" 0 10
+  head="$(git -C "$source" rev-parse HEAD)"
+  write_request "$request" "$source" "$evidence" HEAD "$head" 0 10 "" tier1-tier3-harness
 
   capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 AKKSTACK_DIR="$stack" "$repo_root/scripts/validation-worker.sh" run --request "$request"
 
   [[ "$status" -eq 1 ]] || return 1
   assert_json_equals "$evidence/result.json" .category stack_binding_failed
+  assert_combined_checks_not_run "$evidence" "$head"
   assert_json_equals "$evidence/stack-binding.json" .previous_kind directory
   [[ -d "$stack/code" && ! -L "$stack/code" ]] || return 1
 }

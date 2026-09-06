@@ -208,7 +208,7 @@ write_inconclusive_afk_checks() {
   jq '
     (.checks | [to_entries[] | select(.value.status != "not_run") | .key] | last) as $last
     | .status = "inconclusive"
-    | .checks[$last].status = "inconclusive"
+    | if $last == null then . else .checks[$last].status = "inconclusive" end
   ' "$source" >"$destination"
 }
 
@@ -787,6 +787,7 @@ prepare_checkout() {
 
 run_request() {
   local request_path="$1" validation_status validation_step lock_dir stack_lock_dir stack_lock checkout_dir head_commit stack_path_source
+  local local_checks_path afk_log_prefix
   local -a validation_steps=()
   project= repo= ref= commit= profile= run_id= evidence_dir= timeout_seconds= lock_wait_seconds= stack_role= stack_path=
   request_source_type= request_source_repo= request_source_ref= request_source_commit= request_source_checkout_path=
@@ -808,6 +809,22 @@ run_request() {
 
   ensure_log_files "$evidence_dir"
   copy_request_evidence "$request_path" "$evidence_dir" || true
+
+  # Register the complete combined-gate plan before any fallible dispatch work.
+  # This keeps worker/stack contention, checkout, commit, and binding failures
+  # auditable as required scenarios that did not run, rather than omitting them.
+  if [[ "$profile" == "tier1-tier3-harness" ]]; then
+    local_checks_path="$evidence_dir/afk-checks.json"
+    RESULT_CHECKS_PATH="$local_checks_path"
+    afk_log_prefix=logs
+    if [[ "${VALIDATION_WORKER_AFK_MODE:-0}" == "1" ]]; then
+      afk_log_prefix=worker/logs
+    fi
+    initialize_afk_check_statuses
+    ensure_afk_check_logs "$evidence_dir" 1
+    export AFK_CHECK_CANDIDATE_COMMIT="$commit"
+    write_afk_checks "$local_checks_path" inconclusive "$afk_log_prefix"
+  fi
 
   if [[ -n "$stack_path" ]]; then
     stack_path_source=request.stack.path
@@ -842,6 +859,10 @@ run_request() {
   fi
 
   head_commit="$(git -C "$checkout_dir" rev-parse HEAD)"
+  if [[ -n "$RESULT_CHECKS_PATH" && -z "$commit" ]]; then
+    export AFK_CHECK_CANDIDATE_COMMIT="$head_commit"
+    write_afk_checks "$RESULT_CHECKS_PATH" inconclusive "$afk_log_prefix"
+  fi
   if [[ -n "$commit" && "$head_commit" != "$commit" ]]; then
     write_result "$evidence_dir" failed commit_mismatch 1 "checked out HEAD does not match requested commit" "$checkout_dir" "$head_commit" "$stack_path_source"
     return 1
@@ -893,14 +914,6 @@ run_request() {
   }
 
   if [[ "$profile" == "tier1-tier3-harness" ]]; then
-    local_checks_path="$evidence_dir/afk-checks.json"
-    RESULT_CHECKS_PATH="$local_checks_path"
-    afk_log_prefix=logs
-    if [[ "${VALIDATION_WORKER_AFK_MODE:-0}" == "1" ]]; then
-      afk_log_prefix=worker/logs
-    fi
-    initialize_afk_check_statuses
-    ensure_afk_check_logs "$evidence_dir" 1
     export AFK_CHECK_CANDIDATE_COMMIT="$head_commit"
     mapfile -t afk_plan_rows < <(
       jq -r '.[] | [.profile, .log_file, (.completion_marker // "-"), .failure_status, .failure_message, .inconclusive_message] | @tsv' <<<"$AFK_CHECK_PLAN"
