@@ -31,10 +31,25 @@ fi
 
 mkdir -p "$worker_home/requests"
 request_path="$(mktemp "$worker_home/requests/$run_token.XXXXXX.json")"
+worker_pid=
 cleanup() {
   rm -f "$request_path"
 }
+forward_signal() {
+  local signal="$1" exit_code="$2"
+  trap - INT TERM
+  if [[ -n "$worker_pid" ]]; then
+    kill -"$signal" "$worker_pid" 2>/dev/null || true
+    set +e
+    wait "$worker_pid"
+    set -e
+    worker_pid=
+  fi
+  exit "$exit_code"
+}
 trap cleanup EXIT
+trap 'forward_signal INT 130' INT
+trap 'forward_signal TERM 143' TERM
 
 jq -n \
   --arg project bump-eqemu \
@@ -66,4 +81,11 @@ printf 'Validation evidence: %s\n' "$evidence_dir"
 # the legacy AFK adapter. Do not let ambient worker-only settings alter its
 # validation execution, evidence paths, or timeout semantics.
 env -u VALIDATION_WORKER_VALIDATE_DRY_RUN -u VALIDATION_WORKER_AFK_MODE \
-  "$script_dir/validation-worker.sh" run --request "$request_path"
+  "$script_dir/validation-worker.sh" run --request "$request_path" &
+worker_pid=$!
+set +e
+wait "$worker_pid"
+worker_status=$?
+set -e
+worker_pid=
+exit "$worker_status"

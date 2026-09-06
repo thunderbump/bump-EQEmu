@@ -10,6 +10,16 @@ RUN_REQUEST_CLEANUP_EVIDENCE_DIR=
 RUN_REQUEST_CLEANUP_LOCK_DIR=
 RUN_REQUEST_CLEANUP_STACK_LOCK_DIR=
 RUN_REQUEST_CHILD_PID=
+RUN_REQUEST_CHECKOUT_DIR=
+RUN_REQUEST_HEAD_COMMIT=
+RUN_REQUEST_STACK_PATH_SOURCE=
+RUN_REQUEST_AFK_LOG_PREFIX=logs
+RUN_REQUEST_AFK_ACTIVE_INDEX=-1
+termination_grace_seconds="${VALIDATION_WORKER_TERMINATION_GRACE_SECONDS:-5}"
+if [[ ! "$termination_grace_seconds" =~ ^[0-9]+$ || "$termination_grace_seconds" -eq 0 ]]; then
+  printf 'error: VALIDATION_WORKER_TERMINATION_GRACE_SECONDS must be a positive integer\n' >&2
+  exit 2
+fi
 
 usage() {
   cat <<'USAGE'
@@ -628,36 +638,88 @@ restore_validation_stack() {
   return "$cleanup_status"
 }
 
+mark_active_afk_check_inconclusive() {
+  local index="${RUN_REQUEST_AFK_ACTIVE_INDEX:--1}" last_index=-1
+  [[ "$profile" == "tier1-tier3-harness" && -n "${RESULT_CHECKS_PATH:-}" ]] || return 0
+  if [[ "$index" -lt 0 ]]; then
+    for index in "${!afk_check_statuses[@]}"; do
+      [[ "${afk_check_statuses[$index]}" == "not_run" ]] || last_index="$index"
+    done
+    index="$last_index"
+  fi
+  if [[ "$index" -ge 0 ]]; then
+    afk_check_statuses[$index]=inconclusive
+  fi
+  write_afk_checks "$RESULT_CHECKS_PATH" inconclusive "$RUN_REQUEST_AFK_LOG_PREFIX"
+}
+
+write_terminal_run_failure() {
+  local category="$1" exit_code="$2" message="$3"
+  mark_active_afk_check_inconclusive || true
+  write_result "$RUN_REQUEST_CLEANUP_EVIDENCE_DIR" failed "$category" "$exit_code" "$message" \
+    "$RUN_REQUEST_CHECKOUT_DIR" "$RUN_REQUEST_HEAD_COMMIT" "$RUN_REQUEST_STACK_PATH_SOURCE"
+}
+
+terminate_request_child() {
+  local pid="${RUN_REQUEST_CHILD_PID:-}" deadline pgid
+  [[ -n "$pid" ]] || return 0
+
+  # GNU timeout creates a separate process group for the command. Signal that
+  # group when available so grandchildren cannot retain stack resources.
+  pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
+  if [[ -n "$pgid" && "$pgid" == "$pid" ]]; then
+    kill -TERM -- "-$pgid" 2>/dev/null || true
+  else
+    kill -TERM "$pid" 2>/dev/null || true
+  fi
+  deadline=$(( $(date +%s) + termination_grace_seconds ))
+  while kill -0 "$pid" 2>/dev/null; do
+    if [[ "$(date +%s)" -ge "$deadline" ]]; then
+      if [[ -n "$pgid" && "$pgid" == "$pid" ]]; then
+        kill -KILL -- "-$pgid" 2>/dev/null || true
+      else
+        kill -KILL "$pid" 2>/dev/null || true
+      fi
+      break
+    fi
+    sleep 0.1
+  done
+  wait "$pid" 2>/dev/null || true
+  RUN_REQUEST_CHILD_PID=
+}
+
 run_request_cleanup() {
-  local cleanup_status=0
+  local cleanup_status=0 cleanup_evidence
   [[ "${RUN_REQUEST_CLEANUP_ACTIVE:-0}" == "1" ]] || return 0
   RUN_REQUEST_CLEANUP_ACTIVE=0
   trap - RETURN EXIT INT TERM
+  cleanup_evidence="$RUN_REQUEST_CLEANUP_EVIDENCE_DIR"
 
   # Restoration and both lock removals are independent best-effort operations:
   # one cleanup failure must never strand either lock, but still makes the run
   # fail rather than hiding incomplete cleanup.
-  restore_validation_stack "$RUN_REQUEST_CLEANUP_EVIDENCE_DIR" || cleanup_status=1
+  restore_validation_stack "$cleanup_evidence" || cleanup_status=1
   release_lock "$RUN_REQUEST_CLEANUP_STACK_LOCK_DIR" || cleanup_status=1
   release_lock "$RUN_REQUEST_CLEANUP_LOCK_DIR" || cleanup_status=1
+  if [[ "$cleanup_status" -ne 0 ]]; then
+    RUN_REQUEST_CLEANUP_EVIDENCE_DIR="$cleanup_evidence"
+    write_terminal_run_failure cleanup_failed 1 "validation cleanup failed; inspect stack and lock evidence" || true
+  fi
   RUN_REQUEST_CLEANUP_EVIDENCE_DIR=
   RUN_REQUEST_CLEANUP_STACK_LOCK_DIR=
   RUN_REQUEST_CLEANUP_LOCK_DIR=
-  if [[ "$cleanup_status" -ne 0 ]]; then
-    exit 1
-  fi
-  return 0
+  return "$cleanup_status"
 }
 
 run_request_signal() {
-  local exit_code="$1"
+  local exit_code="$1" cleanup_status=0
   trap - INT TERM
-  if [[ -n "${RUN_REQUEST_CHILD_PID:-}" ]]; then
-    kill -TERM "$RUN_REQUEST_CHILD_PID" 2>/dev/null || true
-    wait "$RUN_REQUEST_CHILD_PID" 2>/dev/null || true
-    RUN_REQUEST_CHILD_PID=
+  terminate_request_child
+  write_terminal_run_failure interrupted "$exit_code" "validation interrupted by signal" || true
+  run_request_cleanup || cleanup_status=1
+  if [[ "$cleanup_status" -ne 0 ]]; then
+    exit 1
   fi
-  run_request_cleanup
   exit "$exit_code"
 }
 
@@ -836,13 +898,14 @@ prepare_checkout() {
 
 run_request() {
   local request_path="$1" validation_status validation_step lock_dir stack_lock_dir stack_lock checkout_dir head_commit stack_path_source
-  local local_checks_path afk_log_prefix
+  local local_checks_path afk_log_prefix=logs
   local -a validation_steps=()
   project= repo= ref= commit= profile= run_id= evidence_dir= timeout_seconds= lock_wait_seconds= stack_role= stack_path=
   request_source_type= request_source_repo= request_source_ref= request_source_commit= request_source_checkout_path=
   stack_path_source=
   RESULT_CHECKS_PATH=
   STACK_BINDING_STATUS= STACK_BINDING_SOURCE= STACK_BINDING_STACK_DIR= STACK_BINDING_CODE_PATH= STACK_BINDING_TARGET= STACK_BINDING_PREVIOUS_KIND= STACK_BINDING_PREVIOUS_TARGET= STACK_BINDING_RESTORE_NEEDED=0
+  RUN_REQUEST_CHECKOUT_DIR= RUN_REQUEST_HEAD_COMMIT= RUN_REQUEST_STACK_PATH_SOURCE= RUN_REQUEST_AFK_LOG_PREFIX=logs RUN_REQUEST_AFK_ACTIVE_INDEX=-1
 
   # Discover and register a requested combined gate before validating fields that
   # can fail (notably stack.path). This is evidence initialization only; request
@@ -905,6 +968,9 @@ run_request() {
   RUN_REQUEST_CLEANUP_EVIDENCE_DIR="$evidence_dir"
   RUN_REQUEST_CLEANUP_LOCK_DIR="$lock_dir"
   RUN_REQUEST_CLEANUP_STACK_LOCK_DIR=
+  RUN_REQUEST_CHECKOUT_DIR="$checkout_dir"
+  RUN_REQUEST_STACK_PATH_SOURCE="$stack_path_source"
+  RUN_REQUEST_AFK_LOG_PREFIX="$afk_log_prefix"
   trap run_request_cleanup RETURN EXIT
   trap 'run_request_signal 130' INT
   trap 'run_request_signal 143' TERM
@@ -920,6 +986,7 @@ run_request() {
   fi
 
   head_commit="$(git -C "$checkout_dir" rev-parse HEAD)"
+  RUN_REQUEST_HEAD_COMMIT="$head_commit"
   if [[ -n "$RESULT_CHECKS_PATH" && -z "$commit" ]]; then
     export AFK_CHECK_CANDIDATE_COMMIT="$head_commit"
     write_afk_checks "$RESULT_CHECKS_PATH" inconclusive "$afk_log_prefix"
@@ -963,11 +1030,11 @@ run_request() {
 
     set +e
     if [[ -n "$stack_path" && -n "${STACK_BINDING_STATUS:-}" ]]; then
-      AKKSTACK_DIR="$stack_path" EXPECTED_EQEMU_CHECKOUT="$checkout_dir" timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1 &
+      AKKSTACK_DIR="$stack_path" EXPECTED_EQEMU_CHECKOUT="$checkout_dir" timeout --signal=TERM --kill-after="${termination_grace_seconds}s" "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1 &
     elif [[ -n "$stack_path" ]]; then
-      AKKSTACK_DIR="$stack_path" timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1 &
+      AKKSTACK_DIR="$stack_path" timeout --signal=TERM --kill-after="${termination_grace_seconds}s" "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1 &
     else
-      timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1 &
+      timeout --signal=TERM --kill-after="${termination_grace_seconds}s" "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1 &
     fi
     RUN_REQUEST_CHILD_PID=$!
     wait "$RUN_REQUEST_CHILD_PID"
@@ -984,6 +1051,7 @@ run_request() {
       jq -r '.[] | [.profile, .log_file, (.completion_marker // "-"), .failure_status, .failure_message, .inconclusive_message] | @tsv' <<<"$AFK_CHECK_PLAN"
     )
     for afk_check_index in "${!afk_plan_rows[@]}"; do
+      RUN_REQUEST_AFK_ACTIVE_INDEX="$afk_check_index"
       IFS=$'\t' read -r afk_profile afk_log_file afk_completion_marker afk_failure_status afk_failure_message afk_inconclusive_message <<<"${afk_plan_rows[$afk_check_index]}"
       if run_validation "$afk_profile" "$evidence_dir/logs/$afk_log_file"; then
         if [[ "$afk_completion_marker" != "-" ]] \
@@ -995,17 +1063,18 @@ run_request() {
           return 1
         fi
         afk_check_statuses[$afk_check_index]=passed
+        write_afk_checks "$local_checks_path" inconclusive "$afk_log_prefix"
         continue
       else
         validation_status=$?
       fi
-      if [[ "$validation_status" -eq 124 && "${VALIDATION_WORKER_AFK_MODE:-0}" != "1" ]]; then
+      if [[ ( "$validation_status" -eq 124 || "$validation_status" -eq 137 ) && "${VALIDATION_WORKER_AFK_MODE:-0}" != "1" ]]; then
         afk_check_statuses[$afk_check_index]=inconclusive
         write_afk_checks "$local_checks_path" rejected "$afk_log_prefix"
         write_result "$evidence_dir" failed timeout 1 "validation timed out" "$checkout_dir" "$head_commit" "$stack_path_source"
         return 1
       fi
-      if [[ "$validation_status" -eq 124 || "$validation_status" -eq 125 || "$validation_status" -eq 127 ]]; then
+      if [[ "$validation_status" -eq 124 || "$validation_status" -eq 125 || "$validation_status" -eq 127 || "$validation_status" -eq 137 ]]; then
         afk_failure_status=inconclusive
         afk_failure_message="$afk_inconclusive_message"
       fi
@@ -1019,6 +1088,7 @@ run_request() {
       write_result "$evidence_dir" failed validation_failed 1 "$afk_failure_message" "$checkout_dir" "$head_commit" "$stack_path_source"
       return 1
     done
+    RUN_REQUEST_AFK_ACTIVE_INDEX=-1
     write_afk_checks "$local_checks_path" passed "$afk_log_prefix"
     write_result "$evidence_dir" passed ok 0 "validation passed" "$checkout_dir" "$head_commit" "$stack_path_source"
     return 0
@@ -1037,7 +1107,7 @@ run_request() {
     else
       validation_status=$?
     fi
-    if [[ "$validation_status" -eq 124 ]]; then
+    if [[ "$validation_status" -eq 124 || "$validation_status" -eq 137 ]]; then
       write_result "$evidence_dir" failed timeout 1 "validation timed out" "$checkout_dir" "$head_commit" "$stack_path_source"
       return 1
     fi

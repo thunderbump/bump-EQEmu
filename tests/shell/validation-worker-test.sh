@@ -81,6 +81,10 @@ make_source_repo() {
   cat >"$source_ref/scripts/validate.sh" <<'SCRIPT'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${VALIDATION_WORKER_TEST_IGNORE_TERM:-0}" == "1" ]]; then
+  trap '' TERM
+  while :; do sleep 1; done
+fi
 if [[ "${VALIDATION_WORKER_TEST_SLEEP:-0}" != "0" ]]; then
   sleep "$VALIDATION_WORKER_TEST_SLEEP"
 fi
@@ -645,6 +649,27 @@ test_timeout() {
   assert_json_equals "$evidence/result.json" .category timeout
 }
 
+test_timeout_kills_a_term_resistant_validation_child() {
+  local source request evidence status output start end
+  make_source_repo source resistant-timeout
+  reset_worker_home
+  evidence="$tmp_root/evidence-resistant-timeout"
+  request="$tmp_root/resistant-timeout.json"
+  write_request "$request" "$source" "$evidence" HEAD "" 0 1
+
+  start="$(date +%s)"
+  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" \
+    VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TEST_IGNORE_TERM=1 \
+    VALIDATION_WORKER_TERMINATION_GRACE_SECONDS=1 \
+    "$repo_root/scripts/validation-worker.sh" run --request "$request"
+  end="$(date +%s)"
+
+  [[ "$status" -eq 1 ]] || return 1
+  [[ $((end - start)) -lt 4 ]] || return 1
+  assert_json_equals "$evidence/result.json" .category timeout
+  [[ ! -e "$tmp_root/worker-home/locks/validation-slot.lock" ]] || return 1
+}
+
 test_tier3_harness_failure_is_categorized_with_logs() {
   local source request evidence status output stack other_checkout fake_bin
   make_source_repo_with_real_validation_scripts source
@@ -864,7 +889,8 @@ test_worker_termination_restores_stack_and_releases_locks() {
 
   env VALIDATION_WORKER_HOME="$tmp_root/worker-home" \
     VALIDATION_WORKER_VALIDATE_DRY_RUN=1 \
-    VALIDATION_WORKER_TEST_SLEEP=30 \
+    VALIDATION_WORKER_TEST_IGNORE_TERM=1 \
+    VALIDATION_WORKER_TERMINATION_GRACE_SECONDS=1 \
     "$repo_root/scripts/validation-worker.sh" run --request "$request" >"$output_file" 2>&1 &
   worker_pid=$!
 
@@ -898,6 +924,51 @@ test_worker_termination_restores_stack_and_releases_locks() {
   [[ ! -e "$stack/.validation-worker-code.lock" ]] || return 1
   [[ ! -e "$tmp_root/worker-home/locks/validation-slot.lock" ]] || return 1
   assert_json_equals "$evidence/stack-binding.json" .restore_status restored
+  assert_json_equals "$evidence/result.json" .category interrupted
+  assert_json_equals "$evidence/result.json" .exit_code 143
+}
+
+test_current_afk_wrapper_forwards_termination_and_retains_evidence() {
+  local source evidence stack wrapper_pid status output_file rebound=0
+  make_afk_contract_repo source wrapper-interruption
+  reset_worker_home
+  evidence="$tmp_root/current-afk-interrupted-evidence"
+  stack="$tmp_root/operator-home/Projects/bump-eqemu/bump-akk-stack-validation"
+  output_file="$tmp_root/current-afk-interrupted.out"
+
+  env HOME="$tmp_root/operator-home" VALIDATION_WORKER_HOME="$tmp_root/worker-home" \
+    VALIDATION_WORKER_TEST_SLEEP=30 VALIDATION_AFK_EVIDENCE_DIR="$evidence" \
+    "$source/scripts/validate-afk" >"$output_file" 2>&1 &
+  wrapper_pid=$!
+
+  for _ in {1..200}; do
+    if [[ -L "$stack/code" ]]; then
+      rebound=1
+      break
+    fi
+    kill -0 "$wrapper_pid" 2>/dev/null || break
+    sleep 0.05
+  done
+  if [[ "$rebound" -ne 1 ]]; then
+    kill -TERM "$wrapper_pid" 2>/dev/null || true
+    wait "$wrapper_pid" 2>/dev/null || true
+    return 1
+  fi
+
+  kill -TERM "$wrapper_pid"
+  set +e
+  wait "$wrapper_pid"
+  status=$?
+  set -e
+
+  [[ "$status" -eq 143 ]] || return 1
+  [[ ! -e "$stack/code" ]] || return 1
+  [[ ! -e "$stack/.validation-worker-code.lock" ]] || return 1
+  [[ ! -e "$tmp_root/worker-home/locks/validation-slot.lock" ]] || return 1
+  [[ -f "$evidence/result.json" ]] || return 1
+  assert_json_equals "$evidence/result.json" .category interrupted
+  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "inconclusive,not_run,not_run"
+  [[ -z "$(find "$tmp_root/worker-home/requests" -type f -print -quit)" ]] || return 1
 }
 
 test_akkstack_dir_real_code_directory_fails_fast() {
@@ -1220,7 +1291,8 @@ SCRIPT
   capture_run status output env HOME="$tmp_root/operator-home" PATH="$fake_bin:$PATH" VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 "$source/scripts/validation-worker.sh" run --request "$request"
 
   [[ "$status" -eq 2 ]] || return 1
-  assert_json_equals "$evidence/worker/afk-checks.json" .status passed
+  assert_json_equals "$evidence/worker/afk-checks.json" .status inconclusive
+  assert_json_equals "$evidence/worker/result.json" .category cleanup_failed
   assert_json_equals "$evidence/result.json" .status inconclusive
   assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,passed,inconclusive"
 }
@@ -1372,6 +1444,7 @@ run_test "local-checkout request still works" test_local_checkout_request_works
 run_test "local-checkout request rejects a drifting submodule" test_local_checkout_rejects_drifting_submodule
 run_test "lock contention is worker_busy" test_lock_contention
 run_test "validation timeout is categorized" test_timeout
+run_test "validation timeout kills a TERM-resistant child" test_timeout_kills_a_term_resistant_validation_child
 run_test "tier3 harness failure is categorized with logs" test_tier3_harness_failure_is_categorized_with_logs
 run_test "combined AFK profile runs Tier 1, canonical harness, and actor queue" test_tier1_tier3_harness_profile_runs_tier1_before_tier3
 run_test "combined AFK profile rejects zero-exit actor queue without completion proof" test_combined_profile_rejects_a_zero_exit_without_runtime_proof
@@ -1382,6 +1455,7 @@ run_test "validation worker binds requested validation stack to worker checkout"
 run_test "validation worker binds validation stack from AKKSTACK_DIR" test_validation_worker_binds_stack_from_akkstack_dir_environment
 run_test "stack lock blocks distinct worker homes on same stack" test_stack_lock_blocks_distinct_worker_homes_on_same_stack
 run_test "worker termination restores stack and releases locks" test_worker_termination_restores_stack_and_releases_locks
+run_test "current AFK wrapper forwards termination and retains evidence" test_current_afk_wrapper_forwards_termination_and_retains_evidence
 run_test "AKKSTACK_DIR real code directory fails fast" test_akkstack_dir_real_code_directory_fails_fast
 run_test "current AFK command validates exact HEAD without arguments" test_current_afk_command_validates_exact_head_without_arguments
 run_test "current AFK command rejects arguments" test_current_afk_command_rejects_arguments
