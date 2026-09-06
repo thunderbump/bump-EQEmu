@@ -2,6 +2,16 @@
 
 This repo is validated through local AkkStack environments. Automated validation should run against a validation stack, while client-facing play and live smoke checks should use a separate gameplay stack.
 
+Pipeline agents should start with the concise [validation instructions](../agents/validation.md), and read
+[database instructions](../agents/database.md) for schema or saved-data work. AFK owns orchestration; this document
+and the worker own test semantics. New world behavior requires an automated scenario through production gameplay
+paths, including bounded outcomes and fixture cleanup. Manual play judges feel and remaining client-specific behavior.
+
+The accepted next database step is isolated snapshot-based upgrade and restore rehearsal. It is not yet a worker
+profile. The shared validation database remains persistent until an explicit isolation profile provides a separate
+target. Schema-changing work needs data-transition proof as well as the existing backup gate; a green general
+harness run alone does not establish migration safety.
+
 The **current AFK repository check** is the no-argument command:
 
 ```sh
@@ -605,7 +615,7 @@ may need the one-off container to be stopped after validation.
 
 - Common utility or isolated logic: Tier 1.
 - Database-backed game logic with an existing CLI hook: Tier 1 plus targeted Tier 2.
-- Schema or migration work: backup gate, then Tier 1 plus targeted Tier 2.
+- Schema or saved-data migration work: backup gate, Tier 1, targeted database assertions and affected runtime scenarios. Follow [database instructions](../agents/database.md) for deployed-version upgrade and restore evidence; isolated snapshot tooling is still planned.
 - Runtime gameplay behavior covered by a harness scenario: Tier 1 plus Tier 3.
 - Runtime process, config, startup, or integration behavior: Tier 1 plus Tier 4.
 - Client-visible behavior or packet flow: Tier 1 plus Tier 4 and Tier 5.
