@@ -118,6 +118,12 @@ if [[ "${VALIDATION_WORKER_TEST_ASSERT_SELF_CONTAINED_GIT:-0}" == "1" ]]; then
   }
 fi
 printf 'fake validate: %s\n' "$*"
+if [[ " $* " == *" tier3-harness "* && "${VALIDATION_WORKER_TEST_OMIT_PROOF_PROFILE:-}" != "tier3-harness" ]]; then
+  printf '[PASS] canonical-zone-harness\n'
+fi
+if [[ " $* " == *" actor-queue-tier3 "* && "${VALIDATION_WORKER_TEST_OMIT_PROOF_PROFILE:-}" != "actor-queue-tier3" ]]; then
+  printf '[PASS] actor-events-runtime\n'
+fi
 SCRIPT
   chmod +x "$source_ref/scripts/validate.sh"
   git -C "$source_ref" init >/dev/null 2>&1
@@ -665,6 +671,28 @@ test_tier1_tier3_harness_profile_runs_tier1_before_tier3() {
   assert_contains "$(cat "$evidence/logs/tier3-zone-harness.log")" "fake validate: --stack validation --dry-run tier3-harness"
   assert_contains "$(cat "$evidence/logs/actor-queue-runtime.log")" "fake validate: --stack validation --dry-run actor-queue-tier3"
   assert_json_equals "$evidence/result.json" '.checks | map(.scenario) | join(",")' "tier1-build-and-unit-tests,canonical-zone-harness,actor-events-runtime"
+}
+
+test_combined_profile_rejects_a_zero_exit_without_runtime_proof() {
+  local source request evidence status output
+  make_source_repo source combined-missing-proof
+  reset_worker_home
+  evidence="$tmp_root/evidence-combined-missing-proof"
+  request="$tmp_root/combined-missing-proof.json"
+  write_request "$request" "$source" "$evidence" HEAD "" 0 10 "" tier1-tier3-harness
+  mkdir -p "$evidence/logs"
+  printf '[PASS] actor-events-runtime\n' >"$evidence/logs/actor-queue-runtime.log"
+
+  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" \
+    VALIDATION_WORKER_VALIDATE_DRY_RUN=1 \
+    VALIDATION_WORKER_TEST_OMIT_PROOF_PROFILE=actor-queue-tier3 \
+    "$repo_root/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 1 ]] || return 1
+  assert_json_equals "$evidence/result.json" .category validation_failed
+  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,passed,rejected"
+  assert_json_equals "$evidence/result.json" '.checks[2].completion_marker' "[PASS] actor-events-runtime"
+  assert_contains "$(cat "$evidence/logs/actor-queue-runtime.log")" "required completion evidence missing: [PASS] actor-events-runtime"
 }
 
 test_combined_profile_propagates_actor_queue_failure() {
@@ -1272,6 +1300,7 @@ run_test "lock contention is worker_busy" test_lock_contention
 run_test "validation timeout is categorized" test_timeout
 run_test "tier3 harness failure is categorized with logs" test_tier3_harness_failure_is_categorized_with_logs
 run_test "combined AFK profile runs Tier 1, canonical harness, and actor queue" test_tier1_tier3_harness_profile_runs_tier1_before_tier3
+run_test "combined AFK profile rejects zero-exit actor queue without completion proof" test_combined_profile_rejects_a_zero_exit_without_runtime_proof
 run_test "combined AFK profile propagates actor queue failure" test_combined_profile_propagates_actor_queue_failure
 run_test "tier1 plus tier3 harness profile uses one timeout budget" test_tier1_tier3_harness_profile_uses_one_timeout_budget
 run_test "tier1 plus tier3 harness profile stops after tier1 failure and releases lock" test_tier1_tier3_harness_profile_stops_after_tier1_failure_and_releases_lock

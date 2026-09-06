@@ -43,12 +43,14 @@ that order while holding one worker/stack lock and sharing one timeout budget. O
 request `safe` when Tier 3 is not required; that profile remains preflight, Tier 1, and read-mostly Tier 2.
 
 Required checks are registered in the small `AFK_CHECK_PLAN` table in `scripts/validation-worker.sh`. Runtime rows
-must provide a stable `scenario`, the production validation `profile` that dispatches it, and a dedicated
-`log_file`; they also define deterministic-failure and inconclusive messages. Add subsequent actor runtime proofs
-to that table rather than duplicating orchestration in an external pipeline. `result.json` records every row's
-scenario, profile, status, and relative log path alongside the exact checkout commit. All rows begin as `not_run`,
-and the combined gate can report `passed` only after each row is changed to `passed`. This is the scenario
-registration and exact-Candidate evidence convention for subsequent actor work.
+must provide a stable `scenario`, the production validation `profile` that dispatches it, a dedicated `log_file`,
+and an exact `[PASS] <scenario>` `completion_marker` emitted only after the scenario's assertions complete.
+They also define deterministic-failure and inconclusive messages. Add subsequent actor runtime proofs
+to that table rather than duplicating orchestration in an external pipeline. A zero profile exit without its
+registered marker is a deterministic failure, so a no-op or internally skipped runtime cannot pass. `result.json`
+records every row's scenario, profile, status, expected completion marker, Candidate commit, and relative log path.
+All rows begin as `not_run`, and the combined gate can report `passed` only after each row is changed to `passed`.
+This is the scenario registration and exact-Candidate evidence convention for subsequent actor work.
 
 Submodule expectations are part of the worker contract. Fetch requests run `git submodule update --init --recursive` before validation. Local-checkout requests continue to work for diagnostics, but the worker treats missing or drifting submodules as request failures instead of mutating the caller-owned checkout.
 

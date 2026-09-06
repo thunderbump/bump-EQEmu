@@ -707,4 +707,7 @@ ZONE_HARNESS_CONTAINER
   fi
   [[ -s "$result_file" ]] || die "Bot Loot Request scenario produced no structured result"
   cat "$result_file"
+  # Keep stdout as the structured scenario result. The AFK worker captures both
+  # streams and requires this exact end-to-end completion evidence in its log.
+  printf '[PASS] canonical-zone-harness\n' >&2
 )

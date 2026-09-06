@@ -61,12 +61,14 @@ VALIDATION_PROFILES='[
   {"name":"tier1-tier3-harness","portable":true,"steps":["tier1","tier3-harness","actor-queue-tier3"],"description":"Run Tier 1 once, then the canonical Tier 3 harness and durable actor queue proof under one timeout budget.","mutation_classification":"database-mutating/runtime-fixture","timeout_guidance":"Longer. Give one shared budget that covers Tier 1 and both required runtime scenarios.","lock_guidance":"Takes the exclusive worker and stack binding locks for the full combined run; the actor scenario cleans its database fixture."}
 ]'
 # Every required runtime proof has a stable scenario identifier, a dispatch profile,
-# and its own log. Add future actor proofs here; status evidence is generated from
-# this registry, so an unrun or failed required scenario cannot produce a pass.
+# an exact completion marker emitted by the scenario itself, and its own log. Add
+# future actor proofs here; the worker requires the marker after a zero exit so an
+# accidentally skipped or no-op scenario cannot produce a pass. Tier 1 is a build
+# step rather than a runtime scenario and therefore has no completion marker.
 AFK_CHECK_PLAN='[
   {"name":"tier1-build-and-unit-tests","scenario":"tier1-build-and-unit-tests","profile":"tier1","log_file":"tier1-build-and-unit-tests.log","failure_status":"rejected","failure_message":"Tier 1 validation failed","inconclusive_message":"Tier 1 validation was inconclusive"},
-  {"name":"tier3-zone-harness","scenario":"canonical-zone-harness","profile":"tier3-harness","log_file":"tier3-zone-harness.log","failure_status":"rejected","failure_message":"Tier 3 Zone Harness validation failed","inconclusive_message":"Tier 3 Zone Harness validation was inconclusive"},
-  {"name":"actor-queue-runtime","scenario":"actor-events-runtime","profile":"actor-queue-tier3","log_file":"actor-queue-runtime.log","failure_status":"rejected","failure_message":"Durable actor queue validation failed","inconclusive_message":"Durable actor queue validation was inconclusive"}
+  {"name":"tier3-zone-harness","scenario":"canonical-zone-harness","profile":"tier3-harness","log_file":"tier3-zone-harness.log","completion_marker":"[PASS] canonical-zone-harness","failure_status":"rejected","failure_message":"Tier 3 Zone Harness validation failed","inconclusive_message":"Tier 3 Zone Harness validation was inconclusive"},
+  {"name":"actor-queue-runtime","scenario":"actor-events-runtime","profile":"actor-queue-tier3","log_file":"actor-queue-runtime.log","completion_marker":"[PASS] actor-events-runtime","failure_status":"rejected","failure_message":"Durable actor queue validation failed","inconclusive_message":"Durable actor queue validation was inconclusive"}
 ]'
 
 emit_profiles_json() {
@@ -173,6 +175,8 @@ write_afk_checks() {
         scenario:.value.scenario,
         profile:.value.profile,
         status:$statuses[.key],
+        completion_marker:(.value.completion_marker // null),
+        candidate_commit:($ENV.AFK_CHECK_CANDIDATE_COMMIT // null),
         log_path:($log_prefix + "/" + .value.log_file)
       }]
     }' >"$path"
@@ -188,10 +192,14 @@ initialize_afk_check_statuses() {
 }
 
 ensure_afk_check_logs() {
-  local evidence_dir="$1" log_file
+  local evidence_dir="$1" truncate="${2:-0}" log_file
   mkdir -p "$evidence_dir/logs"
   while IFS= read -r log_file; do
-    : >>"$evidence_dir/logs/$log_file"
+    if [[ "$truncate" == "1" ]]; then
+      : >"$evidence_dir/logs/$log_file"
+    else
+      : >>"$evidence_dir/logs/$log_file"
+    fi
   done < <(jq -r '.[].log_file' <<<"$AFK_CHECK_PLAN")
 }
 
@@ -892,13 +900,22 @@ run_request() {
       afk_log_prefix=worker/logs
     fi
     initialize_afk_check_statuses
-    ensure_afk_check_logs "$evidence_dir"
+    ensure_afk_check_logs "$evidence_dir" 1
+    export AFK_CHECK_CANDIDATE_COMMIT="$head_commit"
     mapfile -t afk_plan_rows < <(
-      jq -r '.[] | [.profile, .log_file, .failure_status, .failure_message, .inconclusive_message] | @tsv' <<<"$AFK_CHECK_PLAN"
+      jq -r '.[] | [.profile, .log_file, (.completion_marker // "-"), .failure_status, .failure_message, .inconclusive_message] | @tsv' <<<"$AFK_CHECK_PLAN"
     )
     for afk_check_index in "${!afk_plan_rows[@]}"; do
-      IFS=$'\t' read -r afk_profile afk_log_file afk_failure_status afk_failure_message afk_inconclusive_message <<<"${afk_plan_rows[$afk_check_index]}"
+      IFS=$'\t' read -r afk_profile afk_log_file afk_completion_marker afk_failure_status afk_failure_message afk_inconclusive_message <<<"${afk_plan_rows[$afk_check_index]}"
       if run_validation "$afk_profile" "$evidence_dir/logs/$afk_log_file"; then
+        if [[ "$afk_completion_marker" != "-" ]] \
+          && ! grep -Fqx -- "$afk_completion_marker" "$evidence_dir/logs/$afk_log_file"; then
+          printf 'required completion evidence missing: %s\n' "$afk_completion_marker" >>"$evidence_dir/logs/$afk_log_file"
+          afk_check_statuses[$afk_check_index]=rejected
+          write_afk_checks "$local_checks_path" rejected "$afk_log_prefix"
+          write_result "$evidence_dir" failed validation_failed 1 "Required scenario did not emit completion evidence: $afk_completion_marker" "$checkout_dir" "$head_commit" "$stack_path_source"
+          return 1
+        fi
         afk_check_statuses[$afk_check_index]=passed
         continue
       else
