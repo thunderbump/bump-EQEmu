@@ -18,7 +18,7 @@ The **current AFK repository check** is the no-argument command:
 ./scripts/validate-afk
 ```
 
-Run it from the committed Candidate checkout. It resolves that checkout's exact `HEAD`, asks the repository-owned Validation Worker to fetch that commit into worker-owned storage (including recursive submodule initialization), binds the separate validation AkkStack, and runs Tier 1 followed by the canonical Tier 3 Zone Harness under one 2600-second budget. It never selects the gameplay stack. The command prints its evidence directory; by default evidence and the isolated checkout live below ignored `.validation-worker/`. `VALIDATION_WORKER_HOME`, `VALIDATION_AFK_EVIDENCE_DIR`, `VALIDATION_AFK_TIMEOUT_SECONDS`, and `AKKSTACK_DIR` are operator overrides when the standard local paths are unsuitable. Missing prerequisites, lock contention, timeouts, and deterministic failures all return nonzero; success is returned only after both tiers pass.
+Run it from the committed Candidate checkout. It resolves that checkout's exact `HEAD`, asks the repository-owned Validation Worker to fetch that commit into worker-owned storage (including recursive submodule initialization), binds the separate validation AkkStack, and runs Tier 1 once followed by the canonical Tier 3 Zone Harness and durable actor queue runtime proof under one 2600-second budget. It never selects the gameplay stack. The command prints its evidence directory; by default evidence and the isolated checkout live below ignored `.validation-worker/`. `VALIDATION_WORKER_HOME`, `VALIDATION_AFK_EVIDENCE_DIR`, `VALIDATION_AFK_TIMEOUT_SECONDS`, and `AKKSTACK_DIR` are operator overrides when the standard local paths are unsuitable. Missing prerequisites, lock contention, timeouts, deterministic failures, and an unrun required scenario all return nonzero; success is returned only after all three registered checks pass.
 
 The tracked `afk.toml` is a **retained legacy contract** for the older request-driven AFK adapter. Its `validation.command` expects AFK to provide a request rather than being the current Run Preparer's no-argument repository check. Do not use `afk.toml` to infer the current invocation.
 
@@ -37,9 +37,18 @@ assertion failure or `[PASS] actor-events-runtime` to the worker validation log 
 `request.json` and `result.json` evidence.
 
 Both the current `scripts/validate-afk` repository check and the retained legacy AFK adapter pin every AFK Candidate
-to `tier1-tier3-harness`. Neither entry point receives a trusted base commit or change classification, so it cannot
-safely infer which Candidates affect runtime harness behavior. Other automation may continue to request `safe` when
-Tier 3 is not required; that profile remains preflight, Tier 1, and read-mostly Tier 2.
+to the conservative combined `tier1-tier3-harness` profile. Neither entry point receives a trusted base commit or
+change classification, so the profile always dispatches Tier 1 once, `tier3-harness`, and `actor-queue-tier3` in
+that order while holding one worker/stack lock and sharing one timeout budget. Other automation may continue to
+request `safe` when Tier 3 is not required; that profile remains preflight, Tier 1, and read-mostly Tier 2.
+
+Required checks are registered in the small `AFK_CHECK_PLAN` table in `scripts/validation-worker.sh`. Runtime rows
+must provide a stable `scenario`, the production validation `profile` that dispatches it, and a dedicated
+`log_file`; they also define deterministic-failure and inconclusive messages. Add subsequent actor runtime proofs
+to that table rather than duplicating orchestration in an external pipeline. `result.json` records every row's
+scenario, profile, status, and relative log path alongside the exact checkout commit. All rows begin as `not_run`,
+and the combined gate can report `passed` only after each row is changed to `passed`. This is the scenario
+registration and exact-Candidate evidence convention for subsequent actor work.
 
 Submodule expectations are part of the worker contract. Fetch requests run `git submodule update --init --recursive` before validation. Local-checkout requests continue to work for diagnostics, but the worker treats missing or drifting submodules as request failures instead of mutating the caller-owned checkout.
 

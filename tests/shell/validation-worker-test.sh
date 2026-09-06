@@ -85,6 +85,10 @@ if [[ "${VALIDATION_WORKER_TEST_FAIL_TIER1:-0}" == "1" && " $* " == *" tier1"* ]
   printf 'tier1 requested failure\n' >&2
   exit 1
 fi
+if [[ "${VALIDATION_WORKER_TEST_FAIL_ACTOR_QUEUE:-0}" == "1" && " $* " == *" actor-queue-tier3"* ]]; then
+  printf 'actor queue requested failure\n' >&2
+  exit 1
+fi
 if [[ "${VALIDATION_WORKER_TEST_TIER1_EXIT_CODE:-0}" != "0" && " $* " == *" tier1"* ]]; then
   exit "$VALIDATION_WORKER_TEST_TIER1_EXIT_CODE"
 fi
@@ -343,7 +347,7 @@ test_profiles_json() {
   jq -e '.profiles[] | select(.name == "preflight") | .mutation_classification == "read-only"' >/dev/null <<<"$output" || return 1
   jq -e '.profiles[] | select(.name == "safe") | (.timeout_guidance | length > 0) and (.lock_guidance | length > 0)' >/dev/null <<<"$output" || return 1
   jq -e '.profiles[] | select(.name == "tier3-harness")' >/dev/null <<<"$output" || return 1
-  jq -e '.profiles[] | select(.name == "tier1-tier3-harness")' >/dev/null <<<"$output" || return 1
+  jq -e '.profiles[] | select(.name == "tier1-tier3-harness") | .mutation_classification == "database-mutating/runtime-fixture"' >/dev/null <<<"$output" || return 1
   jq -e '.profiles[] | select(.name == "actor-queue-tier3") | .mutation_classification == "database-mutating/runtime-fixture"' >/dev/null <<<"$output" || return 1
 }
 
@@ -646,7 +650,7 @@ test_tier3_harness_failure_is_categorized_with_logs() {
 }
 
 test_tier1_tier3_harness_profile_runs_tier1_before_tier3() {
-  local source request evidence status output validation_log first_tier1 first_tier3
+  local source request evidence status output
   make_source_repo source
   reset_worker_home
   evidence="$tmp_root/evidence-tier1-tier3"
@@ -657,13 +661,26 @@ test_tier1_tier3_harness_profile_runs_tier1_before_tier3() {
 
   [[ "$status" -eq 0 ]] || return 1
   assert_json_equals "$evidence/result.json" .status passed
-  validation_log="$evidence/logs/validation.log"
-  first_tier1="$(grep -n 'fake validate: --stack validation --dry-run tier1' "$validation_log" | head -n1 | cut -d: -f1)"
-  first_tier3="$(grep -n 'fake validate: --stack validation --dry-run tier3-harness' "$validation_log" | head -n1 | cut -d: -f1)"
-  [[ -n "$first_tier1" && -n "$first_tier3" ]] || return 1
-  [[ "$first_tier1" -lt "$first_tier3" ]] || return 1
-  assert_contains "$(cat "$validation_log")" "fake validate: --stack validation --dry-run tier1"
-  assert_contains "$(cat "$validation_log")" "fake validate: --stack validation --dry-run tier3-harness"
+  assert_contains "$(cat "$evidence/logs/tier1-build-and-unit-tests.log")" "fake validate: --stack validation --dry-run tier1"
+  assert_contains "$(cat "$evidence/logs/tier3-zone-harness.log")" "fake validate: --stack validation --dry-run tier3-harness"
+  assert_contains "$(cat "$evidence/logs/actor-queue-runtime.log")" "fake validate: --stack validation --dry-run actor-queue-tier3"
+  assert_json_equals "$evidence/result.json" '.checks | map(.scenario) | join(",")' "tier1-build-and-unit-tests,canonical-zone-harness,actor-events-runtime"
+}
+
+test_combined_profile_propagates_actor_queue_failure() {
+  local source request evidence status output
+  make_source_repo source combined-actor-failure
+  reset_worker_home
+  evidence="$tmp_root/evidence-combined-actor-failure"
+  request="$tmp_root/combined-actor-failure.json"
+  write_request "$request" "$source" "$evidence" HEAD "" 0 10 "" tier1-tier3-harness
+
+  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TEST_FAIL_ACTOR_QUEUE=1 "$repo_root/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 1 ]] || return 1
+  assert_json_equals "$evidence/result.json" .category validation_failed
+  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,passed,rejected"
+  assert_contains "$(cat "$evidence/logs/actor-queue-runtime.log")" "actor queue requested failure"
 }
 
 test_tier1_tier3_harness_profile_uses_one_timeout_budget() {
@@ -686,8 +703,7 @@ test_tier1_tier3_harness_profile_uses_one_timeout_budget() {
     printf 'Expected composite timeout to stay under 3000ms, got %sms\n' "$elapsed_ms" >&2
     return 1
   }
-  validation_log="$evidence/logs/validation.log"
-  assert_contains "$(cat "$validation_log")" "fake validate: --stack validation --dry-run tier1"
+  assert_contains "$(cat "$evidence/logs/tier1-build-and-unit-tests.log")" "fake validate: --stack validation --dry-run tier1"
 }
 
 test_tier1_tier3_harness_profile_stops_after_tier1_failure_and_releases_lock() {
@@ -703,9 +719,9 @@ test_tier1_tier3_harness_profile_stops_after_tier1_failure_and_releases_lock() {
   [[ "$status" -eq 1 ]] || return 1
   assert_json_equals "$evidence/result.json" .status failed
   assert_json_equals "$evidence/result.json" .category validation_failed
-  validation_log="$evidence/logs/validation.log"
+  validation_log="$evidence/logs/tier1-build-and-unit-tests.log"
   assert_contains "$(cat "$validation_log")" "tier1 requested failure"
-  if grep -q 'fake validate: --stack validation --dry-run tier3-harness' "$validation_log"; then
+  if grep -q 'fake validate: --stack validation --dry-run tier3-harness' "$evidence/logs/tier3-zone-harness.log"; then
     printf 'tier3-harness should not run after tier1 failure\n' >&2
     return 1
   fi
@@ -831,8 +847,10 @@ test_current_afk_command_validates_exact_head_without_arguments() {
   assert_json_equals "$evidence/request.json" .stack.role validation
   assert_json_equals "$evidence/result.json" .actual_checkout_commit "$head"
   assert_json_equals "$evidence/result.json" .status passed
-  assert_contains "$(cat "$evidence/logs/validation.log")" "fake validate: --stack validation tier1"
-  assert_contains "$(cat "$evidence/logs/validation.log")" "fake validate: --stack validation tier3-harness"
+  assert_contains "$(cat "$evidence/logs/tier1-build-and-unit-tests.log")" "fake validate: --stack validation tier1"
+  assert_contains "$(cat "$evidence/logs/tier3-zone-harness.log")" "fake validate: --stack validation tier3-harness"
+  assert_contains "$(cat "$evidence/logs/actor-queue-runtime.log")" "fake validate: --stack validation actor-queue-tier3"
+  assert_json_equals "$evidence/result.json" '.checks | map(.scenario) | join(",")' "tier1-build-and-unit-tests,canonical-zone-harness,actor-events-runtime"
 }
 
 test_current_afk_command_rejects_arguments() {
@@ -884,8 +902,8 @@ test_afk_contract_passes_with_stable_checks() {
   assert_json_equals "$evidence/result.json" .schema_version 1
   assert_json_equals "$evidence/result.json" .candidate_sha "$head"
   assert_json_equals "$evidence/result.json" .status passed
-  assert_json_equals "$evidence/result.json" '.checks | map(.name) | join(",")' "tier1-build-and-unit-tests,tier3-zone-harness"
-  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,passed"
+  assert_json_equals "$evidence/result.json" '.checks | map(.name) | join(",")' "tier1-build-and-unit-tests,tier3-zone-harness,actor-queue-runtime"
+  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,passed,passed"
 }
 
 test_afk_contract_binds_tier1_tier3_evidence_to_the_candidate() {
@@ -904,10 +922,11 @@ test_afk_contract_binds_tier1_tier3_evidence_to_the_candidate() {
   assert_json_equals "$evidence/worker/result.json" .profile tier1-tier3-harness
   assert_json_equals "$evidence/worker/result.json" .actual_checkout_commit "$head"
   assert_json_equals "$evidence/result.json" .candidate_sha "$head"
-  assert_json_equals "$evidence/result.json" '.checks | map(.name) | join(",")' "tier1-build-and-unit-tests,tier3-zone-harness"
-  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,passed"
+  assert_json_equals "$evidence/result.json" '.checks | map(.name) | join(",")' "tier1-build-and-unit-tests,tier3-zone-harness,actor-queue-runtime"
+  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,passed,passed"
   [[ -f "$evidence/worker/logs/tier1-build-and-unit-tests.log" ]] || return 1
   [[ -f "$evidence/worker/logs/tier3-zone-harness.log" ]] || return 1
+  [[ -f "$evidence/worker/logs/actor-queue-runtime.log" ]] || return 1
 }
 
 test_afk_contract_is_independent_of_the_trusted_harness_location() {
@@ -961,7 +980,7 @@ test_afk_contract_is_independent_of_the_trusted_harness_location() {
     printf 'nested request exposed the Candidate checkout or trusted-harness path\n' >&2
     return 1
   fi
-  assert_json_equals "$evidence/result.json" '.checks | map(.name) | join(",")' "tier1-build-and-unit-tests,tier3-zone-harness"
+  assert_json_equals "$evidence/result.json" '.checks | map(.name) | join(",")' "tier1-build-and-unit-tests,tier3-zone-harness,actor-queue-runtime"
 }
 
 test_afk_contract_rejects_tier1_and_stops() {
@@ -978,7 +997,7 @@ test_afk_contract_rejects_tier1_and_stops() {
 
   [[ "$status" -eq 1 ]] || return 1
   assert_json_equals "$evidence/result.json" .status rejected
-  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "rejected,not_run"
+  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "rejected,not_run,not_run"
 }
 
 test_afk_contract_reports_missing_prerequisite_as_inconclusive() {
@@ -996,7 +1015,7 @@ test_afk_contract_reports_missing_prerequisite_as_inconclusive() {
 
   [[ "$status" -eq 2 ]] || return 1
   assert_json_equals "$evidence/result.json" .status inconclusive
-  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "inconclusive,not_run"
+  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "inconclusive,not_run,not_run"
 }
 
 test_afk_contract_maps_timeout_and_missing_command_to_inconclusive() {
@@ -1013,7 +1032,7 @@ test_afk_contract_maps_timeout_and_missing_command_to_inconclusive() {
 
     [[ "$status" -eq 2 ]] || return 1
     assert_json_equals "$evidence/result.json" .status inconclusive
-    assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "inconclusive,not_run"
+    assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "inconclusive,not_run,not_run"
   done
 }
 
@@ -1030,7 +1049,7 @@ test_afk_contract_maps_timeout_infrastructure_failure_to_inconclusive() {
 
   [[ "$status" -eq 2 ]] || return 1
   assert_json_equals "$evidence/result.json" .status inconclusive
-  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "inconclusive,not_run"
+  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "inconclusive,not_run,not_run"
 }
 
 test_afk_contract_fetches_a_self_contained_checkout_from_a_linked_worktree() {
@@ -1085,7 +1104,7 @@ SCRIPT
   [[ "$status" -eq 2 ]] || return 1
   assert_json_equals "$evidence/worker/afk-checks.json" .status passed
   assert_json_equals "$evidence/result.json" .status inconclusive
-  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,inconclusive"
+  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,passed,inconclusive"
 }
 
 test_afk_contract_rejects_unapproved_submodule_transports_before_initialization() {
@@ -1236,7 +1255,8 @@ run_test "local-checkout request rejects a drifting submodule" test_local_checko
 run_test "lock contention is worker_busy" test_lock_contention
 run_test "validation timeout is categorized" test_timeout
 run_test "tier3 harness failure is categorized with logs" test_tier3_harness_failure_is_categorized_with_logs
-run_test "tier1 plus tier3 harness profile runs tier1 before tier3" test_tier1_tier3_harness_profile_runs_tier1_before_tier3
+run_test "combined AFK profile runs Tier 1, canonical harness, and actor queue" test_tier1_tier3_harness_profile_runs_tier1_before_tier3
+run_test "combined AFK profile propagates actor queue failure" test_combined_profile_propagates_actor_queue_failure
 run_test "tier1 plus tier3 harness profile uses one timeout budget" test_tier1_tier3_harness_profile_uses_one_timeout_budget
 run_test "tier1 plus tier3 harness profile stops after tier1 failure and releases lock" test_tier1_tier3_harness_profile_stops_after_tier1_failure_and_releases_lock
 run_test "validation worker binds requested validation stack to worker checkout" test_validation_worker_binds_requested_validation_stack_to_worker_checkout

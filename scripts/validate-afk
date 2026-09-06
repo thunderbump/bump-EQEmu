@@ -58,7 +58,7 @@ jq -n \
     stack:{role:"validation", path:$stack_path}
   }' >"$request_path"
 
-printf 'Validating committed Candidate %s with Tier 1 and Tier 3 Zone Harness.\n' "$candidate_sha"
+printf 'Validating committed Candidate %s with Tier 1, Tier 3 Zone Harness, and durable actor queue proof.\n' "$candidate_sha"
 printf 'Validation stack: %s\n' "$stack_path"
 printf 'Validation evidence: %s\n' "$evidence_dir"
 

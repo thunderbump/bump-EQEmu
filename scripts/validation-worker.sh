@@ -58,11 +58,15 @@ VALIDATION_PROFILES='[
   {"name":"tier2-readonly","portable":false},
   {"name":"tier3-harness","portable":true,"description":"Run the canonical Tier 3 Zone Harness smoke.","mutation_classification":"read-mostly/runtime-fixture","timeout_guidance":"Medium. Roughly 10-20 minutes including harness startup.","lock_guidance":"Takes the exclusive worker slot for the whole run. Also takes the stack binding lock when stack.path is used."},
   {"name":"actor-queue-tier3","portable":true,"steps":["tier1","actor-queue-tier3"],"description":"Build Tier 1, then run the durable Autonomous Actor queue executor integration proof.","mutation_classification":"database-mutating/runtime-fixture","timeout_guidance":"Longer. Give one shared budget that covers Tier 1 and the actor queue runtime.","lock_guidance":"Takes the exclusive worker and stack binding locks; mutates the validation database and cleans scenario-owned rows."},
-  {"name":"tier1-tier3-harness","portable":true,"steps":["tier1","tier3-harness"],"description":"Run Tier 1 first, then Tier 3 harness under one timeout budget.","mutation_classification":"read-mostly/runtime-fixture","timeout_guidance":"Longer. Give one shared budget that covers both Tier 1 and Tier 3.","lock_guidance":"Takes the exclusive worker slot for both tiers under one run. Also takes the stack binding lock when stack.path is used."}
+  {"name":"tier1-tier3-harness","portable":true,"steps":["tier1","tier3-harness","actor-queue-tier3"],"description":"Run Tier 1 once, then the canonical Tier 3 harness and durable actor queue proof under one timeout budget.","mutation_classification":"database-mutating/runtime-fixture","timeout_guidance":"Longer. Give one shared budget that covers Tier 1 and both required runtime scenarios.","lock_guidance":"Takes the exclusive worker and stack binding locks for the full combined run; the actor scenario cleans its database fixture."}
 ]'
+# Every required runtime proof has a stable scenario identifier, a dispatch profile,
+# and its own log. Add future actor proofs here; status evidence is generated from
+# this registry, so an unrun or failed required scenario cannot produce a pass.
 AFK_CHECK_PLAN='[
-  {"name":"tier1-build-and-unit-tests","profile":"tier1","log_path":"worker/logs/tier1-build-and-unit-tests.log","failure_status":"rejected","failure_message":"Tier 1 validation failed","inconclusive_message":"Tier 1 validation was inconclusive"},
-  {"name":"tier3-zone-harness","profile":"tier3-harness","log_path":"worker/logs/tier3-zone-harness.log","failure_status":"rejected","failure_message":"Tier 3 Zone Harness validation failed","inconclusive_message":"Tier 3 Zone Harness validation was inconclusive"}
+  {"name":"tier1-build-and-unit-tests","scenario":"tier1-build-and-unit-tests","profile":"tier1","log_file":"tier1-build-and-unit-tests.log","failure_status":"rejected","failure_message":"Tier 1 validation failed","inconclusive_message":"Tier 1 validation was inconclusive"},
+  {"name":"tier3-zone-harness","scenario":"canonical-zone-harness","profile":"tier3-harness","log_file":"tier3-zone-harness.log","failure_status":"rejected","failure_message":"Tier 3 Zone Harness validation failed","inconclusive_message":"Tier 3 Zone Harness validation was inconclusive"},
+  {"name":"actor-queue-runtime","scenario":"actor-events-runtime","profile":"actor-queue-tier3","log_file":"actor-queue-runtime.log","failure_status":"rejected","failure_message":"Durable actor queue validation failed","inconclusive_message":"Durable actor queue validation was inconclusive"}
 ]'
 
 emit_profiles_json() {
@@ -146,22 +150,30 @@ write_result() {
     }' \
     >"$result_json"
 
+  if [[ -n "${RESULT_CHECKS_PATH:-}" && -f "$RESULT_CHECKS_PATH" ]]; then
+    jq --slurpfile registered "$RESULT_CHECKS_PATH" \
+      '. + {checks:$registered[0].checks}' "$result_json" >"$result_json.tmp"
+    mv "$result_json.tmp" "$result_json"
+  fi
   cp "$result_json" "$evidence_dir/worker-output.json"
 }
 
 write_afk_checks() {
-  local path="$1" overall_status="$2" statuses_json
+  local path="$1" overall_status="$2" log_prefix="${3:-logs}" statuses_json
   statuses_json="$(jq -cn '$ARGS.positional' --args "${afk_check_statuses[@]}")"
   jq -n \
     --arg overall_status "$overall_status" \
+    --arg log_prefix "$log_prefix" \
     --argjson plan "$AFK_CHECK_PLAN" \
     --argjson statuses "$statuses_json" \
     '{
       status:$overall_status,
       checks:[$plan | to_entries[] | {
         name:.value.name,
+        scenario:.value.scenario,
+        profile:.value.profile,
         status:$statuses[.key],
-        log_path:.value.log_path
+        log_path:($log_prefix + "/" + .value.log_file)
       }]
     }' >"$path"
 }
@@ -176,11 +188,11 @@ initialize_afk_check_statuses() {
 }
 
 ensure_afk_check_logs() {
-  local evidence_root="$1" log_path
-  while IFS= read -r log_path; do
-    mkdir -p "$evidence_root/$(dirname "$log_path")"
-    : >>"$evidence_root/$log_path"
-  done < <(jq -r '.[].log_path' <<<"$AFK_CHECK_PLAN")
+  local evidence_dir="$1" log_file
+  mkdir -p "$evidence_dir/logs"
+  while IFS= read -r log_file; do
+    : >>"$evidence_dir/logs/$log_file"
+  done < <(jq -r '.[].log_file' <<<"$AFK_CHECK_PLAN")
 }
 
 write_inconclusive_afk_checks() {
@@ -265,11 +277,11 @@ run_afk_request() {
   worker_status=$?
   set -e
 
-  ensure_afk_check_logs "$evidence_dir"
+  ensure_afk_check_logs "$worker_evidence"
   if [[ ! -f "$checks_path" ]]; then
     initialize_afk_check_statuses
     afk_check_statuses[0]=inconclusive
-    write_afk_checks "$checks_path" inconclusive
+    write_afk_checks "$checks_path" inconclusive worker/logs
   fi
   overall_status="$(json_get '.status | strings' "$checks_path")"
   case "$overall_status" in
@@ -771,6 +783,7 @@ run_request() {
   project= repo= ref= commit= profile= run_id= evidence_dir= timeout_seconds= lock_wait_seconds= stack_role= stack_path=
   request_source_type= request_source_repo= request_source_ref= request_source_commit= request_source_checkout_path=
   stack_path_source=
+  RESULT_CHECKS_PATH=
   STACK_BINDING_STATUS= STACK_BINDING_SOURCE= STACK_BINDING_STACK_DIR= STACK_BINDING_CODE_PATH= STACK_BINDING_TARGET= STACK_BINDING_PREVIOUS_KIND= STACK_BINDING_PREVIOUS_TARGET= STACK_BINDING_RESTORE_NEEDED=0
 
   if ! validate_request "$request_path" >/tmp/validation-worker-request-error.$$ 2>&1; then
@@ -871,20 +884,31 @@ run_request() {
     return "$exit_code"
   }
 
-  if [[ "$profile" == "tier1-tier3-harness" && "${VALIDATION_WORKER_AFK_MODE:-0}" == "1" ]]; then
+  if [[ "$profile" == "tier1-tier3-harness" ]]; then
     local_checks_path="$evidence_dir/afk-checks.json"
+    RESULT_CHECKS_PATH="$local_checks_path"
+    afk_log_prefix=logs
+    if [[ "${VALIDATION_WORKER_AFK_MODE:-0}" == "1" ]]; then
+      afk_log_prefix=worker/logs
+    fi
     initialize_afk_check_statuses
-    ensure_afk_check_logs "$(dirname "$evidence_dir")"
+    ensure_afk_check_logs "$evidence_dir"
     mapfile -t afk_plan_rows < <(
-      jq -r '.[] | [.profile, .log_path, .failure_status, .failure_message, .inconclusive_message] | @tsv' <<<"$AFK_CHECK_PLAN"
+      jq -r '.[] | [.profile, .log_file, .failure_status, .failure_message, .inconclusive_message] | @tsv' <<<"$AFK_CHECK_PLAN"
     )
     for afk_check_index in "${!afk_plan_rows[@]}"; do
-      IFS=$'\t' read -r afk_profile afk_log_path afk_failure_status afk_failure_message afk_inconclusive_message <<<"${afk_plan_rows[$afk_check_index]}"
-      if run_validation "$afk_profile" "$(dirname "$evidence_dir")/$afk_log_path"; then
+      IFS=$'\t' read -r afk_profile afk_log_file afk_failure_status afk_failure_message afk_inconclusive_message <<<"${afk_plan_rows[$afk_check_index]}"
+      if run_validation "$afk_profile" "$evidence_dir/logs/$afk_log_file"; then
         afk_check_statuses[$afk_check_index]=passed
         continue
       else
         validation_status=$?
+      fi
+      if [[ "$validation_status" -eq 124 && "${VALIDATION_WORKER_AFK_MODE:-0}" != "1" ]]; then
+        afk_check_statuses[$afk_check_index]=inconclusive
+        write_afk_checks "$local_checks_path" rejected "$afk_log_prefix"
+        write_result "$evidence_dir" failed timeout 1 "validation timed out" "$checkout_dir" "$head_commit" "$stack_path_source"
+        return 1
       fi
       if [[ "$validation_status" -eq 124 || "$validation_status" -eq 125 || "$validation_status" -eq 127 ]]; then
         afk_failure_status=inconclusive
@@ -892,15 +916,15 @@ run_request() {
       fi
       afk_check_statuses[$afk_check_index]="$afk_failure_status"
       if [[ "$afk_failure_status" == "inconclusive" ]]; then
-        write_afk_checks "$local_checks_path" inconclusive
+        write_afk_checks "$local_checks_path" inconclusive "$afk_log_prefix"
         write_result "$evidence_dir" failed prerequisite_unavailable 2 "$afk_failure_message" "$checkout_dir" "$head_commit" "$stack_path_source"
         return 2
       fi
-      write_afk_checks "$local_checks_path" rejected
+      write_afk_checks "$local_checks_path" rejected "$afk_log_prefix"
       write_result "$evidence_dir" failed validation_failed 1 "$afk_failure_message" "$checkout_dir" "$head_commit" "$stack_path_source"
       return 1
     done
-    write_afk_checks "$local_checks_path" passed
+    write_afk_checks "$local_checks_path" passed "$afk_log_prefix"
     write_result "$evidence_dir" passed ok 0 "validation passed" "$checkout_dir" "$head_commit" "$stack_path_source"
     return 0
   fi
