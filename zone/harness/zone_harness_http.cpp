@@ -264,6 +264,7 @@ nlohmann::json ToJson(const BotLootRequestScenarioResult &result)
 		{"looted_item_reached_looter", result.looted_item_reached_looter},
 		{"loot_completed", result.loot_completed},
 		{"loot_completion_elapsed_ms", result.loot_completion_elapsed_ms},
+		{"loot_completion_budget_ms", result.loot_completion_budget_ms},
 		{"dialogue_pending_at_loot_completion", result.dialogue_pending_at_loot_completion},
 		{"normal_processing_responsive", result.normal_processing_responsive},
 		{"bot_inventory_unchanged", result.bot_inventory_unchanged},

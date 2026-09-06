@@ -141,6 +141,7 @@ struct BotLootRequestScenarioResult {
 	bool looted_item_reached_looter = false;
 	bool loot_completed = false;
 	uint32_t loot_completion_elapsed_ms = 0;
+	uint32_t loot_completion_budget_ms = 0;
 	bool dialogue_pending_at_loot_completion = false;
 	bool normal_processing_responsive = false;
 	bool bot_inventory_unchanged = false;

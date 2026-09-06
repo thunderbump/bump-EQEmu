@@ -49,6 +49,7 @@ namespace EQ::ZoneHarness {
 namespace {
 
 inline constexpr uint32_t kActorLeashSourceRequiredTargetTicks = 3;
+inline constexpr uint32_t kBotLootCompletionBudgetMs = 1000;
 
 void AppendItemFingerprint(std::ostringstream &out, const EQ::ItemInstance *item)
 {
@@ -684,13 +685,15 @@ BotLootRequestScenarioResult ZoneHarnessRuntime::RunBotLootRequestUpgrade() {
 		return completed;
 	};
 
+	result.loot_completion_budget_ms = kBotLootCompletionBudgetMs;
 	result.loot_completed = loot_once(upgrade_item_id, &result.loot_completion_elapsed_ms);
 	const auto* looted = fixture.Owner()->GetInv().GetItem(EQ::invslot::slotCursor);
 	result.looted_item_reached_looter = looted && looted->GetID() == upgrade_item_id;
 	result.dialogue_pending_at_loot_completion =
 		pending_dialogue_provider.PendingRequests().size() == 1;
 	result.normal_processing_responsive = result.loot_completed &&
-		result.looted_item_reached_looter && result.dialogue_pending_at_loot_completion;
+		result.looted_item_reached_looter && result.dialogue_pending_at_loot_completion &&
+		result.loot_completion_elapsed_ms < result.loot_completion_budget_ms;
 	fixture.Owner()->GetInv().DeleteItem(EQ::invslot::slotCursor);
 
 	const auto positive = std::find_if(decisions.begin(), decisions.end(), [](const auto& d) { return d.produced; });
