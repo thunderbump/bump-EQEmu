@@ -532,6 +532,30 @@ print(json.dumps({"scenario": payload["scenario"], "proved": True, "bot": payloa
 PY
 }
 
+assert_bot_loot_request_failure_cleanup() {
+  local payload="$1"
+  BOT_LOOT_CLEANUP_PAYLOAD="$payload" python3 - <<'PY'
+import json, os, sys
+payload = json.loads(os.environ["BOT_LOOT_CLEANUP_PAYLOAD"])
+def fail(message):
+    print(json.dumps({"error": message, "payload": payload}, separators=(",", ":")), file=sys.stderr)
+    sys.exit(1)
+if payload.get("proved") is not True or payload.get("scenario") != "bot-loot-request-failure-cleanup":
+    fail("failure-path cleanup scenario was not proved")
+for field in (
+    "failure_induced_after_overrides",
+    "rules_restored",
+    "fixture_entities_cleaned",
+    "delivery_state_restored",
+    "dialogue_provider_state_restored",
+    "decision_observer_state_restored",
+):
+    if payload.get(field) is not True:
+        fail("failed cleanup invariant: " + field)
+print(json.dumps({"scenario": payload["scenario"], "proved": True}, separators=(",", ":")))
+PY
+}
+
 assert_pressure_heal_scenario() {
   local payload="$1"
 
@@ -638,6 +662,9 @@ assert_slow_scenario "$mezzed_scenario" mezzed HarnessSlowSecondaryHostile false
 
 pressure_heal_scenario=$(curl -fsS -X POST "http://127.0.0.1:${port}/api/v1/harness/scenarios/owned-bot-healing/moderate-pressure-fast-heal")
 assert_pressure_heal_scenario "$pressure_heal_scenario"
+
+bot_loot_request_cleanup=$(curl -fsS -X POST "http://127.0.0.1:${port}/api/v1/harness/scenarios/bot-loot-request/failure-cleanup")
+assert_bot_loot_request_failure_cleanup "$bot_loot_request_cleanup"
 
 bot_loot_request_scenario=$(curl -fsS -X POST "http://127.0.0.1:${port}/api/v1/harness/scenarios/bot-loot-request/upgrade")
 assert_bot_loot_request_scenario "$bot_loot_request_scenario"

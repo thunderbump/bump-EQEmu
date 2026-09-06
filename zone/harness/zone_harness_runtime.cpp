@@ -32,7 +32,9 @@
 #include "zone/zonedb.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <thread>
@@ -539,10 +541,15 @@ BotSlowMaintenanceScenarioResult ZoneHarnessRuntime::RunBotSlowMaintenanceMezzed
 	return RunBotSlowMaintenanceScenario(BotSlowMaintenanceScenarioKind::Mezzed, max_ticks, sleep_ms);
 }
 
-BotLootRequestScenarioResult ZoneHarnessRuntime::RunBotLootRequestUpgrade() {
+BotLootRequestScenarioResult ZoneHarnessRuntime::RunBotLootRequestUpgrade()
+{
 	std::lock_guard scenario_lock(scenario_mutex);
 	std::lock_guard lock(mutex);
+	return RunBotLootRequestUpgradeLocked(false);
+}
 
+BotLootRequestScenarioResult ZoneHarnessRuntime::RunBotLootRequestUpgradeLocked(bool fail_after_overrides)
+{
 	BotLootRequestScenarioResult result;
 	result.database_mutation = "none: synthetic owner, bots, equipment, corpses, and loot inventory are in-memory only";
 	if (!booted || !zone || !is_zone_loaded) {
@@ -617,14 +624,16 @@ BotLootRequestScenarioResult ZoneHarnessRuntime::RunBotLootRequestUpgrade() {
 	BotLootRequest::TestDelayedDialogueProvider pending_dialogue_provider;
 	auto saved_delivery_state = ZoneBotLootRequestRuntime::CaptureDeliveryState();
 	auto saved_observer = ZoneBotLootRequestRuntime::CaptureDecisionObserver();
+	auto *saved_dialogue_provider = ZoneBotLootRequestRuntime::CaptureDialogueProviderForTesting();
 	struct ScenarioStateCleanup {
 		uint32_t owner_id;
 		std::vector<uint32_t> bot_ids;
 		BotLootRequest::DeliveryState delivery_state;
 		ZoneBotLootRequestRuntime::DecisionObserver observer;
+		BotLootRequest::DelayedDialogueProvider *dialogue_provider;
 		~ScenarioStateCleanup() {
 			ZoneBotLootRequestRuntime::CancelLootRequestDialogue(owner_id, bot_ids);
-			ZoneBotLootRequestRuntime::ClearDialogueProviderForTesting();
+			ZoneBotLootRequestRuntime::SetDialogueProviderForTesting(dialogue_provider);
 			ZoneBotLootRequestRuntime::RestoreDeliveryState(std::move(delivery_state));
 			ZoneBotLootRequestRuntime::SetDecisionObserver(std::move(observer));
 		}
@@ -632,7 +641,8 @@ BotLootRequestScenarioResult ZoneHarnessRuntime::RunBotLootRequestUpgrade() {
 		owner_stable_id,
 		{primary_bot_stable_id, other_bot_stable_id},
 		std::move(saved_delivery_state),
-		std::move(saved_observer)
+		std::move(saved_observer),
+		saved_dialogue_provider
 	};
 	ZoneBotLootRequestRuntime::SetDialogueProviderForTesting(&pending_dialogue_provider);
 	ZoneBotLootRequestRuntime::SetDecisionObserver(
@@ -642,6 +652,19 @@ BotLootRequestScenarioResult ZoneHarnessRuntime::RunBotLootRequestUpgrade() {
 	ScopedRuleValue cursor_rule("Character:CheckCursorEmptyWhenLooting", "false");
 	if (!enabled_rule.ok() || !cooldown_rule.ok() || !cursor_rule.ok()) {
 		result.reason = "fixture_rule_apply_failed";
+		result.runtime = RuntimeLocked();
+		return result;
+	}
+	if (fail_after_overrides) {
+		// Dirty delivery bookkeeping as well as the installed rules/provider/observer so the
+		// cleanup proof cannot pass merely because this early exit made no state changes.
+		auto dirty_delivery = ZoneBotLootRequestRuntime::CaptureDeliveryState();
+		constexpr uint64_t cleanup_probe_event_id = std::numeric_limits<uint64_t>::max();
+		dirty_delivery.delivered_loot_events.insert(cleanup_probe_event_id);
+		dirty_delivery.delivered_loot_event_order.push_back(cleanup_probe_event_id);
+		dirty_delivery.cooldown_start_ms_by_looter_bot[cleanup_probe_event_id] = 1;
+		ZoneBotLootRequestRuntime::RestoreDeliveryState(std::move(dirty_delivery));
+		result.reason = "intentional_failure_after_fixture_overrides";
 		result.runtime = RuntimeLocked();
 		return result;
 	}
@@ -769,6 +792,72 @@ BotLootRequestScenarioResult ZoneHarnessRuntime::RunBotLootRequestUpgrade() {
 					result.normal_processing_responsive && result.bot_inventory_unchanged &&
 					result.provider_independent;
 	result.reason = result.proved ? "ordinary_loot_upgrade_request_observed" : "scenario_assertion_failed";
+	result.runtime = RuntimeLocked();
+	return result;
+}
+
+BotLootRequestFailureCleanupResult ZoneHarnessRuntime::RunBotLootRequestFailureCleanupProof()
+{
+	std::lock_guard scenario_lock(scenario_mutex);
+	std::lock_guard lock(mutex);
+
+	BotLootRequestFailureCleanupResult result;
+	if (!booted || !zone || !is_zone_loaded) {
+		result.reason = "zone_not_booted";
+		result.runtime = RuntimeLocked();
+		return result;
+	}
+
+	const std::array<std::string, 3> rule_names{
+		"Chat:BotLootRequestEnabled",
+		"Chat:BotLootRequestCooldownSeconds",
+		"Character:CheckCursorEmptyWhenLooting",
+	};
+	std::array<std::string, 3> original_rule_values;
+	bool captured_rules = true;
+	for (size_t i = 0; i < rule_names.size(); ++i) {
+		captured_rules = RuleManager::Instance()->GetRule(rule_names[i], original_rule_values[i]) && captured_rules;
+	}
+	const auto original_delivery = ZoneBotLootRequestRuntime::CaptureDeliveryState();
+	auto *original_provider = ZoneBotLootRequestRuntime::CaptureDialogueProviderForTesting();
+	auto original_observer = ZoneBotLootRequestRuntime::CaptureDecisionObserver();
+	BotLootRequest::TestDelayedDialogueProvider provider_sentinel;
+	bool observer_sentinel_called = false;
+	ZoneBotLootRequestRuntime::SetDialogueProviderForTesting(&provider_sentinel);
+	ZoneBotLootRequestRuntime::SetDecisionObserver(
+		[&observer_sentinel_called](const auto &) { observer_sentinel_called = true; });
+
+	const auto failed = RunBotLootRequestUpgradeLocked(true);
+	result.failure_induced_after_overrides = failed.reason == "intentional_failure_after_fixture_overrides";
+
+	result.rules_restored = captured_rules;
+	for (size_t i = 0; i < rule_names.size(); ++i) {
+		std::string current;
+		result.rules_restored = RuleManager::Instance()->GetRule(rule_names[i], current) &&
+			current == original_rule_values[i] && result.rules_restored;
+	}
+	result.fixture_entities_cleaned =
+		entity_list.GetMob("HarnessLootOwner") == nullptr &&
+		entity_list.GetMob("HarnessUpgradeBot") == nullptr &&
+		entity_list.GetMob("HarnessNoUpgradeBot") == nullptr;
+	const auto current_delivery = ZoneBotLootRequestRuntime::CaptureDeliveryState();
+	result.delivery_state_restored =
+		current_delivery.delivered_loot_events == original_delivery.delivered_loot_events &&
+		current_delivery.delivered_loot_event_order == original_delivery.delivered_loot_event_order &&
+		current_delivery.cooldown_start_ms_by_looter_bot == original_delivery.cooldown_start_ms_by_looter_bot;
+	result.dialogue_provider_state_restored =
+		ZoneBotLootRequestRuntime::CaptureDialogueProviderForTesting() == &provider_sentinel;
+	auto restored_observer = ZoneBotLootRequestRuntime::CaptureDecisionObserver();
+	if (restored_observer) {
+		restored_observer({});
+	}
+	result.decision_observer_state_restored = observer_sentinel_called;
+	ZoneBotLootRequestRuntime::SetDialogueProviderForTesting(original_provider);
+	ZoneBotLootRequestRuntime::SetDecisionObserver(std::move(original_observer));
+	result.proved = result.failure_induced_after_overrides && result.rules_restored &&
+		result.fixture_entities_cleaned && result.delivery_state_restored &&
+		result.dialogue_provider_state_restored && result.decision_observer_state_restored;
+	result.reason = result.proved ? "failure_path_fixture_cleanup_observed" : "failure_path_cleanup_assertion_failed";
 	result.runtime = RuntimeLocked();
 	return result;
 }

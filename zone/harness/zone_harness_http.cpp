@@ -273,6 +273,20 @@ nlohmann::json ToJson(const BotLootRequestScenarioResult &result)
 	};
 }
 
+nlohmann::json ToJson(const BotLootRequestFailureCleanupResult &result)
+{
+	return {
+		{"proved", result.proved}, {"reason", result.reason}, {"scenario", result.scenario},
+		{"failure_induced_after_overrides", result.failure_induced_after_overrides},
+		{"rules_restored", result.rules_restored},
+		{"fixture_entities_cleaned", result.fixture_entities_cleaned},
+		{"delivery_state_restored", result.delivery_state_restored},
+		{"dialogue_provider_state_restored", result.dialogue_provider_state_restored},
+		{"decision_observer_state_restored", result.decision_observer_state_restored},
+		{"runtime", ToJson(result.runtime)},
+	};
+}
+
 nlohmann::json ToJson(const ActorLedBotPartyScenarioResult &result)
 {
 	nlohmann::json followers = nlohmann::json::array();
@@ -734,6 +748,10 @@ bool ServeHttp(const HttpServerOptions &options)
 
 	api.Post("/api/v1/harness/scenarios/bot-loot-request/upgrade", [&runtime](const auto &, auto &res) {
 		SetJson(res, ToJson(runtime.RunBotLootRequestUpgrade()));
+	});
+
+	api.Post("/api/v1/harness/scenarios/bot-loot-request/failure-cleanup", [&runtime](const auto &, auto &res) {
+		SetJson(res, ToJson(runtime.RunBotLootRequestFailureCleanupProof()));
 	});
 
 	api.Post("/api/v1/harness/scenarios/actor-led-bot-party", [&runtime](const auto &req, auto &res) {

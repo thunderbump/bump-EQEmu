@@ -25,6 +25,7 @@ BotLootRequest::DialogueProviderSettings LoadBotLootRequestDialogueSettings()
 }
 
 std::unique_ptr<BotLootRequest::DelayedDialogueQueue> test_dialogue_queue;
+BotLootRequest::DelayedDialogueProvider *test_dialogue_provider = nullptr;
 
 BotLootRequest::DelayedDialogueQueue &ZoneBotLootRequestDialogueQueue()
 {
@@ -106,6 +107,7 @@ void CancelLootRequestDialogue(
 
 void SetDialogueProviderForTesting(BotLootRequest::DelayedDialogueProvider *provider)
 {
+	test_dialogue_provider = provider;
 	test_dialogue_queue = provider ? std::make_unique<BotLootRequest::DelayedDialogueQueue>(
 		*provider,
 		LoadBotLootRequestDialogueSettings()
@@ -114,7 +116,13 @@ void SetDialogueProviderForTesting(BotLootRequest::DelayedDialogueProvider *prov
 
 void ClearDialogueProviderForTesting()
 {
+	test_dialogue_provider = nullptr;
 	test_dialogue_queue.reset();
+}
+
+BotLootRequest::DelayedDialogueProvider *CaptureDialogueProviderForTesting()
+{
+	return test_dialogue_provider;
 }
 
 }

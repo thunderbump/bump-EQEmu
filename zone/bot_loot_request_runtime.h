@@ -58,5 +58,6 @@ void CancelLootRequestDialogue(uint32_t looter_stable_id, const std::vector<uint
 // The caller owns the provider and must clear the override before destroying it.
 void SetDialogueProviderForTesting(BotLootRequest::DelayedDialogueProvider *provider);
 void ClearDialogueProviderForTesting();
+BotLootRequest::DelayedDialogueProvider *CaptureDialogueProviderForTesting();
 
 }

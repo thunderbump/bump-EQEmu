@@ -150,6 +150,19 @@ struct BotLootRequestScenarioResult {
 	RuntimeSnapshot runtime;
 };
 
+struct BotLootRequestFailureCleanupResult {
+	bool proved = false;
+	std::string reason;
+	std::string scenario = "bot-loot-request-failure-cleanup";
+	bool failure_induced_after_overrides = false;
+	bool rules_restored = false;
+	bool fixture_entities_cleaned = false;
+	bool delivery_state_restored = false;
+	bool dialogue_provider_state_restored = false;
+	bool decision_observer_state_restored = false;
+	RuntimeSnapshot runtime;
+};
+
 struct ActorLedBotPartyScenarioResult {
 	bool proved = false;
 	std::string reason;
@@ -293,6 +306,7 @@ public:
 		uint32_t sleep_ms = 25
 	);
 	BotLootRequestScenarioResult RunBotLootRequestUpgrade();
+	BotLootRequestFailureCleanupResult RunBotLootRequestFailureCleanupProof();
 	ActorLedBotPartyScenarioResult RunActorLedBotPartyProof(
 		uint8_t follower_count = 3,
 		uint32_t max_ticks = 160,
@@ -310,6 +324,8 @@ public:
 	void Shutdown();
 
 private:
+	BotLootRequestScenarioResult RunBotLootRequestUpgradeLocked(bool fail_after_overrides);
+
 	struct AutonomousActorPrototypeAction {
 		uint64_t request_id = 0;
 		std::string kind;
