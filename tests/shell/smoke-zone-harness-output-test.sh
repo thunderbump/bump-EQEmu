@@ -38,3 +38,107 @@ if [[ "$(printf '%s\n' "$cleanup_output" "$result" | sed '/^$/d' | wc -l)" -ne 1
 fi
 
 printf 'ok - smoke Zone Harness emits one canonical scenario result\n'
+
+# Exercise the wrapper itself with a deterministic Compose stand-in. This
+# covers -T, the bind-mounted result bridge, host-side publication, and both
+# durable failure paths without starting Docker.
+test_root="$(mktemp -d)"
+trap 'rm -rf "$test_root"' EXIT
+mkdir -p "$test_root/bin" "$test_root/stack"
+touch "$test_root/stack/.env"
+ln -s "$repo_root" "$test_root/stack/code"
+
+cat >"$test_root/bin/docker-compose" <<'MOCK_COMPOSE'
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf '%s\n' "$*" >>"${MOCK_COMPOSE_CALLS:?}"
+[[ " $* " == *" run "* ]] || exit 0
+
+saw_no_tty=false
+result_dir=''
+while (($#)); do
+  case "$1" in
+    -T)
+      saw_no_tty=true
+      shift
+      ;;
+    -v)
+      result_dir="${2%%:*}"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+if [[ "$saw_no_tty" != true || -z "$result_dir" ]]; then
+  printf 'mock: run did not use -T and a result bind mount\n' >&2
+  exit 90
+fi
+
+case "${MOCK_COMPOSE_MODE:-success}" in
+  success)
+    printf '%s\n' "${EXPECTED_RESULT:?}" >"$result_dir/result.json"
+    ;;
+  missing)
+    ;;
+  failure)
+    printf 'durable harness diagnostic\n' >"$result_dir/zone_harness.out"
+    exit 23
+    ;;
+  *)
+    exit 91
+    ;;
+esac
+MOCK_COMPOSE
+chmod +x "$test_root/bin/docker-compose"
+
+calls="$test_root/compose.calls"
+run_wrapper() {
+  PATH="$test_root/bin:$PATH" \
+    AKKSTACK_DIR="$test_root/stack" \
+    MOCK_COMPOSE_CALLS="$calls" \
+    EXPECTED_RESULT="$expected" \
+    MOCK_COMPOSE_MODE="$1" \
+    "$smoke_script"
+}
+
+wrapper_output="$(run_wrapper success)"
+if [[ "$wrapper_output" != "$expected" ]]; then
+  printf 'wrapper did not publish exactly the bind-mounted canonical result\nexpected: %s\nactual:   %s\n' "$expected" "$wrapper_output" >&2
+  exit 1
+fi
+if ! grep -Eq ' run .* -T .* -v .+:/tmp/zone-harness-result ' "$calls"; then
+  printf 'wrapper Compose invocation did not expose the non-TTY result bridge\n' >&2
+  cat "$calls" >&2
+  exit 1
+fi
+
+failure_stdout="$test_root/failure.stdout"
+failure_stderr="$test_root/failure.stderr"
+if run_wrapper failure >"$failure_stdout" 2>"$failure_stderr"; then
+  printf 'wrapper unexpectedly accepted a failed Compose run\n' >&2
+  exit 1
+fi
+if [[ -s "$failure_stdout" ]] || ! grep -q 'durable harness diagnostic' "$failure_stderr" \
+  || ! grep -q 'Zone Harness container failed with status 23' "$failure_stderr"; then
+  printf 'wrapper did not route failed-run diagnostics to stderr\n' >&2
+  cat "$failure_stderr" >&2
+  exit 1
+fi
+
+missing_stdout="$test_root/missing.stdout"
+missing_stderr="$test_root/missing.stderr"
+if run_wrapper missing >"$missing_stdout" 2>"$missing_stderr"; then
+  printf 'wrapper unexpectedly accepted a missing structured result\n' >&2
+  exit 1
+fi
+if [[ -s "$missing_stdout" ]] || ! grep -q 'produced no structured result' "$missing_stderr"; then
+  printf 'wrapper did not diagnose a missing bind-mounted result on stderr\n' >&2
+  cat "$missing_stderr" >&2
+  exit 1
+fi
+
+printf 'ok - smoke Zone Harness wrapper routes non-TTY results and diagnostics\n'

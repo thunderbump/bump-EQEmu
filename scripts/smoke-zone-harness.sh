@@ -70,7 +70,13 @@ die() {
   exit 1
 }
 
-"$repo_root/scripts/check-akkstack-contract.sh" --stack "$AKKSTACK_STACK_ROLE"
+# Keep the successful machine-readable result as the wrapper's only stdout.
+# Preflight detail is useful only when the contract fails.
+contract_output=''
+if ! contract_output=$("$repo_root/scripts/check-akkstack-contract.sh" --stack "$AKKSTACK_STACK_ROLE" 2>&1); then
+  printf '%s\n' "$contract_output" >&2
+  die "AkkStack contract preflight failed"
+fi
 
 command -v docker-compose >/dev/null 2>&1 || die "docker-compose is required"
 
