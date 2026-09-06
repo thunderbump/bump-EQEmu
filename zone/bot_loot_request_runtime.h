@@ -3,6 +3,7 @@
 #include "common/bot_loot_request.h"
 
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -55,9 +56,18 @@ void ProcessReadyLootRequestDialogue();
 void CancelLootRequestDialogue(uint32_t looter_stable_id, const std::vector<uint32_t> &requesting_bot_stable_ids);
 
 // Harness-only seam for proving that corpse loot completion does not wait for dialogue.
-// The caller owns the provider and must clear the override before destroying it.
+// The caller owns the provider and must clear or restore the override before destroying it.
+struct DialogueOverrideState {
+	BotLootRequest::DelayedDialogueProvider *provider = nullptr;
+	std::unique_ptr<BotLootRequest::DelayedDialogueQueue> queue;
+};
+
 void SetDialogueProviderForTesting(BotLootRequest::DelayedDialogueProvider *provider);
 void ClearDialogueProviderForTesting();
-BotLootRequest::DelayedDialogueProvider *CaptureDialogueProviderForTesting();
+// Capture transfers the exact queue so pending-request mappings and request IDs survive a
+// temporary override. The runtime has no test override until the state is restored or replaced.
+DialogueOverrideState CaptureDialogueOverrideStateForTesting();
+void RestoreDialogueOverrideStateForTesting(DialogueOverrideState state);
+BotLootRequest::DelayedDialogueProvider *CurrentDialogueProviderForTesting();
 
 }

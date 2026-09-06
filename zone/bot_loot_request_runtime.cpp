@@ -120,7 +120,23 @@ void ClearDialogueProviderForTesting()
 	test_dialogue_queue.reset();
 }
 
-BotLootRequest::DelayedDialogueProvider *CaptureDialogueProviderForTesting()
+DialogueOverrideState CaptureDialogueOverrideStateForTesting()
+{
+	DialogueOverrideState state{
+		.provider = test_dialogue_provider,
+		.queue = std::move(test_dialogue_queue),
+	};
+	test_dialogue_provider = nullptr;
+	return state;
+}
+
+void RestoreDialogueOverrideStateForTesting(DialogueOverrideState state)
+{
+	test_dialogue_provider = state.provider;
+	test_dialogue_queue = std::move(state.queue);
+}
+
+BotLootRequest::DelayedDialogueProvider *CurrentDialogueProviderForTesting()
 {
 	return test_dialogue_provider;
 }

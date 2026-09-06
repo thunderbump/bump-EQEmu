@@ -624,16 +624,16 @@ BotLootRequestScenarioResult ZoneHarnessRuntime::RunBotLootRequestUpgradeLocked(
 	BotLootRequest::TestDelayedDialogueProvider pending_dialogue_provider;
 	auto saved_delivery_state = ZoneBotLootRequestRuntime::CaptureDeliveryState();
 	auto saved_observer = ZoneBotLootRequestRuntime::CaptureDecisionObserver();
-	auto *saved_dialogue_provider = ZoneBotLootRequestRuntime::CaptureDialogueProviderForTesting();
+	auto saved_dialogue_override = ZoneBotLootRequestRuntime::CaptureDialogueOverrideStateForTesting();
 	struct ScenarioStateCleanup {
 		uint32_t owner_id;
 		std::vector<uint32_t> bot_ids;
 		BotLootRequest::DeliveryState delivery_state;
 		ZoneBotLootRequestRuntime::DecisionObserver observer;
-		BotLootRequest::DelayedDialogueProvider *dialogue_provider;
+		ZoneBotLootRequestRuntime::DialogueOverrideState dialogue_override;
 		~ScenarioStateCleanup() {
 			ZoneBotLootRequestRuntime::CancelLootRequestDialogue(owner_id, bot_ids);
-			ZoneBotLootRequestRuntime::SetDialogueProviderForTesting(dialogue_provider);
+			ZoneBotLootRequestRuntime::RestoreDialogueOverrideStateForTesting(std::move(dialogue_override));
 			ZoneBotLootRequestRuntime::RestoreDeliveryState(std::move(delivery_state));
 			ZoneBotLootRequestRuntime::SetDecisionObserver(std::move(observer));
 		}
@@ -642,7 +642,7 @@ BotLootRequestScenarioResult ZoneHarnessRuntime::RunBotLootRequestUpgradeLocked(
 		{primary_bot_stable_id, other_bot_stable_id},
 		std::move(saved_delivery_state),
 		std::move(saved_observer),
-		saved_dialogue_provider
+		std::move(saved_dialogue_override)
 	};
 	ZoneBotLootRequestRuntime::SetDialogueProviderForTesting(&pending_dialogue_provider);
 	ZoneBotLootRequestRuntime::SetDecisionObserver(
@@ -819,13 +819,27 @@ BotLootRequestFailureCleanupResult ZoneHarnessRuntime::RunBotLootRequestFailureC
 		captured_rules = RuleManager::Instance()->GetRule(rule_names[i], original_rule_values[i]) && captured_rules;
 	}
 	const auto original_delivery = ZoneBotLootRequestRuntime::CaptureDeliveryState();
-	auto *original_provider = ZoneBotLootRequestRuntime::CaptureDialogueProviderForTesting();
+	auto original_dialogue_override = ZoneBotLootRequestRuntime::CaptureDialogueOverrideStateForTesting();
 	auto original_observer = ZoneBotLootRequestRuntime::CaptureDecisionObserver();
 	BotLootRequest::TestDelayedDialogueProvider provider_sentinel;
 	bool observer_sentinel_called = false;
 	ZoneBotLootRequestRuntime::SetDialogueProviderForTesting(&provider_sentinel);
 	ZoneBotLootRequestRuntime::SetDecisionObserver(
 		[&observer_sentinel_called](const auto &) { observer_sentinel_called = true; });
+
+	const BotLootRequest::Request dialogue_probe{
+		.produced = true,
+		.requesting_bot_stable_id = std::numeric_limits<uint32_t>::max(),
+		.requesting_bot_name = "DialogueQueueSentinel",
+		.message = "queue state sentinel",
+		.delivery_channel = BotLootRequest::DeliveryChannel::GroupChat,
+	};
+	const BotLootRequest::SuccessfulLootEvent dialogue_probe_event{
+		.looter_stable_id = std::numeric_limits<uint32_t>::max(),
+		.loot_event_id = std::numeric_limits<uint64_t>::max(),
+		.looter_name = "DialogueQueueSentinelOwner",
+	};
+	ZoneBotLootRequestRuntime::EnqueueLootRequestDialogue(dialogue_probe, dialogue_probe_event);
 
 	const auto failed = RunBotLootRequestUpgradeLocked(true);
 	result.failure_induced_after_overrides = failed.reason == "intentional_failure_after_fixture_overrides";
@@ -845,14 +859,21 @@ BotLootRequestFailureCleanupResult ZoneHarnessRuntime::RunBotLootRequestFailureC
 		current_delivery.delivered_loot_events == original_delivery.delivered_loot_events &&
 		current_delivery.delivered_loot_event_order == original_delivery.delivered_loot_event_order &&
 		current_delivery.cooldown_start_ms_by_looter_bot == original_delivery.cooldown_start_ms_by_looter_bot;
+	// A pointer-only restoration would recreate an empty queue and restart request IDs at one.
+	// Enqueuing again proves both the saved pending mapping and next request ID were retained.
+	ZoneBotLootRequestRuntime::EnqueueLootRequestDialogue(dialogue_probe, dialogue_probe_event);
+	const auto &restored_pending_dialogue = provider_sentinel.PendingRequests();
 	result.dialogue_provider_state_restored =
-		ZoneBotLootRequestRuntime::CaptureDialogueProviderForTesting() == &provider_sentinel;
+		ZoneBotLootRequestRuntime::CurrentDialogueProviderForTesting() == &provider_sentinel &&
+		restored_pending_dialogue.size() == 2 &&
+		restored_pending_dialogue[0].request_id == 1 &&
+		restored_pending_dialogue[1].request_id == 2;
 	auto restored_observer = ZoneBotLootRequestRuntime::CaptureDecisionObserver();
 	if (restored_observer) {
 		restored_observer({});
 	}
 	result.decision_observer_state_restored = observer_sentinel_called;
-	ZoneBotLootRequestRuntime::SetDialogueProviderForTesting(original_provider);
+	ZoneBotLootRequestRuntime::RestoreDialogueOverrideStateForTesting(std::move(original_dialogue_override));
 	ZoneBotLootRequestRuntime::SetDecisionObserver(std::move(original_observer));
 	result.proved = result.failure_induced_after_overrides && result.rules_restored &&
 		result.fixture_entities_cleaned && result.delivery_state_restored &&
