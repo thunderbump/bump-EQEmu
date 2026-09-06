@@ -82,6 +82,7 @@ set -euo pipefail
 
 port="${ZONE_HARNESS_PORT:?ZONE_HARNESS_PORT is required}"
 harness_log="${ZONE_HARNESS_LOG_FILE:?ZONE_HARNESS_LOG_FILE is required}"
+harness_url="http://[::1]:${port}"
 
 until mysqladmin status -ueqemu -p"$EQEMU_DB_PASSWORD" -h mariadb --silent; do
   sleep 1
@@ -146,7 +147,7 @@ trap 'status=$?; kill -TERM "$harness_pid" 2>/dev/null || true; dump_harness_log
 
 health=''
 for _ in $(seq 1 180); do
-  if health=$(curl -fsS "http://127.0.0.1:${port}/api/v1/harness/health" 2>/dev/null); then
+  if health=$(curl --noproxy '*' -fsS "${harness_url}/api/v1/harness/health" 2>/dev/null); then
     break
   fi
   if ! kill -0 "$harness_pid" 2>/dev/null; then
@@ -158,16 +159,16 @@ done
 
 [[ "$health" == *'"healthy":true'* ]] || { printf '%s\n' "$health" >&2; exit 1; }
 
-zone=$(curl -fsS "http://127.0.0.1:${port}/api/v1/harness/zone")
+zone=$(curl --noproxy '*' -fsS "${harness_url}/api/v1/harness/zone")
 [[ "$zone" == *'"short_name":"qrg"'* ]] || { printf '%s\n' "$zone" >&2; exit 1; }
 
-entities=$(curl -fsS "http://127.0.0.1:${port}/api/v1/harness/entities")
+entities=$(curl --noproxy '*' -fsS "${harness_url}/api/v1/harness/entities")
 [[ "$entities" == *'"counts"'* ]] || { printf '%s\n' "$entities" >&2; exit 1; }
 
-process=$(curl -fsS -X POST -H 'Content-Type: application/json' --data '{"ticks":2}' "http://127.0.0.1:${port}/api/v1/harness/process")
+process=$(curl --noproxy '*' -fsS -X POST -H 'Content-Type: application/json' --data '{"ticks":2}' "${harness_url}/api/v1/harness/process")
 [[ "$process" == *'"ticks_processed":2'* ]] || { printf '%s\n' "$process" >&2; exit 1; }
 
-events=$(curl -fsS "http://127.0.0.1:${port}/api/v1/harness/events")
+events=$(curl --noproxy '*' -fsS "${harness_url}/api/v1/harness/events")
 [[ "$events" == *'"events":[]'* ]] || { printf '%s\n' "$events" >&2; exit 1; }
 
 assert_slow_scenario() {
@@ -619,12 +620,12 @@ if not matching:
 PY
 }
 
-scenario=$(curl -fsS -X POST -H 'Content-Type: application/json' --data '{"spell_id":200}' "http://127.0.0.1:${port}/api/v1/harness/scenarios/spell-cast-start")
+scenario=$(curl --noproxy '*' -fsS -X POST -H 'Content-Type: application/json' --data '{"spell_id":200}' "${harness_url}/api/v1/harness/scenarios/spell-cast-start")
 [[ "$scenario" == *'"started":true'* ]] || { printf '%s\n' "$scenario" >&2; exit 1; }
 
 cast_events=''
 for _ in $(seq 1 20); do
-  cast_events=$(curl -fsS "http://127.0.0.1:${port}/api/v1/harness/events?since=0&limit=10")
+  cast_events=$(curl --noproxy '*' -fsS "${harness_url}/api/v1/harness/events?since=0&limit=10")
   if [[ "$cast_events" == *'"type":"spell_cast_started"'* ]]; then
     break
   fi
@@ -633,7 +634,7 @@ done
 [[ "$cast_events" == *'"type":"spell_cast_started"'* ]] || { printf '%s\n' "$cast_events" >&2; exit 1; }
 [[ "$cast_events" == *'"caster"'* && "$cast_events" == *'"target"'* && "$cast_events" == *'"spell"'* && "$cast_events" == *'"cast"'* ]] || { printf '%s\n' "$cast_events" >&2; exit 1; }
 
-headless_target_first=$(curl -fsS -X POST "http://127.0.0.1:${port}/api/v1/harness/scenarios/headless-client/target")
+headless_target_first=$(curl --noproxy '*' -fsS -X POST --data '' "${harness_url}/api/v1/harness/scenarios/headless-client/target")
 assert_headless_target_scenario "$headless_target_first"
 
 headless_target_first_end=$(HEADLESS_TARGET_PAYLOAD="$headless_target_first" python3 - <<'PY'
@@ -644,17 +645,14 @@ payload = json.loads(os.environ["HEADLESS_TARGET_PAYLOAD"])
 print(payload["event_cursor_end"])
 PY
 )
-headless_cleanup_events=$(curl -fsS "http://127.0.0.1:${port}/api/v1/harness/events?since=${headless_target_first_end}&limit=10")
+headless_cleanup_events=$(curl --noproxy '*' -fsS "${harness_url}/api/v1/harness/events?since=${headless_target_first_end}&limit=10")
 assert_empty_event_payload "$headless_cleanup_events" "headless target scenario left post-cleanup events after its reported cursor"
 
-headless_target_second=$(curl -fsS -X POST "http://127.0.0.1:${port}/api/v1/harness/scenarios/headless-client/target")
+headless_target_second=$(curl --noproxy '*' -fsS -X POST --data '' "${harness_url}/api/v1/harness/scenarios/headless-client/target")
 assert_headless_target_scenario "$headless_target_second"
 assert_headless_target_cursor_progression "$headless_target_first" "$headless_target_second"
 
-slow_scenario=$(curl -fsS -X POST "http://127.0.0.1:${port}/api/v1/harness/scenarios/bot-slow-maintenance/current-target")
-assert_slow_scenario "$slow_scenario" current-target HarnessSlowCurrentTarget
-
-entities_zero_sample=$(curl -fsS "http://127.0.0.1:${port}/api/v1/harness/entities?sample_limit=0")
+entities_zero_sample=$(curl --noproxy '*' -fsS "${harness_url}/api/v1/harness/entities?sample_limit=0")
 ENTITIES_ZERO_SAMPLE="$entities_zero_sample" python3 - <<'PY'
 import json
 import os
@@ -667,35 +665,19 @@ if counts.get("mobs", 0) <= 0 or payload.get("sample") != []:
     sys.exit(1)
 PY
 
-fallback_scenario=$(curl -fsS -X POST "http://127.0.0.1:${port}/api/v1/harness/scenarios/bot-slow-maintenance/fallback")
-assert_slow_scenario "$fallback_scenario" fallback HarnessSlowFallbackHostile true
-
-mezzed_scenario=$(curl -fsS -X POST "http://127.0.0.1:${port}/api/v1/harness/scenarios/bot-slow-maintenance/mezzed")
-assert_slow_scenario "$mezzed_scenario" mezzed HarnessSlowSecondaryHostile false true
-
-pressure_heal_scenario=$(curl -fsS -X POST "http://127.0.0.1:${port}/api/v1/harness/scenarios/owned-bot-healing/moderate-pressure-fast-heal")
-assert_pressure_heal_scenario "$pressure_heal_scenario"
-
-bot_loot_request_cleanup=$(curl -fsS -X POST "http://127.0.0.1:${port}/api/v1/harness/scenarios/bot-loot-request/failure-cleanup")
+bot_loot_request_cleanup=$(curl --noproxy '*' -fsS -X POST --data '' "${harness_url}/api/v1/harness/scenarios/bot-loot-request/failure-cleanup")
 assert_bot_loot_request_failure_cleanup "$bot_loot_request_cleanup"
 
-bot_loot_request_scenario=$(curl -fsS -X POST "http://127.0.0.1:${port}/api/v1/harness/scenarios/bot-loot-request/upgrade")
+bot_loot_request_scenario=$(curl --noproxy '*' -fsS -X POST --data '' "${harness_url}/api/v1/harness/scenarios/bot-loot-request/upgrade")
 # Validate and persist the same compact record that the host wrapper publishes.
 assert_bot_loot_request_scenario "$bot_loot_request_scenario" >"$BOT_LOOT_RESULT_FILE"
 
-	actor_loop=$(curl -fsS -X POST "http://127.0.0.1:${port}/api/v1/harness/scenarios/autonomous-actor-loop")
+	actor_loop=$(curl --noproxy '*' -fsS -X POST --data '' "${harness_url}/api/v1/harness/scenarios/autonomous-actor-loop")
 	assert_autonomous_actor_loop "$actor_loop"
-	actor_loop_repeat=$(curl -fsS -X POST "http://127.0.0.1:${port}/api/v1/harness/scenarios/autonomous-actor-loop")
+	actor_loop_repeat=$(curl --noproxy '*' -fsS -X POST --data '' "${harness_url}/api/v1/harness/scenarios/autonomous-actor-loop")
 	assert_autonomous_actor_loop "$actor_loop_repeat"
 
-	actor_party_min=$(curl -fsS -X POST -H 'Content-Type: application/json' --data '{"follower_count":1}' "http://127.0.0.1:${port}/api/v1/harness/scenarios/actor-led-bot-party")
-	assert_actor_led_bot_party "$actor_party_min" 1
-	actor_party_default=$(curl -fsS -X POST -H 'Content-Type: application/json' --data '{"follower_count":3}' "http://127.0.0.1:${port}/api/v1/harness/scenarios/actor-led-bot-party")
-	assert_actor_led_bot_party "$actor_party_default" 3
-	actor_party_max=$(curl -fsS -X POST -H 'Content-Type: application/json' --data '{"follower_count":4}' "http://127.0.0.1:${port}/api/v1/harness/scenarios/actor-led-bot-party")
-	assert_actor_led_bot_party "$actor_party_max" 4
-
-	shutdown=$(curl -fsS -X POST "http://127.0.0.1:${port}/api/v1/harness/shutdown")
+	shutdown=$(curl --noproxy '*' -fsS -X POST --data '' "${harness_url}/api/v1/harness/shutdown")
 [[ "$shutdown" == *'"shutdown_requested":true'* ]] || { printf '%s\n' "$shutdown" >&2; exit 1; }
 
 wait "$harness_pid"

@@ -465,6 +465,23 @@ test_zone_harness_command_checks_build_artifacts_before_zone_launch() {
   assert_contains "$command_text" "tier3-harness requires a prior Tier 1 build or a combined build+harness profile"
   assert_contains "$command_text" "./bin/zone tests:serve-http"
   assert_contains "$command_text" "--max-runtime-seconds 300"
+  assert_contains "$command_text" 'harness_url="http://[::1]:${port}"'
+  assert_contains "$command_text" "curl --noproxy '*'"
+  assert_not_contains "$command_text" "http://127.0.0.1:"
+  python3 - "$capture_file" <<'PY' || return 1
+from pathlib import Path
+import sys
+
+curl_lines = [
+    line.strip()
+    for line in Path(sys.argv[1]).read_text().splitlines()
+    if "curl " in line and not line.lstrip().startswith("#")
+]
+if not curl_lines or any("--noproxy '*'" not in line or '"${harness_url}/' not in line for line in curl_lines):
+    sys.exit(1)
+if any("-X POST" in line and "--data " not in line for line in curl_lines):
+    sys.exit(1)
+PY
   assert_contains "$(cat "$capture_file")" "run --rm --no-deps -T"
   assert_contains "$(cat "$fixture_repo/scripts/smoke-zone-harness.sh")" 'mktemp -d "$repo_root/.zone-harness-result.XXXXXX"'
   assert_contains "$(cat "$capture_file")" 'ZONE_HARNESS_LOG_FILE=/tmp/zone-harness-result/zone_harness.out'
@@ -555,7 +572,8 @@ test_zone_harness_command_exercises_headless_target_twice_with_cursor_cleanup_ch
   assert_contains "$command_text" "headless_target_second="
   assert_contains "$command_text" 'assert_headless_target_scenario "$headless_target_first"'
   assert_contains "$command_text" 'assert_headless_target_scenario "$headless_target_second"'
-  assert_contains "$command_text" 'headless_cleanup_events=$(curl -fsS "http://127.0.0.1:${port}/api/v1/harness/events?since=${headless_target_first_end}&limit=10")'
+  assert_contains "$command_text" 'headless_target_first=$(curl --noproxy '\''*'\'' -fsS -X POST --data '\'''\'' "${harness_url}/api/v1/harness/scenarios/headless-client/target")'
+  assert_contains "$command_text" 'headless_cleanup_events=$(curl --noproxy '\''*'\'' -fsS "${harness_url}/api/v1/harness/events?since=${headless_target_first_end}&limit=10")'
   assert_contains "$command_text" 'assert_empty_event_payload "$headless_cleanup_events"'
   assert_contains "$command_text" 'assert_headless_target_cursor_progression "$headless_target_first" "$headless_target_second"'
   assert_command_helpers_execute "$fixture_repo/scripts/smoke-zone-harness.sh"

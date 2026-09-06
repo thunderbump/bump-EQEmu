@@ -650,7 +650,8 @@ BotLootRequestScenarioResult ZoneHarnessRuntime::RunBotLootRequestUpgradeLocked(
 	ScopedRuleValue enabled_rule("Chat:BotLootRequestEnabled", "true");
 	ScopedRuleValue cooldown_rule("Chat:BotLootRequestCooldownSeconds", "0");
 	ScopedRuleValue cursor_rule("Character:CheckCursorEmptyWhenLooting", "false");
-	if (!enabled_rule.ok() || !cooldown_rule.ok() || !cursor_rule.ok()) {
+	ScopedRuleValue zone_controller_rule("Zone:UseZoneController", "false");
+	if (!enabled_rule.ok() || !cooldown_rule.ok() || !cursor_rule.ok() || !zone_controller_rule.ok()) {
 		result.reason = "fixture_rule_apply_failed";
 		result.runtime = RuntimeLocked();
 		return result;
@@ -669,6 +670,7 @@ BotLootRequestScenarioResult ZoneHarnessRuntime::RunBotLootRequestUpgradeLocked(
 		return result;
 	}
 
+	std::string loot_failure_reason;
 	auto loot_once = [&](uint32_t item_id, uint32_t *completion_elapsed_ms = nullptr) -> bool {
 		const auto* npc_type = content_db.LoadNPCTypesData(754008);
 		if (!npc_type)
@@ -679,16 +681,30 @@ BotLootRequestScenarioResult ZoneHarnessRuntime::RunBotLootRequestUpgradeLocked(
 		auto* corpse = new Corpse(npc, &items, npc->GetNPCTypeID(), &corpse_type, 60000);
 		delete npc;
 		corpse->AddItem(item_id, 1);
+		// Death processing ordinarily grants corpse rights to the killer and its
+		// group. This synthetic corpse bypasses death, so reproduce only that
+		// setup fact before exercising the ordinary loot request/item path.
+		corpse->AllowPlayerLoot(fixture.Owner(), 0);
 		entity_list.AddCorpse(corpse);
 		const uint16_t corpse_id = corpse->GetID();
 		EQApplicationPacket request_packet(OP_LootRequest, 0);
 		corpse->MakeLootRequestPackets(fixture.Owner(), &request_packet);
-		const uint16_t loot_slot = corpse->GetFirstLootSlotByItemID(item_id);
-		if (loot_slot == 0xFFFF) {
+		if (!corpse->IsBeingLootedBy(fixture.Owner())) {
+			loot_failure_reason = "loot_request_not_opened";
 			entity_list.RemoveCorpse(corpse_id);
 			return false;
 		}
+		const uint16_t loot_slot = corpse->GetFirstLootSlotByItemID(item_id);
+		if (loot_slot == 0xFFFF) {
+			loot_failure_reason = "corpse_slot_unavailable";
+			entity_list.RemoveCorpse(corpse_id);
+			return false;
+		}
+		// The production corpse enforces a 10 ms post-open loot cooldown against
+		// Timer's loop clock. A one-off HTTP zone has no outer main loop while this
+		// handler runs, so refresh that clock after the real wait.
 		std::this_thread::sleep_for(std::chrono::milliseconds(12));
+		::Timer::SetCurrentTime();
 		EQApplicationPacket loot_packet(OP_LootItem, sizeof(LootingItem_Struct));
 		auto* loot = reinterpret_cast<LootingItem_Struct*>(loot_packet.pBuffer);
 		loot->lootee = corpse_id;
@@ -703,6 +719,10 @@ BotLootRequestScenarioResult ZoneHarnessRuntime::RunBotLootRequestUpgradeLocked(
 				loot_finished - loot_started).count());
 		}
 		const bool completed = !corpse->HasItem(item_id);
+		if (!completed) {
+			loot_failure_reason = corpse->IsBeingLootedBy(fixture.Owner()) ?
+				"corpse_item_not_removed:session_open" : "corpse_item_not_removed:session_reset";
+		}
 		corpse->EndLoot(fixture.Owner(), &request_packet);
 		entity_list.RemoveCorpse(corpse_id);
 		return completed;
@@ -791,7 +811,8 @@ BotLootRequestScenarioResult ZoneHarnessRuntime::RunBotLootRequestUpgradeLocked(
 					result.looted_item_reached_looter && result.loot_completed &&
 					result.normal_processing_responsive && result.bot_inventory_unchanged &&
 					result.provider_independent;
-	result.reason = result.proved ? "ordinary_loot_upgrade_request_observed" : "scenario_assertion_failed";
+	result.reason = result.proved ? "ordinary_loot_upgrade_request_observed" :
+		("scenario_assertion_failed:" + loot_failure_reason);
 	result.runtime = RuntimeLocked();
 	return result;
 }
@@ -808,12 +829,13 @@ BotLootRequestFailureCleanupResult ZoneHarnessRuntime::RunBotLootRequestFailureC
 		return result;
 	}
 
-	const std::array<std::string, 3> rule_names{
+	const std::array<std::string, 4> rule_names{
 		"Chat:BotLootRequestEnabled",
 		"Chat:BotLootRequestCooldownSeconds",
 		"Character:CheckCursorEmptyWhenLooting",
+		"Zone:UseZoneController",
 	};
-	std::array<std::string, 3> original_rule_values;
+	std::array<std::string, 4> original_rule_values;
 	bool captured_rules = true;
 	for (size_t i = 0; i < rule_names.size(); ++i) {
 		captured_rules = RuleManager::Instance()->GetRule(rule_names[i], original_rule_values[i]) && captured_rules;
