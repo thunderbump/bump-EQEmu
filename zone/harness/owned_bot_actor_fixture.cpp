@@ -328,7 +328,10 @@ Bot *OwnedBotActorFixture::AddOwnedGroupBot(const OwnedBotActorConfig &config, c
 	added_bot->GMMove(position.x, position.y, position.z, position.w);
 
 	if (!group->AddMember(added_bot)) {
-		entity_list.RemoveMob(added_bot->GetID());
+		// CreateOwnedBot registers both EntityList indexes. Use the fixture's
+		// dual-index removal path so a rejected group member cannot leave a
+		// dangling bot_list entry after RemoveMob deletes it.
+		RemoveMob(added_bot);
 		return nullptr;
 	}
 

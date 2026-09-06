@@ -566,7 +566,8 @@ for field in (
 ):
     if payload.get(field) is not True:
         fail("failed cleanup invariant: " + field)
-print(json.dumps({"scenario": payload["scenario"], "proved": True}, separators=(",", ":")))
+# This assertion is intentionally silent on success. The upgrade assertion
+# owns the canonical single machine-readable stdout record.
 PY
 }
 
