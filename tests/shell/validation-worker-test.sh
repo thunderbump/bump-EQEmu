@@ -848,6 +848,58 @@ test_stack_lock_blocks_distinct_worker_homes_on_same_stack() {
   [[ "$(cd "$stack/code" && pwd -P)" == "$(cd "$other_checkout" && pwd -P)" ]] || return 1
 }
 
+test_worker_termination_restores_stack_and_releases_locks() {
+  local source request evidence stack other_checkout worker_pid status output_file rebound=0
+  make_source_repo source interrupted-cleanup
+  reset_worker_home
+  evidence="$tmp_root/evidence-interrupted-cleanup"
+  request="$tmp_root/interrupted-cleanup.json"
+  stack="$tmp_root/interrupted-cleanup-stack"
+  other_checkout="$tmp_root/interrupted-cleanup-other-checkout"
+  output_file="$tmp_root/interrupted-cleanup.out"
+  mkdir -p "$stack" "$other_checkout"
+  printf 'ENV=development\n' >"$stack/.env"
+  ln -s "$other_checkout" "$stack/code"
+  write_request "$request" "$source" "$evidence" HEAD "" 0 60 "$stack" preflight
+
+  env VALIDATION_WORKER_HOME="$tmp_root/worker-home" \
+    VALIDATION_WORKER_VALIDATE_DRY_RUN=1 \
+    VALIDATION_WORKER_TEST_SLEEP=30 \
+    "$repo_root/scripts/validation-worker.sh" run --request "$request" >"$output_file" 2>&1 &
+  worker_pid=$!
+
+  for _ in {1..200}; do
+    if [[ -L "$stack/code" && "$(readlink "$stack/code")" != "$other_checkout" ]]; then
+      rebound=1
+      break
+    fi
+    kill -0 "$worker_pid" 2>/dev/null || break
+    sleep 0.05
+  done
+  if [[ "$rebound" -ne 1 ]]; then
+    kill -TERM "$worker_pid" 2>/dev/null || true
+    wait "$worker_pid" 2>/dev/null || true
+    printf 'worker did not bind the validation stack before interruption\n' >&2
+    return 1
+  fi
+
+  kill -TERM "$worker_pid"
+  set +e
+  wait "$worker_pid"
+  status=$?
+  set -e
+
+  [[ "$status" -eq 143 ]] || {
+    printf 'expected interrupted worker status 143, got %s; output:\n' "$status" >&2
+    cat "$output_file" >&2
+    return 1
+  }
+  [[ "$(readlink "$stack/code")" == "$other_checkout" ]] || return 1
+  [[ ! -e "$stack/.validation-worker-code.lock" ]] || return 1
+  [[ ! -e "$tmp_root/worker-home/locks/validation-slot.lock" ]] || return 1
+  assert_json_equals "$evidence/stack-binding.json" .restore_status restored
+}
+
 test_akkstack_dir_real_code_directory_fails_fast() {
   local source request evidence status output stack head
   make_source_repo source
@@ -1329,6 +1381,7 @@ run_test "tier1 plus tier3 harness profile stops after tier1 failure and release
 run_test "validation worker binds requested validation stack to worker checkout" test_validation_worker_binds_requested_validation_stack_to_worker_checkout
 run_test "validation worker binds validation stack from AKKSTACK_DIR" test_validation_worker_binds_stack_from_akkstack_dir_environment
 run_test "stack lock blocks distinct worker homes on same stack" test_stack_lock_blocks_distinct_worker_homes_on_same_stack
+run_test "worker termination restores stack and releases locks" test_worker_termination_restores_stack_and_releases_locks
 run_test "AKKSTACK_DIR real code directory fails fast" test_akkstack_dir_real_code_directory_fails_fast
 run_test "current AFK command validates exact HEAD without arguments" test_current_afk_command_validates_exact_head_without_arguments
 run_test "current AFK command rejects arguments" test_current_afk_command_rejects_arguments

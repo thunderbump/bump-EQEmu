@@ -5,6 +5,11 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
 worker_home="${VALIDATION_WORKER_HOME:-$repo_root/.validation-worker}"
 lock_name="validation-slot"
+RUN_REQUEST_CLEANUP_ACTIVE=0
+RUN_REQUEST_CLEANUP_EVIDENCE_DIR=
+RUN_REQUEST_CLEANUP_LOCK_DIR=
+RUN_REQUEST_CLEANUP_STACK_LOCK_DIR=
+RUN_REQUEST_CHILD_PID=
 
 usage() {
   cat <<'USAGE'
@@ -493,8 +498,9 @@ acquire_named_lock() {
 
 release_lock() {
   local lock_dir="${1:-}"
-  [[ -n "$lock_dir" ]] && rm -rf "$lock_dir"
-  return 0
+  if [[ -n "$lock_dir" ]]; then
+    rm -rf "$lock_dir"
+  fi
 }
 
 resolve_path() {
@@ -589,19 +595,27 @@ bind_validation_stack() {
 }
 
 restore_validation_stack() {
-  local evidence_dir="$1" restore_status=not-needed
+  local evidence_dir="$1" restore_status=not-needed cleanup_status=0
 
   [[ -n "${STACK_BINDING_STATUS:-}" ]] || return 0
 
   if [[ "${STACK_BINDING_RESTORE_NEEDED:-0}" == "1" ]]; then
     case "$STACK_BINDING_PREVIOUS_KIND" in
       symlink)
-        ln -sfn "$STACK_BINDING_PREVIOUS_TARGET" "$STACK_BINDING_CODE_PATH"
-        restore_status=restored
+        if ln -sfn "$STACK_BINDING_PREVIOUS_TARGET" "$STACK_BINDING_CODE_PATH"; then
+          restore_status=restored
+        else
+          restore_status=failed
+          cleanup_status=1
+        fi
         ;;
       missing)
-        rm -f "$STACK_BINDING_CODE_PATH"
-        restore_status=removed
+        if rm -f "$STACK_BINDING_CODE_PATH"; then
+          restore_status=removed
+        else
+          restore_status=failed
+          cleanup_status=1
+        fi
         ;;
       *)
         restore_status=not-needed
@@ -609,7 +623,42 @@ restore_validation_stack() {
     esac
   fi
 
-  write_stack_binding "$evidence_dir" "$STACK_BINDING_STATUS" validation "$STACK_BINDING_SOURCE" "$STACK_BINDING_STACK_DIR" "$STACK_BINDING_CODE_PATH" "$STACK_BINDING_TARGET" "$STACK_BINDING_PREVIOUS_KIND" "$STACK_BINDING_PREVIOUS_TARGET" "$restore_status" "stack code binding cleanup complete"
+  STACK_BINDING_RESTORE_NEEDED=0
+  write_stack_binding "$evidence_dir" "$STACK_BINDING_STATUS" validation "$STACK_BINDING_SOURCE" "$STACK_BINDING_STACK_DIR" "$STACK_BINDING_CODE_PATH" "$STACK_BINDING_TARGET" "$STACK_BINDING_PREVIOUS_KIND" "$STACK_BINDING_PREVIOUS_TARGET" "$restore_status" "stack code binding cleanup complete" || cleanup_status=1
+  return "$cleanup_status"
+}
+
+run_request_cleanup() {
+  local cleanup_status=0
+  [[ "${RUN_REQUEST_CLEANUP_ACTIVE:-0}" == "1" ]] || return 0
+  RUN_REQUEST_CLEANUP_ACTIVE=0
+  trap - RETURN EXIT INT TERM
+
+  # Restoration and both lock removals are independent best-effort operations:
+  # one cleanup failure must never strand either lock, but still makes the run
+  # fail rather than hiding incomplete cleanup.
+  restore_validation_stack "$RUN_REQUEST_CLEANUP_EVIDENCE_DIR" || cleanup_status=1
+  release_lock "$RUN_REQUEST_CLEANUP_STACK_LOCK_DIR" || cleanup_status=1
+  release_lock "$RUN_REQUEST_CLEANUP_LOCK_DIR" || cleanup_status=1
+  RUN_REQUEST_CLEANUP_EVIDENCE_DIR=
+  RUN_REQUEST_CLEANUP_STACK_LOCK_DIR=
+  RUN_REQUEST_CLEANUP_LOCK_DIR=
+  if [[ "$cleanup_status" -ne 0 ]]; then
+    exit 1
+  fi
+  return 0
+}
+
+run_request_signal() {
+  local exit_code="$1"
+  trap - INT TERM
+  if [[ -n "${RUN_REQUEST_CHILD_PID:-}" ]]; then
+    kill -TERM "$RUN_REQUEST_CHILD_PID" 2>/dev/null || true
+    wait "$RUN_REQUEST_CHILD_PID" 2>/dev/null || true
+    RUN_REQUEST_CHILD_PID=
+  fi
+  run_request_cleanup
+  exit "$exit_code"
 }
 
 verify_checkout_submodules() {
@@ -852,7 +901,13 @@ run_request() {
     write_result "$evidence_dir" failed worker_busy 1 "exclusive validation slot is busy" "$checkout_dir" "" "$stack_path_source"
     return 1
   fi
-  trap 'restore_validation_stack "$evidence_dir"; release_lock "${stack_lock:-}"; release_lock "${lock_dir:-}"' RETURN
+  RUN_REQUEST_CLEANUP_ACTIVE=1
+  RUN_REQUEST_CLEANUP_EVIDENCE_DIR="$evidence_dir"
+  RUN_REQUEST_CLEANUP_LOCK_DIR="$lock_dir"
+  RUN_REQUEST_CLEANUP_STACK_LOCK_DIR=
+  trap run_request_cleanup RETURN EXIT
+  trap 'run_request_signal 130' INT
+  trap 'run_request_signal 143' TERM
 
   if [[ "$request_source_type" == "fetch" ]]; then
     rm -rf "$checkout_dir"
@@ -880,6 +935,7 @@ run_request() {
       write_result "$evidence_dir" failed stack_busy 1 "validation stack is busy" "$checkout_dir" "$head_commit" "$stack_path_source"
       return 1
     fi
+    RUN_REQUEST_CLEANUP_STACK_LOCK_DIR="$stack_lock"
   fi
 
   if ! bind_validation_stack "$evidence_dir" "$stack_path" "$checkout_dir" "$stack_path_source"; then
@@ -907,13 +963,16 @@ run_request() {
 
     set +e
     if [[ -n "$stack_path" && -n "${STACK_BINDING_STATUS:-}" ]]; then
-      AKKSTACK_DIR="$stack_path" EXPECTED_EQEMU_CHECKOUT="$checkout_dir" timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
+      AKKSTACK_DIR="$stack_path" EXPECTED_EQEMU_CHECKOUT="$checkout_dir" timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1 &
     elif [[ -n "$stack_path" ]]; then
-      AKKSTACK_DIR="$stack_path" timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
+      AKKSTACK_DIR="$stack_path" timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1 &
     else
-      timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
+      timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1 &
     fi
+    RUN_REQUEST_CHILD_PID=$!
+    wait "$RUN_REQUEST_CHILD_PID"
     exit_code=$?
+    RUN_REQUEST_CHILD_PID=
     set -e
 
     return "$exit_code"
