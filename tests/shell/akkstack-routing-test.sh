@@ -468,8 +468,9 @@ test_zone_harness_command_checks_build_artifacts_before_zone_launch() {
   assert_contains "$(cat "$fixture_repo/scripts/smoke-zone-harness.sh")" 'mktemp -d "$repo_root/.zone-harness-result.XXXXXX"'
   assert_contains "$(cat "$capture_file")" 'BOT_LOOT_RESULT_FILE=/tmp/zone-harness-result/result.json'
   assert_contains "$(cat "$capture_file")" ':/tmp/zone-harness-result'
-  assert_contains "$command_text" 'printf '\''%s\n'\'' "$bot_loot_request_scenario" >"$BOT_LOOT_RESULT_FILE"'
-  assert_contains "$(cat "$fixture_repo/scripts/smoke-zone-harness.sh")" "jq -c '{scenario,proved,bot:.requesting_bot.name"
+  assert_contains "$command_text" 'assert_bot_loot_request_scenario "$bot_loot_request_scenario" >"$BOT_LOOT_RESULT_FILE"'
+  assert_contains "$(cat "$fixture_repo/scripts/smoke-zone-harness.sh")" 'cat "$result_file"'
+  assert_not_contains "$(cat "$fixture_repo/scripts/smoke-zone-harness.sh")" "jq -c '{scenario,proved,bot:.requesting_bot.name"
   assert_contains "$output" "tier3-harness requires a prior Tier 1 build"
   assert_contains "$output" "missing executable ./bin/zone"
   python3 - "$capture_file" <<'PY'

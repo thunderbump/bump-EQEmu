@@ -678,8 +678,8 @@ bot_loot_request_cleanup=$(curl -fsS -X POST "http://127.0.0.1:${port}/api/v1/ha
 assert_bot_loot_request_failure_cleanup "$bot_loot_request_cleanup"
 
 bot_loot_request_scenario=$(curl -fsS -X POST "http://127.0.0.1:${port}/api/v1/harness/scenarios/bot-loot-request/upgrade")
-assert_bot_loot_request_scenario "$bot_loot_request_scenario" >/dev/null
-printf '%s\n' "$bot_loot_request_scenario" >"$BOT_LOOT_RESULT_FILE"
+# Validate and persist the same compact record that the host wrapper publishes.
+assert_bot_loot_request_scenario "$bot_loot_request_scenario" >"$BOT_LOOT_RESULT_FILE"
 
 	actor_loop=$(curl -fsS -X POST "http://127.0.0.1:${port}/api/v1/harness/scenarios/autonomous-actor-loop")
 	assert_autonomous_actor_loop "$actor_loop"
@@ -709,5 +709,5 @@ ZONE_HARNESS_CONTAINER
     -v "$result_dir:/tmp/zone-harness-result" \
     --entrypoint bash eqemu-server -lc "$container_script"
   [[ -s "$result_file" ]] || die "Bot Loot Request scenario produced no structured result"
-  jq -c '{scenario,proved,bot:.requesting_bot.name,item_id:.upgrade_item_id,slot:.target_slot_name,score:.upgrade_score,reason:.deterministic_reason}' "$result_file"
+  cat "$result_file"
 )
