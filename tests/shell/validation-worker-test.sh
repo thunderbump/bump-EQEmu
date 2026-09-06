@@ -835,6 +835,7 @@ test_current_afk_command_validates_exact_head_without_arguments() {
   capture_run status output env HOME="$tmp_root/operator-home" \
     VALIDATION_WORKER_HOME="$tmp_root/worker-home" \
     VALIDATION_WORKER_VALIDATE_DRY_RUN=1 \
+    VALIDATION_WORKER_AFK_MODE=1 \
     VALIDATION_AFK_EVIDENCE_DIR="$evidence" \
     "$source/scripts/validate-afk"
 
@@ -847,6 +848,7 @@ test_current_afk_command_validates_exact_head_without_arguments() {
   assert_json_equals "$evidence/request.json" .stack.role validation
   assert_json_equals "$evidence/result.json" .actual_checkout_commit "$head"
   assert_json_equals "$evidence/result.json" .status passed
+  assert_json_equals "$evidence/result.json" '.checks | map(.log_path) | join(",")' "logs/tier1-build-and-unit-tests.log,logs/tier3-zone-harness.log,logs/actor-queue-runtime.log"
   assert_contains "$(cat "$evidence/logs/tier1-build-and-unit-tests.log")" "fake validate: --stack validation tier1"
   assert_contains "$(cat "$evidence/logs/tier3-zone-harness.log")" "fake validate: --stack validation tier3-harness"
   assert_contains "$(cat "$evidence/logs/actor-queue-runtime.log")" "fake validate: --stack validation actor-queue-tier3"
@@ -869,11 +871,25 @@ test_current_afk_command_returns_nonzero_for_failure_and_missing_stack() {
   capture_run status output env HOME="$tmp_root/operator-home" \
     VALIDATION_WORKER_HOME="$tmp_root/worker-home-current-failed" \
     VALIDATION_WORKER_VALIDATE_DRY_RUN=1 \
+    VALIDATION_WORKER_AFK_MODE=1 \
     VALIDATION_WORKER_TEST_FAIL_TIER1=1 \
     VALIDATION_AFK_EVIDENCE_DIR="$evidence" \
     "$source/scripts/validate-afk"
   [[ "$status" -eq 1 ]] || return 1
   assert_json_equals "$evidence/result.json" .category validation_failed
+  assert_json_equals "$evidence/result.json" '.checks[0].log_path' logs/tier1-build-and-unit-tests.log
+
+  evidence="$tmp_root/current-afk-timeout-evidence"
+  capture_run status output env HOME="$tmp_root/operator-home" \
+    VALIDATION_WORKER_HOME="$tmp_root/worker-home-current-timeout" \
+    VALIDATION_WORKER_VALIDATE_DRY_RUN=1 \
+    VALIDATION_WORKER_AFK_MODE=1 \
+    VALIDATION_WORKER_TEST_TIER1_EXIT_CODE=124 \
+    VALIDATION_AFK_EVIDENCE_DIR="$evidence" \
+    "$source/scripts/validate-afk"
+  [[ "$status" -eq 1 ]] || return 1
+  assert_json_equals "$evidence/result.json" .category timeout
+  assert_json_equals "$evidence/result.json" '.checks[0].log_path' logs/tier1-build-and-unit-tests.log
 
   rm -rf "$stack"
   evidence="$tmp_root/current-afk-missing-stack-evidence"

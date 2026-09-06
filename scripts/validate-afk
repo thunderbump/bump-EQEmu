@@ -62,7 +62,8 @@ printf 'Validating committed Candidate %s with Tier 1, Tier 3 Zone Harness, and 
 printf 'Validation stack: %s\n' "$stack_path"
 printf 'Validation evidence: %s\n' "$evidence_dir"
 
-# This entry point is the committed-Candidate gate, never a worker preview.
-# Do not allow an operator's ambient worker-only setting to skip validation.
-env -u VALIDATION_WORKER_VALIDATE_DRY_RUN \
+# This entry point is the committed-Candidate gate, never a worker preview or
+# the legacy AFK adapter. Do not let ambient worker-only settings alter its
+# validation execution, evidence paths, or timeout semantics.
+env -u VALIDATION_WORKER_VALIDATE_DRY_RUN -u VALIDATION_WORKER_AFK_MODE \
   "$script_dir/validation-worker.sh" run --request "$request_path"
