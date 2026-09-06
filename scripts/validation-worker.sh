@@ -795,6 +795,28 @@ run_request() {
   RESULT_CHECKS_PATH=
   STACK_BINDING_STATUS= STACK_BINDING_SOURCE= STACK_BINDING_STACK_DIR= STACK_BINDING_CODE_PATH= STACK_BINDING_TARGET= STACK_BINDING_PREVIOUS_KIND= STACK_BINDING_PREVIOUS_TARGET= STACK_BINDING_RESTORE_NEEDED=0
 
+  # Discover and register a requested combined gate before validating fields that
+  # can fail (notably stack.path). This is evidence initialization only; request
+  # validation below remains authoritative and prevents any dispatch.
+  profile="$(json_get '.profile | strings' "$request_path")"
+  evidence_dir="$(json_get '.evidence_dir | strings' "$request_path")"
+  commit="$(json_get '.commit | strings' "$request_path")"
+  if [[ -z "$commit" ]]; then
+    commit="$(json_get '.repo.commit | strings' "$request_path")"
+  fi
+  if [[ "$profile" == "tier1-tier3-harness" && -n "$evidence_dir" ]]; then
+    local_checks_path="$evidence_dir/afk-checks.json"
+    RESULT_CHECKS_PATH="$local_checks_path"
+    afk_log_prefix=logs
+    if [[ "${VALIDATION_WORKER_AFK_MODE:-0}" == "1" ]]; then
+      afk_log_prefix=worker/logs
+    fi
+    initialize_afk_check_statuses
+    ensure_afk_check_logs "$evidence_dir" 1
+    export AFK_CHECK_CANDIDATE_COMMIT="$commit"
+    write_afk_checks "$local_checks_path" inconclusive "$afk_log_prefix"
+  fi
+
   if ! validate_request "$request_path" >/tmp/validation-worker-request-error.$$ 2>&1; then
     evidence_dir="$(json_get '.evidence_dir | strings' "$request_path")"
     evidence_dir="${evidence_dir:-$worker_home/evidence/invalid-$(date +%s)}"
@@ -809,22 +831,6 @@ run_request() {
 
   ensure_log_files "$evidence_dir"
   copy_request_evidence "$request_path" "$evidence_dir" || true
-
-  # Register the complete combined-gate plan before any fallible dispatch work.
-  # This keeps worker/stack contention, checkout, commit, and binding failures
-  # auditable as required scenarios that did not run, rather than omitting them.
-  if [[ "$profile" == "tier1-tier3-harness" ]]; then
-    local_checks_path="$evidence_dir/afk-checks.json"
-    RESULT_CHECKS_PATH="$local_checks_path"
-    afk_log_prefix=logs
-    if [[ "${VALIDATION_WORKER_AFK_MODE:-0}" == "1" ]]; then
-      afk_log_prefix=worker/logs
-    fi
-    initialize_afk_check_statuses
-    ensure_afk_check_logs "$evidence_dir" 1
-    export AFK_CHECK_CANDIDATE_COMMIT="$commit"
-    write_afk_checks "$local_checks_path" inconclusive "$afk_log_prefix"
-  fi
 
   if [[ -n "$stack_path" ]]; then
     stack_path_source=request.stack.path

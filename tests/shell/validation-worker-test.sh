@@ -907,8 +907,9 @@ test_current_afk_command_rejects_arguments() {
 }
 
 test_current_afk_command_returns_nonzero_for_failure_and_missing_stack() {
-  local source evidence status output stack
+  local source evidence status output stack head
   make_afk_contract_repo source current-command-failure
+  head="$(git -C "$source" rev-parse HEAD)"
   stack="$tmp_root/operator-home/Projects/bump-eqemu/bump-akk-stack-validation"
 
   evidence="$tmp_root/current-afk-failed-evidence"
@@ -944,6 +945,10 @@ test_current_afk_command_returns_nonzero_for_failure_and_missing_stack() {
     "$source/scripts/validate-afk"
   [[ "$status" -ne 0 ]] || return 1
   assert_json_equals "$evidence/result.json" .category invalid_request
+  assert_json_equals "$evidence/result.json" '.checks | map(.scenario) | join(",")' "tier1-build-and-unit-tests,canonical-zone-harness,actor-events-runtime"
+  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "not_run,not_run,not_run"
+  assert_json_equals "$evidence/result.json" '.checks | map(.candidate_commit) | unique | join(",")' "$head"
+  [[ -f "$evidence/afk-checks.json" ]] || return 1
 }
 
 test_afk_contract_passes_with_stable_checks() {
@@ -1075,7 +1080,8 @@ test_afk_contract_reports_missing_prerequisite_as_inconclusive() {
 
   [[ "$status" -eq 2 ]] || return 1
   assert_json_equals "$evidence/result.json" .status inconclusive
-  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "inconclusive,not_run,not_run"
+  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "not_run,not_run,not_run"
+  assert_json_equals "$evidence/result.json" '.checks | map(.candidate_commit) | unique | join(",")' "$head"
 }
 
 test_afk_contract_maps_timeout_and_missing_command_to_inconclusive() {
