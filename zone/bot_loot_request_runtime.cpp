@@ -92,4 +92,12 @@ void ProcessReadyLootRequestDialogue()
 	}
 }
 
+void CancelLootRequestDialogue(
+	uint32_t looter_stable_id,
+	const std::vector<uint32_t> &requesting_bot_stable_ids
+)
+{
+	ZoneBotLootRequestDialogueQueue().CancelRequests(looter_stable_id, requesting_bot_stable_ids);
+}
+
 }

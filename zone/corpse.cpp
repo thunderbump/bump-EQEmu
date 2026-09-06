@@ -40,6 +40,7 @@
 #include "zone/string_ids.h"
 #include "zone/worldserver.h"
 
+#include <atomic>
 #include <iostream>
 #include <list>
 #include <utility>
@@ -71,9 +72,19 @@ void ClearDecisionObserver()
 	bot_loot_request_decision_observer = {};
 }
 
-void ResetDeliveryState()
+DecisionObserver CaptureDecisionObserver()
 {
-	bot_loot_request_delivery_state = {};
+	return bot_loot_request_decision_observer;
+}
+
+BotLootRequest::DeliveryState CaptureDeliveryState()
+{
+	return bot_loot_request_delivery_state;
+}
+
+void RestoreDeliveryState(BotLootRequest::DeliveryState state)
+{
+	bot_loot_request_delivery_state = std::move(state);
 }
 
 BotLootRequest::Request EvaluateSuccessfulLoot(Client *looter, const EQ::ItemInstance *inst, Group *group,
@@ -129,6 +140,7 @@ BotLootRequest::Request EvaluateSuccessfulLoot(Client *looter, const EQ::ItemIns
 			.target_slot_name = request.target_slot_name,
 			.upgrade_score = request.upgrade_score,
 			.reason = request.reason_summary,
+			.deterministic_message = request.message,
 		});
 	}
 	if (request.produced) {
@@ -1794,10 +1806,11 @@ void Corpse::LootCorpseItem(Client *c, const EQApplicationPacket *app)
 				c->UpdateTasksOnLoot(this, item->ID, count);
 			}
 
-			const uint64_t corpse_loot_event_source_id = m_corpse_db_id ? m_corpse_db_id : GetID();
+			// Entity IDs and corpse slots are both reusable. A process-lifetime sequence makes
+			// distinct successful loot operations distinct while retaining a stable ID for replay.
+			static std::atomic<uint64_t> next_bot_loot_request_event_id{uint64_t{1} << 63};
 			const uint64_t bot_loot_request_event_id =
-				(corpse_loot_event_source_id << 32) |
-				static_cast<uint32_t>(item_data ? item_data->lootslot : 0);
+				next_bot_loot_request_event_id.fetch_add(1, std::memory_order_relaxed);
 
 			/* Remove it from Corpse */
 				if (item_data) {

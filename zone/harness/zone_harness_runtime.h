@@ -137,11 +137,13 @@ struct BotLootRequestScenarioResult {
 	uint32_t positive_request_count = 0;
 	bool downgrade_suppressed = false;
 	bool duplicate_suppressed = false;
+	int replay_cooldown_seconds = -1;
 	bool looted_item_reached_looter = false;
 	bool loot_completed = false;
 	bool normal_processing_responsive = false;
 	bool bot_inventory_unchanged = false;
-	bool provider_independent = true;
+	bool provider_independent = false;
+	bool provider_failure_observed = false;
 	RuntimeSnapshot runtime;
 };
 

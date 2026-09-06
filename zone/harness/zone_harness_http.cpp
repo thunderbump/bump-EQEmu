@@ -260,11 +260,13 @@ nlohmann::json ToJson(const BotLootRequestScenarioResult &result)
 		{"positive_request_count", result.positive_request_count},
 		{"downgrade_suppressed", result.downgrade_suppressed},
 		{"duplicate_suppressed", result.duplicate_suppressed},
+		{"replay_cooldown_seconds", result.replay_cooldown_seconds},
 		{"looted_item_reached_looter", result.looted_item_reached_looter},
 		{"loot_completed", result.loot_completed},
 		{"normal_processing_responsive", result.normal_processing_responsive},
 		{"bot_inventory_unchanged", result.bot_inventory_unchanged},
-		{"provider_independent", result.provider_independent}, {"runtime", ToJson(result.runtime)},
+		{"provider_independent", result.provider_independent},
+		{"provider_failure_observed", result.provider_failure_observed}, {"runtime", ToJson(result.runtime)},
 	};
 }
 
