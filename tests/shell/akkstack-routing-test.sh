@@ -82,6 +82,28 @@ sys.stdout.write("\n".join(capture) + "\n")
 PY
 }
 
+assert_bot_loot_output_contract() {
+  local script_file="$1"
+  local assertion_script="$tmp_root/assert-bot-loot.py"
+  local stdout_file="$tmp_root/bot-loot.stdout"
+  local stderr_file="$tmp_root/bot-loot.stderr"
+  local payload expected
+
+  extract_embedded_python_heredoc "$script_file" assert_bot_loot_request_scenario >"$assertion_script"
+  payload='{"proved":true,"scenario":"bot-loot-request-upgrade","positive_request_count":1,"upgrade_score":17,"requesting_bot":{"entity_id":101,"name":"HarnessLootUpgradeBot"},"upgrade_item_id":1001,"upgrade_item_name":"Harness Upgrade","target_slot":2,"target_slot_name":"Head","deterministic_reason":"higher armor value","downgrade_suppressed":true,"duplicate_suppressed":true,"looted_item_reached_looter":true,"loot_completed":true,"dialogue_pending_at_loot_completion":true,"normal_processing_responsive":true,"bot_inventory_unchanged":true,"provider_independent":true,"loot_completion_elapsed_ms":2,"loot_completion_budget_ms":100,"grouped_bot_count":2,"database_mutation":"none:in-memory fixture"}'
+  expected='{"scenario":"bot-loot-request-upgrade","proved":true,"bot":"HarnessLootUpgradeBot","item_id":1001,"slot":"Head","score":17,"reason":"higher armor value"}'
+
+  BOT_LOOT_PAYLOAD="$payload" python3 "$assertion_script" >"$stdout_file" 2>"$stderr_file"
+  [[ "$(cat "$stdout_file")" == "$expected" ]] || return 1
+  [[ ! -s "$stderr_file" ]] || return 1
+
+  if BOT_LOOT_PAYLOAD='{"proved":false}' python3 "$assertion_script" >"$stdout_file" 2>"$stderr_file"; then
+    return 1
+  fi
+  [[ ! -s "$stdout_file" ]] || return 1
+  assert_contains "$(cat "$stderr_file")" '"error":"Bot Loot Request scenario did not prove the ordinary loot path"'
+}
+
 assert_command_helpers_execute() {
   local script_file="$1"
   local headless_script="$tmp_root/assert-headless-target.py"
@@ -250,7 +272,7 @@ if [[ -z "\$payload" ]]; then
 fi
 
 printf '%s\n' "\$payload" >"$payload_file"
-EQEMU_DB_PASSWORD=fixture bash -lc "\$payload"
+EQEMU_DB_PASSWORD=fixture ZONE_HARNESS_PORT=9099 ZONE_HARNESS_LOG_FILE=/tmp/zone-harness-test.log bash -lc "\$payload"
 EOF
   chmod +x "$fake_bin/docker-compose"
 }
@@ -442,6 +464,35 @@ test_zone_harness_command_checks_build_artifacts_before_zone_launch() {
   assert_contains "$command_text" "require_runtime_binary ./bin/shared_memory"
   assert_contains "$command_text" "tier3-harness requires a prior Tier 1 build or a combined build+harness profile"
   assert_contains "$command_text" "./bin/zone tests:serve-http"
+  assert_contains "$command_text" "--max-runtime-seconds 300"
+  assert_contains "$command_text" 'harness_url="http://[::1]:${port}"'
+  assert_contains "$command_text" "curl --noproxy '*'"
+  assert_not_contains "$command_text" "http://127.0.0.1:"
+  python3 - "$capture_file" <<'PY' || return 1
+from pathlib import Path
+import sys
+
+curl_lines = [
+    line.strip()
+    for line in Path(sys.argv[1]).read_text().splitlines()
+    if "curl " in line and not line.lstrip().startswith("#")
+]
+if not curl_lines or any("--noproxy '*'" not in line or '"${harness_url}/' not in line for line in curl_lines):
+    sys.exit(1)
+if any("-X POST" in line and "--data " not in line for line in curl_lines):
+    sys.exit(1)
+PY
+  assert_contains "$(cat "$capture_file")" "run --rm --no-deps -T"
+  assert_contains "$(cat "$fixture_repo/scripts/smoke-zone-harness.sh")" 'mktemp -d "$repo_root/.zone-harness-result.XXXXXX"'
+  assert_contains "$(cat "$capture_file")" 'ZONE_HARNESS_LOG_FILE=/tmp/zone-harness-result/zone_harness.out'
+  assert_contains "$(cat "$capture_file")" 'BOT_LOOT_RESULT_FILE=/tmp/zone-harness-result/result.json'
+  assert_contains "$(cat "$capture_file")" ':/tmp/zone-harness-result'
+  assert_contains "$command_text" '>"$harness_log" 2>&1'
+  assert_contains "$command_text" 'assert_bot_loot_request_scenario "$bot_loot_request_scenario" >"$BOT_LOOT_RESULT_FILE"'
+  assert_contains "$(cat "$fixture_repo/scripts/smoke-zone-harness.sh")" 'compose_status=$?'
+  assert_contains "$(cat "$fixture_repo/scripts/smoke-zone-harness.sh")" '[[ -s "$harness_log" ]] && cat "$harness_log" >&2'
+  assert_contains "$(cat "$fixture_repo/scripts/smoke-zone-harness.sh")" 'cat "$result_file"'
+  assert_not_contains "$(cat "$fixture_repo/scripts/smoke-zone-harness.sh")" "jq -c '{scenario,proved,bot:.requesting_bot.name"
   assert_contains "$output" "tier3-harness requires a prior Tier 1 build"
   assert_contains "$output" "missing executable ./bin/zone"
   python3 - "$capture_file" <<'PY'
@@ -521,10 +572,18 @@ test_zone_harness_command_exercises_headless_target_twice_with_cursor_cleanup_ch
   assert_contains "$command_text" "headless_target_second="
   assert_contains "$command_text" 'assert_headless_target_scenario "$headless_target_first"'
   assert_contains "$command_text" 'assert_headless_target_scenario "$headless_target_second"'
-  assert_contains "$command_text" 'headless_cleanup_events=$(curl -fsS "http://127.0.0.1:9099/api/v1/harness/events?since=${headless_target_first_end}&limit=10")'
+  assert_contains "$command_text" 'headless_target_first=$(curl --noproxy '\''*'\'' -fsS -X POST --data '\'''\'' "${harness_url}/api/v1/harness/scenarios/headless-client/target")'
+  assert_contains "$command_text" 'headless_cleanup_events=$(curl --noproxy '\''*'\'' -fsS "${harness_url}/api/v1/harness/events?since=${headless_target_first_end}&limit=10")'
   assert_contains "$command_text" 'assert_empty_event_payload "$headless_cleanup_events"'
   assert_contains "$command_text" 'assert_headless_target_cursor_progression "$headless_target_first" "$headless_target_second"'
   assert_command_helpers_execute "$fixture_repo/scripts/smoke-zone-harness.sh"
+}
+
+test_zone_harness_routes_bot_loot_result_to_non_tty_stdout() {
+  local fixture_repo fixture_parent
+  make_fixture fixture_repo fixture_parent
+
+  assert_bot_loot_output_contract "$fixture_repo/scripts/smoke-zone-harness.sh"
 }
 
 test_validate_tier3_harness_delegates_to_smoke_script() {
@@ -799,6 +858,7 @@ run_test "zone harness dry-run describes stable DB and portless server" test_zon
 run_test "zone harness command checks build artifacts before launch" test_zone_harness_command_checks_build_artifacts_before_zone_launch
 run_test "zone harness uses service DNS runtime config without mutating source" test_zone_harness_uses_service_dns_runtime_config_without_mutating_source
 run_test "zone harness command exercises headless target twice with cursor cleanup checks" test_zone_harness_command_exercises_headless_target_twice_with_cursor_cleanup_checks
+run_test "zone harness routes Bot Loot Request result to non-TTY stdout" test_zone_harness_routes_bot_loot_result_to_non_tty_stdout
 run_test "validate tier3-harness delegates to smoke script" test_validate_tier3_harness_delegates_to_smoke_script
 run_test "actor queue Tier 3 dry run classifies mutation and cleanup" test_actor_queue_tier3_dry_run_classifies_mutation_and_cleanup
 run_test "zone CLI profiles share runtime setup" test_zone_cli_profiles_share_runtime_setup

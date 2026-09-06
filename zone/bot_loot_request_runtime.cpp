@@ -6,6 +6,8 @@
 #include "entity.h"
 #include "groups.h"
 
+#include <memory>
+
 extern EntityList entity_list;
 
 namespace {
@@ -22,6 +24,9 @@ BotLootRequest::DialogueProviderSettings LoadBotLootRequestDialogueSettings()
 	};
 }
 
+std::unique_ptr<BotLootRequest::DelayedDialogueQueue> test_dialogue_queue;
+BotLootRequest::DelayedDialogueProvider *test_dialogue_provider = nullptr;
+
 BotLootRequest::DelayedDialogueQueue &ZoneBotLootRequestDialogueQueue()
 {
 	static BotLootRequest::DelayedDialogueQueue queue(
@@ -29,7 +34,7 @@ BotLootRequest::DelayedDialogueQueue &ZoneBotLootRequestDialogueQueue()
 		LoadBotLootRequestDialogueSettings()
 	);
 
-	return queue;
+	return test_dialogue_queue ? *test_dialogue_queue : queue;
 }
 
 BotLootRequest::CurrentGroupState CurrentLootRequestGroupState(
@@ -90,6 +95,50 @@ void ProcessReadyLootRequestDialogue()
 	while (ZoneBotLootRequestDialogueQueue().PopReadyResult(CurrentLootRequestGroupState, result)) {
 		DeliverLootRequestDialogue(result);
 	}
+}
+
+void CancelLootRequestDialogue(
+	uint32_t looter_stable_id,
+	const std::vector<uint32_t> &requesting_bot_stable_ids
+)
+{
+	ZoneBotLootRequestDialogueQueue().CancelRequests(looter_stable_id, requesting_bot_stable_ids);
+}
+
+void SetDialogueProviderForTesting(BotLootRequest::DelayedDialogueProvider *provider)
+{
+	test_dialogue_provider = provider;
+	test_dialogue_queue = provider ? std::make_unique<BotLootRequest::DelayedDialogueQueue>(
+		*provider,
+		LoadBotLootRequestDialogueSettings()
+	) : nullptr;
+}
+
+void ClearDialogueProviderForTesting()
+{
+	test_dialogue_provider = nullptr;
+	test_dialogue_queue.reset();
+}
+
+DialogueOverrideState CaptureDialogueOverrideStateForTesting()
+{
+	DialogueOverrideState state{
+		.provider = test_dialogue_provider,
+		.queue = std::move(test_dialogue_queue),
+	};
+	test_dialogue_provider = nullptr;
+	return state;
+}
+
+void RestoreDialogueOverrideStateForTesting(DialogueOverrideState state)
+{
+	test_dialogue_provider = state.provider;
+	test_dialogue_queue = std::move(state.queue);
+}
+
+BotLootRequest::DelayedDialogueProvider *CurrentDialogueProviderForTesting()
+{
+	return test_dialogue_provider;
 }
 
 }

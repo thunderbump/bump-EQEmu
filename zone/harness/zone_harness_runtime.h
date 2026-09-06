@@ -119,6 +119,50 @@ struct OwnedBotPressureHealingScenarioResult {
 	RuntimeSnapshot runtime;
 };
 
+struct BotLootRequestScenarioResult {
+	bool proved = false;
+	std::string reason;
+	std::string scenario = "bot-loot-request-upgrade";
+	std::string database_mutation;
+	ActorEventEntity owner;
+	ActorEventEntity requesting_bot;
+	uint8_t grouped_bot_count = 0;
+	uint32_t inferior_item_id = 0;
+	uint32_t upgrade_item_id = 0;
+	std::string upgrade_item_name;
+	int target_slot = -1;
+	std::string target_slot_name;
+	int upgrade_score = 0;
+	std::string deterministic_reason;
+	uint32_t positive_request_count = 0;
+	bool downgrade_suppressed = false;
+	bool duplicate_suppressed = false;
+	int replay_cooldown_seconds = -1;
+	bool looted_item_reached_looter = false;
+	bool loot_completed = false;
+	uint32_t loot_completion_elapsed_ms = 0;
+	uint32_t loot_completion_budget_ms = 0;
+	bool dialogue_pending_at_loot_completion = false;
+	bool normal_processing_responsive = false;
+	bool bot_inventory_unchanged = false;
+	bool provider_independent = false;
+	bool provider_failure_observed = false;
+	RuntimeSnapshot runtime;
+};
+
+struct BotLootRequestFailureCleanupResult {
+	bool proved = false;
+	std::string reason;
+	std::string scenario = "bot-loot-request-failure-cleanup";
+	bool failure_induced_after_overrides = false;
+	bool rules_restored = false;
+	bool fixture_entities_cleaned = false;
+	bool delivery_state_restored = false;
+	bool dialogue_provider_state_restored = false;
+	bool decision_observer_state_restored = false;
+	RuntimeSnapshot runtime;
+};
+
 struct ActorLedBotPartyScenarioResult {
 	bool proved = false;
 	std::string reason;
@@ -261,6 +305,8 @@ public:
 		uint32_t max_ticks = 160,
 		uint32_t sleep_ms = 25
 	);
+	BotLootRequestScenarioResult RunBotLootRequestUpgrade();
+	BotLootRequestFailureCleanupResult RunBotLootRequestFailureCleanupProof();
 	ActorLedBotPartyScenarioResult RunActorLedBotPartyProof(
 		uint8_t follower_count = 3,
 		uint32_t max_ticks = 160,
@@ -278,6 +324,8 @@ public:
 	void Shutdown();
 
 private:
+	BotLootRequestScenarioResult RunBotLootRequestUpgradeLocked(bool fail_after_overrides);
+
 	struct AutonomousActorPrototypeAction {
 		uint64_t request_id = 0;
 		std::string kind;

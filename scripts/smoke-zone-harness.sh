@@ -43,6 +43,13 @@ if [[ "$AKKSTACK_DRY_RUN" -eq 1 ]]; then
 fi
 
 compose_override="$(mktemp)"
+# Keep the bridge below the checkout: Validation Workers may have a private
+# /tmp namespace that is not the Docker daemon's /tmp namespace.
+result_dir="$(mktemp -d "$repo_root/.zone-harness-result.XXXXXX")"
+result_file="$result_dir/result.json"
+harness_log="$result_dir/zone_harness.out"
+compose_stdout="$result_dir/compose.stdout"
+chmod 0777 "$result_dir"
 
 cat >"$compose_override" <<'COMPOSE'
 services:
@@ -52,6 +59,7 @@ COMPOSE
 
 cleanup() {
   rm -f "$compose_override"
+  rm -rf "$result_dir"
 }
 trap cleanup EXIT
 
@@ -63,42 +71,52 @@ die() {
   exit 1
 }
 
-"$repo_root/scripts/check-akkstack-contract.sh" --stack "$AKKSTACK_STACK_ROLE"
+# Keep the successful machine-readable result as the wrapper's only stdout.
+# Preflight detail is useful only when the contract fails.
+contract_output=''
+if ! contract_output=$("$repo_root/scripts/check-akkstack-contract.sh" --stack "$AKKSTACK_STACK_ROLE" 2>&1); then
+  printf '%s\n' "$contract_output" >&2
+  die "AkkStack contract preflight failed"
+fi
 
 command -v docker-compose >/dev/null 2>&1 || die "docker-compose is required"
 
 (
   cd "$stack_dir"
   "${canonical_compose[@]}" up -d --no-recreate mariadb >/dev/null
-  "${harness_compose[@]}" run --rm --no-deps --entrypoint bash eqemu-server -lc "
+  container_script="$(cat <<'ZONE_HARNESS_CONTAINER'
 set -euo pipefail
 
-until mysqladmin status -ueqemu -p\"\$EQEMU_DB_PASSWORD\" -h mariadb --silent; do
+port="${ZONE_HARNESS_PORT:?ZONE_HARNESS_PORT is required}"
+harness_log="${ZONE_HARNESS_LOG_FILE:?ZONE_HARNESS_LOG_FILE is required}"
+harness_url="http://[::1]:${port}"
+
+until mysqladmin status -ueqemu -p"$EQEMU_DB_PASSWORD" -h mariadb --silent; do
   sleep 1
 done
 
 runtime=/tmp/zone-harness-validation-runtime
-rm -rf \"\$runtime\"
-mkdir -p \"\$runtime/bin\" \"\$runtime/logs\" \"\$runtime/maps\" \"\$runtime/quests\"
-ln -s ~/code/build/bin/zone \"\$runtime/bin/zone\"
-ln -s ~/code/build/bin/shared_memory \"\$runtime/bin/shared_memory\"
-jq '.server.database.host = \"mariadb\" | .server.database.port = \"3306\" | .server.qsdatabase.host = \"mariadb\" | .server.qsdatabase.port = \"3306\"' ~/server/eqemu_config.json > \"\$runtime/eqemu_config.json\"
-cd \"\$runtime\"
+rm -rf "$runtime"
+mkdir -p "$runtime/bin" "$runtime/logs" "$runtime/maps" "$runtime/quests"
+ln -s ~/code/build/bin/zone "$runtime/bin/zone"
+ln -s ~/code/build/bin/shared_memory "$runtime/bin/shared_memory"
+jq '.server.database.host = "mariadb" | .server.database.port = "3306" | .server.qsdatabase.host = "mariadb" | .server.qsdatabase.port = "3306"' ~/server/eqemu_config.json > "$runtime/eqemu_config.json"
+cd "$runtime"
 
 dump_harness_log() {
-  status=\$?
-  if [[ \"\$status\" -ne 0 && -f logs/zone_harness.out ]]; then
-    cat logs/zone_harness.out >&2
+  status="${1:-$?}"
+  if [[ "$status" -ne 0 && -f "$harness_log" ]]; then
+    cat "$harness_log" >&2
   fi
-  exit \"\$status\"
+  exit "$status"
 }
 trap dump_harness_log EXIT
 
 require_runtime_binary() {
-  local path=\"\$1\"
+  local path="$1"
 
-  if [[ ! -x \"\$path\" ]]; then
-    printf 'error: tier3-harness requires a prior Tier 1 build or a combined build+harness profile; missing executable %s\n' \"\$path\" >&2
+  if [[ ! -x "$path" ]]; then
+    printf 'error: tier3-harness requires a prior Tier 1 build or a combined build+harness profile; missing executable %s\n' "$path" >&2
     exit 1
   fi
 }
@@ -107,62 +125,67 @@ require_runtime_binary ./bin/zone
 require_runtime_binary ./bin/shared_memory
 
 link_runtime_dir() {
-  local target=\"\$1\"
+  local target="$1"
   shift
   local candidate
 
-  for candidate in \"\$@\"; do
-    if [[ -d \"\$candidate\" ]]; then
-      ln -s \"\$candidate\" \"\$runtime/\$target\"
+  for candidate in "$@"; do
+    if [[ -d "$candidate" ]]; then
+      ln -s "$candidate" "$runtime/$target"
       return 0
     fi
   done
 
-  printf \"missing runtime directory for %s\\n\" \"\$target\" >&2
+  printf "missing runtime directory for %s\n" "$target" >&2
   return 1
 }
 link_runtime_dir shared ~/server/shared
 link_runtime_dir plugins ~/server/quests/plugins ~/server/plugins
 link_runtime_dir lua_modules ~/server/quests/lua_modules ~/server/lua_modules
 
-./bin/zone tests:serve-http --zone qrg --port ${port} --max-runtime-seconds 30 > logs/zone_harness.out 2>&1 &
-harness_pid=\$!
-trap 'kill -TERM \"\$harness_pid\" 2>/dev/null || true; dump_harness_log' EXIT
+if ! ./bin/shared_memory > logs/shared_memory.out 2>&1; then
+  cat logs/shared_memory.out >&2
+  exit 1
+fi
+
+./bin/zone tests:serve-http --zone qrg --port ${port} --max-runtime-seconds 300 >"$harness_log" 2>&1 &
+harness_pid=$!
+trap 'status=$?; kill -TERM "$harness_pid" 2>/dev/null || true; dump_harness_log "$status"' EXIT
 
 health=''
-for _ in \$(seq 1 60); do
-  if health=\$(curl -fsS \"http://127.0.0.1:${port}/api/v1/harness/health\" 2>/dev/null); then
+for _ in $(seq 1 180); do
+  if health=$(curl --noproxy '*' -fsS "${harness_url}/api/v1/harness/health" 2>/dev/null); then
     break
   fi
-  if ! kill -0 \"\$harness_pid\" 2>/dev/null; then
-    cat logs/zone_harness.out >&2
+  if ! kill -0 "$harness_pid" 2>/dev/null; then
+    cat "$harness_log" >&2
     exit 1
   fi
   sleep 1
 done
 
-[[ \"\$health\" == *'\"healthy\":true'* ]] || { printf '%s\n' \"\$health\" >&2; exit 1; }
+[[ "$health" == *'"healthy":true'* ]] || { printf '%s\n' "$health" >&2; exit 1; }
 
-zone=\$(curl -fsS \"http://127.0.0.1:${port}/api/v1/harness/zone\")
-[[ \"\$zone\" == *'\"short_name\":\"qrg\"'* ]] || { printf '%s\n' \"\$zone\" >&2; exit 1; }
+zone=$(curl --noproxy '*' -fsS "${harness_url}/api/v1/harness/zone")
+[[ "$zone" == *'"short_name":"qrg"'* ]] || { printf '%s\n' "$zone" >&2; exit 1; }
 
-entities=\$(curl -fsS \"http://127.0.0.1:${port}/api/v1/harness/entities\")
-[[ \"\$entities\" == *'\"counts\"'* ]] || { printf '%s\n' \"\$entities\" >&2; exit 1; }
+entities=$(curl --noproxy '*' -fsS "${harness_url}/api/v1/harness/entities")
+[[ "$entities" == *'"counts"'* ]] || { printf '%s\n' "$entities" >&2; exit 1; }
 
-process=\$(curl -fsS -X POST -H 'Content-Type: application/json' --data '{\"ticks\":2}' \"http://127.0.0.1:${port}/api/v1/harness/process\")
-[[ \"\$process\" == *'\"ticks_processed\":2'* ]] || { printf '%s\n' \"\$process\" >&2; exit 1; }
+process=$(curl --noproxy '*' -fsS -X POST -H 'Content-Type: application/json' --data '{"ticks":2}' "${harness_url}/api/v1/harness/process")
+[[ "$process" == *'"ticks_processed":2'* ]] || { printf '%s\n' "$process" >&2; exit 1; }
 
-events=\$(curl -fsS \"http://127.0.0.1:${port}/api/v1/harness/events\")
-[[ \"\$events\" == *'\"events\":[]'* ]] || { printf '%s\n' \"\$events\" >&2; exit 1; }
+events=$(curl --noproxy '*' -fsS "${harness_url}/api/v1/harness/events")
+[[ "$events" == *'"events":[]'* ]] || { printf '%s\n' "$events" >&2; exit 1; }
 
 assert_slow_scenario() {
-  local payload=\"\$1\"
-  local scenario=\"\$2\"
-  local expected_name=\"\$3\"
-  local require_current_slowed=\"\${4:-false}\"
-  local require_mezzed=\"\${5:-false}\"
+  local payload="$1"
+  local scenario="$2"
+  local expected_name="$3"
+  local require_current_slowed="${4:-false}"
+  local require_mezzed="${5:-false}"
 
-  SCENARIO_PAYLOAD=\"\$payload\" python3 - \"\$scenario\" \"\$expected_name\" \"\$require_current_slowed\" \"\$require_mezzed\" <<'PY'
+  SCENARIO_PAYLOAD="$payload" python3 - "$scenario" "$expected_name" "$require_current_slowed" "$require_mezzed" <<'PY'
 import json
 import os
 import sys
@@ -211,9 +234,9 @@ PY
 }
 
 assert_headless_target_scenario() {
-  local payload=\"\$1\"
+  local payload="$1"
 
-  HEADLESS_TARGET_PAYLOAD=\"\$payload\" python3 - <<'PY'
+  HEADLESS_TARGET_PAYLOAD="$payload" python3 - <<'PY'
 import json
 import os
 import sys
@@ -279,10 +302,10 @@ PY
 }
 
 assert_headless_target_cursor_progression() {
-  local first_payload=\"\$1\"
-  local second_payload=\"\$2\"
+  local first_payload="$1"
+  local second_payload="$2"
 
-  HEADLESS_TARGET_FIRST=\"\$first_payload\" HEADLESS_TARGET_SECOND=\"\$second_payload\" python3 - <<'PY'
+  HEADLESS_TARGET_FIRST="$first_payload" HEADLESS_TARGET_SECOND="$second_payload" python3 - <<'PY'
 import json
 import os
 import sys
@@ -300,10 +323,10 @@ PY
 }
 
 assert_empty_event_payload() {
-  local payload=\"\$1\"
-  local description=\"\$2\"
+  local payload="$1"
+  local description="$2"
 
-  EVENT_PAYLOAD=\"\$payload\" python3 - \"\$description\" <<'PY'
+  EVENT_PAYLOAD="$payload" python3 - "$description" <<'PY'
 import json
 import os
 import sys
@@ -318,9 +341,9 @@ PY
 }
 
 assert_autonomous_actor_loop() {
-  local payload=\"\$1\"
+  local payload="$1"
 
-  ACTOR_LOOP_PAYLOAD=\"\$payload\" python3 - <<'PY'
+  ACTOR_LOOP_PAYLOAD="$payload" python3 - <<'PY'
 import json
 import os
 import sys
@@ -392,10 +415,10 @@ PY
 }
 
 assert_actor_led_bot_party() {
-  local payload=\"\$1\"
-  local expected_followers=\"\$2\"
+  local payload="$1"
+  local expected_followers="$2"
 
-  ACTOR_PARTY_PAYLOAD=\"\$payload\" python3 - \"\$expected_followers\" <<'PY'
+  ACTOR_PARTY_PAYLOAD="$payload" python3 - "$expected_followers" <<'PY'
 import json
 import os
 import sys
@@ -500,10 +523,65 @@ if not any(
 PY
 }
 
-assert_pressure_heal_scenario() {
-  local payload=\"\$1\"
+assert_bot_loot_request_scenario() {
+  local payload="$1"
+  BOT_LOOT_PAYLOAD="$payload" python3 - <<'PY'
+import json, os, sys
+payload = json.loads(os.environ["BOT_LOOT_PAYLOAD"])
+def fail(message):
+    print(json.dumps({"error": message, "payload": payload}, separators=(",", ":")), file=sys.stderr)
+    sys.exit(1)
+if payload.get("proved") is not True or payload.get("scenario") != "bot-loot-request-upgrade":
+    fail("Bot Loot Request scenario did not prove the ordinary loot path")
+if payload.get("positive_request_count") != 1 or payload.get("upgrade_score", 0) <= 0:
+    fail("expected exactly one positive structured decision")
+for field in ("requesting_bot", "upgrade_item_id", "upgrade_item_name", "target_slot", "target_slot_name", "deterministic_reason"):
+    if payload.get(field) in (None, "", 0): fail("missing structured decision field: " + field)
+for field in ("downgrade_suppressed", "duplicate_suppressed", "looted_item_reached_looter", "loot_completed", "dialogue_pending_at_loot_completion", "normal_processing_responsive", "bot_inventory_unchanged", "provider_independent"):
+    if payload.get(field) is not True: fail("failed invariant: " + field)
+elapsed_ms = payload.get("loot_completion_elapsed_ms")
+budget_ms = payload.get("loot_completion_budget_ms")
+if not isinstance(elapsed_ms, int) or elapsed_ms < 0:
+    fail("missing loot completion latency observation")
+if not isinstance(budget_ms, int) or budget_ms <= 0:
+    fail("missing loot completion latency budget")
+if elapsed_ms >= budget_ms:
+    fail("loot completion exceeded responsiveness budget")
+if payload.get("grouped_bot_count", 0) < 2 or not str(payload.get("database_mutation", "")).startswith("none:"):
+    fail("fixture grouping or cleanup contract was not met")
+print(json.dumps({"scenario": payload["scenario"], "proved": True, "bot": payload["requesting_bot"]["name"], "item_id": payload["upgrade_item_id"], "slot": payload["target_slot_name"], "score": payload["upgrade_score"], "reason": payload["deterministic_reason"]}, separators=(",", ":")))
+PY
+}
 
-  SCENARIO_PAYLOAD=\"\$payload\" python3 - <<'PY'
+assert_bot_loot_request_failure_cleanup() {
+  local payload="$1"
+  BOT_LOOT_CLEANUP_PAYLOAD="$payload" python3 - <<'PY'
+import json, os, sys
+payload = json.loads(os.environ["BOT_LOOT_CLEANUP_PAYLOAD"])
+def fail(message):
+    print(json.dumps({"error": message, "payload": payload}, separators=(",", ":")), file=sys.stderr)
+    sys.exit(1)
+if payload.get("proved") is not True or payload.get("scenario") != "bot-loot-request-failure-cleanup":
+    fail("failure-path cleanup scenario was not proved")
+for field in (
+    "failure_induced_after_overrides",
+    "rules_restored",
+    "fixture_entities_cleaned",
+    "delivery_state_restored",
+    "dialogue_provider_state_restored",
+    "decision_observer_state_restored",
+):
+    if payload.get(field) is not True:
+        fail("failed cleanup invariant: " + field)
+# This assertion is intentionally silent on success. The upgrade assertion
+# owns the canonical single machine-readable stdout record.
+PY
+}
+
+assert_pressure_heal_scenario() {
+  local payload="$1"
+
+  SCENARIO_PAYLOAD="$payload" python3 - <<'PY'
 import json
 import os
 import sys
@@ -550,24 +628,24 @@ if not matching:
 PY
 }
 
-scenario=\$(curl -fsS -X POST -H 'Content-Type: application/json' --data '{\"spell_id\":200}' \"http://127.0.0.1:${port}/api/v1/harness/scenarios/spell-cast-start\")
-[[ \"\$scenario\" == *'\"started\":true'* ]] || { printf '%s\n' \"\$scenario\" >&2; exit 1; }
+scenario=$(curl --noproxy '*' -fsS -X POST -H 'Content-Type: application/json' --data '{"spell_id":200}' "${harness_url}/api/v1/harness/scenarios/spell-cast-start")
+[[ "$scenario" == *'"started":true'* ]] || { printf '%s\n' "$scenario" >&2; exit 1; }
 
 cast_events=''
-for _ in \$(seq 1 20); do
-  cast_events=\$(curl -fsS \"http://127.0.0.1:${port}/api/v1/harness/events?since=0&limit=10\")
-  if [[ \"\$cast_events\" == *'\"type\":\"spell_cast_started\"'* ]]; then
+for _ in $(seq 1 20); do
+  cast_events=$(curl --noproxy '*' -fsS "${harness_url}/api/v1/harness/events?since=0&limit=10")
+  if [[ "$cast_events" == *'"type":"spell_cast_started"'* ]]; then
     break
   fi
   sleep 1
 done
-[[ \"\$cast_events\" == *'\"type\":\"spell_cast_started\"'* ]] || { printf '%s\n' \"\$cast_events\" >&2; exit 1; }
-[[ \"\$cast_events\" == *'\"caster\"'* && \"\$cast_events\" == *'\"target\"'* && \"\$cast_events\" == *'\"spell\"'* && \"\$cast_events\" == *'\"cast\"'* ]] || { printf '%s\n' \"\$cast_events\" >&2; exit 1; }
+[[ "$cast_events" == *'"type":"spell_cast_started"'* ]] || { printf '%s\n' "$cast_events" >&2; exit 1; }
+[[ "$cast_events" == *'"caster"'* && "$cast_events" == *'"target"'* && "$cast_events" == *'"spell"'* && "$cast_events" == *'"cast"'* ]] || { printf '%s\n' "$cast_events" >&2; exit 1; }
 
-headless_target_first=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/headless-client/target\")
-assert_headless_target_scenario \"\$headless_target_first\"
+headless_target_first=$(curl --noproxy '*' -fsS -X POST --data '' "${harness_url}/api/v1/harness/scenarios/headless-client/target")
+assert_headless_target_scenario "$headless_target_first"
 
-headless_target_first_end=\$(HEADLESS_TARGET_PAYLOAD=\"\$headless_target_first\" python3 - <<'PY'
+headless_target_first_end=$(HEADLESS_TARGET_PAYLOAD="$headless_target_first" python3 - <<'PY'
 import json
 import os
 
@@ -575,18 +653,15 @@ payload = json.loads(os.environ["HEADLESS_TARGET_PAYLOAD"])
 print(payload["event_cursor_end"])
 PY
 )
-headless_cleanup_events=\$(curl -fsS \"http://127.0.0.1:${port}/api/v1/harness/events?since=\${headless_target_first_end}&limit=10\")
-assert_empty_event_payload \"\$headless_cleanup_events\" "headless target scenario left post-cleanup events after its reported cursor"
+headless_cleanup_events=$(curl --noproxy '*' -fsS "${harness_url}/api/v1/harness/events?since=${headless_target_first_end}&limit=10")
+assert_empty_event_payload "$headless_cleanup_events" "headless target scenario left post-cleanup events after its reported cursor"
 
-headless_target_second=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/headless-client/target\")
-assert_headless_target_scenario \"\$headless_target_second\"
-assert_headless_target_cursor_progression \"\$headless_target_first\" \"\$headless_target_second\"
+headless_target_second=$(curl --noproxy '*' -fsS -X POST --data '' "${harness_url}/api/v1/harness/scenarios/headless-client/target")
+assert_headless_target_scenario "$headless_target_second"
+assert_headless_target_cursor_progression "$headless_target_first" "$headless_target_second"
 
-slow_scenario=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/bot-slow-maintenance/current-target\")
-assert_slow_scenario \"\$slow_scenario\" current-target HarnessSlowCurrentTarget
-
-entities_zero_sample=\$(curl -fsS \"http://127.0.0.1:${port}/api/v1/harness/entities?sample_limit=0\")
-ENTITIES_ZERO_SAMPLE=\"\$entities_zero_sample\" python3 - <<'PY'
+entities_zero_sample=$(curl --noproxy '*' -fsS "${harness_url}/api/v1/harness/entities?sample_limit=0")
+ENTITIES_ZERO_SAMPLE="$entities_zero_sample" python3 - <<'PY'
 import json
 import os
 import sys
@@ -598,31 +673,38 @@ if counts.get("mobs", 0) <= 0 or payload.get("sample") != []:
     sys.exit(1)
 PY
 
-fallback_scenario=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/bot-slow-maintenance/fallback\")
-assert_slow_scenario \"\$fallback_scenario\" fallback HarnessSlowFallbackHostile true
+bot_loot_request_cleanup=$(curl --noproxy '*' -fsS -X POST --data '' "${harness_url}/api/v1/harness/scenarios/bot-loot-request/failure-cleanup")
+assert_bot_loot_request_failure_cleanup "$bot_loot_request_cleanup"
 
-mezzed_scenario=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/bot-slow-maintenance/mezzed\")
-assert_slow_scenario \"\$mezzed_scenario\" mezzed HarnessSlowSecondaryHostile false true
+bot_loot_request_scenario=$(curl --noproxy '*' -fsS -X POST --data '' "${harness_url}/api/v1/harness/scenarios/bot-loot-request/upgrade")
+# Validate and persist the same compact record that the host wrapper publishes.
+assert_bot_loot_request_scenario "$bot_loot_request_scenario" >"$BOT_LOOT_RESULT_FILE"
 
-pressure_heal_scenario=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/owned-bot-healing/moderate-pressure-fast-heal\")
-assert_pressure_heal_scenario \"\$pressure_heal_scenario\"
+shutdown=$(curl --noproxy '*' -fsS -X POST --data '' "${harness_url}/api/v1/harness/shutdown")
+[[ "$shutdown" == *'"shutdown_requested":true'* ]] || { printf '%s\n' "$shutdown" >&2; exit 1; }
 
-	actor_loop=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/autonomous-actor-loop\")
-	assert_autonomous_actor_loop \"\$actor_loop\"
-	actor_loop_repeat=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/autonomous-actor-loop\")
-	assert_autonomous_actor_loop \"\$actor_loop_repeat\"
-
-	actor_party_min=\$(curl -fsS -X POST -H 'Content-Type: application/json' --data '{\"follower_count\":1}' \"http://127.0.0.1:${port}/api/v1/harness/scenarios/actor-led-bot-party\")
-	assert_actor_led_bot_party \"\$actor_party_min\" 1
-	actor_party_default=\$(curl -fsS -X POST -H 'Content-Type: application/json' --data '{\"follower_count\":3}' \"http://127.0.0.1:${port}/api/v1/harness/scenarios/actor-led-bot-party\")
-	assert_actor_led_bot_party \"\$actor_party_default\" 3
-	actor_party_max=\$(curl -fsS -X POST -H 'Content-Type: application/json' --data '{\"follower_count\":4}' \"http://127.0.0.1:${port}/api/v1/harness/scenarios/actor-led-bot-party\")
-	assert_actor_led_bot_party \"\$actor_party_max\" 4
-
-	shutdown=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/shutdown\")
-[[ \"\$shutdown\" == *'\"shutdown_requested\":true'* ]] || { printf '%s\n' \"\$shutdown\" >&2; exit 1; }
-
-wait \"\$harness_pid\"
+wait "$harness_pid"
 trap - EXIT
-"
+ZONE_HARNESS_CONTAINER
+)"
+  # Disable Compose's pseudo-terminal and bridge the compact result through a
+  # temporary directory mount. Capture all incidental container stdout (for
+  # example mysqladmin's readiness status) so successful wrapper stdout remains
+  # exactly the host-published machine-readable result.
+  compose_status=0
+  "${harness_compose[@]}" run --rm --no-deps -T \
+    -e ZONE_HARNESS_PORT="$port" \
+    -e ZONE_HARNESS_LOG_FILE=/tmp/zone-harness-result/zone_harness.out \
+    -e BOT_LOOT_RESULT_FILE=/tmp/zone-harness-result/result.json \
+    -v "$result_dir:/tmp/zone-harness-result" \
+    --entrypoint bash eqemu-server -lc "$container_script" >"$compose_stdout" || compose_status=$?
+  if [[ "$compose_status" -ne 0 ]]; then
+    # Preserve container stdout as a failure diagnostic while never mixing it
+    # with the successful machine-readable stdout contract.
+    [[ -s "$compose_stdout" ]] && cat "$compose_stdout" >&2
+    [[ -s "$harness_log" ]] && cat "$harness_log" >&2
+    die "Zone Harness container failed with status $compose_status"
+  fi
+  [[ -s "$result_file" ]] || die "Bot Loot Request scenario produced no structured result"
+  cat "$result_file"
 )

@@ -10,6 +10,7 @@
 
 #include "zone_harness_runtime.h"
 
+#include "common/eq_packet_structs.h"
 #include "common/pressure_aware_healing.h"
 #include "common/regular_heal_efficiency.h"
 #include "common/rulesys.h"
@@ -17,7 +18,9 @@
 #include "common/timer.h"
 #include "zone/bot.h"
 #include "zone/bot_heal_selection.h"
+#include "zone/bot_loot_request_runtime.h"
 #include "zone/client.h"
+#include "zone/corpse.h"
 #include "zone/entity.h"
 #include "zone/harness/owned_bot_actor_fixture.h"
 #include "zone/npc.h"
@@ -26,11 +29,19 @@
 #include "zone/xtargetautohaters.h"
 #include "zone/zone.h"
 #include "zone/zone_event_scheduler.h"
+#include "zone/zonedb.h"
 
 #include <algorithm>
+#include <array>
+#include <atomic>
+#include <limits>
+#include <memory>
+#include <sstream>
 #include <thread>
 
 extern EntityList entity_list;
+extern ZoneDatabase content_db;
+extern ZoneDatabase database;
 extern WorldServer worldserver;
 extern Zone *zone;
 extern volatile bool is_zone_loaded;
@@ -40,6 +51,56 @@ namespace EQ::ZoneHarness {
 namespace {
 
 inline constexpr uint32_t kActorLeashSourceRequiredTargetTicks = 3;
+inline constexpr uint32_t kBotLootCompletionBudgetMs = 1000;
+
+void AppendItemFingerprint(std::ostringstream &out, const EQ::ItemInstance *item)
+{
+	if (!item) {
+		out << "null;";
+		return;
+	}
+	out << item->GetID() << ':' << item->GetCharges() << ':' << item->GetPrice() << ':' << item->GetColor()
+		<< ':' << item->GetMerchantSlot() << ':' << item->GetMerchantCount() << ':' << item->GetCurrentSlot()
+		<< ':' << item->IsAttuned() << ':' << item->GetCustomDataString() << ':' << item->IsScaling()
+		<< ':' << item->GetExp() << ':' << item->GetOrnamentationIcon() << ':' << item->GetOrnamentationIDFile()
+		<< ':' << item->GetNewIDFile() << ':' << item->GetOrnamentHeroModel() << ':' << item->GetRecastTimestamp()
+		<< ':' << item->GetSerialNumber() << ':' << item->GetTaskDeliveredCount() << '{';
+	for (uint8_t slot = EQ::invbag::SLOT_BEGIN; slot <= EQ::invbag::SLOT_END; ++slot) {
+		out << static_cast<int>(slot) << '=';
+		AppendItemFingerprint(out, item->GetItem(slot));
+	}
+	out << "}[";
+	for (uint8_t slot = 0; slot < EQ::invaug::SOCKET_COUNT; ++slot) {
+		AppendItemFingerprint(out, item->GetAugment(slot));
+	}
+	out << "]";
+}
+
+std::string BotInventoryFingerprint(Bot *bot)
+{
+	std::ostringstream out;
+	auto &inventory = bot->GetInv();
+	for (const auto &[slot, item] : inventory.GetWorn()) {
+		out << "w" << slot << '=';
+		AppendItemFingerprint(out, item);
+	}
+	for (const auto &[slot, item] : inventory.GetPersonal()) {
+		out << "p" << slot << '=';
+		AppendItemFingerprint(out, item);
+	}
+	int cursor_index = 0;
+	for (auto item = inventory.cursor_cbegin(); item != inventory.cursor_cend(); ++item) {
+		out << "c" << cursor_index++ << '=';
+		AppendItemFingerprint(out, *item);
+	}
+	return out.str();
+}
+
+uint32_t NextHarnessLootStableID()
+{
+	static std::atomic<uint32_t> next_id{0xF0000000};
+	return next_id.fetch_add(1, std::memory_order_relaxed);
+}
 
 }
 
@@ -478,6 +539,370 @@ BotSlowMaintenanceScenarioResult ZoneHarnessRuntime::RunBotSlowMaintenanceFallba
 BotSlowMaintenanceScenarioResult ZoneHarnessRuntime::RunBotSlowMaintenanceMezzed(uint32_t max_ticks, uint32_t sleep_ms)
 {
 	return RunBotSlowMaintenanceScenario(BotSlowMaintenanceScenarioKind::Mezzed, max_ticks, sleep_ms);
+}
+
+BotLootRequestScenarioResult ZoneHarnessRuntime::RunBotLootRequestUpgrade()
+{
+	std::lock_guard scenario_lock(scenario_mutex);
+	std::lock_guard lock(mutex);
+	return RunBotLootRequestUpgradeLocked(false);
+}
+
+BotLootRequestScenarioResult ZoneHarnessRuntime::RunBotLootRequestUpgradeLocked(bool fail_after_overrides)
+{
+	BotLootRequestScenarioResult result;
+	result.database_mutation = "none: synthetic owner, bots, equipment, corpses, and loot inventory are in-memory only";
+	if (!booted || !zone || !is_zone_loaded) {
+		result.reason = "zone_not_booted";
+		result.runtime = RuntimeLocked();
+		return result;
+	}
+
+	// Stable PEQ fixtures: Cloth Cap -> Tattered Leather Cap, both head-slot all-class gear.
+	constexpr uint32_t inferior_item_id = 1001;
+	constexpr uint32_t upgrade_item_id = 2001;
+	constexpr int equipment_slot = EQ::invslot::slotHead;
+	const auto* inferior_item = database.GetItem(inferior_item_id);
+	const auto* upgrade_item = database.GetItem(upgrade_item_id);
+	result.inferior_item_id = inferior_item_id;
+	result.upgrade_item_id = upgrade_item_id;
+	if (!inferior_item || !upgrade_item) {
+		result.reason = "known_item_fixture_unavailable";
+		result.runtime = RuntimeLocked();
+		return result;
+	}
+
+	const uint32_t owner_stable_id = NextHarnessLootStableID();
+	const uint32_t primary_bot_stable_id = NextHarnessLootStableID();
+	const uint32_t other_bot_stable_id = NextHarnessLootStableID();
+	OwnedBotActorFixture fixture;
+	if (!fixture.SetUpOwnedBotGroup({
+			.owner_name = "HarnessLootOwner",
+			.owner_character_id = owner_stable_id,
+			.bot_name = "HarnessUpgradeBot",
+			.level = 60,
+			.race = Race::Barbarian,
+			.bot_class = Class::Shaman,
+		})) {
+		result.reason = fixture.failure_reason;
+		result.runtime = RuntimeLocked();
+		return result;
+	}
+	auto *other_bot = fixture.AddOwnedGroupBot({
+			.owner_name = "HarnessLootOwner",
+			.owner_character_id = owner_stable_id,
+			.bot_name = "HarnessNoUpgradeBot",
+			.level = 60,
+			.race = Race::Barbarian,
+			.bot_class = Class::Shaman,
+		},
+		glm::vec4(4, 0, 0, 0));
+	if (!other_bot) {
+		result.reason = "second_grouped_bot_create_failed";
+		result.runtime = RuntimeLocked();
+		return result;
+	}
+	fixture.AssignBotID(fixture.OwnedBot(), primary_bot_stable_id);
+	fixture.AssignBotID(other_bot, other_bot_stable_id);
+
+	std::unique_ptr<EQ::ItemInstance> inferior_instance(database.CreateItem(inferior_item_id, 1));
+	std::unique_ptr<EQ::ItemInstance> upgrade_instance(database.CreateItem(upgrade_item_id, 1));
+	if (!inferior_instance || !upgrade_instance) {
+		result.reason = "known_item_instance_create_failed";
+		result.runtime = RuntimeLocked();
+		return result;
+	}
+	fixture.OwnedBot()->GetInv().PutItem(equipment_slot, *inferior_instance);
+	other_bot->GetInv().PutItem(equipment_slot, *upgrade_instance);
+	const auto before_primary_inventory = BotInventoryFingerprint(fixture.OwnedBot());
+	const auto before_other_inventory = BotInventoryFingerprint(other_bot);
+	result.owner = fixture.OwnerEntity();
+	result.requesting_bot = fixture.OwnedBotEntity();
+	result.grouped_bot_count = 2;
+
+	std::vector<ZoneBotLootRequestRuntime::StructuredDecision> decisions;
+	BotLootRequest::TestDelayedDialogueProvider pending_dialogue_provider;
+	auto saved_delivery_state = ZoneBotLootRequestRuntime::CaptureDeliveryState();
+	auto saved_observer = ZoneBotLootRequestRuntime::CaptureDecisionObserver();
+	auto saved_dialogue_override = ZoneBotLootRequestRuntime::CaptureDialogueOverrideStateForTesting();
+	struct ScenarioStateCleanup {
+		uint32_t owner_id;
+		std::vector<uint32_t> bot_ids;
+		BotLootRequest::DeliveryState delivery_state;
+		ZoneBotLootRequestRuntime::DecisionObserver observer;
+		ZoneBotLootRequestRuntime::DialogueOverrideState dialogue_override;
+		~ScenarioStateCleanup() {
+			ZoneBotLootRequestRuntime::CancelLootRequestDialogue(owner_id, bot_ids);
+			ZoneBotLootRequestRuntime::RestoreDialogueOverrideStateForTesting(std::move(dialogue_override));
+			ZoneBotLootRequestRuntime::RestoreDeliveryState(std::move(delivery_state));
+			ZoneBotLootRequestRuntime::SetDecisionObserver(std::move(observer));
+		}
+	} scenario_state_cleanup{
+		owner_stable_id,
+		{primary_bot_stable_id, other_bot_stable_id},
+		std::move(saved_delivery_state),
+		std::move(saved_observer),
+		std::move(saved_dialogue_override)
+	};
+	ZoneBotLootRequestRuntime::SetDialogueProviderForTesting(&pending_dialogue_provider);
+	ZoneBotLootRequestRuntime::SetDecisionObserver(
+		[&decisions](const auto& decision) { decisions.push_back(decision); });
+	ScopedRuleValue enabled_rule("Chat:BotLootRequestEnabled", "true");
+	ScopedRuleValue cooldown_rule("Chat:BotLootRequestCooldownSeconds", "0");
+	ScopedRuleValue cursor_rule("Character:CheckCursorEmptyWhenLooting", "false");
+	ScopedRuleValue zone_controller_rule("Zone:UseZoneController", "false");
+	if (!enabled_rule.ok() || !cooldown_rule.ok() || !cursor_rule.ok() || !zone_controller_rule.ok()) {
+		result.reason = "fixture_rule_apply_failed";
+		result.runtime = RuntimeLocked();
+		return result;
+	}
+	if (fail_after_overrides) {
+		// Dirty delivery bookkeeping as well as the installed rules/provider/observer so the
+		// cleanup proof cannot pass merely because this early exit made no state changes.
+		auto dirty_delivery = ZoneBotLootRequestRuntime::CaptureDeliveryState();
+		constexpr uint64_t cleanup_probe_event_id = std::numeric_limits<uint64_t>::max();
+		dirty_delivery.delivered_loot_events.insert(cleanup_probe_event_id);
+		dirty_delivery.delivered_loot_event_order.push_back(cleanup_probe_event_id);
+		dirty_delivery.cooldown_start_ms_by_looter_bot[cleanup_probe_event_id] = 1;
+		ZoneBotLootRequestRuntime::RestoreDeliveryState(std::move(dirty_delivery));
+		result.reason = "intentional_failure_after_fixture_overrides";
+		result.runtime = RuntimeLocked();
+		return result;
+	}
+
+	std::string loot_failure_reason;
+	auto loot_once = [&](uint32_t item_id, uint32_t *completion_elapsed_ms = nullptr) -> bool {
+		const auto* npc_type = content_db.LoadNPCTypesData(754008);
+		if (!npc_type)
+			return false;
+		auto* npc = new NPC(npc_type, nullptr, fixture.Owner()->GetPosition(), GravityBehavior::Water);
+		LootItems items;
+		const NPCType* corpse_type = npc_type;
+		auto* corpse = new Corpse(npc, &items, npc->GetNPCTypeID(), &corpse_type, 60000);
+		delete npc;
+		corpse->AddItem(item_id, 1);
+		// Death processing ordinarily grants corpse rights to the killer and its
+		// group. This synthetic corpse bypasses death, so reproduce only that
+		// setup fact before exercising the ordinary loot request/item path.
+		corpse->AllowPlayerLoot(fixture.Owner(), 0);
+		entity_list.AddCorpse(corpse);
+		const uint16_t corpse_id = corpse->GetID();
+		EQApplicationPacket request_packet(OP_LootRequest, 0);
+		corpse->MakeLootRequestPackets(fixture.Owner(), &request_packet);
+		if (!corpse->IsBeingLootedBy(fixture.Owner())) {
+			loot_failure_reason = "loot_request_not_opened";
+			entity_list.RemoveCorpse(corpse_id);
+			return false;
+		}
+		const uint16_t loot_slot = corpse->GetFirstLootSlotByItemID(item_id);
+		if (loot_slot == 0xFFFF) {
+			loot_failure_reason = "corpse_slot_unavailable";
+			entity_list.RemoveCorpse(corpse_id);
+			return false;
+		}
+		// The production corpse enforces a 10 ms post-open loot cooldown against
+		// Timer's loop clock. A one-off HTTP zone has no outer main loop while this
+		// handler runs, so refresh that clock after the real wait.
+		std::this_thread::sleep_for(std::chrono::milliseconds(12));
+		::Timer::SetCurrentTime();
+		EQApplicationPacket loot_packet(OP_LootItem, sizeof(LootingItem_Struct));
+		auto* loot = reinterpret_cast<LootingItem_Struct*>(loot_packet.pBuffer);
+		loot->lootee = corpse_id;
+		loot->looter = fixture.Owner()->GetID();
+		loot->slot_id = loot_slot;
+		loot->auto_loot = 0;
+		const auto loot_started = std::chrono::steady_clock::now();
+		corpse->LootCorpseItem(fixture.Owner(), &loot_packet);
+		const auto loot_finished = std::chrono::steady_clock::now();
+		if (completion_elapsed_ms) {
+			*completion_elapsed_ms = static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+				loot_finished - loot_started).count());
+		}
+		const bool completed = !corpse->HasItem(item_id);
+		if (!completed) {
+			loot_failure_reason = corpse->IsBeingLootedBy(fixture.Owner()) ?
+				"corpse_item_not_removed:session_open" : "corpse_item_not_removed:session_reset";
+		}
+		corpse->EndLoot(fixture.Owner(), &request_packet);
+		entity_list.RemoveCorpse(corpse_id);
+		return completed;
+	};
+
+	result.loot_completion_budget_ms = kBotLootCompletionBudgetMs;
+	result.loot_completed = loot_once(upgrade_item_id, &result.loot_completion_elapsed_ms);
+	const auto* looted = fixture.Owner()->GetInv().GetItem(EQ::invslot::slotCursor);
+	result.looted_item_reached_looter = looted && looted->GetID() == upgrade_item_id;
+	result.dialogue_pending_at_loot_completion =
+		pending_dialogue_provider.PendingRequests().size() == 1;
+	result.normal_processing_responsive = result.loot_completed &&
+		result.looted_item_reached_looter && result.dialogue_pending_at_loot_completion &&
+		result.loot_completion_elapsed_ms < result.loot_completion_budget_ms;
+	fixture.Owner()->GetInv().DeleteItem(EQ::invslot::slotCursor);
+
+	const auto positive = std::find_if(decisions.begin(), decisions.end(), [](const auto& d) { return d.produced; });
+	const bool has_positive = positive != decisions.end();
+	const ZoneBotLootRequestRuntime::StructuredDecision positive_decision =
+		has_positive ? *positive : ZoneBotLootRequestRuntime::StructuredDecision{};
+	result.positive_request_count = static_cast<uint32_t>(
+		std::count_if(decisions.begin(), decisions.end(), [](const auto& d) { return d.produced; }));
+	if (has_positive) {
+		result.upgrade_item_name = positive_decision.item_name;
+		result.target_slot = positive_decision.target_slot;
+		result.target_slot_name = positive_decision.target_slot_name;
+		result.upgrade_score = positive_decision.upgrade_score;
+		result.deterministic_reason = positive_decision.reason;
+	}
+
+	const auto decision_count_before_replay = decisions.size();
+	result.replay_cooldown_seconds = RuleI(Chat, BotLootRequestCooldownSeconds);
+	const auto replay = ZoneBotLootRequestRuntime::EvaluateSuccessfulLoot(
+		fixture.Owner(), upgrade_instance.get(), fixture.ActorGroup(), "[harness item]",
+		positive_decision.loot_event_id);
+	result.duplicate_suppressed = result.replay_cooldown_seconds == 0 && !replay.produced &&
+		decisions.size() == decision_count_before_replay + 1;
+
+	const auto produced_before_downgrade =
+		std::count_if(decisions.begin(), decisions.end(), [](const auto& d) { return d.produced; });
+	const bool downgrade_looted = loot_once(inferior_item_id);
+	result.downgrade_suppressed =
+		downgrade_looted && std::count_if(decisions.begin(), decisions.end(),
+										  [](const auto& d) { return d.produced; }) == produced_before_downgrade;
+	fixture.Owner()->GetInv().DeleteItem(EQ::invslot::slotCursor);
+
+	if (has_positive) {
+		BotLootRequest::TestDelayedDialogueProvider failed_provider;
+		BotLootRequest::DelayedDialogueQueue failed_queue(failed_provider, {});
+		BotLootRequest::Request eligible_request{
+			.produced = true,
+			.requesting_bot_stable_id = positive_decision.requesting_bot_stable_id,
+			.requesting_bot_name = positive_decision.requesting_bot_name,
+			.message = positive_decision.deterministic_message,
+			.delivery_channel = BotLootRequest::DeliveryChannel::GroupChat,
+			.target_slot = positive_decision.target_slot,
+			.target_slot_name = positive_decision.target_slot_name,
+			.plain_item_name = positive_decision.item_name,
+			.reason_summary = positive_decision.reason,
+			.upgrade_score = positive_decision.upgrade_score,
+		};
+		BotLootRequest::SuccessfulLootEvent event{
+			.looter_stable_id = owner_stable_id,
+			.loot_event_id = positive_decision.loot_event_id,
+			.looter_name = fixture.Owner()->GetCleanName(),
+		};
+		const auto queued = failed_queue.Enqueue(eligible_request, event, {});
+		BotLootRequest::DialogueResult failed_dialogue;
+		result.provider_failure_observed = queued.queued && failed_provider.CompleteNextFailure() &&
+			failed_queue.PopReadyResult([](const auto &) {
+				return BotLootRequest::CurrentGroupState{true, true, true};
+			}, failed_dialogue) && failed_dialogue.produced &&
+			failed_dialogue.debug_reason == "loot_request_dialogue_unavailable" &&
+			failed_dialogue.message == eligible_request.message;
+		result.provider_independent = result.provider_failure_observed && eligible_request.produced;
+	}
+
+	result.bot_inventory_unchanged =
+		BotInventoryFingerprint(fixture.OwnedBot()) == before_primary_inventory &&
+		BotInventoryFingerprint(other_bot) == before_other_inventory;
+	result.proved = result.positive_request_count == 1 && has_positive &&
+					positive_decision.requesting_bot_stable_id == primary_bot_stable_id &&
+					positive_decision.item_id == upgrade_item_id && result.target_slot == equipment_slot &&
+					result.upgrade_score > 0 && !result.deterministic_reason.empty() &&
+					result.downgrade_suppressed && result.duplicate_suppressed &&
+					result.looted_item_reached_looter && result.loot_completed &&
+					result.normal_processing_responsive && result.bot_inventory_unchanged &&
+					result.provider_independent;
+	result.reason = result.proved ? "ordinary_loot_upgrade_request_observed" :
+		("scenario_assertion_failed:" + loot_failure_reason);
+	result.runtime = RuntimeLocked();
+	return result;
+}
+
+BotLootRequestFailureCleanupResult ZoneHarnessRuntime::RunBotLootRequestFailureCleanupProof()
+{
+	std::lock_guard scenario_lock(scenario_mutex);
+	std::lock_guard lock(mutex);
+
+	BotLootRequestFailureCleanupResult result;
+	if (!booted || !zone || !is_zone_loaded) {
+		result.reason = "zone_not_booted";
+		result.runtime = RuntimeLocked();
+		return result;
+	}
+
+	const std::array<std::string, 4> rule_names{
+		"Chat:BotLootRequestEnabled",
+		"Chat:BotLootRequestCooldownSeconds",
+		"Character:CheckCursorEmptyWhenLooting",
+		"Zone:UseZoneController",
+	};
+	std::array<std::string, 4> original_rule_values;
+	bool captured_rules = true;
+	for (size_t i = 0; i < rule_names.size(); ++i) {
+		captured_rules = RuleManager::Instance()->GetRule(rule_names[i], original_rule_values[i]) && captured_rules;
+	}
+	const auto original_delivery = ZoneBotLootRequestRuntime::CaptureDeliveryState();
+	auto original_dialogue_override = ZoneBotLootRequestRuntime::CaptureDialogueOverrideStateForTesting();
+	auto original_observer = ZoneBotLootRequestRuntime::CaptureDecisionObserver();
+	BotLootRequest::TestDelayedDialogueProvider provider_sentinel;
+	bool observer_sentinel_called = false;
+	ZoneBotLootRequestRuntime::SetDialogueProviderForTesting(&provider_sentinel);
+	ZoneBotLootRequestRuntime::SetDecisionObserver(
+		[&observer_sentinel_called](const auto &) { observer_sentinel_called = true; });
+
+	const BotLootRequest::Request dialogue_probe{
+		.produced = true,
+		.requesting_bot_stable_id = std::numeric_limits<uint32_t>::max(),
+		.requesting_bot_name = "DialogueQueueSentinel",
+		.message = "queue state sentinel",
+		.delivery_channel = BotLootRequest::DeliveryChannel::GroupChat,
+	};
+	const BotLootRequest::SuccessfulLootEvent dialogue_probe_event{
+		.looter_stable_id = std::numeric_limits<uint32_t>::max(),
+		.loot_event_id = std::numeric_limits<uint64_t>::max(),
+		.looter_name = "DialogueQueueSentinelOwner",
+	};
+	ZoneBotLootRequestRuntime::EnqueueLootRequestDialogue(dialogue_probe, dialogue_probe_event);
+
+	const auto failed = RunBotLootRequestUpgradeLocked(true);
+	result.failure_induced_after_overrides = failed.reason == "intentional_failure_after_fixture_overrides";
+
+	result.rules_restored = captured_rules;
+	for (size_t i = 0; i < rule_names.size(); ++i) {
+		std::string current;
+		result.rules_restored = RuleManager::Instance()->GetRule(rule_names[i], current) &&
+			current == original_rule_values[i] && result.rules_restored;
+	}
+	result.fixture_entities_cleaned =
+		entity_list.GetMob("HarnessLootOwner") == nullptr &&
+		entity_list.GetMob("HarnessUpgradeBot") == nullptr &&
+		entity_list.GetMob("HarnessNoUpgradeBot") == nullptr;
+	const auto current_delivery = ZoneBotLootRequestRuntime::CaptureDeliveryState();
+	result.delivery_state_restored =
+		current_delivery.delivered_loot_events == original_delivery.delivered_loot_events &&
+		current_delivery.delivered_loot_event_order == original_delivery.delivered_loot_event_order &&
+		current_delivery.cooldown_start_ms_by_looter_bot == original_delivery.cooldown_start_ms_by_looter_bot;
+	// A pointer-only restoration would recreate an empty queue and restart request IDs at one.
+	// Enqueuing again proves both the saved pending mapping and next request ID were retained.
+	ZoneBotLootRequestRuntime::EnqueueLootRequestDialogue(dialogue_probe, dialogue_probe_event);
+	const auto &restored_pending_dialogue = provider_sentinel.PendingRequests();
+	result.dialogue_provider_state_restored =
+		ZoneBotLootRequestRuntime::CurrentDialogueProviderForTesting() == &provider_sentinel &&
+		restored_pending_dialogue.size() == 2 &&
+		restored_pending_dialogue[0].request_id == 1 &&
+		restored_pending_dialogue[1].request_id == 2;
+	auto restored_observer = ZoneBotLootRequestRuntime::CaptureDecisionObserver();
+	if (restored_observer) {
+		restored_observer({});
+	}
+	result.decision_observer_state_restored = observer_sentinel_called;
+	ZoneBotLootRequestRuntime::RestoreDialogueOverrideStateForTesting(std::move(original_dialogue_override));
+	ZoneBotLootRequestRuntime::SetDecisionObserver(std::move(original_observer));
+	result.proved = result.failure_induced_after_overrides && result.rules_restored &&
+		result.fixture_entities_cleaned && result.delivery_state_restored &&
+		result.dialogue_provider_state_restored && result.decision_observer_state_restored;
+	result.reason = result.proved ? "failure_path_fixture_cleanup_observed" : "failure_path_cleanup_assertion_failed";
+	result.runtime = RuntimeLocked();
+	return result;
 }
 
 ActorLedBotPartyScenarioResult ZoneHarnessRuntime::RunActorLedBotPartyProof(

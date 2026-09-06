@@ -247,6 +247,46 @@ nlohmann::json ToJson(const BotSlowMaintenanceScenarioResult &result)
 	};
 }
 
+nlohmann::json ToJson(const BotLootRequestScenarioResult &result)
+{
+	return {
+		{"proved", result.proved}, {"reason", result.reason}, {"scenario", result.scenario},
+		{"database_mutation", result.database_mutation}, {"owner", ToJson(result.owner)},
+		{"requesting_bot", ToJson(result.requesting_bot)}, {"grouped_bot_count", result.grouped_bot_count},
+		{"inferior_item_id", result.inferior_item_id}, {"upgrade_item_id", result.upgrade_item_id},
+		{"upgrade_item_name", result.upgrade_item_name}, {"target_slot", result.target_slot},
+		{"target_slot_name", result.target_slot_name}, {"upgrade_score", result.upgrade_score},
+		{"deterministic_reason", result.deterministic_reason},
+		{"positive_request_count", result.positive_request_count},
+		{"downgrade_suppressed", result.downgrade_suppressed},
+		{"duplicate_suppressed", result.duplicate_suppressed},
+		{"replay_cooldown_seconds", result.replay_cooldown_seconds},
+		{"looted_item_reached_looter", result.looted_item_reached_looter},
+		{"loot_completed", result.loot_completed},
+		{"loot_completion_elapsed_ms", result.loot_completion_elapsed_ms},
+		{"loot_completion_budget_ms", result.loot_completion_budget_ms},
+		{"dialogue_pending_at_loot_completion", result.dialogue_pending_at_loot_completion},
+		{"normal_processing_responsive", result.normal_processing_responsive},
+		{"bot_inventory_unchanged", result.bot_inventory_unchanged},
+		{"provider_independent", result.provider_independent},
+		{"provider_failure_observed", result.provider_failure_observed}, {"runtime", ToJson(result.runtime)},
+	};
+}
+
+nlohmann::json ToJson(const BotLootRequestFailureCleanupResult &result)
+{
+	return {
+		{"proved", result.proved}, {"reason", result.reason}, {"scenario", result.scenario},
+		{"failure_induced_after_overrides", result.failure_induced_after_overrides},
+		{"rules_restored", result.rules_restored},
+		{"fixture_entities_cleaned", result.fixture_entities_cleaned},
+		{"delivery_state_restored", result.delivery_state_restored},
+		{"dialogue_provider_state_restored", result.dialogue_provider_state_restored},
+		{"decision_observer_state_restored", result.decision_observer_state_restored},
+		{"runtime", ToJson(result.runtime)},
+	};
+}
+
 nlohmann::json ToJson(const ActorLedBotPartyScenarioResult &result)
 {
 	nlohmann::json followers = nlohmann::json::array();
@@ -704,6 +744,14 @@ bool ServeHttp(const HttpServerOptions &options)
 
 	api.Post("/api/v1/harness/scenarios/owned-bot-healing/moderate-pressure-fast-heal", [&runtime](const auto &, auto &res) {
 		SetJson(res, ToJson(runtime.RunOwnedBotPressureHealingModeratePressureFastHeal()));
+	});
+
+	api.Post("/api/v1/harness/scenarios/bot-loot-request/upgrade", [&runtime](const auto &, auto &res) {
+		SetJson(res, ToJson(runtime.RunBotLootRequestUpgrade()));
+	});
+
+	api.Post("/api/v1/harness/scenarios/bot-loot-request/failure-cleanup", [&runtime](const auto &, auto &res) {
+		SetJson(res, ToJson(runtime.RunBotLootRequestFailureCleanupProof()));
 	});
 
 	api.Post("/api/v1/harness/scenarios/actor-led-bot-party", [&runtime](const auto &req, auto &res) {

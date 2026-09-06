@@ -40,8 +40,10 @@
 #include "zone/string_ids.h"
 #include "zone/worldserver.h"
 
+#include <atomic>
 #include <iostream>
 #include <list>
+#include <utility>
 
 using json = nlohmann::json;
 
@@ -54,78 +56,100 @@ extern QueryServ           *QServ;
 namespace {
 
 BotLootRequest::DeliveryState bot_loot_request_delivery_state;
-
-void MaybeSendBotLootRequest(
-	Client *looter,
-	const EQ::ItemInstance *inst,
-	Group *group,
-	const std::string &item_link,
-	uint64_t loot_event_id
-)
-{
-	if (!looter || !inst || !inst->GetItem() || !group || !RuleB(Chat, BotLootRequestEnabled)) {
-		return;
-	}
-
-	std::list<Bot *> grouped_bots;
-	group->GetBotList(grouped_bots);
-	if (grouped_bots.empty()) {
-		return;
-	}
-
-	BotLootRequest::SuccessfulLootEvent event{
-		.looter_stable_id = looter->CharacterID(),
-		.loot_event_id = loot_event_id,
-		.looter_name = looter->GetCleanName(),
-		.looted_item = inst->GetItem(),
-		.looted_item_instance = inst,
-		.looted_item_link = item_link
-	};
-
-	for (auto *bot : grouped_bots) {
-		if (!bot) {
-			continue;
-		}
-
-		BotLootRequest::GroupedBotSnapshot bot_snapshot{
-			.name_stable_id = bot->GetBotID(),
-			.name = bot->GetCleanName(),
-			.race_id = bot->GetBaseRace(),
-			.class_id = bot->GetClass(),
-			.level = bot->GetLevel(),
-			.ranged_mode = bot->IsBotRanged()
-		};
-
-		for (int slot_id = EQ::invslot::EQUIPMENT_BEGIN; slot_id <= EQ::invslot::EQUIPMENT_END; ++slot_id) {
-			if (const auto *bot_item = bot->GetBotItem(slot_id); bot_item && bot_item->GetItem()) {
-				bot_snapshot.equipped_items.push_back({
-					.item = bot_item->GetItem(),
-					.item_instance = bot_item,
-					.slot_id = slot_id
-				});
-			}
-		}
-
-		event.grouped_bots.push_back(bot_snapshot);
-	}
-
-	const auto request = BotLootRequest::PlanVisibleRequestForSuccessfulLoot(
-		event,
-		{
-			.enabled = RuleB(Chat, BotLootRequestEnabled),
-			.cooldown_seconds = RuleI(Chat, BotLootRequestCooldownSeconds),
-			.current_time_ms = Timer::GetCurrentTime()
-		},
-		bot_loot_request_delivery_state
-	);
-	if (!request.produced) {
-		return;
-	}
-
-	ZoneBotLootRequestRuntime::EnqueueLootRequestDialogue(request, event);
-}
+ZoneBotLootRequestRuntime::DecisionObserver bot_loot_request_decision_observer;
 
 } // namespace
+
+namespace ZoneBotLootRequestRuntime {
+
+void SetDecisionObserver(DecisionObserver observer)
+{
+	bot_loot_request_decision_observer = std::move(observer);
+}
+
+void ClearDecisionObserver()
+{
+	bot_loot_request_decision_observer = {};
+}
+
+DecisionObserver CaptureDecisionObserver()
+{
+	return bot_loot_request_decision_observer;
+}
+
+BotLootRequest::DeliveryState CaptureDeliveryState()
+{
+	return bot_loot_request_delivery_state;
+}
+
+void RestoreDeliveryState(BotLootRequest::DeliveryState state)
+{
+	bot_loot_request_delivery_state = std::move(state);
+}
+
+BotLootRequest::Request EvaluateSuccessfulLoot(Client *looter, const EQ::ItemInstance *inst, Group *group,
+	const std::string &item_link, uint64_t loot_event_id)
+{
+	BotLootRequest::SuccessfulLootEvent event;
+	if (looter && inst && inst->GetItem() && group && RuleB(Chat, BotLootRequestEnabled)) {
+		event.looter_stable_id = looter->CharacterID();
+		event.loot_event_id = loot_event_id;
+		event.looter_name = looter->GetCleanName();
+		event.looted_item = inst->GetItem();
+		event.looted_item_instance = inst;
+		event.looted_item_link = item_link;
+
+		std::list<Bot *> grouped_bots;
+		group->GetBotList(grouped_bots);
+		for (auto *bot : grouped_bots) {
+			if (!bot) {
+				continue;
+			}
+			BotLootRequest::GroupedBotSnapshot snapshot{
+				.name_stable_id = bot->GetBotID(),
+				.name = bot->GetCleanName(),
+				.race_id = bot->GetBaseRace(),
+				.class_id = bot->GetClass(),
+				.level = bot->GetLevel(),
+				.ranged_mode = bot->IsBotRanged()
+			};
+			for (int slot = EQ::invslot::EQUIPMENT_BEGIN; slot <= EQ::invslot::EQUIPMENT_END; ++slot) {
+				if (const auto *item = bot->GetBotItem(slot); item && item->GetItem()) {
+					snapshot.equipped_items.push_back({item->GetItem(), item, slot});
+				}
+			}
+			event.grouped_bots.push_back(std::move(snapshot));
+		}
+	}
+
+	auto request = BotLootRequest::PlanVisibleRequestForSuccessfulLoot(
+		event,
+		{RuleB(Chat, BotLootRequestEnabled), RuleI(Chat, BotLootRequestCooldownSeconds), Timer::GetCurrentTime()},
+		bot_loot_request_delivery_state
+	);
+	if (bot_loot_request_decision_observer) {
+		bot_loot_request_decision_observer({
+			.produced = request.produced,
+			.looter_stable_id = event.looter_stable_id,
+			.loot_event_id = event.loot_event_id,
+			.requesting_bot_stable_id = request.requesting_bot_stable_id,
+			.requesting_bot_name = request.requesting_bot_name,
+			.item_id = event.looted_item ? event.looted_item->ID : 0,
+			.item_name = request.plain_item_name,
+			.target_slot = request.target_slot,
+			.target_slot_name = request.target_slot_name,
+			.upgrade_score = request.upgrade_score,
+			.reason = request.reason_summary,
+			.deterministic_message = request.message,
+		});
+	}
+	if (request.produced) {
+		EnqueueLootRequestDialogue(request, event);
+	}
+	return request;
+}
+
+} // namespace ZoneBotLootRequestRuntime
 
 void Corpse::SendEndLootErrorPacket(Client *client)
 {
@@ -1782,9 +1806,11 @@ void Corpse::LootCorpseItem(Client *c, const EQApplicationPacket *app)
 				c->UpdateTasksOnLoot(this, item->ID, count);
 			}
 
+			// Entity IDs and corpse slots are both reusable. A process-lifetime sequence makes
+			// distinct successful loot operations distinct while retaining a stable ID for replay.
+			static std::atomic<uint64_t> next_bot_loot_request_event_id{uint64_t{1} << 63};
 			const uint64_t bot_loot_request_event_id =
-				(static_cast<uint64_t>(m_corpse_db_id) << 32) |
-				static_cast<uint32_t>(item_data ? item_data->lootslot : 0);
+				next_bot_loot_request_event_id.fetch_add(1, std::memory_order_relaxed);
 
 			/* Remove it from Corpse */
 				if (item_data) {
@@ -1837,7 +1863,9 @@ void Corpse::LootCorpseItem(Client *c, const EQApplicationPacket *app)
 						c->GetName(),
 						linker.Link().c_str()
 					);
-					MaybeSendBotLootRequest(c, inst, g, linker.Link(), bot_loot_request_event_id);
+					ZoneBotLootRequestRuntime::EvaluateSuccessfulLoot(
+						c, inst, g, linker.Link(), bot_loot_request_event_id
+					);
 				}
 			else {
 				Raid *r = c->GetRaid();

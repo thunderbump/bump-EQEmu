@@ -226,7 +226,7 @@ fixture_home="$(mktemp -d)"
 trap 'rm -rf "$fixture_home"' EXIT
 mkdir -p "$fixture_home/server"
 printf '%s\n' '{"server":{"database":{},"qsdatabase":{}}}' >"$fixture_home/server/eqemu_config.json"
-HOME="$fixture_home" EQEMU_DB_PASSWORD=fixture bash -c "$payload"
+HOME="$fixture_home" EQEMU_DB_PASSWORD=fixture ZONE_HARNESS_PORT=9099 ZONE_HARNESS_LOG_FILE=/tmp/zone-harness-test.log bash -c "$payload"
 SCRIPT
   chmod +x "$fake_bin/docker-compose"
 }

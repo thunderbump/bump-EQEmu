@@ -1186,7 +1186,13 @@ Request PlanVisibleRequestForSuccessfulLoot(
 	}
 
 	if (event.loot_event_id != 0) {
+		constexpr size_t max_remembered_loot_events = 16384;
 		delivery_state.delivered_loot_events.insert(event.loot_event_id);
+		delivery_state.delivered_loot_event_order.push_back(event.loot_event_id);
+		while (delivery_state.delivered_loot_event_order.size() > max_remembered_loot_events) {
+			delivery_state.delivered_loot_events.erase(delivery_state.delivered_loot_event_order.front());
+			delivery_state.delivered_loot_event_order.pop_front();
+		}
 	}
 
 	if (settings.cooldown_seconds > 0) {
@@ -1324,14 +1330,13 @@ EnqueueResult DelayedDialogueQueue::Enqueue(
 bool DelayedDialogueQueue::PopReadyResult(const CurrentGroupResolver &resolver, DialogueResult &result)
 {
 	DelayedDialogueCompletion completion;
-	if (!provider_.PopCompletion(completion)) {
-		return false;
-	}
-
-	const auto pending_request = pending_requests_.find(completion.request_id);
-	if (pending_request == pending_requests_.end()) {
-		return false;
-	}
+	decltype(pending_requests_)::iterator pending_request;
+	do {
+		if (!provider_.PopCompletion(completion)) {
+			return false;
+		}
+		pending_request = pending_requests_.find(completion.request_id);
+	} while (pending_request == pending_requests_.end());
 
 	const auto request = std::move(pending_request->second);
 	pending_requests_.erase(pending_request);
@@ -1365,6 +1370,25 @@ bool DelayedDialogueQueue::PopReadyResult(const CurrentGroupResolver &resolver, 
 
 	result = GeneratedDialogueResult(request, speech_line);
 	return true;
+}
+
+void DelayedDialogueQueue::CancelRequests(
+	uint32_t looter_stable_id,
+	const std::vector<uint32_t> &requesting_bot_stable_ids
+)
+{
+	for (auto request = pending_requests_.begin(); request != pending_requests_.end();) {
+		const auto &pending = request->second;
+		const bool bot_matches = std::find(
+			requesting_bot_stable_ids.begin(), requesting_bot_stable_ids.end(), pending.requesting_bot_stable_id
+		) != requesting_bot_stable_ids.end();
+		if (pending.looter_stable_id == looter_stable_id && bot_matches) {
+			request = pending_requests_.erase(request);
+		}
+		else {
+			++request;
+		}
+	}
 }
 
 OllamaDelayedLootRequestDialogueProvider::OllamaDelayedLootRequestDialogueProvider()

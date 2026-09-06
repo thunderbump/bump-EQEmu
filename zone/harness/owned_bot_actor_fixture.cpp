@@ -19,6 +19,7 @@
 #include "zone/zonedb.h"
 
 #include <algorithm>
+#include <atomic>
 #include <utility>
 
 extern EntityList entity_list;
@@ -26,6 +27,22 @@ extern EntityList entity_list;
 namespace EQ::ZoneHarness {
 
 namespace {
+
+// Synthetic owners participate in ordinary group and inventory code, but have
+// no network stream for Client::Process to poll during bounded harness ticks.
+class SyntheticOwnerClient final : public Client {
+public:
+	bool Process() override { return true; }
+};
+
+uint32_t NextHarnessGroupID()
+{
+	// One-off harness zones do not connect to world to receive its normal group
+	// ID lease. Keep synthetic groups process-local and outside the usual low-ID
+	// range while still registering them through EntityList.
+	static std::atomic<uint32_t> next_group_id{0x70000000};
+	return next_group_id.fetch_add(1, std::memory_order_relaxed);
+}
 
 ActorEventEntity EntityFor(Mob *mob)
 {
@@ -115,9 +132,14 @@ bool OwnedBotActorFixture::SetUpOwnedBotSolo(const OwnedBotActorConfig &config)
 
 Client *OwnedBotActorFixture::CreateSyntheticOwnerClient(const std::string &owner_name, uint32_t owner_character_id, uint8_t level)
 {
-	auto *synthetic_owner = new Client();
+	auto *synthetic_owner = new SyntheticOwnerClient();
 	synthetic_owner->TempName(owner_name.c_str());
 	synthetic_owner->SetCharacterId(owner_character_id);
+	// Headless clients have no zone-entry packet to select an inventory layout.
+	// Use the current supported layout so ordinary corpse-slot translation and
+	// inventory operations have the same lookup tables as a connected client.
+	synthetic_owner->SetClientVersion(EQ::versions::ClientVersion::RoF2);
+	synthetic_owner->GetInv().SetInventoryVersion(EQ::versions::ClientVersion::RoF2);
 	synthetic_owner->Mob::SetLevel(level);
 	synthetic_owner->SetHP(10000);
 	synthetic_owner->SetMana(10000);
@@ -194,7 +216,7 @@ bool OwnedBotActorFixture::SetUpOwnedBotGroup(const OwnedBotActorConfig &config)
 		return false;
 	}
 
-	entity_list.AddGroup(group);
+	entity_list.AddGroup(group, NextHarnessGroupID());
 	group_id = group->GetID();
 	if (!group_id) {
 		failure_reason = "group_registration_failed";
@@ -279,7 +301,7 @@ bool OwnedBotActorFixture::SetUpOwnedBotParty(const OwnedBotPartyConfig &config)
 		}
 	}
 
-	entity_list.AddGroup(group);
+	entity_list.AddGroup(group, NextHarnessGroupID());
 	group_id = group->GetID();
 	if (!group_id) {
 		failure_reason = "group_registration_failed";
@@ -306,7 +328,10 @@ Bot *OwnedBotActorFixture::AddOwnedGroupBot(const OwnedBotActorConfig &config, c
 	added_bot->GMMove(position.x, position.y, position.z, position.w);
 
 	if (!group->AddMember(added_bot)) {
-		entity_list.RemoveMob(added_bot->GetID());
+		// CreateOwnedBot registers both EntityList indexes. Use the fixture's
+		// dual-index removal path so a rejected group member cannot leave a
+		// dangling bot_list entry after RemoveMob deletes it.
+		RemoveMob(added_bot);
 		return nullptr;
 	}
 
@@ -474,6 +499,12 @@ bool OwnedBotActorFixture::RemoveMob(Mob *mob)
 	const bool removed_actor = actor == mob;
 	const bool removed_primary_target = primary_target == mob;
 	const bool removed_secondary_target = secondary_target == mob;
+	// Bots are indexed in both mob_list and bot_list. Remove the secondary
+	// index first so RemoveMob cannot leave a dangling Bot pointer that later
+	// fixture cleanup (or ordinary entity processing) dereferences.
+	if (mob->IsBot()) {
+		entity_list.RemoveBot(entity_id);
+	}
 	if (!entity_list.RemoveMob(entity_id)) {
 		return false;
 	}
@@ -527,6 +558,9 @@ void OwnedBotActorFixture::Reset()
 	}
 
 	for (auto id = mob_ids.rbegin(); id != mob_ids.rend(); ++id) {
+		if (auto *mob = entity_list.GetMob(*id); mob && mob->IsBot()) {
+			entity_list.RemoveBot(*id);
+		}
 		entity_list.RemoveMob(*id);
 	}
 	mob_ids.clear();

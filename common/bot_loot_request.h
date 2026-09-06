@@ -101,6 +101,7 @@ struct Request {
 
 struct DeliveryState {
 	std::unordered_set<uint64_t> delivered_loot_events;
+	std::deque<uint64_t> delivered_loot_event_order;
 	std::unordered_map<uint64_t, uint32_t> cooldown_start_ms_by_looter_bot;
 };
 
@@ -218,6 +219,9 @@ public:
 		const DialogueProviderSettings &provider_settings
 	);
 	bool PopReadyResult(const CurrentGroupResolver &resolver, DialogueResult &result);
+	// Forget queued work owned by a fixture or disconnected group. Provider completions may
+	// still arrive, but PopReadyResult discards completions without a pending request.
+	void CancelRequests(uint32_t looter_stable_id, const std::vector<uint32_t> &requesting_bot_stable_ids);
 
 private:
 	DelayedDialogueProvider &provider_;
