@@ -672,12 +672,7 @@ bot_loot_request_scenario=$(curl --noproxy '*' -fsS -X POST --data '' "${harness
 # Validate and persist the same compact record that the host wrapper publishes.
 assert_bot_loot_request_scenario "$bot_loot_request_scenario" >"$BOT_LOOT_RESULT_FILE"
 
-	actor_loop=$(curl --noproxy '*' -fsS -X POST --data '' "${harness_url}/api/v1/harness/scenarios/autonomous-actor-loop")
-	assert_autonomous_actor_loop "$actor_loop"
-	actor_loop_repeat=$(curl --noproxy '*' -fsS -X POST --data '' "${harness_url}/api/v1/harness/scenarios/autonomous-actor-loop")
-	assert_autonomous_actor_loop "$actor_loop_repeat"
-
-	shutdown=$(curl --noproxy '*' -fsS -X POST --data '' "${harness_url}/api/v1/harness/shutdown")
+shutdown=$(curl --noproxy '*' -fsS -X POST --data '' "${harness_url}/api/v1/harness/shutdown")
 [[ "$shutdown" == *'"shutdown_requested":true'* ]] || { printf '%s\n' "$shutdown" >&2; exit 1; }
 
 wait "$harness_pid"

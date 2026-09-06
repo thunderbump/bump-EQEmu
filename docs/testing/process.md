@@ -431,10 +431,6 @@ HTTP server receives a zero-length request instead of rejecting a missing `Conte
   upgrade item, target slot, positive score, and deterministic reason; a downgrade makes no request; replay is
   duplicate-suppressed; the item reaches the looter within the responsiveness budget while dialogue remains
   pending; Bot inventory stays unchanged; and provider behavior does not decide eligibility.
-- `POST /api/v1/harness/scenarios/autonomous-actor-loop` proves one owned spawned bot can act as a bounded
-  **Autonomous Actor** harness primitive by enqueueing target and say actions, processing a small tick budget,
-  observing actor-scoped perception, and verifying cursor-based `target_changed` and `speech_emitted`
-  **Actor Events** without default persistent DB mutation.
 - `POST /api/v1/harness/shutdown` requests clean shutdown.
 
 Expected validation result: the wrapper exits `0` and prints one concise machine-readable Bot Loot Request line,
