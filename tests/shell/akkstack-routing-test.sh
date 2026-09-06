@@ -272,7 +272,7 @@ if [[ -z "\$payload" ]]; then
 fi
 
 printf '%s\n' "\$payload" >"$payload_file"
-EQEMU_DB_PASSWORD=fixture ZONE_HARNESS_PORT=9099 bash -lc "\$payload"
+EQEMU_DB_PASSWORD=fixture ZONE_HARNESS_PORT=9099 ZONE_HARNESS_LOG_FILE=/tmp/zone-harness-test.log bash -lc "\$payload"
 EOF
   chmod +x "$fake_bin/docker-compose"
 }
@@ -464,11 +464,16 @@ test_zone_harness_command_checks_build_artifacts_before_zone_launch() {
   assert_contains "$command_text" "require_runtime_binary ./bin/shared_memory"
   assert_contains "$command_text" "tier3-harness requires a prior Tier 1 build or a combined build+harness profile"
   assert_contains "$command_text" "./bin/zone tests:serve-http"
+  assert_contains "$command_text" "--max-runtime-seconds 300"
   assert_contains "$(cat "$capture_file")" "run --rm --no-deps -T"
   assert_contains "$(cat "$fixture_repo/scripts/smoke-zone-harness.sh")" 'mktemp -d "$repo_root/.zone-harness-result.XXXXXX"'
+  assert_contains "$(cat "$capture_file")" 'ZONE_HARNESS_LOG_FILE=/tmp/zone-harness-result/zone_harness.out'
   assert_contains "$(cat "$capture_file")" 'BOT_LOOT_RESULT_FILE=/tmp/zone-harness-result/result.json'
   assert_contains "$(cat "$capture_file")" ':/tmp/zone-harness-result'
+  assert_contains "$command_text" '>"$harness_log" 2>&1'
   assert_contains "$command_text" 'assert_bot_loot_request_scenario "$bot_loot_request_scenario" >"$BOT_LOOT_RESULT_FILE"'
+  assert_contains "$(cat "$fixture_repo/scripts/smoke-zone-harness.sh")" 'compose_status=$?'
+  assert_contains "$(cat "$fixture_repo/scripts/smoke-zone-harness.sh")" '[[ -s "$harness_log" ]] && cat "$harness_log" >&2'
   assert_contains "$(cat "$fixture_repo/scripts/smoke-zone-harness.sh")" 'cat "$result_file"'
   assert_not_contains "$(cat "$fixture_repo/scripts/smoke-zone-harness.sh")" "jq -c '{scenario,proved,bot:.requesting_bot.name"
   assert_contains "$output" "tier3-harness requires a prior Tier 1 build"

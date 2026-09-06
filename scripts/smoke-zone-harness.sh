@@ -47,6 +47,7 @@ compose_override="$(mktemp)"
 # /tmp namespace that is not the Docker daemon's /tmp namespace.
 result_dir="$(mktemp -d "$repo_root/.zone-harness-result.XXXXXX")"
 result_file="$result_dir/result.json"
+harness_log="$result_dir/zone_harness.out"
 chmod 0777 "$result_dir"
 
 cat >"$compose_override" <<'COMPOSE'
@@ -80,6 +81,7 @@ command -v docker-compose >/dev/null 2>&1 || die "docker-compose is required"
 set -euo pipefail
 
 port="${ZONE_HARNESS_PORT:?ZONE_HARNESS_PORT is required}"
+harness_log="${ZONE_HARNESS_LOG_FILE:?ZONE_HARNESS_LOG_FILE is required}"
 
 until mysqladmin status -ueqemu -p"$EQEMU_DB_PASSWORD" -h mariadb --silent; do
   sleep 1
@@ -95,8 +97,8 @@ cd "$runtime"
 
 dump_harness_log() {
   status="${1:-$?}"
-  if [[ "$status" -ne 0 && -f logs/zone_harness.out ]]; then
-    cat logs/zone_harness.out >&2
+  if [[ "$status" -ne 0 && -f "$harness_log" ]]; then
+    cat "$harness_log" >&2
   fi
   exit "$status"
 }
@@ -138,7 +140,7 @@ if ! ./bin/shared_memory > logs/shared_memory.out 2>&1; then
   exit 1
 fi
 
-./bin/zone tests:serve-http --zone qrg --port ${port} --max-runtime-seconds 180 > logs/zone_harness.out 2>&1 &
+./bin/zone tests:serve-http --zone qrg --port ${port} --max-runtime-seconds 300 >"$harness_log" 2>&1 &
 harness_pid=$!
 trap 'status=$?; kill -TERM "$harness_pid" 2>/dev/null || true; dump_harness_log "$status"' EXIT
 
@@ -148,7 +150,7 @@ for _ in $(seq 1 180); do
     break
   fi
   if ! kill -0 "$harness_pid" 2>/dev/null; then
-    cat logs/zone_harness.out >&2
+    cat "$harness_log" >&2
     exit 1
   fi
   sleep 1
@@ -703,11 +705,19 @@ ZONE_HARNESS_CONTAINER
   # Disable Compose's pseudo-terminal and bridge the compact result through a
   # temporary directory mount. Printing it from this host-side wrapper ensures the
   # Validation Worker captures it even when Compose consumes container output.
+  compose_status=0
   "${harness_compose[@]}" run --rm --no-deps -T \
     -e ZONE_HARNESS_PORT="$port" \
+    -e ZONE_HARNESS_LOG_FILE=/tmp/zone-harness-result/zone_harness.out \
     -e BOT_LOOT_RESULT_FILE=/tmp/zone-harness-result/result.json \
     -v "$result_dir:/tmp/zone-harness-result" \
-    --entrypoint bash eqemu-server -lc "$container_script"
+    --entrypoint bash eqemu-server -lc "$container_script" || compose_status=$?
+  if [[ "$compose_status" -ne 0 ]]; then
+    # Compose output can be lost when this wrapper itself is redirected. The
+    # bind-mounted log is a deterministic fallback for Validation Worker logs.
+    [[ -s "$harness_log" ]] && cat "$harness_log" >&2
+    die "Zone Harness container failed with status $compose_status"
+  fi
   [[ -s "$result_file" ]] || die "Bot Loot Request scenario produced no structured result"
   cat "$result_file"
 )

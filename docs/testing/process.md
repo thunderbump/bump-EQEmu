@@ -374,7 +374,7 @@ timing. Those still belong in the live server and manual tiers below.
 The one-off harness process command is:
 
 ```sh
-zone tests:serve-http --zone qrg --port 9099 --max-runtime-seconds 180
+zone tests:serve-http --zone qrg --port 9099 --max-runtime-seconds 300
 ```
 
 In normal repo validation, prefer the wrapper instead of hand-assembling the AkkStack container, temporary runtime
@@ -408,7 +408,7 @@ recreate the long-running database container. The temporary runtime should link 
 
 Inside the one-off `eqemu-server` container, the wrapper waits for the validation MariaDB service through Docker
 service DNS, builds a temporary runtime directory that links the repo build binaries and initialized server
-assets, runs `zone tests:serve-http --zone qrg --port 9099 --max-runtime-seconds 180`, curls localhost from inside
+assets, runs `zone tests:serve-http --zone qrg --port 9099 --max-runtime-seconds 300`, curls localhost from inside
 the same container, and checks:
 
 - `GET /api/v1/harness/health` returns healthy JSON.
@@ -446,7 +446,7 @@ the same container, and checks:
 - `POST /api/v1/harness/shutdown` requests clean shutdown.
 
 Expected validation result: the wrapper exits `0` and prints one concise machine-readable Bot Loot Request line,
-for example `{"scenario":"bot-loot-request-upgrade","proved":true,"bot":"HarnessLootUpgradeBot","item_id":1001,"slot":"Head","score":17,"reason":"higher armor value"}` (fixture values may differ). The Compose run disables pseudo-TTY allocation and writes the compact result through a temporary directory mount; the host wrapper then prints it to stdout. This preserves the line in the Validation Worker's repository-owned Tier 3 log evidence rather than only displaying it inside Compose. Generated dialogue wording is intentionally absent. On failure the wrapper retains useful diagnostics by printing the failed HTTP response, a compact scenario error payload, or `logs/zone_harness.out` from the temporary runtime to stderr.
+for example `{"scenario":"bot-loot-request-upgrade","proved":true,"bot":"HarnessLootUpgradeBot","item_id":1001,"slot":"Head","score":17,"reason":"higher armor value"}` (fixture values may differ). The Compose run disables pseudo-TTY allocation and writes the compact result through a temporary directory mount; the host wrapper then prints it to stdout. This preserves the line in the Validation Worker's repository-owned Tier 3 log evidence rather than only displaying it inside Compose. Generated dialogue wording is intentionally absent. The 300-second process bound accommodates the complete canonical scenario sequence; each responsiveness assertion retains its own narrower deadline. On failure, the same mount preserves the zone log long enough for the host wrapper to copy it to stderr, so redirected Validation Worker evidence retains diagnostics even when Compose output is unavailable.
 
 Fixture and database expectations:
 
