@@ -374,7 +374,7 @@ timing. Those still belong in the live server and manual tiers below.
 The one-off harness process command is:
 
 ```sh
-zone tests:serve-http --zone qrg --port 9099 --max-runtime-seconds 30
+zone tests:serve-http --zone qrg --port 9099 --max-runtime-seconds 180
 ```
 
 In normal repo validation, prefer the wrapper instead of hand-assembling the AkkStack container, temporary runtime
@@ -408,7 +408,7 @@ recreate the long-running database container. The temporary runtime should link 
 
 Inside the one-off `eqemu-server` container, the wrapper waits for the validation MariaDB service through Docker
 service DNS, builds a temporary runtime directory that links the repo build binaries and initialized server
-assets, runs `zone tests:serve-http --zone qrg --port 9099 --max-runtime-seconds 30`, curls localhost from inside
+assets, runs `zone tests:serve-http --zone qrg --port 9099 --max-runtime-seconds 180`, curls localhost from inside
 the same container, and checks:
 
 - `GET /api/v1/harness/health` returns healthy JSON.
@@ -428,6 +428,14 @@ the same container, and checks:
 - `POST /api/v1/harness/scenarios/owned-bot-healing/moderate-pressure-fast-heal` proves one representative
   pressure-aware owned-bot healing path by observing a normal heal cast-start event for a synthetic owned target
   under in-memory combat pressure.
+- `POST /api/v1/harness/scenarios/bot-loot-request/failure-cleanup` deliberately fails after installing the
+  Bot Loot Request fixture overrides and proves that rule, entity, delivery, provider, and decision-observer state
+  is restored by the failure path.
+- `POST /api/v1/harness/scenarios/bot-loot-request/upgrade` runs the ordinary corpse-loot path with a synthetic
+  owner and grouped owned Bots. It proves exactly one positive structured decision identifies the requesting Bot,
+  upgrade item, target slot, positive score, and deterministic reason; a downgrade makes no request; replay is
+  duplicate-suppressed; the item reaches the looter within the responsiveness budget while dialogue remains
+  pending; Bot inventory stays unchanged; and provider behavior does not decide eligibility.
 - `POST /api/v1/harness/scenarios/autonomous-actor-loop` proves one owned spawned bot can act as a bounded
   **Autonomous Actor** harness primitive by enqueueing target and say actions, processing a small tick budget,
   observing actor-scoped perception, and verifying cursor-based `target_changed` and `speech_emitted`
@@ -437,8 +445,8 @@ the same container, and checks:
   follower bots can instead source target, assist, and leash intent from a narrow `ActorCommandSource` seam.
 - `POST /api/v1/harness/shutdown` requests clean shutdown.
 
-Expected validation result: the wrapper exits `0` with no scenario payload printed. On failure it prints either
-the failed HTTP response, a compact scenario error payload, or `logs/zone_harness.out` from the temporary runtime.
+Expected validation result: the wrapper exits `0` and prints one concise machine-readable Bot Loot Request line,
+for example `{"scenario":"bot-loot-request-upgrade","proved":true,"bot":"HarnessLootUpgradeBot","item_id":1001,"slot":"Head","score":17,"reason":"higher armor value"}` (fixture values may differ). The Compose run disables pseudo-TTY allocation and writes the compact result through a temporary directory mount; the host wrapper then prints it to stdout. This preserves the line in the Validation Worker's repository-owned Tier 3 log evidence rather than only displaying it inside Compose. Generated dialogue wording is intentionally absent. On failure the wrapper retains useful diagnostics by printing the failed HTTP response, a compact scenario error payload, or `logs/zone_harness.out` from the temporary runtime to stderr.
 
 Fixture and database expectations:
 
@@ -452,6 +460,11 @@ Fixture and database expectations:
 - The default owned-bot pressure-aware healing scenario also reports `database_mutation` beginning with `none:`.
   It uses in-process rule overrides that are restored before the scenario returns and does not persist gameplay
   state, bot rows, or rule values.
+- The Bot Loot Request scenarios are `read-mostly/runtime-fixture`. They read known item content, but the owner,
+  grouped Bots, equipped inferior item, corpse, loot, and inventory observations are in-memory. Their temporary
+  rule and Bot Loot Request delivery/provider/observer overrides are scope-restored on success and induced
+  failure; no owner, Bot, corpse, inventory, or rule rows are persisted. The failure-cleanup endpoint explicitly
+  verifies that restoration contract.
 - The default headless-client target scenario reports `database_mutation` beginning with `none:` and should leave
   no unreported `target_changed` cleanup events after its returned `event_cursor_end`.
 
@@ -476,6 +489,11 @@ healer bot, one owned heal target bot, and one hostile NPC in ordinary zone proc
 in-memory HP, combat, and incoming-pressure shortcuts up front, then waits for a normal `spell_cast_started`
 Actor Event. The representative path is a `RegularHeal` request that pressure-aware selection escalates to
 `FastHeals`; broad pressure and heal-category matrices remain in deterministic unit coverage.
+
+The Bot Loot Request upgrade scenario is separate from conserved Autonomous Actor item acquisition. The synthetic
+owner performs ordinary corpse looting while grouped owned Bots only evaluate the item and plan an advisory
+request. This scenario does not create Actor Holdings, call `AcquireOneItem`, transfer the item to a Bot, or
+replace Bot equipment. Assertions use structured gameplay facts and never generated or remote dialogue wording.
 
 The autonomous actor loop harness scenario is intentionally narrower. It uses the same non-persistent owned-bot
 fixture to prove a first perception-action-event loop: enqueue bounded target and say actions for one owned bot,

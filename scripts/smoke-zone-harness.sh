@@ -43,6 +43,11 @@ if [[ "$AKKSTACK_DRY_RUN" -eq 1 ]]; then
 fi
 
 compose_override="$(mktemp)"
+# Keep the bridge below the checkout: Validation Workers may have a private
+# /tmp namespace that is not the Docker daemon's /tmp namespace.
+result_dir="$(mktemp -d "$repo_root/.zone-harness-result.XXXXXX")"
+result_file="$result_dir/result.json"
+chmod 0777 "$result_dir"
 
 cat >"$compose_override" <<'COMPOSE'
 services:
@@ -52,6 +57,7 @@ COMPOSE
 
 cleanup() {
   rm -f "$compose_override"
+  rm -rf "$result_dir"
 }
 trap cleanup EXIT
 
@@ -88,7 +94,7 @@ jq '.server.database.host = "mariadb" | .server.database.port = "3306" | .server
 cd "$runtime"
 
 dump_harness_log() {
-  status=$?
+  status="${1:-$?}"
   if [[ "$status" -ne 0 && -f logs/zone_harness.out ]]; then
     cat logs/zone_harness.out >&2
   fi
@@ -127,12 +133,17 @@ link_runtime_dir shared ~/server/shared
 link_runtime_dir plugins ~/server/quests/plugins ~/server/plugins
 link_runtime_dir lua_modules ~/server/quests/lua_modules ~/server/lua_modules
 
-./bin/zone tests:serve-http --zone qrg --port ${port} --max-runtime-seconds 30 > logs/zone_harness.out 2>&1 &
+if ! ./bin/shared_memory > logs/shared_memory.out 2>&1; then
+  cat logs/shared_memory.out >&2
+  exit 1
+fi
+
+./bin/zone tests:serve-http --zone qrg --port ${port} --max-runtime-seconds 180 > logs/zone_harness.out 2>&1 &
 harness_pid=$!
-trap 'kill -TERM "$harness_pid" 2>/dev/null || true; dump_harness_log' EXIT
+trap 'status=$?; kill -TERM "$harness_pid" 2>/dev/null || true; dump_harness_log "$status"' EXIT
 
 health=''
-for _ in $(seq 1 60); do
+for _ in $(seq 1 180); do
   if health=$(curl -fsS "http://127.0.0.1:${port}/api/v1/harness/health" 2>/dev/null); then
     break
   fi
@@ -667,7 +678,8 @@ bot_loot_request_cleanup=$(curl -fsS -X POST "http://127.0.0.1:${port}/api/v1/ha
 assert_bot_loot_request_failure_cleanup "$bot_loot_request_cleanup"
 
 bot_loot_request_scenario=$(curl -fsS -X POST "http://127.0.0.1:${port}/api/v1/harness/scenarios/bot-loot-request/upgrade")
-assert_bot_loot_request_scenario "$bot_loot_request_scenario"
+assert_bot_loot_request_scenario "$bot_loot_request_scenario" >/dev/null
+printf '%s\n' "$bot_loot_request_scenario" >"$BOT_LOOT_RESULT_FILE"
 
 	actor_loop=$(curl -fsS -X POST "http://127.0.0.1:${port}/api/v1/harness/scenarios/autonomous-actor-loop")
 	assert_autonomous_actor_loop "$actor_loop"
@@ -688,5 +700,14 @@ wait "$harness_pid"
 trap - EXIT
 ZONE_HARNESS_CONTAINER
 )"
-  "${harness_compose[@]}" run --rm --no-deps -e ZONE_HARNESS_PORT="$port" --entrypoint bash eqemu-server -lc "$container_script"
+  # Disable Compose's pseudo-terminal and bridge the compact result through a
+  # temporary directory mount. Printing it from this host-side wrapper ensures the
+  # Validation Worker captures it even when Compose consumes container output.
+  "${harness_compose[@]}" run --rm --no-deps -T \
+    -e ZONE_HARNESS_PORT="$port" \
+    -e BOT_LOOT_RESULT_FILE=/tmp/zone-harness-result/result.json \
+    -v "$result_dir:/tmp/zone-harness-result" \
+    --entrypoint bash eqemu-server -lc "$container_script"
+  [[ -s "$result_file" ]] || die "Bot Loot Request scenario produced no structured result"
+  jq -c '{scenario,proved,bot:.requesting_bot.name,item_id:.upgrade_item_id,slot:.target_slot_name,score:.upgrade_score,reason:.deterministic_reason}' "$result_file"
 )
