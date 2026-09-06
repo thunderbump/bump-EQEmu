@@ -516,8 +516,10 @@ if payload.get("positive_request_count") != 1 or payload.get("upgrade_score", 0)
     fail("expected exactly one positive structured decision")
 for field in ("requesting_bot", "upgrade_item_id", "upgrade_item_name", "target_slot", "target_slot_name", "deterministic_reason"):
     if payload.get(field) in (None, "", 0): fail("missing structured decision field: " + field)
-for field in ("downgrade_suppressed", "duplicate_suppressed", "looted_item_reached_looter", "loot_completed", "normal_processing_responsive", "bot_inventory_unchanged", "provider_independent"):
+for field in ("downgrade_suppressed", "duplicate_suppressed", "looted_item_reached_looter", "loot_completed", "dialogue_pending_at_loot_completion", "normal_processing_responsive", "bot_inventory_unchanged", "provider_independent"):
     if payload.get(field) is not True: fail("failed invariant: " + field)
+if not isinstance(payload.get("loot_completion_elapsed_ms"), int) or payload["loot_completion_elapsed_ms"] < 0:
+    fail("missing loot completion latency observation")
 if payload.get("grouped_bot_count", 0) < 2 or not str(payload.get("database_mutation", "")).startswith("none:"):
     fail("fixture grouping or cleanup contract was not met")
 print(json.dumps({"scenario": payload["scenario"], "proved": True, "bot": payload["requesting_bot"]["name"], "item_id": payload["upgrade_item_id"], "slot": payload["target_slot_name"], "score": payload["upgrade_score"], "reason": payload["deterministic_reason"]}, separators=(",", ":")))

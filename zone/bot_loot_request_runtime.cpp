@@ -6,6 +6,8 @@
 #include "entity.h"
 #include "groups.h"
 
+#include <memory>
+
 extern EntityList entity_list;
 
 namespace {
@@ -22,6 +24,8 @@ BotLootRequest::DialogueProviderSettings LoadBotLootRequestDialogueSettings()
 	};
 }
 
+std::unique_ptr<BotLootRequest::DelayedDialogueQueue> test_dialogue_queue;
+
 BotLootRequest::DelayedDialogueQueue &ZoneBotLootRequestDialogueQueue()
 {
 	static BotLootRequest::DelayedDialogueQueue queue(
@@ -29,7 +33,7 @@ BotLootRequest::DelayedDialogueQueue &ZoneBotLootRequestDialogueQueue()
 		LoadBotLootRequestDialogueSettings()
 	);
 
-	return queue;
+	return test_dialogue_queue ? *test_dialogue_queue : queue;
 }
 
 BotLootRequest::CurrentGroupState CurrentLootRequestGroupState(
@@ -98,6 +102,19 @@ void CancelLootRequestDialogue(
 )
 {
 	ZoneBotLootRequestDialogueQueue().CancelRequests(looter_stable_id, requesting_bot_stable_ids);
+}
+
+void SetDialogueProviderForTesting(BotLootRequest::DelayedDialogueProvider *provider)
+{
+	test_dialogue_queue = provider ? std::make_unique<BotLootRequest::DelayedDialogueQueue>(
+		*provider,
+		LoadBotLootRequestDialogueSettings()
+	) : nullptr;
+}
+
+void ClearDialogueProviderForTesting()
+{
+	test_dialogue_queue.reset();
 }
 
 }

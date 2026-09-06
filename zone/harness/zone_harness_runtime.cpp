@@ -613,10 +613,9 @@ BotLootRequestScenarioResult ZoneHarnessRuntime::RunBotLootRequestUpgrade() {
 	result.grouped_bot_count = 2;
 
 	std::vector<ZoneBotLootRequestRuntime::StructuredDecision> decisions;
+	BotLootRequest::TestDelayedDialogueProvider pending_dialogue_provider;
 	auto saved_delivery_state = ZoneBotLootRequestRuntime::CaptureDeliveryState();
 	auto saved_observer = ZoneBotLootRequestRuntime::CaptureDecisionObserver();
-	ZoneBotLootRequestRuntime::SetDecisionObserver(
-		[&decisions](const auto& decision) { decisions.push_back(decision); });
 	struct ScenarioStateCleanup {
 		uint32_t owner_id;
 		std::vector<uint32_t> bot_ids;
@@ -624,6 +623,7 @@ BotLootRequestScenarioResult ZoneHarnessRuntime::RunBotLootRequestUpgrade() {
 		ZoneBotLootRequestRuntime::DecisionObserver observer;
 		~ScenarioStateCleanup() {
 			ZoneBotLootRequestRuntime::CancelLootRequestDialogue(owner_id, bot_ids);
+			ZoneBotLootRequestRuntime::ClearDialogueProviderForTesting();
 			ZoneBotLootRequestRuntime::RestoreDeliveryState(std::move(delivery_state));
 			ZoneBotLootRequestRuntime::SetDecisionObserver(std::move(observer));
 		}
@@ -633,6 +633,9 @@ BotLootRequestScenarioResult ZoneHarnessRuntime::RunBotLootRequestUpgrade() {
 		std::move(saved_delivery_state),
 		std::move(saved_observer)
 	};
+	ZoneBotLootRequestRuntime::SetDialogueProviderForTesting(&pending_dialogue_provider);
+	ZoneBotLootRequestRuntime::SetDecisionObserver(
+		[&decisions](const auto& decision) { decisions.push_back(decision); });
 	ScopedRuleValue enabled_rule("Chat:BotLootRequestEnabled", "true");
 	ScopedRuleValue cooldown_rule("Chat:BotLootRequestCooldownSeconds", "0");
 	ScopedRuleValue cursor_rule("Character:CheckCursorEmptyWhenLooting", "false");
@@ -642,7 +645,7 @@ BotLootRequestScenarioResult ZoneHarnessRuntime::RunBotLootRequestUpgrade() {
 		return result;
 	}
 
-	auto loot_once = [&](uint32_t item_id) -> bool {
+	auto loot_once = [&](uint32_t item_id, uint32_t *completion_elapsed_ms = nullptr) -> bool {
 		const auto* npc_type = content_db.LoadNPCTypesData(754008);
 		if (!npc_type)
 			return false;
@@ -668,16 +671,26 @@ BotLootRequestScenarioResult ZoneHarnessRuntime::RunBotLootRequestUpgrade() {
 		loot->looter = fixture.Owner()->GetID();
 		loot->slot_id = loot_slot;
 		loot->auto_loot = 0;
+		const auto loot_started = std::chrono::steady_clock::now();
 		corpse->LootCorpseItem(fixture.Owner(), &loot_packet);
+		const auto loot_finished = std::chrono::steady_clock::now();
+		if (completion_elapsed_ms) {
+			*completion_elapsed_ms = static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+				loot_finished - loot_started).count());
+		}
 		const bool completed = !corpse->HasItem(item_id);
 		corpse->EndLoot(fixture.Owner(), &request_packet);
 		entity_list.RemoveCorpse(corpse_id);
 		return completed;
 	};
 
-	result.loot_completed = loot_once(upgrade_item_id);
+	result.loot_completed = loot_once(upgrade_item_id, &result.loot_completion_elapsed_ms);
 	const auto* looted = fixture.Owner()->GetInv().GetItem(EQ::invslot::slotCursor);
 	result.looted_item_reached_looter = looted && looted->GetID() == upgrade_item_id;
+	result.dialogue_pending_at_loot_completion =
+		pending_dialogue_provider.PendingRequests().size() == 1;
+	result.normal_processing_responsive = result.loot_completed &&
+		result.looted_item_reached_looter && result.dialogue_pending_at_loot_completion;
 	fixture.Owner()->GetInv().DeleteItem(EQ::invslot::slotCursor);
 
 	const auto positive = std::find_if(decisions.begin(), decisions.end(), [](const auto& d) { return d.produced; });
@@ -741,10 +754,6 @@ BotLootRequestScenarioResult ZoneHarnessRuntime::RunBotLootRequestUpgrade() {
 		result.provider_independent = result.provider_failure_observed && eligible_request.produced;
 	}
 
-	const auto ticks_before = process_ticks;
-	ProcessOneTick();
-	++process_ticks;
-	result.normal_processing_responsive = process_ticks == ticks_before + 1;
 	result.bot_inventory_unchanged =
 		BotInventoryFingerprint(fixture.OwnedBot()) == before_primary_inventory &&
 		BotInventoryFingerprint(other_bot) == before_other_inventory;

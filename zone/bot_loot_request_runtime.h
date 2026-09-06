@@ -54,4 +54,9 @@ void EnqueueLootRequestDialogue(
 void ProcessReadyLootRequestDialogue();
 void CancelLootRequestDialogue(uint32_t looter_stable_id, const std::vector<uint32_t> &requesting_bot_stable_ids);
 
+// Harness-only seam for proving that corpse loot completion does not wait for dialogue.
+// The caller owns the provider and must clear the override before destroying it.
+void SetDialogueProviderForTesting(BotLootRequest::DelayedDialogueProvider *provider);
+void ClearDialogueProviderForTesting();
+
 }
