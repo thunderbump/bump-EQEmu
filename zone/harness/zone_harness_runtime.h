@@ -119,6 +119,32 @@ struct OwnedBotPressureHealingScenarioResult {
 	RuntimeSnapshot runtime;
 };
 
+struct BotLootRequestScenarioResult {
+	bool proved = false;
+	std::string reason;
+	std::string scenario = "bot-loot-request-upgrade";
+	std::string database_mutation;
+	ActorEventEntity owner;
+	ActorEventEntity requesting_bot;
+	uint8_t grouped_bot_count = 0;
+	uint32_t inferior_item_id = 0;
+	uint32_t upgrade_item_id = 0;
+	std::string upgrade_item_name;
+	int target_slot = -1;
+	std::string target_slot_name;
+	int upgrade_score = 0;
+	std::string deterministic_reason;
+	uint32_t positive_request_count = 0;
+	bool downgrade_suppressed = false;
+	bool duplicate_suppressed = false;
+	bool looted_item_reached_looter = false;
+	bool loot_completed = false;
+	bool normal_processing_responsive = false;
+	bool bot_inventory_unchanged = false;
+	bool provider_independent = true;
+	RuntimeSnapshot runtime;
+};
+
 struct ActorLedBotPartyScenarioResult {
 	bool proved = false;
 	std::string reason;
@@ -261,6 +287,7 @@ public:
 		uint32_t max_ticks = 160,
 		uint32_t sleep_ms = 25
 	);
+	BotLootRequestScenarioResult RunBotLootRequestUpgrade();
 	ActorLedBotPartyScenarioResult RunActorLedBotPartyProof(
 		uint8_t follower_count = 3,
 		uint32_t max_ticks = 160,

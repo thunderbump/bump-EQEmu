@@ -500,6 +500,28 @@ if not any(
 PY
 }
 
+assert_bot_loot_request_scenario() {
+  local payload="\$1"
+  BOT_LOOT_PAYLOAD="\$payload" python3 - <<'PY'
+import json, os, sys
+payload = json.loads(os.environ["BOT_LOOT_PAYLOAD"])
+def fail(message):
+    print(json.dumps({"error": message, "payload": payload}, separators=(",", ":")), file=sys.stderr)
+    sys.exit(1)
+if payload.get("proved") is not True or payload.get("scenario") != "bot-loot-request-upgrade":
+    fail("Bot Loot Request scenario did not prove the ordinary loot path")
+if payload.get("positive_request_count") != 1 or payload.get("upgrade_score", 0) <= 0:
+    fail("expected exactly one positive structured decision")
+for field in ("requesting_bot", "upgrade_item_id", "upgrade_item_name", "target_slot", "target_slot_name", "deterministic_reason"):
+    if payload.get(field) in (None, "", 0): fail("missing structured decision field: " + field)
+for field in ("downgrade_suppressed", "duplicate_suppressed", "looted_item_reached_looter", "loot_completed", "normal_processing_responsive", "bot_inventory_unchanged", "provider_independent"):
+    if payload.get(field) is not True: fail("failed invariant: " + field)
+if payload.get("grouped_bot_count", 0) < 2 or not str(payload.get("database_mutation", "")).startswith("none:"):
+    fail("fixture grouping or cleanup contract was not met")
+print(json.dumps({"scenario": payload["scenario"], "proved": True, "bot": payload["requesting_bot"]["name"], "item_id": payload["upgrade_item_id"], "slot": payload["target_slot_name"], "score": payload["upgrade_score"], "reason": payload["deterministic_reason"]}, separators=(",", ":")))
+PY
+}
+
 assert_pressure_heal_scenario() {
   local payload=\"\$1\"
 
@@ -606,6 +628,9 @@ assert_slow_scenario \"\$mezzed_scenario\" mezzed HarnessSlowSecondaryHostile fa
 
 pressure_heal_scenario=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/owned-bot-healing/moderate-pressure-fast-heal\")
 assert_pressure_heal_scenario \"\$pressure_heal_scenario\"
+
+bot_loot_request_scenario=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/bot-loot-request/upgrade\")
+assert_bot_loot_request_scenario \"\$bot_loot_request_scenario\"
 
 	actor_loop=\$(curl -fsS -X POST \"http://127.0.0.1:${port}/api/v1/harness/scenarios/autonomous-actor-loop\")
 	assert_autonomous_actor_loop \"\$actor_loop\"
