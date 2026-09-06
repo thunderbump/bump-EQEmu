@@ -19,7 +19,7 @@ Use the default Beads triage label vocabulary. See `docs/agents/triage-labels.md
 
 ### Domain docs
 
-Single-context repo: read root `CONTEXT.md` and `docs/adr/` when present. See `docs/agents/domain.md`.
+Use the relevant terms in `CONTEXT.md` and read only ADRs that affect the active Bead. See `docs/agents/domain.md`.
 
 ### Sub-agents
 
@@ -30,11 +30,8 @@ Whenever you use a sub-agent, choose a model you think would be appropriate for 
 
 ## Testing
 
-The repository-owned Validation Contract in `docs/testing/process.md` and `scripts/validation-worker.sh` is the
-authority for automated validation. Its evidence identifies the profile, status, exact Candidate commit, and
-artifacts; external automation must not duplicate repository-specific test semantics.
+AFK owns its implementation, review, repair, and publication workflow. This repo owns test semantics and exact-Candidate evidence. The current no-argument repository check is `./scripts/validate-afk`; `afk.toml` is legacy. Do not wrap an AFK run in another implementation/review pipeline.
 
-Automated validation defaults to the separate `../bump-akk-stack-validation` stack and its persistent developer
-database. Use `../bump-akk-stack` only for gameplay, client-facing, or other live proof that the contract assigns to
-the gameplay stack. Prefer repository wrappers and existing stack commands, and avoid changing either AkkStack
-checkout unless the required validation cannot be supported from this repository.
+For implementation, read [validation instructions](docs/agents/validation.md). Every new world behavior needs a bounded automated Zone Harness scenario through production gameplay paths. Manual play judges feel; it does not replace setup-heavy correctness tests.
+
+For schema, migrations, saved-data changes, or database operations, also read [database instructions](docs/agents/database.md). Use the validation stack for automation; gameplay deployment is a separate operation. Prefer repository wrappers and avoid AkkStack edits unless required validation cannot be supported here.
