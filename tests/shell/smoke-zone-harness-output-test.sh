@@ -78,6 +78,10 @@ if [[ "$saw_no_tty" != true || -z "$result_dir" ]]; then
   exit 90
 fi
 
+# Representative successful output from the container readiness loop must not
+# leak into the wrapper's machine-readable stdout.
+printf 'Uptime: 3  Threads: 1  Questions: 1\n'
+
 case "${MOCK_COMPOSE_MODE:-success}" in
   success)
     printf '%s\n' "${EXPECTED_RESULT:?}" >"$result_dir/result.json"
@@ -123,6 +127,7 @@ if run_wrapper failure >"$failure_stdout" 2>"$failure_stderr"; then
   exit 1
 fi
 if [[ -s "$failure_stdout" ]] || ! grep -q 'durable harness diagnostic' "$failure_stderr" \
+  || ! grep -q 'Uptime: 3' "$failure_stderr" \
   || ! grep -q 'Zone Harness container failed with status 23' "$failure_stderr"; then
   printf 'wrapper did not route failed-run diagnostics to stderr\n' >&2
   cat "$failure_stderr" >&2

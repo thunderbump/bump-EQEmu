@@ -48,6 +48,7 @@ compose_override="$(mktemp)"
 result_dir="$(mktemp -d "$repo_root/.zone-harness-result.XXXXXX")"
 result_file="$result_dir/result.json"
 harness_log="$result_dir/zone_harness.out"
+compose_stdout="$result_dir/compose.stdout"
 chmod 0777 "$result_dir"
 
 cat >"$compose_override" <<'COMPOSE'
@@ -687,18 +688,20 @@ trap - EXIT
 ZONE_HARNESS_CONTAINER
 )"
   # Disable Compose's pseudo-terminal and bridge the compact result through a
-  # temporary directory mount. Printing it from this host-side wrapper ensures the
-  # Validation Worker captures it even when Compose consumes container output.
+  # temporary directory mount. Capture all incidental container stdout (for
+  # example mysqladmin's readiness status) so successful wrapper stdout remains
+  # exactly the host-published machine-readable result.
   compose_status=0
   "${harness_compose[@]}" run --rm --no-deps -T \
     -e ZONE_HARNESS_PORT="$port" \
     -e ZONE_HARNESS_LOG_FILE=/tmp/zone-harness-result/zone_harness.out \
     -e BOT_LOOT_RESULT_FILE=/tmp/zone-harness-result/result.json \
     -v "$result_dir:/tmp/zone-harness-result" \
-    --entrypoint bash eqemu-server -lc "$container_script" || compose_status=$?
+    --entrypoint bash eqemu-server -lc "$container_script" >"$compose_stdout" || compose_status=$?
   if [[ "$compose_status" -ne 0 ]]; then
-    # Compose output can be lost when this wrapper itself is redirected. The
-    # bind-mounted log is a deterministic fallback for Validation Worker logs.
+    # Preserve container stdout as a failure diagnostic while never mixing it
+    # with the successful machine-readable stdout contract.
+    [[ -s "$compose_stdout" ]] && cat "$compose_stdout" >&2
     [[ -s "$harness_log" ]] && cat "$harness_log" >&2
     die "Zone Harness container failed with status $compose_status"
   fi
