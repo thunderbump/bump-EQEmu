@@ -728,6 +728,24 @@ terminate_request_child() {
       else
         kill -KILL "$pid" 2>/dev/null || true
       fi
+
+      # Signal delivery is asynchronous. Do not restore the shared stack or
+      # release its locks merely because KILL was sent: a descendant can still
+      # be completing exit (for example after uninterruptible I/O). Give exit
+      # one final bounded grace period and report failure rather than allowing
+      # cleanup to overlap a surviving command tree.
+      deadline=$(( $(date +%s) + termination_grace_seconds ))
+      while :; do
+        if [[ "$group_tracked" -eq 1 ]]; then
+          process_group_has_live_members "$pgid" || break
+        else
+          kill -0 "$pid" 2>/dev/null || break
+        fi
+        if [[ "$(date +%s)" -ge "$deadline" ]]; then
+          return 1
+        fi
+        sleep 0.1
+      done
       break
     fi
     sleep 0.1
@@ -762,7 +780,14 @@ run_request_cleanup() {
 run_request_signal() {
   local exit_code="$1" cleanup_status=0
   trap - INT TERM
-  terminate_request_child
+  if ! terminate_request_child; then
+    # Keep the stack binding and locks intact if the command tree could not be
+    # proven dead. Releasing shared resources in this state would permit a new
+    # request to race the surviving descendant.
+    write_terminal_run_failure child_termination_failed 1 \
+      "validation command descendants remained active after KILL grace period; stack cleanup withheld" || true
+    exit 1
+  fi
   write_terminal_run_failure interrupted "$exit_code" "validation interrupted by signal" || true
   run_request_cleanup || cleanup_status=1
   if [[ "$cleanup_status" -ne 0 ]]; then

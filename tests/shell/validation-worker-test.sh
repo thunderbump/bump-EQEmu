@@ -874,7 +874,7 @@ test_stack_lock_blocks_distinct_worker_homes_on_same_stack() {
 }
 
 test_worker_termination_kills_checkout_deletion_descendant_after_leader_exit() {
-  local source request evidence checkout_dir fake_bin real_rm marker child_pid_file worker_pid status output_file start end child_pid child_stat
+  local source request evidence checkout_dir fake_bin real_rm marker child_ready child_pid_file worker_pid status output_file start end child_pid child_stat
   make_source_repo source interrupted-checkout-deletion
   reset_worker_home
   evidence="$tmp_root/evidence-interrupted-checkout-deletion"
@@ -882,6 +882,7 @@ test_worker_termination_kills_checkout_deletion_descendant_after_leader_exit() {
   checkout_dir="$tmp_root/worker-home/checkouts/run-$(basename "$evidence")"
   fake_bin="$tmp_root/fake-bin-interrupted-checkout-deletion"
   marker="$tmp_root/interrupted-checkout-deletion.started"
+  child_ready="$tmp_root/interrupted-checkout-deletion.child-ready"
   child_pid_file="$tmp_root/interrupted-checkout-deletion.pid"
   output_file="$tmp_root/interrupted-checkout-deletion.out"
   real_rm="$(command -v rm)"
@@ -895,10 +896,15 @@ if [[ "\${*: -1}" == "$checkout_dir" ]]; then
   # descendant before restoring the stack or releasing locks.
   (
     trap '' TERM
+    : >"$child_ready"
     while :; do sleep 1; done
   ) &
   descendant_pid=\$!
   printf '%s\n' "\$descendant_pid" >"$child_pid_file"
+  # Do not publish fixture readiness until the descendant confirms that its
+  # TERM disposition is installed. Otherwise the worker signal can race the
+  # trap setup and let this regression test pass without exercising KILL.
+  while [[ ! -e "$child_ready" ]]; do sleep 0.01; done
   : >"$marker"
   trap 'exit 0' TERM
   wait "\$descendant_pid"
