@@ -24,7 +24,7 @@ The tracked `afk.toml` is a **retained legacy contract** for the older request-d
 
 ADR 0006 also defines the lower-level portable automation contract: automation may call `scripts/validation-worker.sh run --request <request.json>` with a fetchable repo/ref or commit and an evidence directory. For local diagnostics, the same worker also accepts a local-checkout request path instead of a fetch source. Fetch requests clone into worker-owned storage, local-checkout requests validate the named checkout in place, and both paths acquire an exclusive validation slot, delegate to the project validation profile, and write mechanical evidence (`request.json`, `result.json`, and logs). Requests may include `stack.role: "validation"` and `stack.path` to select a validation AkkStack checkout; when present, the worker binds that stack's `code` symlink to the active checkout under the same exclusive lock and writes `stack-binding.json`. Direct path-based wrapper usage such as `scripts/validate.sh` remains supported for local diagnostics and narrowing failures, but it is not the portable automation contract because it assumes the caller can see the local checkout, AkkStack path, and Docker host.
 
-Signal cleanup restores the prior stack binding and releases the validation-slot and stack locks only after the worker proves the tracked command tree has exited. If descendants remain observable after TERM/KILL and the final bounded grace period, `result.json` reports `child_termination_failed`; the worker intentionally leaves the current binding and both lock directories in place so no subsequent validation can race the surviving tree. An operator must confirm that all descendants have exited before restoring the binding recorded in `stack-binding.json` and removing those locks.
+Signal cleanup restores the prior stack binding and releases the validation-slot and stack locks only after the worker proves the tracked command tree has exited. This proof is also required after a command leader returns normally; surviving process-group members are terminated and make the command inconclusive. If descendants remain observable after TERM/KILL and the final bounded grace period, `result.json` reports `child_termination_failed`; the worker intentionally leaves the current binding and both lock directories in place so no subsequent validation can race the surviving tree. An operator must confirm that all descendants have exited before restoring the binding recorded in `stack-binding.json` and removing those locks.
 
 Bootstrap from zero is a separate setup task. Do not fold `make install`, environment generation, data downloads, or first-time database setup into every validation pass.
 
@@ -32,8 +32,11 @@ Use `scripts/validation-worker.sh profiles --json` to discover the portable AFK-
 
 `actor-queue-tier3` is the target-owned durable Autonomous Actor queue proof. After a Tier 1 build, it runs
 `zone tests:actor-events` against the persistent validation database. The scenario provisions a reserved owner,
-Actor Profiles, Actor Status, queue rows, and Actor Events; its scope guard removes those scenario-owned rows and
-reserved-owner fixture on exit. It is therefore classified `database-mutating/runtime-fixture`, not read-only.
+Actor Profiles, Actor Status, queue rows, and Actor Events. Its checked scope guard removes those scenario-owned rows
+and reserved-owner fixture before emitting PASS. The worker also reserves part of the same request deadline for a
+separate token-scoped cleanup invocation while the stack binding and locks remain held, so timeout and interruption
+do not depend on C++ stack unwinding; cleanup failure is retained as `cleanup_failed` evidence in
+`actor-queue-cleanup.log`. It is therefore classified `database-mutating/runtime-fixture`, not read-only.
 The scenario uses the ordinary `stand` verb, which is independent of gameplay rule settings, and emits its detailed
 assertion failure or `[PASS] actor-events-runtime` to the worker validation log while the worker supplies structured
 `request.json` and `result.json` evidence.

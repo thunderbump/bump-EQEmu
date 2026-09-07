@@ -85,6 +85,14 @@ if [[ "${VALIDATION_WORKER_TEST_IGNORE_TERM:-0}" == "1" ]]; then
   trap '' TERM
   while :; do sleep 1; done
 fi
+if [[ "${VALIDATION_WORKER_TEST_SPAWN_DESCENDANT:-0}" == "1" ]]; then
+  (
+    trap '' TERM
+    while :; do sleep 1; done
+  ) &
+  printf '%s\n' "$!" >"$VALIDATION_WORKER_TEST_DESCENDANT_PID_FILE"
+  exit 0
+fi
 if [[ "${VALIDATION_WORKER_TEST_SLEEP:-0}" != "0" ]]; then
   sleep "$VALIDATION_WORKER_TEST_SLEEP"
 fi
@@ -94,6 +102,9 @@ fi
 if [[ "${VALIDATION_WORKER_TEST_SLEEP_TIER3:-0}" != "0" && " $* " == *" tier3-harness"* ]]; then
   sleep "$VALIDATION_WORKER_TEST_SLEEP_TIER3"
 fi
+if [[ "${VALIDATION_WORKER_TEST_SLEEP_ACTOR_QUEUE:-0}" != "0" && " $* " == *" actor-queue-tier3"* ]]; then
+  sleep "$VALIDATION_WORKER_TEST_SLEEP_ACTOR_QUEUE"
+fi
 if [[ "${VALIDATION_WORKER_TEST_FAIL_TIER1:-0}" == "1" && " $* " == *" tier1"* ]]; then
   printf 'tier1 requested failure\n' >&2
   exit 1
@@ -101,6 +112,13 @@ fi
 if [[ "${VALIDATION_WORKER_TEST_FAIL_ACTOR_QUEUE:-0}" == "1" && " $* " == *" actor-queue-tier3"* ]]; then
   printf 'actor queue requested failure\n' >&2
   exit 1
+fi
+if [[ " $* " == *" actor-queue-cleanup "* ]]; then
+  [[ -z "${VALIDATION_WORKER_TEST_CLEANUP_MARKER:-}" ]] || : >"$VALIDATION_WORKER_TEST_CLEANUP_MARKER"
+  if [[ "${VALIDATION_WORKER_TEST_FAIL_ACTOR_CLEANUP:-0}" == "1" ]]; then
+    printf 'actor queue cleanup requested failure\n' >&2
+    exit 1
+  fi
 fi
 if [[ "${VALIDATION_WORKER_TEST_TIER1_EXIT_CODE:-0}" != "0" && " $* " == *" tier1"* ]]; then
   exit "$VALIDATION_WORKER_TEST_TIER1_EXIT_CODE"
@@ -647,6 +665,67 @@ test_timeout() {
 
   [[ "$status" -eq 1 ]] || return 1
   assert_json_equals "$evidence/result.json" .category timeout
+}
+
+test_normal_completion_kills_surviving_command_descendants() {
+  local source request evidence status output child_pid_file child_stat
+  make_source_repo source normal-descendant
+  reset_worker_home
+  evidence="$tmp_root/evidence-normal-descendant"
+  request="$tmp_root/normal-descendant.json"
+  child_pid_file="$tmp_root/normal-descendant.pid"
+  write_request "$request" "$source" "$evidence" HEAD "" 0 10 "" preflight
+
+  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" \
+    VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TEST_SPAWN_DESCENDANT=1 \
+    VALIDATION_WORKER_TEST_DESCENDANT_PID_FILE="$child_pid_file" VALIDATION_WORKER_TERMINATION_GRACE_SECONDS=1 \
+    "$repo_root/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 1 ]] || return 1
+  child_stat="$(ps -o stat= -p "$(cat "$child_pid_file")" 2>/dev/null || true)"
+  [[ -z "$child_stat" || "$child_stat" == Z* ]] || return 1
+  assert_json_equals "$evidence/result.json" .category validation_failed
+  [[ ! -e "$tmp_root/worker-home/locks/validation-slot.lock" ]] || return 1
+}
+
+test_actor_timeout_still_dispatches_cleanup() {
+  local source request evidence status output cleanup_marker
+  make_source_repo source actor-timeout-cleanup
+  reset_worker_home
+  evidence="$tmp_root/evidence-actor-timeout-cleanup"
+  request="$tmp_root/actor-timeout-cleanup.json"
+  cleanup_marker="$tmp_root/actor-timeout-cleanup.ran"
+  write_request "$request" "$source" "$evidence" HEAD "" 0 4 "" tier1-tier3-harness
+
+  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 \
+    VALIDATION_WORKER_TEST_SLEEP_ACTOR_QUEUE=10 VALIDATION_WORKER_TEST_CLEANUP_MARKER="$cleanup_marker" \
+    VALIDATION_WORKER_TERMINATION_GRACE_SECONDS=1 \
+    "$repo_root/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 1 ]] || return 1
+  [[ -f "$cleanup_marker" ]] || return 1
+  assert_json_equals "$evidence/result.json" .category timeout
+  assert_json_equals "$evidence/result.json" '.checks[2].status' inconclusive
+}
+
+test_actor_cleanup_is_dispatched_and_failure_is_propagated() {
+  local source request evidence status output cleanup_marker
+  make_source_repo source actor-cleanup
+  reset_worker_home
+  evidence="$tmp_root/evidence-actor-cleanup"
+  request="$tmp_root/actor-cleanup.json"
+  cleanup_marker="$tmp_root/actor-cleanup.ran"
+  write_request "$request" "$source" "$evidence" HEAD "" 0 20 "" tier1-tier3-harness
+
+  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 \
+    VALIDATION_WORKER_TEST_CLEANUP_MARKER="$cleanup_marker" VALIDATION_WORKER_TEST_FAIL_ACTOR_CLEANUP=1 \
+    "$repo_root/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 1 ]] || return 1
+  [[ -f "$cleanup_marker" ]] || return 1
+  [[ -f "$evidence/logs/actor-queue-cleanup.log" ]] || return 1
+  assert_json_equals "$evidence/result.json" .category cleanup_failed
+  assert_json_equals "$evidence/result.json" '.checks[2].status' inconclusive
 }
 
 test_timeout_kills_a_term_resistant_validation_child() {
@@ -1697,6 +1776,9 @@ run_test "local-checkout request still works" test_local_checkout_request_works
 run_test "local-checkout request rejects a drifting submodule" test_local_checkout_rejects_drifting_submodule
 run_test "lock contention is worker_busy" test_lock_contention
 run_test "validation timeout is categorized" test_timeout
+run_test "normal completion kills surviving command descendants" test_normal_completion_kills_surviving_command_descendants
+run_test "actor timeout still dispatches cleanup" test_actor_timeout_still_dispatches_cleanup
+run_test "actor cleanup is dispatched and failure is propagated" test_actor_cleanup_is_dispatched_and_failure_is_propagated
 run_test "validation timeout kills a TERM-resistant child" test_timeout_kills_a_term_resistant_validation_child
 run_test "tier3 harness failure is categorized with logs" test_tier3_harness_failure_is_categorized_with_logs
 run_test "combined AFK profile runs Tier 1, canonical harness, and actor queue" test_tier1_tier3_harness_profile_runs_tier1_before_tier3

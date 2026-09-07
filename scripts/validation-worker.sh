@@ -10,12 +10,15 @@ RUN_REQUEST_CLEANUP_EVIDENCE_DIR=
 RUN_REQUEST_CLEANUP_LOCK_DIR=
 RUN_REQUEST_CLEANUP_STACK_LOCK_DIR=
 RUN_REQUEST_CHILD_PID=
+RUN_REQUEST_CHILD_PGID=
 RUN_REQUEST_CHECKOUT_DIR=
 RUN_REQUEST_HEAD_COMMIT=
 RUN_REQUEST_STACK_PATH_SOURCE=
 RUN_REQUEST_AFK_LOG_PREFIX=logs
 RUN_REQUEST_AFK_ACTIVE_INDEX=-1
 RUN_REQUEST_DEADLINE_NS=
+RUN_REQUEST_COMMAND_DEADLINE_NS=
+RUN_REQUEST_ACTOR_CLEANUP_REQUIRED=0
 termination_grace_seconds="${VALIDATION_WORKER_TERMINATION_GRACE_SECONDS:-5}"
 if [[ ! "$termination_grace_seconds" =~ ^[0-9]+$ || "$termination_grace_seconds" -eq 0 ]]; then
   printf 'error: VALIDATION_WORKER_TERMINATION_GRACE_SECONDS must be a positive integer\n' >&2
@@ -664,23 +667,38 @@ write_terminal_run_failure() {
 run_tracked_command() {
   local status
 
-  # Give every potentially long-running child its own process group. Bash runs
-  # traps promptly while waiting for an asynchronous child, and the signal
-  # handler can therefore terminate the complete command tree within the same
-  # grace period used by validation commands.
+  # Give every potentially long-running child its own process group. Keep the
+  # pgid independently of the leader: a command may return after daemonizing a
+  # descendant, and the reaped leader can no longer be queried with ps.
   set +e
   setsid "$@" &
   RUN_REQUEST_CHILD_PID=$!
+  RUN_REQUEST_CHILD_PGID=$RUN_REQUEST_CHILD_PID
   wait "$RUN_REQUEST_CHILD_PID"
   status=$?
-  RUN_REQUEST_CHILD_PID=
+  if process_group_has_live_members "$RUN_REQUEST_CHILD_PGID"; then
+    # Normal leader completion is not command-tree completion. Terminate and
+    # prove the leaked descendants dead before shared locks can be released.
+    terminate_request_child
+    if [[ "$?" -ne 0 ]]; then
+      set -e
+      write_terminal_run_failure child_termination_failed 1 \
+        "validation command descendants remained active after KILL grace period; stack cleanup withheld" || true
+      trap - RETURN EXIT
+      exit 1
+    fi
+    status=125
+  else
+    RUN_REQUEST_CHILD_PID=
+    RUN_REQUEST_CHILD_PGID=
+  fi
   set -e
   return "$status"
 }
 
 run_tracked_timeout_command() {
   local remaining_ns remaining_ms remaining_duration
-  remaining_ns=$(( RUN_REQUEST_DEADLINE_NS - $(date +%s%N) ))
+  remaining_ns=$(( ${RUN_REQUEST_COMMAND_DEADLINE_NS:-$RUN_REQUEST_DEADLINE_NS} - $(date +%s%N) ))
   remaining_ms=$(( remaining_ns / 1000000 ))
   if [[ "$remaining_ms" -le 0 ]]; then
     return 124
@@ -702,13 +720,16 @@ process_group_has_live_members() {
 }
 
 terminate_request_child() {
-  local pid="${RUN_REQUEST_CHILD_PID:-}" deadline pgid group_tracked=0
+  local pid="${RUN_REQUEST_CHILD_PID:-}" deadline pgid="${RUN_REQUEST_CHILD_PGID:-}" observed_pgid group_tracked=0
   [[ -n "$pid" ]] || return 0
 
-  # run_tracked_command starts the command under setsid. Retain that process
-  # group identity after TERM: its leader may exit before a TERM-resistant
-  # descendant, but the surviving group must still receive bounded escalation.
-  pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
+  # run_tracked_command records the setsid group before waiting. The lookup is
+  # useful while the leader remains live, but the recorded value stays
+  # authoritative after normal completion has reaped that leader.
+  observed_pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
+  if [[ -z "$pgid" ]]; then
+    pgid="$observed_pgid"
+  fi
   if [[ -n "$pgid" && "$pgid" == "$pid" ]]; then
     group_tracked=1
     kill -TERM -- "-$pgid" 2>/dev/null || true
@@ -752,6 +773,7 @@ terminate_request_child() {
   done
   wait "$pid" 2>/dev/null || true
   RUN_REQUEST_CHILD_PID=
+  RUN_REQUEST_CHILD_PGID=
 }
 
 run_request_cleanup() {
@@ -791,6 +813,15 @@ run_request_signal() {
     # invoking the cleanup that this branch must withhold.
     trap - EXIT
     exit 1
+  fi
+  if [[ "${RUN_REQUEST_ACTOR_CLEANUP_REQUIRED:-0}" == "1" ]]; then
+    RUN_REQUEST_COMMAND_DEADLINE_NS=$RUN_REQUEST_DEADLINE_NS
+    if ! perform_actor_queue_cleanup; then
+      write_terminal_run_failure cleanup_failed 1 \
+        "actor queue database cleanup failed after interruption; inspect actor-queue-cleanup.log" || true
+      run_request_cleanup || true
+      exit 1
+    fi
   fi
   write_terminal_run_failure interrupted "$exit_code" "validation interrupted by signal" || true
   run_request_cleanup || cleanup_status=1
@@ -1029,7 +1060,7 @@ run_request() {
   stack_path_source=
   RESULT_CHECKS_PATH=
   STACK_BINDING_STATUS= STACK_BINDING_SOURCE= STACK_BINDING_STACK_DIR= STACK_BINDING_CODE_PATH= STACK_BINDING_TARGET= STACK_BINDING_PREVIOUS_KIND= STACK_BINDING_PREVIOUS_TARGET= STACK_BINDING_RESTORE_NEEDED=0
-  RUN_REQUEST_CHECKOUT_DIR= RUN_REQUEST_HEAD_COMMIT= RUN_REQUEST_STACK_PATH_SOURCE= RUN_REQUEST_AFK_LOG_PREFIX=logs RUN_REQUEST_AFK_ACTIVE_INDEX=-1 RUN_REQUEST_DEADLINE_NS=
+  RUN_REQUEST_CHECKOUT_DIR= RUN_REQUEST_HEAD_COMMIT= RUN_REQUEST_STACK_PATH_SOURCE= RUN_REQUEST_AFK_LOG_PREFIX=logs RUN_REQUEST_AFK_ACTIVE_INDEX=-1 RUN_REQUEST_DEADLINE_NS= RUN_REQUEST_COMMAND_DEADLINE_NS= RUN_REQUEST_CHILD_PID= RUN_REQUEST_CHILD_PGID= RUN_REQUEST_ACTOR_CLEANUP_REQUIRED=0
 
   # Discover and register a requested combined gate before validating fields that
   # can fail (notably stack.path). This is evidence initialization only; request
@@ -1142,21 +1173,75 @@ run_request() {
     validation_cmd+=(--dry-run)
   fi
 
+  actor_validation_token="${head_commit:0:16}-${run_id}"
   run_validation() {
     local profile_name="$1" log_path="${2:-$evidence_dir/logs/validation.log}"
     local exit_code
 
     set +e
     if [[ -n "$stack_path" && -n "${STACK_BINDING_STATUS:-}" ]]; then
-      run_tracked_timeout_command env AKKSTACK_DIR="$stack_path" EXPECTED_EQEMU_CHECKOUT="$checkout_dir" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
+      run_tracked_timeout_command env AKKSTACK_DIR="$stack_path" EXPECTED_EQEMU_CHECKOUT="$checkout_dir" \
+        ACTOR_QUEUE_VALIDATION_TOKEN="$actor_validation_token" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
     elif [[ -n "$stack_path" ]]; then
-      run_tracked_timeout_command env AKKSTACK_DIR="$stack_path" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
+      run_tracked_timeout_command env AKKSTACK_DIR="$stack_path" ACTOR_QUEUE_VALIDATION_TOKEN="$actor_validation_token" \
+        "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
     else
-      run_tracked_timeout_command "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
+      run_tracked_timeout_command env ACTOR_QUEUE_VALIDATION_TOKEN="$actor_validation_token" \
+        "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
     fi
     exit_code=$?
     set -e
     return "$exit_code"
+  }
+
+  perform_actor_queue_cleanup() {
+    local cleanup_status
+    set +e
+    run_validation actor-queue-cleanup "$evidence_dir/logs/actor-queue-cleanup.log"
+    cleanup_status=$?
+    set -e
+    if [[ "$cleanup_status" -eq 0 ]]; then
+      RUN_REQUEST_ACTOR_CLEANUP_REQUIRED=0
+    fi
+    return "$cleanup_status"
+  }
+
+  run_validation_with_actor_cleanup() {
+    local profile_name="$1" log_path="${2:-$evidence_dir/logs/validation.log}" status cleanup_status
+    local now_ns remaining_ns reserve_ns
+    VALIDATION_ACTOR_CLEANUP_FAILED=0
+    if [[ "$profile_name" != "actor-queue-tier3" ]]; then
+      run_validation "$profile_name" "$log_path"
+      return $?
+    fi
+
+    # Reserve part of the request's existing deadline for an out-of-process
+    # cleanup pass. It runs while both locks and the Candidate stack binding are
+    # still held, including after timeout or interruption of the zone process.
+    now_ns=$(date +%s%N)
+    remaining_ns=$(( RUN_REQUEST_DEADLINE_NS - now_ns ))
+    if [[ "$remaining_ns" -le 0 ]]; then
+      return 124
+    fi
+    reserve_ns=$(( termination_grace_seconds * 1000000000 ))
+    if [[ "$reserve_ns" -gt $(( remaining_ns / 2 )) ]]; then
+      reserve_ns=$(( remaining_ns / 2 ))
+    fi
+    RUN_REQUEST_COMMAND_DEADLINE_NS=$(( RUN_REQUEST_DEADLINE_NS - reserve_ns ))
+    RUN_REQUEST_ACTOR_CLEANUP_REQUIRED=1
+    set +e
+    run_validation "$profile_name" "$log_path"
+    status=$?
+    RUN_REQUEST_COMMAND_DEADLINE_NS=$RUN_REQUEST_DEADLINE_NS
+    perform_actor_queue_cleanup
+    cleanup_status=$?
+    RUN_REQUEST_COMMAND_DEADLINE_NS=
+    set -e
+    if [[ "$cleanup_status" -ne 0 ]]; then
+      VALIDATION_ACTOR_CLEANUP_FAILED=1
+      return 125
+    fi
+    return "$status"
   }
 
   if [[ "$profile" == "tier1-tier3-harness" ]]; then
@@ -1167,7 +1252,7 @@ run_request() {
     for afk_check_index in "${!afk_plan_rows[@]}"; do
       RUN_REQUEST_AFK_ACTIVE_INDEX="$afk_check_index"
       IFS=$'\t' read -r afk_profile afk_log_file afk_completion_marker afk_failure_status afk_failure_message afk_inconclusive_message <<<"${afk_plan_rows[$afk_check_index]}"
-      if run_validation "$afk_profile" "$evidence_dir/logs/$afk_log_file"; then
+      if run_validation_with_actor_cleanup "$afk_profile" "$evidence_dir/logs/$afk_log_file"; then
         if [[ "$afk_completion_marker" != "-" ]] \
           && ! grep -Fqx -- "$afk_completion_marker" "$evidence_dir/logs/$afk_log_file"; then
           printf 'required completion evidence missing: %s\n' "$afk_completion_marker" >>"$evidence_dir/logs/$afk_log_file"
@@ -1181,6 +1266,12 @@ run_request() {
         continue
       else
         validation_status=$?
+      fi
+      if [[ "${VALIDATION_ACTOR_CLEANUP_FAILED:-0}" == "1" ]]; then
+        afk_check_statuses[$afk_check_index]=inconclusive
+        write_afk_checks "$local_checks_path" inconclusive "$afk_log_prefix"
+        write_result "$evidence_dir" failed cleanup_failed 1 "actor queue database cleanup failed; inspect actor-queue-cleanup.log" "$checkout_dir" "$head_commit" "$stack_path_source"
+        return 1
       fi
       if [[ ( "$validation_status" -eq 124 || "$validation_status" -eq 137 ) && "${VALIDATION_WORKER_AFK_MODE:-0}" != "1" ]]; then
         afk_check_statuses[$afk_check_index]=inconclusive
@@ -1216,10 +1307,14 @@ run_request() {
   fi
 
   for validation_step in "${validation_steps[@]}"; do
-    if run_validation "$validation_step"; then
+    if run_validation_with_actor_cleanup "$validation_step"; then
       continue
     else
       validation_status=$?
+    fi
+    if [[ "${VALIDATION_ACTOR_CLEANUP_FAILED:-0}" == "1" ]]; then
+      write_result "$evidence_dir" failed cleanup_failed 1 "actor queue database cleanup failed; inspect actor-queue-cleanup.log" "$checkout_dir" "$head_commit" "$stack_path_source"
+      return 1
     fi
     if [[ "$validation_status" -eq 124 || "$validation_status" -eq 137 ]]; then
       write_result "$evidence_dir" failed timeout 1 "validation timed out" "$checkout_dir" "$head_commit" "$stack_path_source"

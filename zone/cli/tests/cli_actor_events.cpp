@@ -37,6 +37,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
@@ -100,33 +101,113 @@ int64_t CountPlayerEventLogRowsWithMarker(const std::string& marker) {
 class ActorEventPersistenceCleanup {
 public:
 	void TrackActorId(uint32_t actor_id) {
-		if (actor_id > 0) {
+		if (actor_id > 0 && std::find(actor_ids_.begin(), actor_ids_.end(), actor_id) == actor_ids_.end()) {
 			actor_ids_.push_back(actor_id);
 		}
 	}
 
 	uint32_t reserved_owner_character_id = 0;
 
-	~ActorEventPersistenceCleanup() {
-		for (auto actor_id : actor_ids_) {
-			ActorActionQueueRepository::DeleteByActorId(database, actor_id);
-			ActorEventsRepository::DeleteByActorId(database, actor_id);
-			ActorStatusRepository::DeleteOne(database, actor_id);
-		}
+	bool Cleanup(std::string* failure_reason = nullptr) {
+		bool ok = true;
+		std::string failures;
+		const auto remove = [&](const std::string& label, const std::string& statement) {
+			const auto result = database.QueryDatabase(statement);
+			if (!result.Success()) {
+				ok = false;
+				failures += (failures.empty() ? "" : ",") + label;
+			}
+		};
 
+		for (auto actor_id : actor_ids_) {
+			remove("actor_action_queue", fmt::format("DELETE FROM actor_action_queue WHERE actor_id = {}", actor_id));
+			remove("actor_events", fmt::format("DELETE FROM actor_events WHERE actor_id = {}", actor_id));
+			remove("actor_status", fmt::format("DELETE FROM actor_status WHERE actor_id = {}", actor_id));
+		}
 		for (auto it = actor_ids_.rbegin(); it != actor_ids_.rend(); ++it) {
-			ActorProfilesRepository::DeleteOne(database, *it);
+			remove("actor_profiles", fmt::format("DELETE FROM actor_profiles WHERE actor_id = {}", *it));
 		}
 
 		if (reserved_owner_character_id > 0) {
-			std::string unused_reason;
-			EQ::Actor::ReservedOwners::Rollback(database, reserved_owner_character_id, &unused_reason);
+			const auto owner_result = database.QueryDatabase(
+				fmt::format("SELECT COUNT(*) FROM character_data WHERE id = {}", reserved_owner_character_id));
+			if (!owner_result.Success() || owner_result.RowCount() != 1 || !owner_result.begin()[0]) {
+				ok = false;
+				failures += (failures.empty() ? "" : ",") + std::string("reserved_owner_lookup");
+			} else if (ok && strtoull(owner_result.begin()[0], nullptr, 10) > 0) {
+				std::string rollback_reason;
+				if (!EQ::Actor::ReservedOwners::Rollback(database, reserved_owner_character_id, &rollback_reason)) {
+					ok = false;
+					failures += (failures.empty() ? "" : ",") + "reserved_owner:" + rollback_reason;
+				}
+			}
+		}
+		if (ok) {
+			actor_ids_.clear();
+			reserved_owner_character_id = 0;
+		}
+		if (failure_reason) {
+			*failure_reason = failures;
+		}
+		return ok;
+	}
+
+	~ActorEventPersistenceCleanup() {
+		std::string failure_reason;
+		if (!Cleanup(&failure_reason)) {
+			std::cerr << "[CLEANUP-FAIL] actor-events-runtime: " << failure_reason << "\n";
 		}
 	}
 
 private:
 	std::vector<uint32_t> actor_ids_;
 };
+
+std::string ActorValidationOwnerPrefix() {
+	std::string token = std::getenv("ACTOR_QUEUE_VALIDATION_TOKEN") ? std::getenv("ACTOR_QUEUE_VALIDATION_TOKEN") : "";
+	token.erase(std::remove_if(token.begin(), token.end(), [](unsigned char c) { return !std::isalnum(c); }), token.end());
+	if (token.empty()) {
+		token = std::to_string(BuildRunNonce());
+	}
+	return "ActorownerRuntime" + token.substr(0, 40);
+}
+
+bool CleanupActorValidationOwners(const std::string& owner_prefix, std::string* failure_reason, size_t* owner_count) {
+	auto owners = database.QueryDatabase(fmt::format(
+		"SELECT id FROM character_data WHERE name LIKE '{}%' AND last_name = '{}' AND (deleted_at IS NULL OR deleted_at <= 0)",
+		Strings::Escape(owner_prefix), Strings::Escape(std::string(EQ::Actor::ReservedOwners::kReservedOwnerLastNameMarker))));
+	if (!owners.Success()) {
+		*failure_reason = "reserved_owner_discovery_failed";
+		return false;
+	}
+
+	std::vector<uint32_t> owner_ids;
+	for (auto row : owners) {
+		if (row[0]) {
+			owner_ids.push_back(static_cast<uint32_t>(strtoul(row[0], nullptr, 10)));
+		}
+	}
+	*owner_count = owner_ids.size();
+	for (const auto owner_id : owner_ids) {
+		auto profiles = database.QueryDatabase(
+			fmt::format("SELECT actor_id FROM actor_profiles WHERE owner_character_id = {}", owner_id));
+		if (!profiles.Success()) {
+			*failure_reason = "actor_profile_discovery_failed";
+			return false;
+		}
+		ActorEventPersistenceCleanup cleanup;
+		cleanup.reserved_owner_character_id = owner_id;
+		for (auto row : profiles) {
+			if (row[0]) {
+				cleanup.TrackActorId(static_cast<uint32_t>(strtoul(row[0], nullptr, 10)));
+			}
+		}
+		if (!cleanup.Cleanup(failure_reason)) {
+			return false;
+		}
+	}
+	return true;
+}
 
 class BlockingPersistenceSink final : public EQ::ZoneHarness::ActorEventPersistenceSink {
 public:
@@ -214,6 +295,17 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 	}
 
 	EQEmuLogSys::Instance()->SilenceConsoleLogging();
+	const auto owner_prefix = ActorValidationOwnerPrefix();
+	if (cmd["--cleanup-only"]) {
+		std::string failure_reason;
+		size_t owner_count = 0;
+		if (!CleanupActorValidationOwners(owner_prefix, &failure_reason, &owner_count)) {
+			std::cerr << "[CLEANUP-FAIL] actor-events-runtime: " << failure_reason << "\n";
+			std::exit(1);
+		}
+		std::cout << "[PASS] actor-events-cleanup owners=" << owner_count << "\n";
+		return;
+	}
 
 	try {
 		ExpectRecorderShutdownWaitsForInFlightCallbacks();
@@ -231,8 +323,7 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 		EQ::ZoneHarness::ActorEventRecorder::RegisterActiveRecorder(&recorder);
 
 		ActorEventPersistenceCleanup cleanup;
-		const auto reserved_owner =
-			EQ::Actor::ReservedOwners::Provision(database, fmt::format("ActorownerRuntime{}", run_nonce));
+		const auto reserved_owner = EQ::Actor::ReservedOwners::Provision(database, owner_prefix);
 		Expect(reserved_owner.character_id > 0,
 			   "reserved owner provisioning should succeed for runtime actor event persistence");
 		cleanup.reserved_owner_character_id = reserved_owner.character_id;
@@ -711,6 +802,9 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 					"runtime actor event persistence should not write marker rows to player_event_logs");
 
 		EQ::ZoneHarness::ActorEventRecorder::ClearActiveRecorder(&recorder);
+		fixture.Cleanup();
+		std::string cleanup_failure;
+		Expect(cleanup.Cleanup(&cleanup_failure), "actor event persistence cleanup should succeed: " + cleanup_failure);
 		std::cout << "[PASS] actor-events-runtime\n";
 	} catch (const TestFailure& e) {
 		std::cerr << "[FAIL] " << e.what() << "\n";

@@ -32,6 +32,8 @@ Commands:
   tier3-harness   Run the canonical Zone Harness smoke.
   actor-queue-tier3
                   Run the DB-mutating durable actor queue integration scenario.
+  actor-queue-cleanup
+                  Remove actor queue rows owned by the current validation token.
   safe            Run preflight, tier1, and tier2-readonly.
 
 The safe command intentionally does not run DB-mutating Tier 2 checks or Tier 3
@@ -103,13 +105,27 @@ run_actor_queue_tier3() {
   run_mariadb
   (
     cd "$stack_dir"
-    "${compose[@]}" run --rm --no-deps --entrypoint bash eqemu-server -lc \
+    "${compose[@]}" run --rm --no-deps -e ACTOR_QUEUE_VALIDATION_TOKEN --entrypoint bash eqemu-server -lc \
       'set -euo pipefail
 test -x ~/code/build/bin/zone || { printf "error: actor-queue-tier3 requires a prior Tier 1 build; missing executable ~/code/build/bin/zone\n" >&2; exit 2; }
 runtime=/tmp/actor-queue-tier3-runtime
 ~/code/scripts/lib/prepare-zone-cli-runtime.sh "$runtime"
 cd "$runtime"
 ~/code/build/bin/zone tests:actor-events'
+  )
+}
+
+run_actor_queue_cleanup() {
+  run_preflight
+  run_mariadb
+  (
+    cd "$stack_dir"
+    "${compose[@]}" run --rm --no-deps -e ACTOR_QUEUE_VALIDATION_TOKEN --entrypoint bash eqemu-server -lc \
+      'set -euo pipefail
+runtime=/tmp/actor-queue-tier3-runtime
+~/code/scripts/lib/prepare-zone-cli-runtime.sh "$runtime"
+cd "$runtime"
+~/code/build/bin/zone tests:actor-events --cleanup-only'
   )
 }
 
@@ -136,7 +152,7 @@ fi
 command="${AKKSTACK_REMAINING_ARGS[0]}"
 
 case "$command" in
-  preflight|tier1|tier2-readonly|tier3-harness|actor-queue-tier3|safe)
+  preflight|tier1|tier2-readonly|tier3-harness|actor-queue-tier3|actor-queue-cleanup|safe)
     ;;
   *)
     usage >&2
@@ -151,6 +167,11 @@ fi
 
 if [[ "$AKKSTACK_DRY_RUN" -eq 1 && "$command" == "actor-queue-tier3" ]]; then
   akkstack_print_dry_run "would run tests:actor-events as a database-mutating runtime fixture; scenario-owned rows are cleaned up" "${compose_files[@]}"
+  exit 0
+fi
+
+if [[ "$AKKSTACK_DRY_RUN" -eq 1 && "$command" == "actor-queue-cleanup" ]]; then
+  akkstack_print_dry_run "would run tests:actor-events --cleanup-only for the validation token" "${compose_files[@]}"
   exit 0
 fi
 
@@ -179,6 +200,9 @@ case "$command" in
     ;;
   actor-queue-tier3)
     run_actor_queue_tier3
+    ;;
+  actor-queue-cleanup)
+    run_actor_queue_cleanup
     ;;
   safe)
     run_preflight
