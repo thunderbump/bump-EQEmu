@@ -93,6 +93,9 @@ if [[ "${VALIDATION_WORKER_TEST_SPAWN_DESCENDANT:-0}" == "1" ]]; then
   printf '%s\n' "$!" >"$VALIDATION_WORKER_TEST_DESCENDANT_PID_FILE"
   exit 0
 fi
+if [[ -n "${VALIDATION_WORKER_TEST_STARTED_MARKER:-}" ]]; then
+  : >"$VALIDATION_WORKER_TEST_STARTED_MARKER"
+fi
 if [[ "${VALIDATION_WORKER_TEST_SLEEP:-0}" != "0" ]]; then
   sleep "$VALIDATION_WORKER_TEST_SLEEP"
 fi
@@ -1261,20 +1264,22 @@ test_worker_termination_restores_stack_and_releases_locks() {
 }
 
 test_current_afk_wrapper_forwards_termination_and_retains_evidence() {
-  local source evidence stack wrapper_pid status output_file rebound=0
+  local source evidence stack wrapper_pid status output_file validation_started rebound=0
   make_afk_contract_repo source wrapper-interruption
   reset_worker_home
   evidence="$tmp_root/current-afk-interrupted-evidence"
   stack="$tmp_root/operator-home/Projects/bump-eqemu/bump-akk-stack-validation"
   output_file="$tmp_root/current-afk-interrupted.out"
+  validation_started="$tmp_root/current-afk-validation.started"
 
   env HOME="$tmp_root/operator-home" VALIDATION_WORKER_HOME="$tmp_root/worker-home" \
-    VALIDATION_WORKER_TEST_SLEEP=30 VALIDATION_AFK_EVIDENCE_DIR="$evidence" \
+    VALIDATION_WORKER_TEST_SLEEP=30 VALIDATION_WORKER_TEST_STARTED_MARKER="$validation_started" \
+    VALIDATION_AFK_EVIDENCE_DIR="$evidence" \
     "$source/scripts/validate-afk" >"$output_file" 2>&1 &
   wrapper_pid=$!
 
   for _ in {1..200}; do
-    if [[ -L "$stack/code" ]]; then
+    if [[ -L "$stack/code" && -f "$validation_started" ]]; then
       rebound=1
       break
     fi

@@ -112,10 +112,10 @@ public:
 		bool ok = true;
 		std::string failures;
 		const auto remove = [&](const std::string& label, const std::string& statement) {
-			const auto result = database.QueryDatabase(statement);
+			auto result = database.QueryDatabase(statement);
 			if (!result.Success()) {
 				ok = false;
-				failures += (failures.empty() ? "" : ",") + label;
+				failures += (failures.empty() ? std::string() : ",") + label;
 			}
 		};
 
@@ -129,16 +129,16 @@ public:
 		}
 
 		if (reserved_owner_character_id > 0) {
-			const auto owner_result = database.QueryDatabase(
+			auto owner_result = database.QueryDatabase(
 				fmt::format("SELECT COUNT(*) FROM character_data WHERE id = {}", reserved_owner_character_id));
 			if (!owner_result.Success() || owner_result.RowCount() != 1 || !owner_result.begin()[0]) {
 				ok = false;
-				failures += (failures.empty() ? "" : ",") + std::string("reserved_owner_lookup");
+				failures += (failures.empty() ? std::string() : ",") + "reserved_owner_lookup";
 			} else if (ok && strtoull(owner_result.begin()[0], nullptr, 10) > 0) {
 				std::string rollback_reason;
 				if (!EQ::Actor::ReservedOwners::Rollback(database, reserved_owner_character_id, &rollback_reason)) {
 					ok = false;
-					failures += (failures.empty() ? "" : ",") + "reserved_owner:" + rollback_reason;
+					failures += (failures.empty() ? std::string() : ",") + "reserved_owner:" + rollback_reason;
 				}
 			}
 		}
