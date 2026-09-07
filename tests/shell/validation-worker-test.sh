@@ -873,6 +873,59 @@ test_stack_lock_blocks_distinct_worker_homes_on_same_stack() {
   [[ "$(cd "$stack/code" && pwd -P)" == "$(cd "$other_checkout" && pwd -P)" ]] || return 1
 }
 
+test_worker_termination_during_checkout_deletion_is_bounded() {
+  local source request evidence checkout_dir fake_bin real_rm marker child_pid_file worker_pid status output_file start end
+  make_source_repo source interrupted-checkout-deletion
+  reset_worker_home
+  evidence="$tmp_root/evidence-interrupted-checkout-deletion"
+  request="$tmp_root/interrupted-checkout-deletion.json"
+  checkout_dir="$tmp_root/worker-home/checkouts/run-$(basename "$evidence")"
+  fake_bin="$tmp_root/fake-bin-interrupted-checkout-deletion"
+  marker="$tmp_root/interrupted-checkout-deletion.started"
+  child_pid_file="$tmp_root/interrupted-checkout-deletion.pid"
+  output_file="$tmp_root/interrupted-checkout-deletion.out"
+  real_rm="$(command -v rm)"
+  mkdir -p "$checkout_dir" "$fake_bin"
+  printf 'old checkout\n' >"$checkout_dir/marker"
+  cat >"$fake_bin/rm" <<SCRIPT
+#!/usr/bin/env bash
+if [[ "\${*: -1}" == "$checkout_dir" ]]; then
+  printf '%s\n' "\$\$" >"$child_pid_file"
+  : >"$marker"
+  trap '' TERM
+  while :; do sleep 1; done
+fi
+exec "$real_rm" "\$@"
+SCRIPT
+  chmod +x "$fake_bin/rm"
+  write_request "$request" "$source" "$evidence" HEAD "" 0 60
+
+  env PATH="$fake_bin:$PATH" VALIDATION_WORKER_HOME="$tmp_root/worker-home" \
+    VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TERMINATION_GRACE_SECONDS=1 \
+    "$repo_root/scripts/validation-worker.sh" run --request "$request" >"$output_file" 2>&1 &
+  worker_pid=$!
+  for _ in {1..200}; do
+    [[ -f "$marker" ]] && break
+    kill -0 "$worker_pid" 2>/dev/null || break
+    sleep 0.05
+  done
+  [[ -f "$marker" ]] || return 1
+
+  start="$(date +%s)"
+  kill -TERM "$worker_pid"
+  set +e
+  wait "$worker_pid"
+  status=$?
+  set -e
+  end="$(date +%s)"
+
+  [[ "$status" -eq 143 ]] || return 1
+  [[ $((end - start)) -lt 4 ]] || return 1
+  ! kill -0 "$(cat "$child_pid_file")" 2>/dev/null || return 1
+  [[ ! -e "$tmp_root/worker-home/locks/validation-slot.lock" ]] || return 1
+  assert_json_equals "$evidence/result.json" .category interrupted
+}
+
 test_worker_termination_during_fetch_is_bounded() {
   local source request evidence fake_bin real_git marker child_pid_file worker_pid status output_file start end
   make_source_repo source interrupted-fetch
@@ -1558,6 +1611,7 @@ run_test "tier1 plus tier3 harness profile stops after tier1 failure and release
 run_test "validation worker binds requested validation stack to worker checkout" test_validation_worker_binds_requested_validation_stack_to_worker_checkout
 run_test "validation worker binds validation stack from AKKSTACK_DIR" test_validation_worker_binds_stack_from_akkstack_dir_environment
 run_test "stack lock blocks distinct worker homes on same stack" test_stack_lock_blocks_distinct_worker_homes_on_same_stack
+run_test "worker termination during checkout deletion is bounded" test_worker_termination_during_checkout_deletion_is_bounded
 run_test "worker termination during fetch is bounded" test_worker_termination_during_fetch_is_bounded
 run_test "worker termination during submodule preparation is bounded" test_worker_termination_during_submodule_preparation_is_bounded
 run_test "worker termination restores stack and releases locks" test_worker_termination_restores_stack_and_releases_locks

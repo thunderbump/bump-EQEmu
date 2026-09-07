@@ -901,6 +901,39 @@ initialize_checkout_submodules() {
   run_isolated_submodule_update "$checkout_dir" "$evidence_dir" yes
 }
 
+set_checkout_preparation_error() {
+  local status="$1" message="$2"
+  if [[ "$status" -eq 124 || "$status" -eq 137 ]]; then
+    PREPARE_ERROR_CATEGORY=timeout
+    PREPARE_ERROR_MESSAGE="checkout preparation timed out"
+  else
+    PREPARE_ERROR_CATEGORY=fetch_failed
+    PREPARE_ERROR_MESSAGE="$message"
+  fi
+}
+
+reset_checkout_directory() {
+  local checkout_dir="$1" evidence_dir="$2" status
+
+  set +e
+  run_tracked_timeout_command rm -rf -- "$checkout_dir" >>"$evidence_dir/logs/fetch.log" 2>&1
+  status=$?
+  set -e
+  if [[ "$status" -ne 0 ]]; then
+    set_checkout_preparation_error "$status" "failed to remove previous checkout"
+    return 1
+  fi
+
+  set +e
+  run_tracked_timeout_command mkdir -p -- "$checkout_dir" >>"$evidence_dir/logs/fetch.log" 2>&1
+  status=$?
+  set -e
+  if [[ "$status" -ne 0 ]]; then
+    set_checkout_preparation_error "$status" "failed to create checkout directory"
+    return 1
+  fi
+}
+
 run_checkout_git_step() {
   local checkout_dir="$1" evidence_dir="$2" status
   shift 2
@@ -912,13 +945,7 @@ run_checkout_git_step() {
   if [[ "$status" -eq 0 ]]; then
     return 0
   fi
-  if [[ "$status" -eq 124 || "$status" -eq 137 ]]; then
-    PREPARE_ERROR_CATEGORY=timeout
-    PREPARE_ERROR_MESSAGE="checkout preparation timed out"
-  else
-    PREPARE_ERROR_CATEGORY=fetch_failed
-    PREPARE_ERROR_MESSAGE="failed to fetch or checkout requested ref"
-  fi
+  set_checkout_preparation_error "$status" "failed to fetch or checkout requested ref"
   return 1
 }
 
@@ -1026,8 +1053,10 @@ run_request() {
   RUN_REQUEST_DEADLINE_NS=$(( $(date +%s%N) + (timeout_seconds * 1000000000) ))
 
   if [[ "$request_source_type" == "fetch" ]]; then
-    rm -rf "$checkout_dir"
-    mkdir -p "$checkout_dir"
+    if ! reset_checkout_directory "$checkout_dir" "$evidence_dir"; then
+      write_result "$evidence_dir" failed "$PREPARE_ERROR_CATEGORY" 1 "$PREPARE_ERROR_MESSAGE" "$checkout_dir" "" "$stack_path_source"
+      return 1
+    fi
   fi
 
   if ! prepare_checkout "$checkout_dir" "$evidence_dir"; then
