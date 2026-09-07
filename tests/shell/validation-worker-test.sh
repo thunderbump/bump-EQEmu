@@ -873,8 +873,8 @@ test_stack_lock_blocks_distinct_worker_homes_on_same_stack() {
   [[ "$(cd "$stack/code" && pwd -P)" == "$(cd "$other_checkout" && pwd -P)" ]] || return 1
 }
 
-test_worker_termination_during_checkout_deletion_is_bounded() {
-  local source request evidence checkout_dir fake_bin real_rm marker child_pid_file worker_pid status output_file start end
+test_worker_termination_kills_checkout_deletion_descendant_after_leader_exit() {
+  local source request evidence checkout_dir fake_bin real_rm marker child_pid_file worker_pid status output_file start end child_pid child_stat
   make_source_repo source interrupted-checkout-deletion
   reset_worker_home
   evidence="$tmp_root/evidence-interrupted-checkout-deletion"
@@ -890,10 +890,18 @@ test_worker_termination_during_checkout_deletion_is_bounded() {
   cat >"$fake_bin/rm" <<SCRIPT
 #!/usr/bin/env bash
 if [[ "\${*: -1}" == "$checkout_dir" ]]; then
-  printf '%s\n' "\$\$" >"$child_pid_file"
+  # The group leader exits on TERM, while this descendant deliberately
+  # survives it. Cleanup must continue tracking the process group and KILL the
+  # descendant before restoring the stack or releasing locks.
+  (
+    trap '' TERM
+    while :; do sleep 1; done
+  ) &
+  descendant_pid=\$!
+  printf '%s\n' "\$descendant_pid" >"$child_pid_file"
   : >"$marker"
-  trap '' TERM
-  while :; do sleep 1; done
+  trap 'exit 0' TERM
+  wait "\$descendant_pid"
 fi
 exec "$real_rm" "\$@"
 SCRIPT
@@ -921,7 +929,12 @@ SCRIPT
 
   [[ "$status" -eq 143 ]] || return 1
   [[ $((end - start)) -lt 4 ]] || return 1
-  ! kill -0 "$(cat "$child_pid_file")" 2>/dev/null || return 1
+  child_pid="$(cat "$child_pid_file")"
+  child_stat="$(ps -o stat= -p "$child_pid" 2>/dev/null || true)"
+  [[ -z "$child_stat" || "$child_stat" == Z* ]] || {
+    printf 'TERM-resistant checkout descendant still active with status %s\n' "$child_stat" >&2
+    return 1
+  }
   [[ ! -e "$tmp_root/worker-home/locks/validation-slot.lock" ]] || return 1
   assert_json_equals "$evidence/result.json" .category interrupted
 }
@@ -1611,7 +1624,7 @@ run_test "tier1 plus tier3 harness profile stops after tier1 failure and release
 run_test "validation worker binds requested validation stack to worker checkout" test_validation_worker_binds_requested_validation_stack_to_worker_checkout
 run_test "validation worker binds validation stack from AKKSTACK_DIR" test_validation_worker_binds_stack_from_akkstack_dir_environment
 run_test "stack lock blocks distinct worker homes on same stack" test_stack_lock_blocks_distinct_worker_homes_on_same_stack
-run_test "worker termination during checkout deletion is bounded" test_worker_termination_during_checkout_deletion_is_bounded
+run_test "worker termination kills a checkout descendant after its leader exits" test_worker_termination_kills_checkout_deletion_descendant_after_leader_exit
 run_test "worker termination during fetch is bounded" test_worker_termination_during_fetch_is_bounded
 run_test "worker termination during submodule preparation is bounded" test_worker_termination_during_submodule_preparation_is_bounded
 run_test "worker termination restores stack and releases locks" test_worker_termination_restores_stack_and_releases_locks

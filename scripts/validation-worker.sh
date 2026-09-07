@@ -689,22 +689,41 @@ run_tracked_timeout_command() {
   run_tracked_command timeout --signal=TERM --kill-after="${termination_grace_seconds}s" "$remaining_duration" "$@"
 }
 
+process_group_has_live_members() {
+  local pgid="$1"
+
+  # The group leader remains as a zombie until this shell waits for it. Ignore
+  # zombies while deciding whether any command descendant can still retain
+  # validation-stack resources.
+  ps -eo pgid=,stat= 2>/dev/null | awk -v target="$pgid" '
+    $1 == target && $2 !~ /^Z/ { found = 1 }
+    END { exit(found ? 0 : 1) }
+  '
+}
+
 terminate_request_child() {
-  local pid="${RUN_REQUEST_CHILD_PID:-}" deadline pgid
+  local pid="${RUN_REQUEST_CHILD_PID:-}" deadline pgid group_tracked=0
   [[ -n "$pid" ]] || return 0
 
-  # GNU timeout creates a separate process group for the command. Signal that
-  # group when available so grandchildren cannot retain stack resources.
+  # run_tracked_command starts the command under setsid. Retain that process
+  # group identity after TERM: its leader may exit before a TERM-resistant
+  # descendant, but the surviving group must still receive bounded escalation.
   pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
   if [[ -n "$pgid" && "$pgid" == "$pid" ]]; then
+    group_tracked=1
     kill -TERM -- "-$pgid" 2>/dev/null || true
   else
     kill -TERM "$pid" 2>/dev/null || true
   fi
   deadline=$(( $(date +%s) + termination_grace_seconds ))
-  while kill -0 "$pid" 2>/dev/null; do
+  while :; do
+    if [[ "$group_tracked" -eq 1 ]]; then
+      process_group_has_live_members "$pgid" || break
+    else
+      kill -0 "$pid" 2>/dev/null || break
+    fi
     if [[ "$(date +%s)" -ge "$deadline" ]]; then
-      if [[ -n "$pgid" && "$pgid" == "$pid" ]]; then
+      if [[ "$group_tracked" -eq 1 ]]; then
         kill -KILL -- "-$pgid" 2>/dev/null || true
       else
         kill -KILL "$pid" 2>/dev/null || true
