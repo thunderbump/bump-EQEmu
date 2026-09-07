@@ -786,6 +786,10 @@ run_request_signal() {
     # request to race the surviving descendant.
     write_terminal_run_failure child_termination_failed 1 \
       "validation command descendants remained active after KILL grace period; stack cleanup withheld" || true
+    # run_request installed cleanup as both RETURN and EXIT protection. This
+    # failure intentionally retains the binding and locks, so prevent exit from
+    # invoking the cleanup that this branch must withhold.
+    trap - EXIT
     exit 1
   fi
   write_terminal_run_failure interrupted "$exit_code" "validation interrupted by signal" || true

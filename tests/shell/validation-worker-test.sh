@@ -1049,6 +1049,83 @@ SCRIPT
   assert_json_equals "$evidence/result.json" .category interrupted
 }
 
+test_worker_failed_termination_retains_stack_and_locks() {
+  local source request evidence stack other_checkout fake_bin real_ps pgid_file worker_pid status output_file rebound=0
+  make_source_repo source failed-termination-cleanup
+  reset_worker_home
+  evidence="$tmp_root/evidence-failed-termination-cleanup"
+  request="$tmp_root/failed-termination-cleanup.json"
+  stack="$tmp_root/failed-termination-cleanup-stack"
+  other_checkout="$tmp_root/failed-termination-cleanup-other-checkout"
+  fake_bin="$tmp_root/fake-bin-failed-termination-cleanup"
+  pgid_file="$tmp_root/failed-termination-cleanup.pgid"
+  output_file="$tmp_root/failed-termination-cleanup.out"
+  real_ps="$(command -v ps)"
+  mkdir -p "$stack" "$other_checkout" "$fake_bin"
+  printf 'ENV=development\n' >"$stack/.env"
+  ln -s "$other_checkout" "$stack/code"
+  write_request "$request" "$source" "$evidence" HEAD "" 0 60 "$stack" preflight
+
+  # Simulate a process group that remains observable after KILL. The initial
+  # lookup still uses the real ps so termination targets the actual setsid
+  # group; subsequent membership checks retain that pgid through both grace
+  # periods and exercise the cleanup-withheld failure path.
+  cat >"$fake_bin/ps" <<SCRIPT
+#!/usr/bin/env bash
+if [[ "\${1:-}" == "-eo" && "\${2:-}" == "pgid=,stat=" && -s "$pgid_file" ]]; then
+  printf '%s S\n' "\$(cat "$pgid_file")"
+  exit 0
+fi
+if [[ "\${1:-}" == "-o" && "\${2:-}" == "pgid=" ]]; then
+  output="\$("$real_ps" "\$@")"
+  printf '%s\n' "\$output"
+  printf '%s\n' "\$output" | tr -d ' ' >"$pgid_file"
+  exit 0
+fi
+exec "$real_ps" "\$@"
+SCRIPT
+  chmod +x "$fake_bin/ps"
+
+  env PATH="$fake_bin:$PATH" VALIDATION_WORKER_HOME="$tmp_root/worker-home" \
+    VALIDATION_WORKER_VALIDATE_DRY_RUN=1 \
+    VALIDATION_WORKER_TEST_IGNORE_TERM=1 \
+    VALIDATION_WORKER_TERMINATION_GRACE_SECONDS=1 \
+    "$repo_root/scripts/validation-worker.sh" run --request "$request" >"$output_file" 2>&1 &
+  worker_pid=$!
+
+  for _ in {1..200}; do
+    if [[ -L "$stack/code" && "$(readlink "$stack/code")" != "$other_checkout" ]]; then
+      rebound=1
+      break
+    fi
+    kill -0 "$worker_pid" 2>/dev/null || break
+    sleep 0.05
+  done
+  if [[ "$rebound" -ne 1 ]]; then
+    kill -KILL "$worker_pid" 2>/dev/null || true
+    wait "$worker_pid" 2>/dev/null || true
+    printf 'worker did not bind the validation stack before failed termination test\n' >&2
+    return 1
+  fi
+
+  kill -TERM "$worker_pid"
+  set +e
+  wait "$worker_pid"
+  status=$?
+  set -e
+
+  [[ "$status" -eq 1 ]] || {
+    printf 'expected failed termination status 1, got %s; output:\n' "$status" >&2
+    cat "$output_file" >&2
+    return 1
+  }
+  [[ "$(readlink "$stack/code")" != "$other_checkout" ]] || return 1
+  [[ -d "$stack/.validation-worker-code.lock" ]] || return 1
+  [[ -d "$tmp_root/worker-home/locks/validation-slot.lock" ]] || return 1
+  assert_json_equals "$evidence/result.json" .category child_termination_failed
+  assert_json_equals "$evidence/result.json" .exit_code 1
+}
+
 test_worker_termination_restores_stack_and_releases_locks() {
   local source request evidence stack other_checkout worker_pid status output_file rebound=0
   make_source_repo source interrupted-cleanup
@@ -1633,6 +1710,7 @@ run_test "stack lock blocks distinct worker homes on same stack" test_stack_lock
 run_test "worker termination kills a checkout descendant after its leader exits" test_worker_termination_kills_checkout_deletion_descendant_after_leader_exit
 run_test "worker termination during fetch is bounded" test_worker_termination_during_fetch_is_bounded
 run_test "worker termination during submodule preparation is bounded" test_worker_termination_during_submodule_preparation_is_bounded
+run_test "failed worker termination retains stack and locks" test_worker_failed_termination_retains_stack_and_locks
 run_test "worker termination restores stack and releases locks" test_worker_termination_restores_stack_and_releases_locks
 run_test "current AFK wrapper forwards termination and retains evidence" test_current_afk_wrapper_forwards_termination_and_retains_evidence
 run_test "AKKSTACK_DIR real code directory fails fast" test_akkstack_dir_real_code_directory_fails_fast
