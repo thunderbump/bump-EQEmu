@@ -15,6 +15,7 @@ RUN_REQUEST_HEAD_COMMIT=
 RUN_REQUEST_STACK_PATH_SOURCE=
 RUN_REQUEST_AFK_LOG_PREFIX=logs
 RUN_REQUEST_AFK_ACTIVE_INDEX=-1
+RUN_REQUEST_DEADLINE_NS=
 termination_grace_seconds="${VALIDATION_WORKER_TERMINATION_GRACE_SECONDS:-5}"
 if [[ ! "$termination_grace_seconds" =~ ^[0-9]+$ || "$termination_grace_seconds" -eq 0 ]]; then
   printf 'error: VALIDATION_WORKER_TERMINATION_GRACE_SECONDS must be a positive integer\n' >&2
@@ -660,6 +661,34 @@ write_terminal_run_failure() {
     "$RUN_REQUEST_CHECKOUT_DIR" "$RUN_REQUEST_HEAD_COMMIT" "$RUN_REQUEST_STACK_PATH_SOURCE"
 }
 
+run_tracked_command() {
+  local status
+
+  # Give every potentially long-running child its own process group. Bash runs
+  # traps promptly while waiting for an asynchronous child, and the signal
+  # handler can therefore terminate the complete command tree within the same
+  # grace period used by validation commands.
+  set +e
+  setsid "$@" &
+  RUN_REQUEST_CHILD_PID=$!
+  wait "$RUN_REQUEST_CHILD_PID"
+  status=$?
+  RUN_REQUEST_CHILD_PID=
+  set -e
+  return "$status"
+}
+
+run_tracked_timeout_command() {
+  local remaining_ns remaining_ms remaining_duration
+  remaining_ns=$(( RUN_REQUEST_DEADLINE_NS - $(date +%s%N) ))
+  remaining_ms=$(( remaining_ns / 1000000 ))
+  if [[ "$remaining_ms" -le 0 ]]; then
+    return 124
+  fi
+  printf -v remaining_duration '%d.%03ds' "$(( remaining_ms / 1000 ))" "$(( remaining_ms % 1000 ))"
+  run_tracked_command timeout --signal=TERM --kill-after="${termination_grace_seconds}s" "$remaining_duration" "$@"
+}
+
 terminate_request_child() {
   local pid="${RUN_REQUEST_CHILD_PID:-}" deadline pgid
   [[ -n "$pid" ]] || return 0
@@ -726,11 +755,15 @@ run_request_signal() {
 verify_checkout_submodules() {
   local checkout_dir="$1" evidence_dir="$2" mode="$3" output status
 
+  local output_path="$evidence_dir/logs/submodule-status.tmp"
+
   set +e
-  output="$(timeout "$timeout_seconds" git -C "$checkout_dir" submodule status --recursive 2>&1)"
+  run_tracked_timeout_command git -C "$checkout_dir" submodule status --recursive >"$output_path" 2>&1
   status=$?
   set -e
+  output="$(cat "$output_path")"
   printf '%s\n' "$output" >>"$evidence_dir/logs/submodule.log"
+  rm -f "$output_path"
 
   if [[ "$status" -eq 124 ]]; then
     SUBMODULE_ERROR_CATEGORY=timeout
@@ -817,10 +850,10 @@ run_isolated_submodule_update() {
   fi
 
   set +e
-  env -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT \
+  run_tracked_timeout_command env -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT \
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 \
     GIT_TERMINAL_PROMPT=0 GIT_ASKPASS= SSH_ASKPASS= \
-    timeout "$timeout_seconds" git -C "$checkout_dir" "${transport_config[@]}" "${update_args[@]}" \
+    git -C "$checkout_dir" "${transport_config[@]}" "${update_args[@]}" \
     >>"$evidence_dir/logs/submodule.log" 2>&1
   status=$?
   set -e
@@ -868,19 +901,35 @@ initialize_checkout_submodules() {
   run_isolated_submodule_update "$checkout_dir" "$evidence_dir" yes
 }
 
+run_checkout_git_step() {
+  local checkout_dir="$1" evidence_dir="$2" status
+  shift 2
+
+  set +e
+  run_tracked_timeout_command git -C "$checkout_dir" "$@" >>"$evidence_dir/logs/fetch.log" 2>&1
+  status=$?
+  set -e
+  if [[ "$status" -eq 0 ]]; then
+    return 0
+  fi
+  if [[ "$status" -eq 124 || "$status" -eq 137 ]]; then
+    PREPARE_ERROR_CATEGORY=timeout
+    PREPARE_ERROR_MESSAGE="checkout preparation timed out"
+  else
+    PREPARE_ERROR_CATEGORY=fetch_failed
+    PREPARE_ERROR_MESSAGE="failed to fetch or checkout requested ref"
+  fi
+  return 1
+}
+
 prepare_checkout() {
   local checkout_dir="$1" evidence_dir="$2"
-  local status
 
   if [[ "$request_source_type" == "fetch" ]]; then
-    if ! git -C "$checkout_dir" init >>"$evidence_dir/logs/fetch.log" 2>&1 \
-      || ! git -C "$checkout_dir" remote add origin "$repo" >>"$evidence_dir/logs/fetch.log" 2>&1 \
-      || ! git -C "$checkout_dir" fetch --depth=1 origin "$request_source_ref" >>"$evidence_dir/logs/fetch.log" 2>&1 \
-      || ! git -C "$checkout_dir" checkout --detach FETCH_HEAD >>"$evidence_dir/logs/fetch.log" 2>&1; then
-      PREPARE_ERROR_CATEGORY=fetch_failed
-      PREPARE_ERROR_MESSAGE="failed to fetch or checkout requested ref"
-      return 1
-    fi
+    run_checkout_git_step "$checkout_dir" "$evidence_dir" init || return 1
+    run_checkout_git_step "$checkout_dir" "$evidence_dir" remote add origin "$repo" || return 1
+    run_checkout_git_step "$checkout_dir" "$evidence_dir" fetch --depth=1 origin "$request_source_ref" || return 1
+    run_checkout_git_step "$checkout_dir" "$evidence_dir" checkout --detach FETCH_HEAD || return 1
 
     if ! initialize_checkout_submodules "$checkout_dir" "$evidence_dir"; then
       return 1
@@ -905,7 +954,7 @@ run_request() {
   stack_path_source=
   RESULT_CHECKS_PATH=
   STACK_BINDING_STATUS= STACK_BINDING_SOURCE= STACK_BINDING_STACK_DIR= STACK_BINDING_CODE_PATH= STACK_BINDING_TARGET= STACK_BINDING_PREVIOUS_KIND= STACK_BINDING_PREVIOUS_TARGET= STACK_BINDING_RESTORE_NEEDED=0
-  RUN_REQUEST_CHECKOUT_DIR= RUN_REQUEST_HEAD_COMMIT= RUN_REQUEST_STACK_PATH_SOURCE= RUN_REQUEST_AFK_LOG_PREFIX=logs RUN_REQUEST_AFK_ACTIVE_INDEX=-1
+  RUN_REQUEST_CHECKOUT_DIR= RUN_REQUEST_HEAD_COMMIT= RUN_REQUEST_STACK_PATH_SOURCE= RUN_REQUEST_AFK_LOG_PREFIX=logs RUN_REQUEST_AFK_ACTIVE_INDEX=-1 RUN_REQUEST_DEADLINE_NS=
 
   # Discover and register a requested combined gate before validating fields that
   # can fail (notably stack.path). This is evidence initialization only; request
@@ -974,6 +1023,7 @@ run_request() {
   trap run_request_cleanup RETURN EXIT
   trap 'run_request_signal 130' INT
   trap 'run_request_signal 143' TERM
+  RUN_REQUEST_DEADLINE_NS=$(( $(date +%s%N) + (timeout_seconds * 1000000000) ))
 
   if [[ "$request_source_type" == "fetch" ]]; then
     rm -rf "$checkout_dir"
@@ -1015,33 +1065,20 @@ run_request() {
     validation_cmd+=(--dry-run)
   fi
 
-  validation_started_at_ns="$(date +%s%N)"
   run_validation() {
     local profile_name="$1" log_path="${2:-$evidence_dir/logs/validation.log}"
-    local exit_code elapsed_ns remaining_ns remaining_ms remaining_duration
-
-    elapsed_ns=$(( $(date +%s%N) - validation_started_at_ns ))
-    remaining_ns=$(( (timeout_seconds * 1000000000) - elapsed_ns ))
-    remaining_ms=$(( remaining_ns / 1000000 ))
-    if [[ "$remaining_ms" -le 0 ]]; then
-      return 124
-    fi
-    printf -v remaining_duration '%d.%03ds' "$(( remaining_ms / 1000 ))" "$(( remaining_ms % 1000 ))"
+    local exit_code
 
     set +e
     if [[ -n "$stack_path" && -n "${STACK_BINDING_STATUS:-}" ]]; then
-      AKKSTACK_DIR="$stack_path" EXPECTED_EQEMU_CHECKOUT="$checkout_dir" timeout --signal=TERM --kill-after="${termination_grace_seconds}s" "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1 &
+      run_tracked_timeout_command env AKKSTACK_DIR="$stack_path" EXPECTED_EQEMU_CHECKOUT="$checkout_dir" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
     elif [[ -n "$stack_path" ]]; then
-      AKKSTACK_DIR="$stack_path" timeout --signal=TERM --kill-after="${termination_grace_seconds}s" "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1 &
+      run_tracked_timeout_command env AKKSTACK_DIR="$stack_path" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
     else
-      timeout --signal=TERM --kill-after="${termination_grace_seconds}s" "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1 &
+      run_tracked_timeout_command "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
     fi
-    RUN_REQUEST_CHILD_PID=$!
-    wait "$RUN_REQUEST_CHILD_PID"
     exit_code=$?
-    RUN_REQUEST_CHILD_PID=
     set -e
-
     return "$exit_code"
   }
 
