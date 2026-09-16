@@ -41,6 +41,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
+#include <exception>
 #include <future>
 #include <iostream>
 #include <memory>
@@ -249,39 +250,72 @@ private:
 void ExpectRecorderShutdownWaitsForInFlightCallbacks() {
 	using namespace std::chrono_literals;
 
-	EQ::ZoneHarness::ActorEventRecorder recorder;
-	BlockingPersistenceSink blocking_sink;
-	recorder.SetPersistenceSink(&blocking_sink);
-	EQ::ZoneHarness::ActorEventRecorder::RegisterActiveRecorder(&recorder);
+	// Keep the objects alive in the timeout path. Detached workers let this proof
+	// report a bounded failure instead of blocking in thread::join or an async
+	// future destructor if recorder teardown regresses.
+	auto recorder = std::make_shared<EQ::ZoneHarness::ActorEventRecorder>();
+	auto blocking_sink = std::make_shared<BlockingPersistenceSink>();
+	recorder->SetPersistenceSink(blocking_sink.get());
+	EQ::ZoneHarness::ActorEventRecorder::RegisterActiveRecorder(recorder.get());
 
-	std::thread observe_thread(
-		[]() { EQ::ZoneHarness::ActorEventRecorder::ObserveSpeechEmitted(nullptr, "say", "teardown-sync", 200); });
+	std::promise<void> observe_done_promise;
+	auto observe_done = observe_done_promise.get_future();
+	std::thread([recorder, blocking_sink, done = std::move(observe_done_promise)]() mutable {
+		(void)blocking_sink;
+		try {
+			EQ::ZoneHarness::ActorEventRecorder::ObserveSpeechEmitted(nullptr, "say", "teardown-sync", 200);
+			done.set_value();
+		} catch (...) {
+			done.set_exception(std::current_exception());
+		}
+	}).detach();
 
-	const bool persist_started = blocking_sink.WaitUntilPersistStarted(1s);
+	const bool persist_started = blocking_sink->WaitUntilPersistStarted(1s);
 	if (!persist_started) {
-		observe_thread.join();
-		EQ::ZoneHarness::ActorEventRecorder::ClearActiveRecorder(&recorder);
-		recorder.SetPersistenceSink(nullptr);
-		Fail("blocking persistence sink should observe an in-flight speech callback");
+		// The observer may enter the sink immediately after the deadline. Always
+		// release it before starting teardown so neither worker can deadlock.
+		blocking_sink->AllowPersistToFinish();
 	}
 
-	auto clear_future = std::async(
-		std::launch::async, [&recorder]() { EQ::ZoneHarness::ActorEventRecorder::ClearActiveRecorder(&recorder); });
+	std::promise<void> clear_done_promise;
+	auto clear_done = clear_done_promise.get_future();
+	std::thread([recorder, blocking_sink, done = std::move(clear_done_promise)]() mutable {
+		(void)blocking_sink;
+		try {
+			EQ::ZoneHarness::ActorEventRecorder::ClearActiveRecorder(recorder.get());
+			done.set_value();
+		} catch (...) {
+			done.set_exception(std::current_exception());
+		}
+	}).detach();
 
-	const auto clear_status_while_blocked = clear_future.wait_for(100ms);
-	blocking_sink.AllowPersistToFinish();
-	const bool persist_finished = blocking_sink.WaitUntilPersistFinished(1s);
-	observe_thread.join();
-	const auto clear_status_after_release = clear_future.wait_for(1s);
-	clear_future.get();
-	recorder.SetPersistenceSink(nullptr);
+	const auto clear_status_while_blocked = clear_done.wait_for(100ms);
+	blocking_sink->AllowPersistToFinish();
+	const bool persist_finished = blocking_sink->WaitUntilPersistFinished(1s);
+	const auto observe_status_after_release = observe_done.wait_for(1s);
+	const auto clear_status_after_release = clear_done.wait_for(1s);
 
+	// get() is safe only after the corresponding deadline reports ready.
+	if (observe_status_after_release == std::future_status::ready) {
+		observe_done.get();
+	}
+	if (clear_status_after_release == std::future_status::ready) {
+		clear_done.get();
+	}
+	if (observe_status_after_release == std::future_status::ready &&
+		clear_status_after_release == std::future_status::ready) {
+		recorder->SetPersistenceSink(nullptr);
+	}
+
+	Expect(persist_started, "blocking persistence sink should observe an in-flight speech callback");
 	Expect(clear_status_while_blocked == std::future_status::timeout,
 		   "active recorder teardown should wait for in-flight callbacks before returning");
 	Expect(persist_finished, "blocking persistence sink should finish after release");
+	Expect(observe_status_after_release == std::future_status::ready,
+		   "in-flight speech callback should finish within the teardown deadline");
 	Expect(clear_status_after_release == std::future_status::ready,
 		   "active recorder teardown should finish once in-flight callbacks drain");
-	ExpectEqual(recorder.Since(0, 4).size(), static_cast<size_t>(1),
+	ExpectEqual(recorder->Since(0, 4).size(), static_cast<size_t>(1),
 				"blocked speech callback should still record one actor event before teardown completes");
 }
 
