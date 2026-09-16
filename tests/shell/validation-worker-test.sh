@@ -4,6 +4,9 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 tmp_root="$(mktemp -d)"
 test_filter="${1:-}"
+# Production reserves enough time for Compose/MariaDB startup. Synthetic worker
+# tests use short request budgets and instant cleanup unless a test overrides it.
+export VALIDATION_WORKER_ACTOR_CLEANUP_RESERVE_SECONDS=1
 
 cleanup() {
   rm -rf "$tmp_root"
@@ -117,6 +120,9 @@ if [[ "${VALIDATION_WORKER_TEST_FAIL_ACTOR_QUEUE:-0}" == "1" && " $* " == *" act
   exit 1
 fi
 if [[ " $* " == *" actor-queue-cleanup "* ]]; then
+  if [[ "${VALIDATION_WORKER_TEST_SLEEP_ACTOR_CLEANUP:-0}" != "0" ]]; then
+    sleep "$VALIDATION_WORKER_TEST_SLEEP_ACTOR_CLEANUP"
+  fi
   [[ -z "${VALIDATION_WORKER_TEST_CLEANUP_MARKER:-}" ]] || : >"$VALIDATION_WORKER_TEST_CLEANUP_MARKER"
   if [[ "${VALIDATION_WORKER_TEST_FAIL_ACTOR_CLEANUP:-0}" == "1" ]]; then
     printf 'actor queue cleanup requested failure\n' >&2
@@ -698,11 +704,12 @@ test_actor_timeout_still_dispatches_cleanup() {
   evidence="$tmp_root/evidence-actor-timeout-cleanup"
   request="$tmp_root/actor-timeout-cleanup.json"
   cleanup_marker="$tmp_root/actor-timeout-cleanup.ran"
-  write_request "$request" "$source" "$evidence" HEAD "" 0 4 "" tier1-tier3-harness
+  write_request "$request" "$source" "$evidence" HEAD "" 0 8 "" tier1-tier3-harness
 
   capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 \
-    VALIDATION_WORKER_TEST_SLEEP_ACTOR_QUEUE=10 VALIDATION_WORKER_TEST_CLEANUP_MARKER="$cleanup_marker" \
-    VALIDATION_WORKER_TERMINATION_GRACE_SECONDS=1 \
+    VALIDATION_WORKER_TEST_SLEEP_ACTOR_QUEUE=10 VALIDATION_WORKER_TEST_SLEEP_ACTOR_CLEANUP=2 \
+    VALIDATION_WORKER_TEST_CLEANUP_MARKER="$cleanup_marker" VALIDATION_WORKER_TERMINATION_GRACE_SECONDS=1 \
+    VALIDATION_WORKER_ACTOR_CLEANUP_RESERVE_SECONDS=3 \
     "$repo_root/scripts/validation-worker.sh" run --request "$request"
 
   [[ "$status" -eq 1 ]] || return 1

@@ -20,8 +20,13 @@ RUN_REQUEST_DEADLINE_NS=
 RUN_REQUEST_COMMAND_DEADLINE_NS=
 RUN_REQUEST_ACTOR_CLEANUP_REQUIRED=0
 termination_grace_seconds="${VALIDATION_WORKER_TERMINATION_GRACE_SECONDS:-5}"
+actor_cleanup_reserve_seconds="${VALIDATION_WORKER_ACTOR_CLEANUP_RESERVE_SECONDS:-120}"
 if [[ ! "$termination_grace_seconds" =~ ^[0-9]+$ || "$termination_grace_seconds" -eq 0 ]]; then
   printf 'error: VALIDATION_WORKER_TERMINATION_GRACE_SECONDS must be a positive integer\n' >&2
+  exit 2
+fi
+if [[ ! "$actor_cleanup_reserve_seconds" =~ ^[0-9]+$ || "$actor_cleanup_reserve_seconds" -eq 0 ]]; then
+  printf 'error: VALIDATION_WORKER_ACTOR_CLEANUP_RESERVE_SECONDS must be a positive integer\n' >&2
   exit 2
 fi
 
@@ -58,6 +63,8 @@ skip fetch, require an existing checkout, and verify submodules are already
 initialized and pinned to recorded commits instead of mutating the checkout.
 Set VALIDATION_WORKER_VALIDATE_DRY_RUN=1 to delegate with --dry-run for local
 contract tests. If stack.path is omitted, AKKSTACK_DIR remains a path override.
+VALIDATION_WORKER_ACTOR_CLEANUP_RESERVE_SECONDS controls the portion of the
+shared timeout reserved for actor database cleanup (default: 120 seconds).
 USAGE
 }
 
@@ -687,7 +694,12 @@ run_tracked_command() {
       trap - RETURN EXIT
       exit 1
     fi
-    status=125
+    # Preserve timeout classification after proving the remaining command tree
+    # dead. A successful command that leaked descendants is still an internal
+    # validation failure rather than a success.
+    if [[ "$status" -ne 124 && "$status" -ne 137 ]]; then
+      status=125
+    fi
   else
     RUN_REQUEST_CHILD_PID=
     RUN_REQUEST_CHILD_PGID=
@@ -704,7 +716,9 @@ run_tracked_timeout_command() {
     return 124
   fi
   printf -v remaining_duration '%d.%03ds' "$(( remaining_ms / 1000 ))" "$(( remaining_ms % 1000 ))"
-  run_tracked_command timeout --signal=TERM --kill-after="${termination_grace_seconds}s" "$remaining_duration" "$@"
+  # --foreground keeps the managed command in the process group created by
+  # run_tracked_command, so killing that group cannot leave it behind.
+  run_tracked_command timeout --foreground --signal=TERM --kill-after="${termination_grace_seconds}s" "$remaining_duration" "$@"
 }
 
 process_group_has_live_members() {
@@ -1215,17 +1229,16 @@ run_request() {
       return $?
     fi
 
-    # Reserve part of the request's existing deadline for an out-of-process
-    # cleanup pass. It runs while both locks and the Candidate stack binding are
-    # still held, including after timeout or interruption of the zone process.
+    # Reserve independent portions of the request's existing deadline for
+    # terminating a timed-out actor process and for the out-of-process cleanup
+    # pass. Cleanup runs while both locks and the Candidate stack binding are
+    # still held. Do not dispatch the mutating scenario when the remaining
+    # request budget cannot provide both reserves.
     now_ns=$(date +%s%N)
     remaining_ns=$(( RUN_REQUEST_DEADLINE_NS - now_ns ))
-    if [[ "$remaining_ns" -le 0 ]]; then
+    reserve_ns=$(( (termination_grace_seconds + actor_cleanup_reserve_seconds) * 1000000000 ))
+    if [[ "$remaining_ns" -le "$reserve_ns" ]]; then
       return 124
-    fi
-    reserve_ns=$(( termination_grace_seconds * 1000000000 ))
-    if [[ "$reserve_ns" -gt $(( remaining_ns / 2 )) ]]; then
-      reserve_ns=$(( remaining_ns / 2 ))
     fi
     RUN_REQUEST_COMMAND_DEADLINE_NS=$(( RUN_REQUEST_DEADLINE_NS - reserve_ns ))
     RUN_REQUEST_ACTOR_CLEANUP_REQUIRED=1
