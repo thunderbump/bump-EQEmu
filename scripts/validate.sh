@@ -32,6 +32,8 @@ Commands:
   tier3-harness   Run the canonical Zone Harness smoke.
   actor-queue-tier3
                   Run the DB-mutating durable actor queue integration scenario.
+  actor-queue-stop
+                  Stop and remove the current validation actor container.
   actor-queue-cleanup
                   Remove actor queue rows owned by the current validation token.
   safe            Run preflight, tier1, and tier2-readonly.
@@ -100,12 +102,24 @@ run_tier2_readonly() {
   run_tier2_readonly_zone_tests
 }
 
+require_actor_container_name() {
+  [[ -n "${ACTOR_QUEUE_VALIDATION_CONTAINER:-}" ]] || {
+    printf 'error: ACTOR_QUEUE_VALIDATION_CONTAINER is required\n' >&2
+    return 2
+  }
+  [[ "$ACTOR_QUEUE_VALIDATION_CONTAINER" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || {
+    printf 'error: invalid ACTOR_QUEUE_VALIDATION_CONTAINER\n' >&2
+    return 2
+  }
+}
+
 run_actor_queue_tier3() {
+  require_actor_container_name
   run_preflight
   run_mariadb
   (
     cd "$stack_dir"
-    "${compose[@]}" run --rm --no-deps -e ACTOR_QUEUE_VALIDATION_TOKEN --entrypoint bash eqemu-server -lc \
+    "${compose[@]}" run --name "$ACTOR_QUEUE_VALIDATION_CONTAINER" --rm --no-deps -e ACTOR_QUEUE_VALIDATION_TOKEN --entrypoint bash eqemu-server -lc \
       'set -euo pipefail
 test -x ~/code/build/bin/zone || { printf "error: actor-queue-tier3 requires a prior Tier 1 build; missing executable ~/code/build/bin/zone\n" >&2; exit 2; }
 runtime=/tmp/actor-queue-tier3-runtime
@@ -115,12 +129,31 @@ cd "$runtime"
   )
 }
 
+run_actor_queue_stop() {
+  require_actor_container_name
+
+  # The Compose client is a local process, but its one-off container belongs to
+  # the Docker daemon and can survive client termination. Repeatedly request
+  # removal, then prove both daemon reachability and container absence before
+  # the worker is allowed to clean the database or release shared locks.
+  while docker container inspect "$ACTOR_QUEUE_VALIDATION_CONTAINER" >/dev/null 2>&1; do
+    docker container rm --force "$ACTOR_QUEUE_VALIDATION_CONTAINER" >/dev/null 2>&1 || true
+    sleep 0.1
+  done
+  docker info >/dev/null
+  if docker container inspect "$ACTOR_QUEUE_VALIDATION_CONTAINER" >/dev/null 2>&1; then
+    printf 'error: actor validation container remains present: %s\n' "$ACTOR_QUEUE_VALIDATION_CONTAINER" >&2
+    return 1
+  fi
+}
+
 run_actor_queue_cleanup() {
+  require_actor_container_name
   run_preflight
   run_mariadb
   (
     cd "$stack_dir"
-    "${compose[@]}" run --rm --no-deps -e ACTOR_QUEUE_VALIDATION_TOKEN --entrypoint bash eqemu-server -lc \
+    "${compose[@]}" run --name "$ACTOR_QUEUE_VALIDATION_CONTAINER" --rm --no-deps -e ACTOR_QUEUE_VALIDATION_TOKEN --entrypoint bash eqemu-server -lc \
       'set -euo pipefail
 runtime=/tmp/actor-queue-tier3-runtime
 ~/code/scripts/lib/prepare-zone-cli-runtime.sh "$runtime"
@@ -152,7 +185,7 @@ fi
 command="${AKKSTACK_REMAINING_ARGS[0]}"
 
 case "$command" in
-  preflight|tier1|tier2-readonly|tier3-harness|actor-queue-tier3|actor-queue-cleanup|safe)
+  preflight|tier1|tier2-readonly|tier3-harness|actor-queue-tier3|actor-queue-stop|actor-queue-cleanup|safe)
     ;;
   *)
     usage >&2
@@ -167,6 +200,11 @@ fi
 
 if [[ "$AKKSTACK_DRY_RUN" -eq 1 && "$command" == "actor-queue-tier3" ]]; then
   akkstack_print_dry_run "would run tests:actor-events as a database-mutating runtime fixture; scenario-owned rows are cleaned up" "${compose_files[@]}"
+  exit 0
+fi
+
+if [[ "$AKKSTACK_DRY_RUN" -eq 1 && "$command" == "actor-queue-stop" ]]; then
+  akkstack_print_dry_run "would stop and remove the named actor validation container" "${compose_files[@]}"
   exit 0
 fi
 
@@ -200,6 +238,9 @@ case "$command" in
     ;;
   actor-queue-tier3)
     run_actor_queue_tier3
+    ;;
+  actor-queue-stop)
+    run_actor_queue_stop
     ;;
   actor-queue-cleanup)
     run_actor_queue_cleanup

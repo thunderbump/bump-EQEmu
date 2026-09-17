@@ -640,7 +640,8 @@ EOF
   [[ "$status" -eq 0 ]] || return 1
   assert_contains "$(cat "$payload_file")" '~/code/scripts/lib/prepare-zone-cli-runtime.sh "$runtime"'
 
-  capture_run status output env PATH="$fake_bin:$PATH" "$fixture_repo/scripts/validate.sh" actor-queue-tier3
+  capture_run status output env PATH="$fake_bin:$PATH" ACTOR_QUEUE_VALIDATION_CONTAINER=actor-routing-test \
+    "$fixture_repo/scripts/validate.sh" actor-queue-tier3
   [[ "$status" -eq 0 ]] || return 1
   assert_contains "$(cat "$payload_file")" '~/code/scripts/lib/prepare-zone-cli-runtime.sh "$runtime"'
 }
@@ -826,7 +827,8 @@ EOF
   printf '#!/usr/bin/env bash\nexit 1\n' >"$fake_bin/mysqladmin"
   chmod +x "$fake_bin/mysqladmin"
 
-  capture_run status output env PATH="$fake_bin:$PATH" timeout 5 "$fixture_repo/scripts/validate.sh" actor-queue-tier3
+  capture_run status output env PATH="$fake_bin:$PATH" ACTOR_QUEUE_VALIDATION_CONTAINER=actor-readiness-test \
+    timeout 5 "$fixture_repo/scripts/validate.sh" actor-queue-tier3
 
   [[ "$status" -ne 0 && "$status" -ne 124 ]] || return 1
   assert_contains "$output" "MariaDB service mariadb was not ready within 1 seconds"

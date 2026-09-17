@@ -19,6 +19,8 @@ RUN_REQUEST_AFK_ACTIVE_INDEX=-1
 RUN_REQUEST_DEADLINE_NS=
 RUN_REQUEST_COMMAND_DEADLINE_NS=
 RUN_REQUEST_ACTOR_CLEANUP_REQUIRED=0
+RUN_REQUEST_ACTOR_CONTAINER_MAY_BE_ACTIVE=0
+RUN_REQUEST_CHILD_TOKEN=
 termination_grace_seconds="${VALIDATION_WORKER_TERMINATION_GRACE_SECONDS:-5}"
 actor_cleanup_reserve_seconds="${VALIDATION_WORKER_ACTOR_CLEANUP_RESERVE_SECONDS:-120}"
 if [[ ! "$termination_grace_seconds" =~ ^[0-9]+$ || "$termination_grace_seconds" -eq 0 ]]; then
@@ -674,21 +676,21 @@ write_terminal_run_failure() {
 run_tracked_command() {
   local status
 
-  # Give every potentially long-running child its own process group. Keep the
-  # pgid independently of the leader: a command may return after daemonizing a
-  # descendant, and the reaped leader can no longer be queried with ps.
+  # Give every potentially long-running child its own process group and an
+  # inherited identity token. The token also finds descendants that create a
+  # new session/process group, which PGID-only tracking cannot observe.
+  RUN_REQUEST_CHILD_TOKEN="validation-worker-$$-$(date +%s%N)-$RANDOM"
   set +e
-  setsid "$@" &
+  setsid env VALIDATION_WORKER_COMMAND_TOKEN="$RUN_REQUEST_CHILD_TOKEN" "$@" &
   RUN_REQUEST_CHILD_PID=$!
   RUN_REQUEST_CHILD_PGID=$RUN_REQUEST_CHILD_PID
   wait "$RUN_REQUEST_CHILD_PID"
   status=$?
-  if process_group_has_live_members "$RUN_REQUEST_CHILD_PGID"; then
+  if request_command_has_live_members; then
     # Normal leader completion is not command-tree completion. Terminate and
     # prove the leaked descendants dead before shared locks can be released.
     terminate_request_child
     if [[ "$?" -ne 0 ]]; then
-      set -e
       write_terminal_run_failure child_termination_failed 1 \
         "validation command descendants remained active after KILL grace period; stack cleanup withheld" || true
       trap - RETURN EXIT
@@ -703,8 +705,10 @@ run_tracked_command() {
   else
     RUN_REQUEST_CHILD_PID=
     RUN_REQUEST_CHILD_PGID=
+    RUN_REQUEST_CHILD_TOKEN=
   fi
-  set -e
+  # Do not enable errexit here. Shell options are global, and callers disable
+  # it while capturing expected rejection/timeout statuses.
   return "$status"
 }
 
@@ -733,36 +737,58 @@ process_group_has_live_members() {
   '
 }
 
+command_token_pids() {
+  local token="${RUN_REQUEST_CHILD_TOKEN:-}" proc pid stat_line stat_rest state entry
+  [[ -n "$token" ]] || return 0
+  for proc in /proc/[0-9]*; do
+    pid="${proc##*/}"
+    [[ "$pid" != "$$" && -r "$proc/environ" && -r "$proc/stat" ]] || continue
+    IFS= read -r stat_line <"$proc/stat" 2>/dev/null || continue
+    stat_rest="${stat_line##*) }"
+    state="${stat_rest%% *}"
+    [[ "$state" != "Z" ]] || continue
+    while IFS= read -r -d '' entry; do
+      if [[ "$entry" == "VALIDATION_WORKER_COMMAND_TOKEN=$token" ]]; then
+        printf '%s\n' "$pid"
+        break
+      fi
+    done <"$proc/environ" 2>/dev/null
+  done
+}
+
+request_command_has_live_members() {
+  if [[ -n "${RUN_REQUEST_CHILD_PGID:-}" ]] \
+    && process_group_has_live_members "$RUN_REQUEST_CHILD_PGID"; then
+    return 0
+  fi
+  [[ -n "$(command_token_pids)" ]]
+}
+
+signal_request_command() {
+  local signal="$1" pgid="${RUN_REQUEST_CHILD_PGID:-}" pid
+  if [[ -n "$pgid" ]]; then
+    kill -"$signal" -- "-$pgid" 2>/dev/null || true
+  fi
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] && kill -"$signal" "$pid" 2>/dev/null || true
+  done < <(command_token_pids)
+}
+
 terminate_request_child() {
-  local pid="${RUN_REQUEST_CHILD_PID:-}" deadline pgid="${RUN_REQUEST_CHILD_PGID:-}" observed_pgid group_tracked=0
+  local pid="${RUN_REQUEST_CHILD_PID:-}" deadline observed_pgid
   [[ -n "$pid" ]] || return 0
 
-  # run_tracked_command records the setsid group before waiting. The lookup is
-  # useful while the leader remains live, but the recorded value stays
-  # authoritative after normal completion has reaped that leader.
+  # Confirm the leader's current group while it is still available. The group
+  # recorded at launch remains authoritative after the leader is reaped.
   observed_pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
-  if [[ -z "$pgid" ]]; then
-    pgid="$observed_pgid"
+  if [[ -z "${RUN_REQUEST_CHILD_PGID:-}" ]]; then
+    RUN_REQUEST_CHILD_PGID="$observed_pgid"
   fi
-  if [[ -n "$pgid" && "$pgid" == "$pid" ]]; then
-    group_tracked=1
-    kill -TERM -- "-$pgid" 2>/dev/null || true
-  else
-    kill -TERM "$pid" 2>/dev/null || true
-  fi
+  signal_request_command TERM
   deadline=$(( $(date +%s) + termination_grace_seconds ))
-  while :; do
-    if [[ "$group_tracked" -eq 1 ]]; then
-      process_group_has_live_members "$pgid" || break
-    else
-      kill -0 "$pid" 2>/dev/null || break
-    fi
+  while request_command_has_live_members; do
     if [[ "$(date +%s)" -ge "$deadline" ]]; then
-      if [[ "$group_tracked" -eq 1 ]]; then
-        kill -KILL -- "-$pgid" 2>/dev/null || true
-      else
-        kill -KILL "$pid" 2>/dev/null || true
-      fi
+      signal_request_command KILL
 
       # Signal delivery is asynchronous. Do not restore the shared stack or
       # release its locks merely because KILL was sent: a descendant can still
@@ -770,12 +796,7 @@ terminate_request_child() {
       # one final bounded grace period and report failure rather than allowing
       # cleanup to overlap a surviving command tree.
       deadline=$(( $(date +%s) + termination_grace_seconds ))
-      while :; do
-        if [[ "$group_tracked" -eq 1 ]]; then
-          process_group_has_live_members "$pgid" || break
-        else
-          kill -0 "$pid" 2>/dev/null || break
-        fi
+      while request_command_has_live_members; do
         if [[ "$(date +%s)" -ge "$deadline" ]]; then
           return 1
         fi
@@ -788,6 +809,7 @@ terminate_request_child() {
   wait "$pid" 2>/dev/null || true
   RUN_REQUEST_CHILD_PID=
   RUN_REQUEST_CHILD_PGID=
+  RUN_REQUEST_CHILD_TOKEN=
 }
 
 run_request_cleanup() {
@@ -828,14 +850,37 @@ run_request_signal() {
     trap - EXIT
     exit 1
   fi
+  if [[ "${RUN_REQUEST_ACTOR_CONTAINER_MAY_BE_ACTIVE:-0}" == "1" ]]; then
+    RUN_REQUEST_COMMAND_DEADLINE_NS=$RUN_REQUEST_DEADLINE_NS
+    if ! perform_actor_container_stop; then
+      write_terminal_run_failure actor_container_termination_failed 1 \
+        "actor validation container could not be proven absent after interruption; cleanup and locks withheld" || true
+      trap - EXIT
+      exit 1
+    fi
+  fi
   if [[ "${RUN_REQUEST_ACTOR_CLEANUP_REQUIRED:-0}" == "1" ]]; then
     RUN_REQUEST_COMMAND_DEADLINE_NS=$RUN_REQUEST_DEADLINE_NS
     if ! perform_actor_queue_cleanup; then
+      if [[ "${RUN_REQUEST_ACTOR_CONTAINER_MAY_BE_ACTIVE:-0}" == "1" ]] \
+        && ! perform_actor_container_stop; then
+        write_terminal_run_failure actor_container_termination_failed 1 \
+          "actor cleanup container could not be proven absent; cleanup and locks withheld" || true
+        trap - EXIT
+        exit 1
+      fi
       write_terminal_run_failure cleanup_failed 1 \
         "actor queue database cleanup failed after interruption; inspect actor-queue-cleanup.log" || true
       run_request_cleanup || true
       exit 1
     fi
+    if ! perform_actor_container_stop; then
+      write_terminal_run_failure actor_container_termination_failed 1 \
+        "actor cleanup container could not be proven absent; cleanup and locks withheld" || true
+      trap - EXIT
+      exit 1
+    fi
+    RUN_REQUEST_ACTOR_CLEANUP_REQUIRED=0
   fi
   write_terminal_run_failure interrupted "$exit_code" "validation interrupted by signal" || true
   run_request_cleanup || cleanup_status=1
@@ -1074,7 +1119,7 @@ run_request() {
   stack_path_source=
   RESULT_CHECKS_PATH=
   STACK_BINDING_STATUS= STACK_BINDING_SOURCE= STACK_BINDING_STACK_DIR= STACK_BINDING_CODE_PATH= STACK_BINDING_TARGET= STACK_BINDING_PREVIOUS_KIND= STACK_BINDING_PREVIOUS_TARGET= STACK_BINDING_RESTORE_NEEDED=0
-  RUN_REQUEST_CHECKOUT_DIR= RUN_REQUEST_HEAD_COMMIT= RUN_REQUEST_STACK_PATH_SOURCE= RUN_REQUEST_AFK_LOG_PREFIX=logs RUN_REQUEST_AFK_ACTIVE_INDEX=-1 RUN_REQUEST_DEADLINE_NS= RUN_REQUEST_COMMAND_DEADLINE_NS= RUN_REQUEST_CHILD_PID= RUN_REQUEST_CHILD_PGID= RUN_REQUEST_ACTOR_CLEANUP_REQUIRED=0
+  RUN_REQUEST_CHECKOUT_DIR= RUN_REQUEST_HEAD_COMMIT= RUN_REQUEST_STACK_PATH_SOURCE= RUN_REQUEST_AFK_LOG_PREFIX=logs RUN_REQUEST_AFK_ACTIVE_INDEX=-1 RUN_REQUEST_DEADLINE_NS= RUN_REQUEST_COMMAND_DEADLINE_NS= RUN_REQUEST_CHILD_PID= RUN_REQUEST_CHILD_PGID= RUN_REQUEST_CHILD_TOKEN= RUN_REQUEST_ACTOR_CLEANUP_REQUIRED=0 RUN_REQUEST_ACTOR_CONTAINER_MAY_BE_ACTIVE=0
 
   # Discover and register a requested combined gate before validating fields that
   # can fail (notably stack.path). This is evidence initialization only; request
@@ -1188,6 +1233,7 @@ run_request() {
   fi
 
   actor_validation_token="${head_commit:0:16}-${run_id}"
+  actor_container_name="afk-actor-${head_commit:0:12}-$(printf '%s' "$run_id" | sha256sum | cut -c1-12)"
   run_validation() {
     local profile_name="$1" log_path="${2:-$evidence_dir/logs/validation.log}"
     local exit_code
@@ -1195,33 +1241,44 @@ run_request() {
     set +e
     if [[ -n "$stack_path" && -n "${STACK_BINDING_STATUS:-}" ]]; then
       run_tracked_timeout_command env AKKSTACK_DIR="$stack_path" EXPECTED_EQEMU_CHECKOUT="$checkout_dir" \
-        ACTOR_QUEUE_VALIDATION_TOKEN="$actor_validation_token" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
+        ACTOR_QUEUE_VALIDATION_TOKEN="$actor_validation_token" ACTOR_QUEUE_VALIDATION_CONTAINER="$actor_container_name" \
+        "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
     elif [[ -n "$stack_path" ]]; then
       run_tracked_timeout_command env AKKSTACK_DIR="$stack_path" ACTOR_QUEUE_VALIDATION_TOKEN="$actor_validation_token" \
-        "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
+        ACTOR_QUEUE_VALIDATION_CONTAINER="$actor_container_name" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
     else
       run_tracked_timeout_command env ACTOR_QUEUE_VALIDATION_TOKEN="$actor_validation_token" \
-        "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
+        ACTOR_QUEUE_VALIDATION_CONTAINER="$actor_container_name" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
     fi
     exit_code=$?
     set -e
     return "$exit_code"
   }
 
+  perform_actor_container_stop() {
+    local stop_status
+    set +e
+    run_validation actor-queue-stop "$evidence_dir/logs/actor-queue-stop.log"
+    stop_status=$?
+    set -e
+    if [[ "$stop_status" -eq 0 ]]; then
+      RUN_REQUEST_ACTOR_CONTAINER_MAY_BE_ACTIVE=0
+    fi
+    return "$stop_status"
+  }
+
   perform_actor_queue_cleanup() {
     local cleanup_status
+    RUN_REQUEST_ACTOR_CONTAINER_MAY_BE_ACTIVE=1
     set +e
     run_validation actor-queue-cleanup "$evidence_dir/logs/actor-queue-cleanup.log"
     cleanup_status=$?
     set -e
-    if [[ "$cleanup_status" -eq 0 ]]; then
-      RUN_REQUEST_ACTOR_CLEANUP_REQUIRED=0
-    fi
     return "$cleanup_status"
   }
 
   run_validation_with_actor_cleanup() {
-    local profile_name="$1" log_path="${2:-$evidence_dir/logs/validation.log}" status cleanup_status
+    local profile_name="$1" log_path="${2:-$evidence_dir/logs/validation.log}" status cleanup_status container_stop_status
     local now_ns remaining_ns reserve_ns
     VALIDATION_ACTOR_CLEANUP_FAILED=0
     if [[ "$profile_name" != "actor-queue-tier3" ]]; then
@@ -1242,18 +1299,38 @@ run_request() {
     fi
     RUN_REQUEST_COMMAND_DEADLINE_NS=$(( RUN_REQUEST_DEADLINE_NS - reserve_ns ))
     RUN_REQUEST_ACTOR_CLEANUP_REQUIRED=1
+    RUN_REQUEST_ACTOR_CONTAINER_MAY_BE_ACTIVE=1
     set +e
     run_validation "$profile_name" "$log_path"
     status=$?
     RUN_REQUEST_COMMAND_DEADLINE_NS=$RUN_REQUEST_DEADLINE_NS
+    perform_actor_container_stop
+    container_stop_status=$?
+    if [[ "$container_stop_status" -ne 0 ]]; then
+      RUN_REQUEST_COMMAND_DEADLINE_NS=
+      set -e
+      write_terminal_run_failure actor_container_termination_failed 1 \
+        "actor validation container could not be proven absent; database and stack cleanup withheld" || true
+      trap - RETURN EXIT
+      exit 1
+    fi
     perform_actor_queue_cleanup
     cleanup_status=$?
+    perform_actor_container_stop
+    container_stop_status=$?
     RUN_REQUEST_COMMAND_DEADLINE_NS=
     set -e
+    if [[ "$container_stop_status" -ne 0 ]]; then
+      write_terminal_run_failure actor_container_termination_failed 1 \
+        "actor cleanup container could not be proven absent; stack cleanup withheld" || true
+      trap - RETURN EXIT
+      exit 1
+    fi
     if [[ "$cleanup_status" -ne 0 ]]; then
       VALIDATION_ACTOR_CLEANUP_FAILED=1
       return 125
     fi
+    RUN_REQUEST_ACTOR_CLEANUP_REQUIRED=0
     return "$status"
   }
 
