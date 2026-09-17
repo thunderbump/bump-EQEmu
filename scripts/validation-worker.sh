@@ -851,7 +851,9 @@ run_request_signal() {
     exit 1
   fi
   if [[ "${RUN_REQUEST_ACTOR_CONTAINER_MAY_BE_ACTIVE:-0}" == "1" ]]; then
-    RUN_REQUEST_COMMAND_DEADLINE_NS=$RUN_REQUEST_DEADLINE_NS
+    # Signal handling must not inherit the request's potentially hour-long
+    # deadline. Give daemon-side stop/removal proof one short bounded grace.
+    RUN_REQUEST_COMMAND_DEADLINE_NS=$(( $(date +%s%N) + termination_grace_seconds * 1000000000 ))
     if ! perform_actor_container_stop; then
       write_terminal_run_failure actor_container_termination_failed 1 \
         "actor validation container could not be proven absent after interruption; cleanup and locks withheld" || true
@@ -1343,7 +1345,9 @@ run_request() {
       RUN_REQUEST_AFK_ACTIVE_INDEX="$afk_check_index"
       IFS=$'\t' read -r afk_profile afk_log_file afk_completion_marker afk_failure_status afk_failure_message afk_inconclusive_message <<<"${afk_plan_rows[$afk_check_index]}"
       if run_validation_with_actor_cleanup "$afk_profile" "$evidence_dir/logs/$afk_log_file"; then
-        if [[ "$afk_completion_marker" != "-" ]] \
+        # Dry-run validates dispatch and routing only; validate.sh deliberately
+        # does not execute runtime scenarios or emit their production markers.
+        if [[ "${VALIDATION_WORKER_VALIDATE_DRY_RUN:-0}" != "1" && "$afk_completion_marker" != "-" ]] \
           && ! grep -Fqx -- "$afk_completion_marker" "$evidence_dir/logs/$afk_log_file"; then
           printf 'required completion evidence missing: %s\n' "$afk_completion_marker" >>"$evidence_dir/logs/$afk_log_file"
           afk_check_statuses[$afk_check_index]=rejected

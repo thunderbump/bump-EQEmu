@@ -113,8 +113,11 @@ fi
 if [[ "${VALIDATION_WORKER_TEST_SLEEP_TIER3:-0}" != "0" && " $* " == *" tier3-harness"* ]]; then
   sleep "$VALIDATION_WORKER_TEST_SLEEP_TIER3"
 fi
-if [[ "${VALIDATION_WORKER_TEST_SLEEP_ACTOR_QUEUE:-0}" != "0" && " $* " == *" actor-queue-tier3"* ]]; then
-  sleep "$VALIDATION_WORKER_TEST_SLEEP_ACTOR_QUEUE"
+if [[ " $* " == *" actor-queue-tier3"* ]]; then
+  [[ -z "${VALIDATION_WORKER_TEST_ACTOR_STARTED_MARKER:-}" ]] || : >"$VALIDATION_WORKER_TEST_ACTOR_STARTED_MARKER"
+  if [[ "${VALIDATION_WORKER_TEST_SLEEP_ACTOR_QUEUE:-0}" != "0" ]]; then
+    sleep "$VALIDATION_WORKER_TEST_SLEEP_ACTOR_QUEUE"
+  fi
 fi
 if [[ "${VALIDATION_WORKER_TEST_FAIL_TIER1:-0}" == "1" && " $* " == *" tier1"* ]]; then
   printf 'tier1 requested failure\n' >&2
@@ -126,6 +129,9 @@ if [[ "${VALIDATION_WORKER_TEST_FAIL_ACTOR_QUEUE:-0}" == "1" && " $* " == *" act
 fi
 if [[ " $* " == *" actor-queue-stop "* ]]; then
   [[ -z "${VALIDATION_WORKER_TEST_STOP_MARKER:-}" ]] || : >"$VALIDATION_WORKER_TEST_STOP_MARKER"
+  if [[ "${VALIDATION_WORKER_TEST_SLEEP_ACTOR_STOP:-0}" != "0" ]]; then
+    sleep "$VALIDATION_WORKER_TEST_SLEEP_ACTOR_STOP"
+  fi
   if [[ "${VALIDATION_WORKER_TEST_FAIL_ACTOR_STOP:-0}" == "1" ]]; then
     printf 'actor container stop requested failure\n' >&2
     exit 1
@@ -754,6 +760,42 @@ test_actor_timeout_still_dispatches_cleanup() {
   assert_json_equals "$evidence/result.json" '.checks[2].status' inconclusive
 }
 
+test_interrupted_actor_container_stop_uses_short_deadline() {
+  local source request evidence actor_started output_file worker_pid status start end
+  make_source_repo source actor-interrupted-stop
+  reset_worker_home
+  evidence="$tmp_root/evidence-actor-interrupted-stop"
+  request="$tmp_root/actor-interrupted-stop.json"
+  actor_started="$tmp_root/actor-interrupted-stop.started"
+  output_file="$tmp_root/actor-interrupted-stop.out"
+  write_request "$request" "$source" "$evidence" HEAD "" 0 60 "" tier1-tier3-harness
+
+  env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 \
+    VALIDATION_WORKER_TEST_ACTOR_STARTED_MARKER="$actor_started" VALIDATION_WORKER_TEST_SLEEP_ACTOR_QUEUE=30 \
+    VALIDATION_WORKER_TEST_SLEEP_ACTOR_STOP=30 VALIDATION_WORKER_TERMINATION_GRACE_SECONDS=1 \
+    "$repo_root/scripts/validation-worker.sh" run --request "$request" >"$output_file" 2>&1 &
+  worker_pid=$!
+  for _ in {1..200}; do
+    [[ -e "$actor_started" ]] && break
+    sleep 0.05
+  done
+  [[ -e "$actor_started" ]] || return 1
+
+  start="$(date +%s)"
+  kill -TERM "$worker_pid"
+  set +e
+  wait "$worker_pid"
+  status=$?
+  set -e
+  end="$(date +%s)"
+
+  [[ "$status" -eq 1 ]] || return 1
+  [[ $((end - start)) -lt 5 ]] || return 1
+  assert_json_equals "$evidence/result.json" .category actor_container_termination_failed
+  [[ -e "$tmp_root/worker-home/locks/validation-slot.lock" ]] || return 1
+  rm -rf "$tmp_root/worker-home/locks/validation-slot.lock"
+}
+
 test_actor_container_stop_failure_retains_lock_and_skips_database_cleanup() {
   local source request evidence status output cleanup_marker stop_marker
   make_source_repo source actor-stop-failure
@@ -860,6 +902,24 @@ test_tier1_tier3_harness_profile_runs_tier1_before_tier3() {
   assert_json_equals "$evidence/result.json" '.checks | map(.scenario) | join(",")' "tier1-build-and-unit-tests,canonical-zone-harness,actor-events-runtime"
 }
 
+test_combined_profile_dry_run_does_not_require_runtime_markers() {
+  local source request evidence status output
+  make_source_repo source combined-dry-run-no-proof
+  reset_worker_home
+  evidence="$tmp_root/evidence-combined-dry-run-no-proof"
+  request="$tmp_root/combined-dry-run-no-proof.json"
+  write_request "$request" "$source" "$evidence" HEAD "" 0 10 "" tier1-tier3-harness
+
+  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" \
+    VALIDATION_WORKER_VALIDATE_DRY_RUN=1 \
+    VALIDATION_WORKER_TEST_OMIT_PROOF_PROFILE=actor-queue-tier3 \
+    "$repo_root/scripts/validation-worker.sh" run --request "$request"
+
+  [[ "$status" -eq 0 ]] || return 1
+  assert_json_equals "$evidence/result.json" .status passed
+  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,passed,passed"
+}
+
 test_combined_profile_rejects_a_zero_exit_without_runtime_proof() {
   local source request evidence status output
   make_source_repo source combined-missing-proof
@@ -871,7 +931,6 @@ test_combined_profile_rejects_a_zero_exit_without_runtime_proof() {
   printf '[PASS] actor-events-runtime\n' >"$evidence/logs/actor-queue-runtime.log"
 
   capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" \
-    VALIDATION_WORKER_VALIDATE_DRY_RUN=1 \
     VALIDATION_WORKER_TEST_OMIT_PROOF_PROFILE=actor-queue-tier3 \
     "$repo_root/scripts/validation-worker.sh" run --request "$request"
 
@@ -1850,11 +1909,13 @@ run_test "validation timeout is categorized" test_timeout
 run_test "normal completion kills surviving command descendants" test_normal_completion_kills_surviving_command_descendants
 run_test "normal completion kills a descendant that starts a new session" test_normal_completion_kills_setsid_descendant
 run_test "actor timeout still dispatches cleanup" test_actor_timeout_still_dispatches_cleanup
+run_test "interrupted actor container stop uses a short deadline" test_interrupted_actor_container_stop_uses_short_deadline
 run_test "actor container stop failure retains lock and skips database cleanup" test_actor_container_stop_failure_retains_lock_and_skips_database_cleanup
 run_test "actor cleanup is dispatched and failure is propagated" test_actor_cleanup_is_dispatched_and_failure_is_propagated
 run_test "validation timeout kills a TERM-resistant child" test_timeout_kills_a_term_resistant_validation_child
 run_test "tier3 harness failure is categorized with logs" test_tier3_harness_failure_is_categorized_with_logs
 run_test "combined AFK profile runs Tier 1, canonical harness, and actor queue" test_tier1_tier3_harness_profile_runs_tier1_before_tier3
+run_test "combined AFK dry run does not require runtime completion markers" test_combined_profile_dry_run_does_not_require_runtime_markers
 run_test "combined AFK profile rejects zero-exit actor queue without completion proof" test_combined_profile_rejects_a_zero_exit_without_runtime_proof
 run_test "combined AFK profile propagates actor queue failure" test_combined_profile_propagates_actor_queue_failure
 run_test "tier1 plus tier3 harness profile uses one timeout budget" test_tier1_tier3_harness_profile_uses_one_timeout_budget

@@ -130,16 +130,37 @@ cd "$runtime"
 }
 
 run_actor_queue_stop() {
+  local stabilization_seconds="${ACTOR_QUEUE_STOP_STABILIZATION_SECONDS:-2}"
+  local absent_since_ns= now_ns= stabilization_ns
   require_actor_container_name
+  [[ "$stabilization_seconds" =~ ^[0-9]+$ && "$stabilization_seconds" -gt 0 ]] || {
+    printf 'error: ACTOR_QUEUE_STOP_STABILIZATION_SECONDS must be a positive integer\n' >&2
+    return 2
+  }
+  stabilization_ns=$(( stabilization_seconds * 1000000000 ))
 
   # The Compose client is a local process, but its one-off container belongs to
-  # the Docker daemon and can survive client termination. Repeatedly request
-  # removal, then prove both daemon reachability and container absence before
-  # the worker is allowed to clean the database or release shared locks.
-  while docker container inspect "$ACTOR_QUEUE_VALIDATION_CONTAINER" >/dev/null 2>&1; do
-    docker container rm --force "$ACTOR_QUEUE_VALIDATION_CONTAINER" >/dev/null 2>&1 || true
+  # the Docker daemon and can survive client termination. An accepted create
+  # request may also finish after the client and the first inspect are gone.
+  # Require a continuous absence window, restarting it whenever the named
+  # container appears, before database cleanup or shared-lock release.
+  while :; do
+    if docker container inspect "$ACTOR_QUEUE_VALIDATION_CONTAINER" >/dev/null 2>&1; then
+      absent_since_ns=
+      docker container rm --force "$ACTOR_QUEUE_VALIDATION_CONTAINER" >/dev/null 2>&1 || true
+    else
+      # Distinguish confirmed absence from an unreachable daemon.
+      docker info >/dev/null
+      now_ns="$(date +%s%N)"
+      if [[ -z "$absent_since_ns" ]]; then
+        absent_since_ns="$now_ns"
+      elif [[ $(( now_ns - absent_since_ns )) -ge "$stabilization_ns" ]]; then
+        break
+      fi
+    fi
     sleep 0.1
   done
+
   docker info >/dev/null
   if docker container inspect "$ACTOR_QUEUE_VALIDATION_CONTAINER" >/dev/null 2>&1; then
     printf 'error: actor validation container remains present: %s\n' "$ACTOR_QUEUE_VALIDATION_CONTAINER" >&2

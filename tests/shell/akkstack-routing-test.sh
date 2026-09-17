@@ -614,6 +614,47 @@ test_actor_queue_tier3_dry_run_classifies_mutation_and_cleanup() {
   assert_contains "$output" "scenario-owned rows are cleaned up"
 }
 
+test_actor_queue_stop_waits_for_delayed_container_creation() {
+  local fixture_repo fixture_parent fake_bin state_file removed_file status output
+  make_fixture fixture_repo fixture_parent
+  fake_bin="$(mktemp -d "$tmp_root/fake-delayed-actor-container-bin.XXXXXX")"
+  state_file="$tmp_root/delayed-actor-container-inspects"
+  removed_file="$tmp_root/delayed-actor-container-removed"
+  printf '0\n' >"$state_file"
+
+  cat >"$fake_bin/docker" <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == "info" ]]; then
+  exit 0
+fi
+if [[ "$1 $2" == "container inspect" ]]; then
+  [[ ! -e "$DELAYED_CONTAINER_REMOVED" ]] || exit 1
+  count="$(cat "$DELAYED_CONTAINER_STATE")"
+  count=$((count + 1))
+  printf '%s\n' "$count" >"$DELAYED_CONTAINER_STATE"
+  # Simulate a daemon-side create completing after several absence checks.
+  [[ "$count" -eq 4 ]]
+  exit
+fi
+if [[ "$1 $2 $3" == "container rm --force" ]]; then
+  : >"$DELAYED_CONTAINER_REMOVED"
+  exit 0
+fi
+exit 1
+SCRIPT
+  chmod +x "$fake_bin/docker"
+
+  capture_run status output env PATH="$fake_bin:$PATH" \
+    DELAYED_CONTAINER_STATE="$state_file" DELAYED_CONTAINER_REMOVED="$removed_file" \
+    ACTOR_QUEUE_VALIDATION_CONTAINER=actor-delayed-create ACTOR_QUEUE_STOP_STABILIZATION_SECONDS=1 \
+    "$fixture_repo/scripts/validate.sh" actor-queue-stop
+
+  [[ "$status" -eq 0 ]] || return 1
+  [[ -e "$removed_file" ]] || return 1
+  [[ "$(cat "$state_file")" -eq 4 ]] || return 1
+}
+
 test_zone_cli_profiles_share_runtime_setup() {
   local fixture_repo fixture_parent fake_bin payload_file status output
   make_fixture fixture_repo fixture_parent
@@ -863,6 +904,7 @@ run_test "zone harness command exercises headless target twice with cursor clean
 run_test "zone harness routes Bot Loot Request result to non-TTY stdout" test_zone_harness_routes_bot_loot_result_to_non_tty_stdout
 run_test "validate tier3-harness delegates to smoke script" test_validate_tier3_harness_delegates_to_smoke_script
 run_test "actor queue Tier 3 dry run classifies mutation and cleanup" test_actor_queue_tier3_dry_run_classifies_mutation_and_cleanup
+run_test "actor queue stop catches delayed daemon-side container creation" test_actor_queue_stop_waits_for_delayed_container_creation
 run_test "zone CLI profiles share runtime setup" test_zone_cli_profiles_share_runtime_setup
 run_test "zone CLI runtime rejects unsafe paths before deletion" test_zone_cli_runtime_rejects_unsafe_paths_before_deletion
 run_test "help mentions stack and dry-run" test_help_mentions_stack_and_dry_run
