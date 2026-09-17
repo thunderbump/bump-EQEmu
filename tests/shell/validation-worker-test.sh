@@ -326,10 +326,11 @@ assert contract == {
         "trusted_files": [
             "scripts/validation-worker.sh",
             "scripts/validate.sh",
+            "scripts/rehearse-database-migration.sh",
             "scripts/check-akkstack-contract.sh",
             "scripts/lib/akkstack-routing.sh",
         ],
-        "timeout_seconds": 2700,
+        "timeout_seconds": 5500,
     },
 }
 PY
@@ -339,7 +340,7 @@ test_profiles_json() {
   local status output
   capture_run status output "$repo_root/scripts/validation-worker.sh" profiles --json
   [[ "$status" -eq 0 ]] || return 1
-  jq -e '.profiles | length == 5' >/dev/null <<<"$output" || return 1
+  jq -e '.profiles | length == 7' >/dev/null <<<"$output" || return 1
   jq -e '.profiles[] | select(.name == "preflight") | .mutation_classification == "read-only"' >/dev/null <<<"$output" || return 1
   jq -e '.profiles[] | select(.name == "safe") | (.timeout_guidance | length > 0) and (.lock_guidance | length > 0)' >/dev/null <<<"$output" || return 1
   jq -e '.profiles[] | select(.name == "tier3-harness")' >/dev/null <<<"$output" || return 1
@@ -827,11 +828,12 @@ test_current_afk_command_validates_exact_head_without_arguments() {
   assert_contains "$output" "Validation evidence: $evidence"
   assert_json_equals "$evidence/request.json" .commit "$head"
   assert_json_equals "$evidence/request.json" .ref "$head"
-  assert_json_equals "$evidence/request.json" .profile tier1-tier3-harness
+  assert_json_equals "$evidence/request.json" .profile tier1-migration-tier3
   assert_json_equals "$evidence/request.json" .stack.role validation
   assert_json_equals "$evidence/result.json" .actual_checkout_commit "$head"
   assert_json_equals "$evidence/result.json" .status passed
   assert_contains "$(cat "$evidence/logs/validation.log")" "fake validate: --stack validation tier1"
+  assert_contains "$(cat "$evidence/logs/validation.log")" "fake validate: --stack validation migration-rehearsal"
   assert_contains "$(cat "$evidence/logs/validation.log")" "fake validate: --stack validation tier3-harness"
 }
 
@@ -884,8 +886,8 @@ test_afk_contract_passes_with_stable_checks() {
   assert_json_equals "$evidence/result.json" .schema_version 1
   assert_json_equals "$evidence/result.json" .candidate_sha "$head"
   assert_json_equals "$evidence/result.json" .status passed
-  assert_json_equals "$evidence/result.json" '.checks | map(.name) | join(",")' "tier1-build-and-unit-tests,tier3-zone-harness"
-  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,passed"
+  assert_json_equals "$evidence/result.json" '.checks | map(.name) | join(",")' "tier1-build-and-unit-tests,isolated-database-migration-rehearsal,tier3-zone-harness"
+  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,passed,passed"
 }
 
 test_afk_contract_binds_tier1_tier3_evidence_to_the_candidate() {
@@ -900,13 +902,14 @@ test_afk_contract_binds_tier1_tier3_evidence_to_the_candidate() {
   capture_run status output env HOME="$tmp_root/operator-home" VALIDATION_WORKER_HOME="$tmp_root/worker-home-afk-tier1-tier3" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 "$source/scripts/validation-worker.sh" run --request "$request"
 
   [[ "$status" -eq 0 ]] || return 1
-  assert_json_equals "$evidence/worker-request.json" .profile tier1-tier3-harness
-  assert_json_equals "$evidence/worker/result.json" .profile tier1-tier3-harness
+  assert_json_equals "$evidence/worker-request.json" .profile tier1-migration-tier3
+  assert_json_equals "$evidence/worker/result.json" .profile tier1-migration-tier3
   assert_json_equals "$evidence/worker/result.json" .actual_checkout_commit "$head"
   assert_json_equals "$evidence/result.json" .candidate_sha "$head"
-  assert_json_equals "$evidence/result.json" '.checks | map(.name) | join(",")' "tier1-build-and-unit-tests,tier3-zone-harness"
-  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,passed"
+  assert_json_equals "$evidence/result.json" '.checks | map(.name) | join(",")' "tier1-build-and-unit-tests,isolated-database-migration-rehearsal,tier3-zone-harness"
+  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,passed,passed"
   [[ -f "$evidence/worker/logs/tier1-build-and-unit-tests.log" ]] || return 1
+  [[ -f "$evidence/worker/logs/database-migration-rehearsal.log" ]] || return 1
   [[ -f "$evidence/worker/logs/tier3-zone-harness.log" ]] || return 1
 }
 
@@ -954,14 +957,14 @@ test_afk_contract_is_independent_of_the_trusted_harness_location() {
   assert_json_equals "$worker_request" .repo "$canonical_repo"
   assert_json_equals "$worker_request" .ref "$head"
   assert_json_equals "$worker_request" .commit "$head"
-  assert_json_equals "$worker_request" .profile tier1-tier3-harness
+  assert_json_equals "$worker_request" .profile tier1-migration-tier3
   assert_json_equals "$worker_request" .stack.role validation
   assert_json_equals "$worker_request" .stack.path "$stack"
   if grep -Fq "$candidate_checkout" "$worker_request" || grep -Fq "$harness_root" "$worker_request"; then
     printf 'nested request exposed the Candidate checkout or trusted-harness path\n' >&2
     return 1
   fi
-  assert_json_equals "$evidence/result.json" '.checks | map(.name) | join(",")' "tier1-build-and-unit-tests,tier3-zone-harness"
+  assert_json_equals "$evidence/result.json" '.checks | map(.name) | join(",")' "tier1-build-and-unit-tests,isolated-database-migration-rehearsal,tier3-zone-harness"
 }
 
 test_afk_contract_rejects_tier1_and_stops() {
@@ -978,7 +981,7 @@ test_afk_contract_rejects_tier1_and_stops() {
 
   [[ "$status" -eq 1 ]] || return 1
   assert_json_equals "$evidence/result.json" .status rejected
-  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "rejected,not_run"
+  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "rejected,not_run,not_run"
 }
 
 test_afk_contract_reports_missing_prerequisite_as_inconclusive() {
@@ -996,7 +999,7 @@ test_afk_contract_reports_missing_prerequisite_as_inconclusive() {
 
   [[ "$status" -eq 2 ]] || return 1
   assert_json_equals "$evidence/result.json" .status inconclusive
-  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "inconclusive,not_run"
+  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "inconclusive,not_run,not_run"
 }
 
 test_afk_contract_maps_timeout_and_missing_command_to_inconclusive() {
@@ -1013,7 +1016,7 @@ test_afk_contract_maps_timeout_and_missing_command_to_inconclusive() {
 
     [[ "$status" -eq 2 ]] || return 1
     assert_json_equals "$evidence/result.json" .status inconclusive
-    assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "inconclusive,not_run"
+    assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "inconclusive,not_run,not_run"
   done
 }
 
@@ -1030,7 +1033,7 @@ test_afk_contract_maps_timeout_infrastructure_failure_to_inconclusive() {
 
   [[ "$status" -eq 2 ]] || return 1
   assert_json_equals "$evidence/result.json" .status inconclusive
-  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "inconclusive,not_run"
+  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "inconclusive,not_run,not_run"
 }
 
 test_afk_contract_fetches_a_self_contained_checkout_from_a_linked_worktree() {
@@ -1085,7 +1088,7 @@ SCRIPT
   [[ "$status" -eq 2 ]] || return 1
   assert_json_equals "$evidence/worker/afk-checks.json" .status passed
   assert_json_equals "$evidence/result.json" .status inconclusive
-  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,inconclusive"
+  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,passed,inconclusive"
 }
 
 test_afk_contract_rejects_unapproved_submodule_transports_before_initialization() {

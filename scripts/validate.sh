@@ -32,6 +32,8 @@ Commands:
   tier3-harness   Run the canonical Zone Harness smoke.
   actor-queue-tier3
                   Run the DB-mutating durable actor queue integration scenario.
+  migration-rehearsal
+                  Rehearse upgrade and rollback from a known isolated snapshot.
   safe            Run preflight, tier1, and tier2-readonly.
 
 The safe command intentionally does not run DB-mutating Tier 2 checks or Tier 3
@@ -54,6 +56,9 @@ validation_action() {
       ;;
     tier2-readonly)
       printf '%s\n' "would run preflight, start or verify MariaDB with canonical Compose (--no-recreate), and run tests:npc-handins and tests:npc-handins-multiquest as separate zone CLI processes in a single one-off eqemu-server container"
+      ;;
+    migration-rehearsal)
+      printf '%s\n' "would rehearse Candidate database upgrade, idempotence, scenarios, and old-build rollback in a disposable database"
       ;;
     safe)
       printf '%s\n' "would run preflight, tier1, and tier2-readonly"
@@ -98,6 +103,12 @@ run_tier2_readonly() {
   run_tier2_readonly_zone_tests
 }
 
+run_migration_rehearsal() {
+  local args=(--stack "$AKKSTACK_STACK_ROLE")
+  [[ "$AKKSTACK_DRY_RUN" -eq 0 ]] || args+=(--dry-run)
+  "$repo_root/scripts/rehearse-database-migration.sh" "${args[@]}"
+}
+
 run_actor_queue_tier3() {
   run_preflight
   run_mariadb
@@ -136,7 +147,7 @@ fi
 command="${AKKSTACK_REMAINING_ARGS[0]}"
 
 case "$command" in
-  preflight|tier1|tier2-readonly|tier3-harness|actor-queue-tier3|safe)
+  preflight|tier1|tier2-readonly|tier3-harness|actor-queue-tier3|migration-rehearsal|safe)
     ;;
   *)
     usage >&2
@@ -146,6 +157,10 @@ esac
 
 if [[ "$command" == "tier3-harness" ]]; then
   run_tier3_harness
+  exit 0
+fi
+if [[ "$command" == "migration-rehearsal" ]]; then
+  run_migration_rehearsal
   exit 0
 fi
 
@@ -179,6 +194,9 @@ case "$command" in
     ;;
   actor-queue-tier3)
     run_actor_queue_tier3
+    ;;
+  migration-rehearsal)
+    run_migration_rehearsal
     ;;
   safe)
     run_preflight

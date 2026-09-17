@@ -7,10 +7,10 @@ Pipeline agents should start with the concise [validation instructions](../agent
 and the worker own test semantics. New world behavior requires an automated scenario through production gameplay
 paths, including bounded outcomes and fixture cleanup. Manual play judges feel and remaining client-specific behavior.
 
-The accepted next database step is isolated snapshot-based upgrade and restore rehearsal. It is not yet a worker
-profile. The shared validation database remains persistent until an explicit isolation profile provides a separate
-target. Schema-changing work needs data-transition proof as well as the existing backup gate; a green general
-harness run alone does not establish migration safety.
+Isolated snapshot-based upgrade and restore rehearsal is provided by the
+[`migration-rehearsal` profile](database-migration-rehearsal.md). The shared validation database remains persistent;
+the profile creates and cleans a reserved, uniquely named database in the same MariaDB process. Schema-changing
+work needs this data-transition proof; a green general harness run alone does not establish migration safety.
 
 The **current AFK repository check** is the no-argument command:
 
@@ -18,7 +18,7 @@ The **current AFK repository check** is the no-argument command:
 ./scripts/validate-afk
 ```
 
-Run it from the committed Candidate checkout. It resolves that checkout's exact `HEAD`, asks the repository-owned Validation Worker to fetch that commit into worker-owned storage (including recursive submodule initialization), binds the separate validation AkkStack, and runs Tier 1 followed by the canonical Tier 3 Zone Harness under one 2600-second budget. It never selects the gameplay stack. The command prints its evidence directory; by default evidence and the isolated checkout live below ignored `.validation-worker/`. `VALIDATION_WORKER_HOME`, `VALIDATION_AFK_EVIDENCE_DIR`, `VALIDATION_AFK_TIMEOUT_SECONDS`, and `AKKSTACK_DIR` are operator overrides when the standard local paths are unsuitable. Missing prerequisites, lock contention, timeouts, and deterministic failures all return nonzero; success is returned only after both tiers pass.
+Run it from the committed Candidate checkout. It resolves that checkout's exact `HEAD`, asks the repository-owned Validation Worker to fetch that commit into worker-owned storage (including recursive submodule initialization), binds the separate validation AkkStack, and runs Tier 1, isolated migration rehearsal, and the canonical Tier 3 Zone Harness under one 5400-second budget. It never selects the gameplay stack. The command prints its evidence directory; by default evidence and the isolated checkout live below ignored `.validation-worker/`. `VALIDATION_WORKER_HOME`, `VALIDATION_AFK_EVIDENCE_DIR`, `VALIDATION_AFK_TIMEOUT_SECONDS`, and `AKKSTACK_DIR` are operator overrides when the standard local paths are unsuitable. Missing prerequisites, lock contention, timeouts, and deterministic failures all return nonzero; success is returned only after both tiers pass.
 
 The tracked `afk.toml` is a **retained legacy contract** for the older request-driven AFK adapter. Its `validation.command` expects AFK to provide a request rather than being the current Run Preparer's no-argument repository check. Do not use `afk.toml` to infer the current invocation.
 
@@ -26,7 +26,7 @@ ADR 0006 also defines the lower-level portable automation contract: automation m
 
 Bootstrap from zero is a separate setup task. Do not fold `make install`, environment generation, data downloads, or first-time database setup into every validation pass.
 
-Use `scripts/validation-worker.sh profiles --json` to discover the portable AFK-facing profiles and their rough mutation, timeout, and locking guidance. Today that discovery surface exposes `preflight`, `safe`, `tier3-harness`, `actor-queue-tier3`, and `tier1-tier3-harness`.
+Use `scripts/validation-worker.sh profiles --json` to discover the portable AFK-facing profiles and their rough mutation, timeout, and locking guidance. The discovery surface includes `migration-rehearsal` and the conservative combined `tier1-migration-tier3` profile in addition to the ordinary profiles.
 
 `actor-queue-tier3` is the target-owned durable Autonomous Actor queue proof. After a Tier 1 build, it runs
 `zone tests:actor-events` against the persistent validation database. The scenario provisions a reserved owner,
@@ -37,9 +37,10 @@ assertion failure or `[PASS] actor-events-runtime` to the worker validation log 
 `request.json` and `result.json` evidence.
 
 Both the current `scripts/validate-afk` repository check and the retained legacy AFK adapter pin every AFK Candidate
-to `tier1-tier3-harness`. Neither entry point receives a trusted base commit or change classification, so it cannot
-safely infer which Candidates affect runtime harness behavior. Other automation may continue to request `safe` when
-Tier 3 is not required; that profile remains preflight, Tier 1, and read-mostly Tier 2.
+to `tier1-migration-tier3`. Neither entry point receives a trusted base commit or change classification, so this is
+the conservative schema-work gate. Missing snapshot fixtures are an explicit nonzero/inconclusive prerequisite,
+never a skipped pass. Other automation may explicitly request lighter profiles when its trusted selection mechanism
+establishes that schema and saved data are unaffected.
 
 Submodule expectations are part of the worker contract. Fetch requests run `git submodule update --init --recursive` before validation. Local-checkout requests continue to work for diagnostics, but the worker treats missing or drifting submodules as request failures instead of mutating the caller-owned checkout.
 
@@ -615,7 +616,7 @@ may need the one-off container to be stopped after validation.
 
 - Common utility or isolated logic: Tier 1.
 - Database-backed game logic with an existing CLI hook: Tier 1 plus targeted Tier 2.
-- Schema or saved-data migration work: backup gate, Tier 1, targeted database assertions and affected runtime scenarios. Follow [database instructions](../agents/database.md) for deployed-version upgrade and restore evidence; isolated snapshot tooling is still planned.
+- Schema or saved-data migration work: Tier 1 plus the [isolated migration rehearsal](database-migration-rehearsal.md), including targeted data assertions and affected runtime scenarios. The persistent shared database remains outside the rehearsal target.
 - Runtime gameplay behavior covered by a harness scenario: Tier 1 plus Tier 3.
 - Runtime process, config, startup, or integration behavior: Tier 1 plus Tier 4.
 - Client-visible behavior or packet flow: Tier 1 plus Tier 4 and Tier 5.

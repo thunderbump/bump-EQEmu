@@ -10,7 +10,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
 worker_home="${VALIDATION_WORKER_HOME:-$repo_root/.validation-worker}"
 stack_path="${AKKSTACK_DIR:-$HOME/Projects/bump-eqemu/bump-akk-stack-validation}"
-timeout_seconds="${VALIDATION_AFK_TIMEOUT_SECONDS:-2600}"
+timeout_seconds="${VALIDATION_AFK_TIMEOUT_SECONDS:-5400}"
 
 if [[ ! "$timeout_seconds" =~ ^[0-9]+$ || "$timeout_seconds" -eq 0 ]]; then
   printf 'error: VALIDATION_AFK_TIMEOUT_SECONDS must be a positive integer\n' >&2
@@ -50,7 +50,7 @@ jq -n \
     repo:$repo,
     ref:$ref,
     commit:$commit,
-    profile:"tier1-tier3-harness",
+    profile:"tier1-migration-tier3",
     run_id:$run_id,
     evidence_dir:$evidence_dir,
     timeout_seconds:$timeout_seconds,
@@ -58,7 +58,7 @@ jq -n \
     stack:{role:"validation", path:$stack_path}
   }' >"$request_path"
 
-printf 'Validating committed Candidate %s with Tier 1 and Tier 3 Zone Harness.\n' "$candidate_sha"
+printf 'Validating committed Candidate %s with Tier 1, isolated migration rehearsal, and Tier 3 Zone Harness.\n' "$candidate_sha"
 printf 'Validation stack: %s\n' "$stack_path"
 printf 'Validation evidence: %s\n' "$evidence_dir"
 

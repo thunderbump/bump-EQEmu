@@ -833,6 +833,25 @@ EOF
   assert_contains "$output" "inspect the selected AkkStack MariaDB service logs"
 }
 
+test_migration_rehearsal_dry_run_and_guards() {
+  local fixture_repo fixture_parent status output
+  make_fixture fixture_repo fixture_parent
+
+  capture_run status output "$fixture_repo/scripts/validate.sh" --stack validation --dry-run migration-rehearsal
+  [[ "$status" -eq 0 ]] || return 1
+  assert_contains "$output" "unique isolated database"
+  assert_contains "$output" "gameplay and shared validation databases rejected"
+  assert_contains "$output" "restore cost"
+
+  capture_run status output "$fixture_repo/scripts/rehearse-database-migration.sh" --stack gameplay --dry-run
+  [[ "$status" -eq 2 ]] || return 1
+  assert_contains "$output" "only accepts --stack validation"
+
+  capture_run status output "$fixture_repo/scripts/rehearse-database-migration.sh" --stack validation
+  [[ "$status" -eq 125 ]] || return 1
+  assert_contains "$output" "MIGRATION_REHEARSAL_MANIFEST"
+}
+
 test_safe_dry_run_keeps_readonly_composition() {
   local fixture_repo fixture_parent status output
   make_fixture fixture_repo fixture_parent
@@ -868,6 +887,7 @@ run_test "dry-run prints route and skips Docker" test_dry_run_prints_route_and_s
 run_test "tier2-readonly dry-run describes one-off container" test_tier2_readonly_dry_run_describes_single_one_off_container
 run_test "tier2-readonly runtime payload rewrites DB host to mariadb service DNS" test_tier2_readonly_uses_service_dns_runtime_config
 run_test "actor queue Tier 3 fails when MariaDB never becomes ready" test_actor_queue_tier3_fails_when_mariadb_never_becomes_ready
+run_test "migration rehearsal dry run describes isolation and rejects unsafe selection" test_migration_rehearsal_dry_run_and_guards
 run_test "safe dry-run keeps readonly composition" test_safe_dry_run_keeps_readonly_composition
 
 if [[ "$failures" -gt 0 ]]; then
