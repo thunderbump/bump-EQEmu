@@ -91,6 +91,12 @@ fi
 if [[ "${VALIDATION_WORKER_TEST_MIGRATION_EXIT_CODE:-0}" != "0" && " $* " == *" migration-rehearsal"* ]]; then
   exit "$VALIDATION_WORKER_TEST_MIGRATION_EXIT_CODE"
 fi
+if [[ -n "${VALIDATION_WORKER_TEST_EXPECT_MIGRATION_MANIFEST:-}" && " $* " == *" migration-rehearsal"* ]]; then
+  [[ "${MIGRATION_REHEARSAL_MANIFEST:-}" == "$VALIDATION_WORKER_TEST_EXPECT_MIGRATION_MANIFEST" ]] || {
+    printf 'migration manifest selection was not inherited\n' >&2
+    exit 1
+  }
+fi
 if [[ "${VALIDATION_WORKER_TEST_ASSERT_STACK_BINDING:-0}" == "1" ]]; then
   [[ -n "${AKKSTACK_DIR:-}" ]] || { printf 'missing AKKSTACK_DIR\n' >&2; exit 1; }
   [[ -n "${EXPECTED_EQEMU_CHECKOUT:-}" ]] || { printf 'missing EXPECTED_EQEMU_CHECKOUT\n' >&2; exit 1; }
@@ -840,6 +846,40 @@ test_current_afk_command_validates_exact_head_without_arguments() {
   assert_contains "$(cat "$(dirname "$evidence")/worker/logs/tier3-zone-harness.log")" "fake validate: --stack validation tier3-harness"
 }
 
+test_current_afk_command_loads_reviewed_manifest_selection() {
+  local source evidence worker_home manifest status output
+  make_afk_contract_repo source current-command-manifest-selection
+  worker_home="$tmp_root/worker-home-manifest-selection"
+  evidence="$tmp_root/current-afk-manifest-selection-evidence"
+  manifest="$tmp_root/reviewed-migration-manifest.json"
+  mkdir -p "$worker_home"
+  printf '%s\n' '{}' >"$manifest"
+  printf '%s\n' "$manifest" >"$worker_home/migration-rehearsal-manifest"
+
+  capture_run status output env HOME="$tmp_root/operator-home" \
+    VALIDATION_WORKER_HOME="$worker_home" \
+    VALIDATION_WORKER_VALIDATE_DRY_RUN=1 \
+    VALIDATION_WORKER_TEST_EXPECT_MIGRATION_MANIFEST="$manifest" \
+    VALIDATION_AFK_EVIDENCE_DIR="$evidence" \
+    "$source/scripts/validate-afk"
+
+  [[ "$status" -eq 0 ]] || return 1
+  assert_json_equals "$evidence/result.json" .status passed
+}
+
+test_current_afk_command_rejects_invalid_manifest_selection() {
+  local source worker_home status output
+  make_afk_contract_repo source current-command-invalid-manifest-selection
+  worker_home="$tmp_root/worker-home-invalid-manifest-selection"
+  mkdir -p "$worker_home"
+  printf '%s\n' relative/path >"$worker_home/migration-rehearsal-manifest"
+
+  capture_run status output env HOME="$tmp_root/operator-home" VALIDATION_WORKER_HOME="$worker_home" "$source/scripts/validate-afk"
+
+  [[ "$status" -eq 2 ]] || return 1
+  assert_contains "$output" "must contain one absolute readable manifest path"
+}
+
 test_current_afk_command_classifies_missing_migration_fixture() {
   local source evidence status output
   make_afk_contract_repo source current-command-missing-migration
@@ -1267,6 +1307,8 @@ run_test "validation worker binds validation stack from AKKSTACK_DIR" test_valid
 run_test "stack lock blocks distinct worker homes on same stack" test_stack_lock_blocks_distinct_worker_homes_on_same_stack
 run_test "AKKSTACK_DIR real code directory fails fast" test_akkstack_dir_real_code_directory_fails_fast
 run_test "current AFK command validates exact HEAD without arguments" test_current_afk_command_validates_exact_head_without_arguments
+run_test "current AFK command loads a reviewed migration manifest selection" test_current_afk_command_loads_reviewed_manifest_selection
+run_test "current AFK command rejects an invalid migration manifest selection" test_current_afk_command_rejects_invalid_manifest_selection
 run_test "current AFK command classifies a missing migration fixture" test_current_afk_command_classifies_missing_migration_fixture
 run_test "current AFK command rejects arguments" test_current_afk_command_rejects_arguments
 run_test "current AFK command returns nonzero for failure and missing stack" test_current_afk_command_returns_nonzero_for_failure_and_missing_stack

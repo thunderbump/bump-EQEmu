@@ -77,6 +77,17 @@ upgraded_assert_sha="$(sha256sum "$upgraded_assert_sql" | awk '{print $1}')"
 restored_assert_sha="$(sha256sum "$restored_assert_sql" | awk '{print $1}')"
 old_world_path="$(required_string '.old_build.world_binary_container_path' old_build.world_binary_container_path)"
 old_world_sha="$(required_string '.old_build.world_binary_sha256' old_build.world_binary_sha256)"
+[[ "$old_world_path" == /* ]] || { printf 'error: old_build.world_binary_container_path must be an absolute container path\n' >&2; exit 2; }
+compose_override_member="$(jq -er '.old_build.compose_file // empty | select(type == "string" and length > 0)' "$manifest" 2>/dev/null || true)"
+compose_override=""
+if [[ -n "$compose_override_member" ]]; then
+  compose_override="$(resolve_member "$compose_override_member")"
+  old_build_host_dir="$(resolve_member "$(required_string '.old_build.host_directory' old_build.host_directory)")"
+  [[ -d "$old_build_host_dir" ]] || { printf 'error: old_build.host_directory must name a directory\n' >&2; exit 2; }
+  expected_override="$(printf 'services:\n  eqemu-server:\n    volumes:\n      - %s' "$(jq -Rn --arg mount "$old_build_host_dir:/opt/eqemu-old:ro" '$mount')")"
+  [[ "$(cat "$compose_override")" == "$expected_override" ]] || { printf 'error: old-build Compose override is not the expected read-only mount\n' >&2; exit 2; }
+fi
+build_identity_attested="$(jq -er '.source.build_identity_attested // false | booleans' "$manifest" 2>/dev/null)" || { printf 'error: source.build_identity_attested must be boolean\n' >&2; exit 2; }
 [[ "$snapshot_sha" =~ ^[0-9a-f]{64}$ && "$old_world_sha" =~ ^[0-9a-f]{64}$ ]] || { printf 'error: manifest checksums must be lowercase SHA-256 values\n' >&2; exit 2; }
 actual_snapshot_sha="$(sha256sum "$snapshot" | awk '{print $1}')"
 [[ "$actual_snapshot_sha" == "$snapshot_sha" ]] || { printf 'error: snapshot checksum mismatch for %s\n' "$snapshot_id" >&2; exit 1; }
@@ -95,12 +106,14 @@ evidence_dir="$(realpath "$evidence_dir")"
 result="$evidence_dir/result.json"
 log="$evidence_dir/rehearsal.log"
 compose=(docker-compose -f docker-compose.yml -f docker-compose.dev.yml)
+if [[ -n "$compose_override" ]]; then compose+=(-f "$compose_override"); fi
 database_created=0
 user_created=0
 status=failed
 failure_step=setup
 restore_ms=null
 candidate_versions=""
+snapshot_data_state=""
 
 root_sql() {
   local statement="$1"
@@ -119,10 +132,11 @@ write_result() {
     --arg snapshot_id "$snapshot_id" --arg snapshot_sha256 "$snapshot_sha" --arg source_build "$source_build" --arg old_world_sha "$old_world_sha" \
     --arg source_mariadb_version "$source_mariadb" --argjson source_server_version "$source_server_version" \
     --argjson source_bots_version "$source_bots_version" --argjson source_custom_version "$source_custom_version" \
+    --argjson build_identity_attested "$build_identity_attested" \
     --arg target_database "$target_db" --arg candidate_versions "$candidate_versions" --arg seed_sha "$seed_sha" \
     --arg upgraded_assert_sha "$upgraded_assert_sha" --arg restored_assert_sha "$restored_assert_sha" \
     --argjson scenarios "$scenarios_json" --arg completed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson restore_ms "$restore_ms" \
-    '{schema_version:1,status:$status,failure_step:(if $failure_step=="" then null else $failure_step end),candidate_commit:$candidate_commit,snapshot:{id:$snapshot_id,sha256:$snapshot_sha256},source:{build:$source_build,world_binary_sha256:$old_world_sha,mariadb_version:$source_mariadb,database_versions:{server:$source_server_version,bots:$source_bots_version,custom:$source_custom_version}},resulting_database_versions:(if $candidate_versions=="" then null else ($candidate_versions|split(":")|map(tonumber)|{server:.[0],bots:.[1],custom:.[2]}) end),fixtures:{seed_sha256:$seed_sha,upgraded_assert_sha256:$upgraded_assert_sha,restored_assert_sha256:$restored_assert_sha},candidate_scenarios:$scenarios,target:{class:"isolated-disposable",database:$target_database},restore_elapsed_ms:$restore_ms,completed_at:$completed_at}' >"$result"
+    '{schema_version:1,status:$status,failure_step:(if $failure_step=="" then null else $failure_step end),candidate_commit:$candidate_commit,snapshot:{id:$snapshot_id,sha256:$snapshot_sha256},source:{build:$source_build,build_identity_attested:$build_identity_attested,world_binary_sha256:$old_world_sha,mariadb_version:$source_mariadb,database_versions:{server:$source_server_version,bots:$source_bots_version,custom:$source_custom_version}},resulting_database_versions:(if $candidate_versions=="" then null else ($candidate_versions|split(":")|map(tonumber)|{server:.[0],bots:.[1],custom:.[2]}) end),fixtures:{seed_sha256:$seed_sha,upgraded_assert_sha256:$upgraded_assert_sha,restored_assert_sha256:$restored_assert_sha},candidate_scenarios:$scenarios,target:{class:"isolated-disposable",database:$target_database},restore_elapsed_ms:$restore_ms,completed_at:$completed_at}' >"$result"
 }
 cleanup() {
   local main_status=$? cleanup_status=0 result_status=0
@@ -208,6 +222,7 @@ import_snapshot >>"$log" 2>&1
 snapshot_versions="$(target_query 'SELECT CONCAT(version,CHAR(58),bots_version,CHAR(58),custom_version) FROM db_version LIMIT 1')"
 expected_versions="$source_server_version:$source_bots_version:$source_custom_version"
 [[ "$snapshot_versions" == "$expected_versions" ]] || { printf 'error: restored database versions %s do not match manifest %s\n' "$snapshot_versions" "$expected_versions" >&2; exit 1; }
+snapshot_data_state="$(target_query 'SELECT CONCAT((SELECT COUNT(*) FROM character_data),CHAR(58),(SELECT COALESCE(BIT_XOR(CRC32(CONCAT(id,CHAR(58),account_id))),0) FROM character_data),CHAR(58),(SELECT COALESCE(SUM(copper + 10 * silver + 100 * gold + 1000 * platinum + copper_bank + 10 * silver_bank + 100 * gold_bank + 1000 * platinum_bank + copper_cursor + 10 * silver_cursor + 100 * gold_cursor + 1000 * platinum_cursor),0) FROM character_currency),CHAR(58),(SELECT COUNT(*) FROM bot_data),CHAR(58),(SELECT COALESCE(SUM(owner_id),0) FROM bot_data),CHAR(58),(SELECT COALESCE(BIT_XOR(CRC32(CONCAT(bot_id,CHAR(58),owner_id))),0) FROM bot_data))')"
 failure_step=seed_old_format
 target_mysql <"$seed_sql" >>"$log" 2>&1
 failure_step=candidate_update
@@ -229,6 +244,8 @@ import_snapshot >>"$log" 2>&1
 restore_ms=$(( $(date +%s%3N) - start_ms ))
 failure_step=restored_assertions
 query_file_expect_ok "$restored_assert_sql"
+restored_data_state="$(target_query 'SELECT CONCAT((SELECT COUNT(*) FROM character_data),CHAR(58),(SELECT COALESCE(BIT_XOR(CRC32(CONCAT(id,CHAR(58),account_id))),0) FROM character_data),CHAR(58),(SELECT COALESCE(SUM(copper + 10 * silver + 100 * gold + 1000 * platinum + copper_bank + 10 * silver_bank + 100 * gold_bank + 1000 * platinum_bank + copper_cursor + 10 * silver_cursor + 100 * gold_cursor + 1000 * platinum_cursor),0) FROM character_currency),CHAR(58),(SELECT COUNT(*) FROM bot_data),CHAR(58),(SELECT COALESCE(SUM(owner_id),0) FROM bot_data),CHAR(58),(SELECT COALESCE(BIT_XOR(CRC32(CONCAT(bot_id,CHAR(58),owner_id))),0) FROM bot_data))')"
+[[ "$restored_data_state" == "$snapshot_data_state" ]] || { printf 'error: rollback restore changed representative ownership or currency state\n' >&2; exit 1; }
 failure_step=old_build_recovery
 "${compose[@]}" run --rm --no-deps -T \
   -e "MIGRATION_TARGET_DB=$target_db" -e "MIGRATION_TARGET_USER=$target_user" \

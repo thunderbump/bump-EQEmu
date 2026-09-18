@@ -874,6 +874,61 @@ test_migration_rehearsal_enforces_restricted_database_contract() {
   assert_not_contains "$source" 'snapshot_stream | "${compose[@]}" exec -T mariadb bash -lc '\''mysql -uroot'
 }
 
+test_prepare_migration_fixture_builds_reviewable_inputs_without_running_docker() {
+  local fixture_repo fixture_parent baseline fake_bin marker snapshot_sha archive_sha status output
+  make_fixture fixture_repo fixture_parent
+  baseline="$tmp_root/captured-baseline"
+  fake_bin="$tmp_root/prepare-fake-bin"
+  marker="$tmp_root/prepare-docker-called"
+  mkdir -p "$baseline/archive/bin" "$fake_bin"
+  printf '%s\n' 'CREATE TABLE db_version (version INT, bots_version INT, custom_version INT);' | gzip >"$baseline/database.sql.gz"
+  printf '#!/usr/bin/env bash\necho old-world\n' >"$baseline/archive/bin/world"
+  chmod +x "$baseline/archive/bin/world"
+  tar -C "$baseline/archive" -czf "$baseline/installed-binaries.tar.gz" bin/world
+  snapshot_sha="$(sha256sum "$baseline/database.sql.gz" | awk '{print $1}')"
+  archive_sha="$(sha256sum "$baseline/installed-binaries.tar.gz" | awk '{print $1}')"
+  jq -n --arg snapshot_sha "$snapshot_sha" --arg archive_sha "$archive_sha" \
+    '{baseline_id:"fixture-baseline",source:{checkout_commit:"unattested-source",mariadb_version:"10.11",database_versions:{server:9328,bots:9055,custom:0}},artifacts:{database:{sha256:$snapshot_sha},binaries:{sha256:$archive_sha}}}' >"$baseline/manifest.json"
+  printf '#!/usr/bin/env bash\n: >%q\nexit 99\n' "$marker" >"$fake_bin/docker-compose"
+  chmod +x "$fake_bin/docker-compose"
+
+  capture_run status output env PATH="$fake_bin:$PATH" "$fixture_repo/scripts/prepare-migration-rehearsal-fixture.sh" --baseline-dir "$baseline"
+
+  [[ "$status" -eq 0 ]] || return 1
+  [[ ! -e "$marker" ]] || return 1
+  jq -e '
+    .snapshot.file == "database.sql.gz" and
+    .source.build == "unattested-source" and
+    .source.build_identity_attested == false and
+    .source.database_versions == {server:9328,bots:9055,custom:0} and
+    .old_build.world_binary_container_path == "/opt/eqemu-old/bin/world" and
+    .candidate_scenarios == ["~/code/build/bin/zone tests:actor-events"]
+  ' "$baseline/migration-rehearsal-manifest.json" >/dev/null || return 1
+  assert_contains "$(cat "$baseline/migration-rehearsal-fixture/docker-compose.migration-rehearsal.yml")" ":/opt/eqemu-old:ro"
+  assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "currency_copper_total"
+  assert_contains "$(cat "$baseline/migration-rehearsal.env")" "MIGRATION_REHEARSAL_MANIFEST="
+  [[ "$(cat "$baseline/migration-rehearsal.manifest-path")" == "$baseline/migration-rehearsal-manifest.json" ]] || return 1
+  assert_contains "$output" "Review it"
+}
+
+test_prepare_migration_fixture_rejects_unrecorded_checksums() {
+  local fixture_repo fixture_parent baseline status output
+  make_fixture fixture_repo fixture_parent
+  baseline="$tmp_root/mismatched-baseline"
+  mkdir -p "$baseline/archive"
+  printf 'snapshot' | gzip >"$baseline/database.sql.gz"
+  printf '#!/bin/sh\n' >"$baseline/archive/world"
+  chmod +x "$baseline/archive/world"
+  tar -C "$baseline/archive" -czf "$baseline/installed-binaries.tar.gz" world
+  printf '%s\n' '{"checksums":["wrong"]}' >"$baseline/manifest.json"
+
+  capture_run status output "$fixture_repo/scripts/prepare-migration-rehearsal-fixture.sh" --baseline-dir "$baseline"
+
+  [[ "$status" -eq 1 ]] || return 1
+  assert_contains "$output" "does not record the database snapshot checksum"
+  [[ ! -e "$baseline/migration-rehearsal-manifest.json" ]] || return 1
+}
+
 test_safe_dry_run_keeps_readonly_composition() {
   local fixture_repo fixture_parent status output
   make_fixture fixture_repo fixture_parent
@@ -911,6 +966,8 @@ run_test "tier2-readonly runtime payload rewrites DB host to mariadb service DNS
 run_test "actor queue Tier 3 fails when MariaDB never becomes ready" test_actor_queue_tier3_fails_when_mariadb_never_becomes_ready
 run_test "migration rehearsal dry run describes isolation and rejects unsafe selection" test_migration_rehearsal_dry_run_and_guards
 run_test "migration rehearsal uses a restricted account for every database path" test_migration_rehearsal_enforces_restricted_database_contract
+run_test "migration fixture preparation creates reviewable inputs without Docker" test_prepare_migration_fixture_builds_reviewable_inputs_without_running_docker
+run_test "migration fixture preparation rejects mismatched captures" test_prepare_migration_fixture_rejects_unrecorded_checksums
 run_test "safe dry-run keeps readonly composition" test_safe_dry_run_keeps_readonly_composition
 
 if [[ "$failures" -gt 0 ]]; then
