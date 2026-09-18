@@ -312,6 +312,14 @@ query_file_expect_ok "$upgraded_assert_sql"
 first_state="$(schema_fingerprint)"
 candidate_versions="$(target_query 'SELECT CONCAT(version,CHAR(58),bots_version,CHAR(58),custom_version) FROM db_version LIMIT 1')"
 [[ "$candidate_versions" =~ ^[0-9]+:[0-9]+:[0-9]+$ ]] || { printf 'error: invalid Candidate versions\n' >&2; exit 1; }
+# This fixture requires the Candidate's full server/bot/custom schema targets.
+# Read the exact checkout rather than accepting any stable numeric version.
+failure_step=candidate_target_versions
+expected_candidate_versions="$(python3 "$script_dir/lib/migration-target-versions.py" "$repo_root/common/version.h")"
+[[ "$candidate_versions" == "$expected_candidate_versions" ]] || {
+  printf 'error: upgraded versions %s do not match Candidate targets %s\n' "$candidate_versions" "$expected_candidate_versions" >&2
+  exit 1
+}
 failure_step=idempotent_update
 run_candidate update
 second_state="$(schema_fingerprint)"

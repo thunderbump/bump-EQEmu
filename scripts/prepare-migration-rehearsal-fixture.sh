@@ -288,7 +288,7 @@ BEGIN
   BEGIN
     DECLARE CONTINUE HANDLER FOR 4025 SET status_oversize = TRUE;
     INSERT INTO `actor_status` (`actor_id`, `state`, `status_json`, `updated_at`)
-      VALUES (1, 'afk-constraint-test', CONCAT('"', REPEAT('x', 4096), '"'), UTC_TIMESTAMP());
+      VALUES (1, 'afk-constraint-test', CONCAT('"', REPEAT('x', 4095), '"'), UTC_TIMESTAMP());
   END;
   BEGIN
     DECLARE CONTINUE HANDLER FOR 4025 SET event_invalid = TRUE;
@@ -298,7 +298,7 @@ BEGIN
   BEGIN
     DECLARE CONTINUE HANDLER FOR 4025 SET event_oversize = TRUE;
     INSERT INTO `actor_events` (`actor_id`, `event_type`, `event_json`, `created_at`)
-      VALUES (0, 'afk-constraint-test', CONCAT('"', REPEAT('x', 16384), '"'), UTC_TIMESTAMP());
+      VALUES (0, 'afk-constraint-test', CONCAT('"', REPEAT('x', 16383), '"'), UTC_TIMESTAMP());
   END;
   BEGIN
     DECLARE CONTINUE HANDLER FOR 4025 SET source_invalid = TRUE;
@@ -310,7 +310,7 @@ BEGIN
     DECLARE CONTINUE HANDLER FOR 4025 SET source_oversize = TRUE;
     INSERT INTO `actor_action_queue`
       (`actor_id`, `source`, `source_metadata_json`, `action_type`, `action_json`, `idempotency_key`, `state`, `created_at`, `updated_at`)
-      VALUES (0, 'afk-constraint-test', CONCAT('"', REPEAT('x', 4096), '"'), 'test', '{}', 'source-oversize', 'test', UTC_TIMESTAMP(), UTC_TIMESTAMP());
+      VALUES (0, 'afk-constraint-test', CONCAT('"', REPEAT('x', 4095), '"'), 'test', '{}', 'source-oversize', 'test', UTC_TIMESTAMP(), UTC_TIMESTAMP());
   END;
   BEGIN
     DECLARE CONTINUE HANDLER FOR 4025 SET action_invalid = TRUE;
@@ -322,7 +322,7 @@ BEGIN
     DECLARE CONTINUE HANDLER FOR 4025 SET action_oversize = TRUE;
     INSERT INTO `actor_action_queue`
       (`actor_id`, `source`, `action_type`, `action_json`, `idempotency_key`, `state`, `created_at`, `updated_at`)
-      VALUES (0, 'afk-constraint-test', 'test', CONCAT('"', REPEAT('x', 16384), '"'), 'action-oversize', 'test', UTC_TIMESTAMP(), UTC_TIMESTAMP());
+      VALUES (0, 'afk-constraint-test', 'test', CONCAT('"', REPEAT('x', 16383), '"'), 'action-oversize', 'test', UTC_TIMESTAMP(), UTC_TIMESTAMP());
   END;
   BEGIN
     DECLARE CONTINUE HANDLER FOR 4025 SET result_invalid = TRUE;
@@ -334,8 +334,23 @@ BEGIN
     DECLARE CONTINUE HANDLER FOR 4025 SET result_oversize = TRUE;
     INSERT INTO `actor_action_queue`
       (`actor_id`, `source`, `action_type`, `action_json`, `idempotency_key`, `state`, `result_json`, `created_at`, `updated_at`)
-      VALUES (0, 'afk-constraint-test', 'test', '{}', 'result-oversize', 'test', CONCAT('"', REPEAT('x', 16384), '"'), UTC_TIMESTAMP(), UTC_TIMESTAMP());
+      VALUES (0, 'afk-constraint-test', 'test', '{}', 'result-oversize', 'test', CONCAT('"', REPEAT('x', 16383), '"'), UTC_TIMESTAMP(), UTC_TIMESTAMP());
   END;
+
+  -- Valid JSON at each exact limit must succeed; rejection aborts the gate.
+    INSERT INTO `actor_status` (`actor_id`, `state`, `status_json`, `updated_at`)
+      VALUES (2, 'afk-constraint-test', CONCAT('"', REPEAT('x', 4094), '"'), UTC_TIMESTAMP());
+    INSERT INTO `actor_events` (`actor_id`, `event_type`, `event_json`, `created_at`)
+      VALUES (0, 'afk-constraint-test', CONCAT('"', REPEAT('x', 16382), '"'), UTC_TIMESTAMP());
+    INSERT INTO `actor_action_queue`
+      (`actor_id`, `source`, `source_metadata_json`, `action_type`, `action_json`, `idempotency_key`, `state`, `created_at`, `updated_at`)
+      VALUES (0, 'afk-constraint-test', CONCAT('"', REPEAT('x', 4094), '"'), 'test', '{}', 'source-boundary', 'test', UTC_TIMESTAMP(), UTC_TIMESTAMP());
+    INSERT INTO `actor_action_queue`
+      (`actor_id`, `source`, `action_type`, `action_json`, `idempotency_key`, `state`, `created_at`, `updated_at`)
+      VALUES (0, 'afk-constraint-test', 'test', CONCAT('"', REPEAT('x', 16382), '"'), 'action-boundary', 'test', UTC_TIMESTAMP(), UTC_TIMESTAMP());
+    INSERT INTO `actor_action_queue`
+      (`actor_id`, `source`, `action_type`, `action_json`, `idempotency_key`, `state`, `result_json`, `created_at`, `updated_at`)
+      VALUES (0, 'afk-constraint-test', 'test', '{}', 'result-boundary', 'test', CONCAT('"', REPEAT('x', 16382), '"'), UTC_TIMESTAMP(), UTC_TIMESTAMP());
 
   ROLLBACK;
   SET @afk_status_json_constraint = status_invalid AND status_oversize;

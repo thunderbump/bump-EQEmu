@@ -111,6 +111,19 @@ sys.exit(98)
         self.assertIn('^[0-9]+[.][0-9]+$', script)
         self.assertIn('"$source_mariadb".*', script)
 
+    def test_candidate_targets_require_complete_numeric_definitions(self):
+        import runpy
+        read = runpy.run_path(str(ROOT / 'scripts/lib/migration-target-versions.py'))['target_versions']
+        header = ('#define CURRENT_BINARY_DATABASE_VERSION 9335\n'
+                  '#define CURRENT_BINARY_BOTS_DATABASE_VERSION 9055\n'
+                  '#define CUSTOM_BINARY_DATABASE_VERSION 0\n')
+        self.assertEqual(read(header), '9335:9055:0')
+        for invalid in (header.replace('9335', 'unknown'),
+                        header + '#define CUSTOM_BINARY_DATABASE_VERSION 1\n',
+                        header.replace('#define CUSTOM_BINARY_DATABASE_VERSION 0\n', '')):
+            with self.assertRaises(ValueError):
+                read(invalid)
+
     def test_json_constraints_are_checked_behaviorally_not_via_truncated_metadata(self):
         preparer = (ROOT / 'scripts/prepare-migration-rehearsal-fixture.sh').read_text()
         assertion = preparer.split(
