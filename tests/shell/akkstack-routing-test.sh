@@ -852,6 +852,21 @@ test_migration_rehearsal_dry_run_and_guards() {
   assert_contains "$output" "MIGRATION_REHEARSAL_MANIFEST"
 }
 
+test_migration_rehearsal_enforces_restricted_database_contract() {
+  local script="$repo_root/scripts/rehearse-database-migration.sh" source
+  source="$(cat "$script")"
+
+  assert_contains "$source" "CREATE USER '\$target_user'@'%'"
+  assert_contains "$source" 'GRANT ALL PRIVILEGES ON \`$target_db\`.*'
+  assert_contains "$source" 'snapshot_stream | target_mysql'
+  assert_contains "$source" '.server.content_database |= isolated'
+  assert_contains "$source" '.host = \"mariadb\" | .port = \"3306\"'
+  assert_contains "$source" 'database_created=1'
+  assert_contains "$source" 'user_created=1'
+  assert_contains "$source" 'exit "$main_status"'
+  assert_not_contains "$source" 'snapshot_stream | "${compose[@]}" exec -T mariadb bash -lc '\''mysql -uroot'
+}
+
 test_safe_dry_run_keeps_readonly_composition() {
   local fixture_repo fixture_parent status output
   make_fixture fixture_repo fixture_parent
@@ -888,6 +903,7 @@ run_test "tier2-readonly dry-run describes one-off container" test_tier2_readonl
 run_test "tier2-readonly runtime payload rewrites DB host to mariadb service DNS" test_tier2_readonly_uses_service_dns_runtime_config
 run_test "actor queue Tier 3 fails when MariaDB never becomes ready" test_actor_queue_tier3_fails_when_mariadb_never_becomes_ready
 run_test "migration rehearsal dry run describes isolation and rejects unsafe selection" test_migration_rehearsal_dry_run_and_guards
+run_test "migration rehearsal uses a restricted account for every database path" test_migration_rehearsal_enforces_restricted_database_contract
 run_test "safe dry-run keeps readonly composition" test_safe_dry_run_keeps_readonly_composition
 
 if [[ "$failures" -gt 0 ]]; then

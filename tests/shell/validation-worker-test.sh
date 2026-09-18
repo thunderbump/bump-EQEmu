@@ -88,6 +88,9 @@ fi
 if [[ "${VALIDATION_WORKER_TEST_TIER1_EXIT_CODE:-0}" != "0" && " $* " == *" tier1"* ]]; then
   exit "$VALIDATION_WORKER_TEST_TIER1_EXIT_CODE"
 fi
+if [[ "${VALIDATION_WORKER_TEST_MIGRATION_EXIT_CODE:-0}" != "0" && " $* " == *" migration-rehearsal"* ]]; then
+  exit "$VALIDATION_WORKER_TEST_MIGRATION_EXIT_CODE"
+fi
 if [[ "${VALIDATION_WORKER_TEST_ASSERT_STACK_BINDING:-0}" == "1" ]]; then
   [[ -n "${AKKSTACK_DIR:-}" ]] || { printf 'missing AKKSTACK_DIR\n' >&2; exit 1; }
   [[ -n "${EXPECTED_EQEMU_CHECKOUT:-}" ]] || { printf 'missing EXPECTED_EQEMU_CHECKOUT\n' >&2; exit 1; }
@@ -832,9 +835,26 @@ test_current_afk_command_validates_exact_head_without_arguments() {
   assert_json_equals "$evidence/request.json" .stack.role validation
   assert_json_equals "$evidence/result.json" .actual_checkout_commit "$head"
   assert_json_equals "$evidence/result.json" .status passed
-  assert_contains "$(cat "$evidence/logs/validation.log")" "fake validate: --stack validation tier1"
-  assert_contains "$(cat "$evidence/logs/validation.log")" "fake validate: --stack validation migration-rehearsal"
-  assert_contains "$(cat "$evidence/logs/validation.log")" "fake validate: --stack validation tier3-harness"
+  assert_contains "$(cat "$(dirname "$evidence")/worker/logs/tier1-build-and-unit-tests.log")" "fake validate: --stack validation tier1"
+  assert_contains "$(cat "$(dirname "$evidence")/worker/logs/database-migration-rehearsal.log")" "fake validate: --stack validation migration-rehearsal"
+  assert_contains "$(cat "$(dirname "$evidence")/worker/logs/tier3-zone-harness.log")" "fake validate: --stack validation tier3-harness"
+}
+
+test_current_afk_command_classifies_missing_migration_fixture() {
+  local source evidence status output
+  make_afk_contract_repo source current-command-missing-migration
+  evidence="$tmp_root/current-afk-missing-migration-evidence"
+
+  capture_run status output env HOME="$tmp_root/operator-home" \
+    VALIDATION_WORKER_HOME="$tmp_root/worker-home-current-missing-migration" \
+    VALIDATION_WORKER_TEST_MIGRATION_EXIT_CODE=125 \
+    VALIDATION_AFK_EVIDENCE_DIR="$evidence" \
+    "$source/scripts/validate-afk"
+
+  [[ "$status" -eq 2 ]] || return 1
+  assert_json_equals "$evidence/result.json" .category prerequisite_unavailable
+  assert_json_equals "$evidence/afk-checks.json" .status inconclusive
+  assert_json_equals "$evidence/afk-checks.json" '.checks | map(.status) | join(",")' "passed,inconclusive,not_run"
 }
 
 test_current_afk_command_rejects_arguments() {
@@ -1247,6 +1267,7 @@ run_test "validation worker binds validation stack from AKKSTACK_DIR" test_valid
 run_test "stack lock blocks distinct worker homes on same stack" test_stack_lock_blocks_distinct_worker_homes_on_same_stack
 run_test "AKKSTACK_DIR real code directory fails fast" test_akkstack_dir_real_code_directory_fails_fast
 run_test "current AFK command validates exact HEAD without arguments" test_current_afk_command_validates_exact_head_without_arguments
+run_test "current AFK command classifies a missing migration fixture" test_current_afk_command_classifies_missing_migration_fixture
 run_test "current AFK command rejects arguments" test_current_afk_command_rejects_arguments
 run_test "current AFK command returns nonzero for failure and missing stack" test_current_afk_command_returns_nonzero_for_failure_and_missing_stack
 run_test "AFK contract reports stable passing checks" test_afk_contract_passes_with_stable_checks

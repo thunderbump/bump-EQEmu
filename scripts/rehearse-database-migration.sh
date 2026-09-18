@@ -83,8 +83,11 @@ actual_snapshot_sha="$(sha256sum "$snapshot" | awk '{print $1}')"
 
 candidate_commit="$(git -C "$repo_root" rev-parse HEAD)"
 run_token="$(date -u +%Y%m%dT%H%M%SZ)-$$-$RANDOM"
-target_db="afk_migration_${run_token//[^A-Za-z0-9]/_}"
-[[ "$target_db" =~ ^afk_migration_[A-Za-z0-9_]+$ ]] || { printf 'error: failed to construct safe isolated database name\n' >&2; exit 2; }
+target_suffix="${run_token//[^A-Za-z0-9]/_}"
+target_db="afk_migration_$target_suffix"
+target_user="afk_mig_${$}_${RANDOM}"
+target_password="$(printf '%s' "$run_token-$RANDOM-$candidate_commit" | sha256sum | awk '{print $1}')"
+[[ "$target_db" =~ ^afk_migration_[A-Za-z0-9_]+$ && "$target_user" =~ ^afk_mig_[A-Za-z0-9_]+$ ]] || { printf 'error: failed to construct safe isolated database identity\n' >&2; exit 2; }
 if [[ -z "$evidence_dir" ]]; then evidence_dir="$(mktemp -d "${TMPDIR:-/tmp}/eqemu-migration-evidence.XXXXXX")"; fi
 if [[ -e "$evidence_dir" && ! -d "$evidence_dir" ]]; then printf 'error: evidence destination is not a directory\n' >&2; exit 2; fi
 mkdir -p "$evidence_dir"
@@ -92,11 +95,24 @@ evidence_dir="$(realpath "$evidence_dir")"
 result="$evidence_dir/result.json"
 log="$evidence_dir/rehearsal.log"
 compose=(docker-compose -f docker-compose.yml -f docker-compose.dev.yml)
-created=0
+database_created=0
+user_created=0
 status=failed
 failure_step=setup
 restore_ms=null
 candidate_versions=""
+
+root_sql() {
+  local statement="$1"
+  printf '%s\n' "$statement" | "${compose[@]}" exec -T mariadb bash -lc 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot'
+}
+target_mysql() {
+  "${compose[@]}" exec -T mariadb bash -lc 'MYSQL_PWD="$2" mysql -N -B -u"$1" "$3"' _ "$target_user" "$target_password" "$target_db"
+}
+target_query() {
+  local statement="$1"
+  "${compose[@]}" exec -T mariadb bash -lc 'MYSQL_PWD="$2" mysql -N -B -u"$1" "$3" -e "$4"' _ "$target_user" "$target_password" "$target_db" "$statement"
+}
 
 write_result() {
   jq -n --arg status "$status" --arg failure_step "$failure_step" --arg candidate_commit "$candidate_commit" \
@@ -109,14 +125,26 @@ write_result() {
     '{schema_version:1,status:$status,failure_step:(if $failure_step=="" then null else $failure_step end),candidate_commit:$candidate_commit,snapshot:{id:$snapshot_id,sha256:$snapshot_sha256},source:{build:$source_build,world_binary_sha256:$old_world_sha,mariadb_version:$source_mariadb,database_versions:{server:$source_server_version,bots:$source_bots_version,custom:$source_custom_version}},resulting_database_versions:(if $candidate_versions=="" then null else ($candidate_versions|split(":")|map(tonumber)|{server:.[0],bots:.[1],custom:.[2]}) end),fixtures:{seed_sha256:$seed_sha,upgraded_assert_sha256:$upgraded_assert_sha,restored_assert_sha256:$restored_assert_sha},candidate_scenarios:$scenarios,target:{class:"isolated-disposable",database:$target_database},restore_elapsed_ms:$restore_ms,completed_at:$completed_at}' >"$result"
 }
 cleanup() {
-  local cleanup_status=0
-  if [[ "$created" -eq 1 ]]; then
-    (cd "$stack_dir" && "${compose[@]}" exec -T mariadb bash -lc 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -e "DROP DATABASE IF EXISTS `'$target_db'`; REVOKE ALL PRIVILEGES ON `'$target_db'`.* FROM '\''eqemu'\''@'\''%'\''"') >>"$log" 2>&1 || cleanup_status=$?
+  local main_status=$? cleanup_status=0 result_status=0
+  trap - EXIT
+  set +e
+  cd "$stack_dir"
+  if [[ "$user_created" -eq 1 ]]; then
+    root_sql "DROP USER IF EXISTS '$target_user'@'%'" >>"$log" 2>&1 || cleanup_status=1
   fi
-  if [[ "$cleanup_status" -ne 0 && "$status" == passed ]]; then status=failed; failure_step=cleanup; fi
-  write_result
+  if [[ "$database_created" -eq 1 ]]; then
+    root_sql "DROP DATABASE IF EXISTS \`$target_db\`" >>"$log" 2>&1 || cleanup_status=1
+  fi
+  if [[ "$cleanup_status" -ne 0 ]]; then
+    status=failed
+    failure_step=cleanup
+  fi
+  write_result || result_status=$?
   printf 'Migration rehearsal evidence: %s\n' "$evidence_dir"
-  [[ "$cleanup_status" -eq 0 ]]
+  if [[ "$cleanup_status" -ne 0 || "$result_status" -ne 0 ]]; then
+    exit 1
+  fi
+  exit "$main_status"
 }
 trap cleanup EXIT
 
@@ -126,8 +154,11 @@ shared_db="$("${compose[@]}" exec -T mariadb bash -lc 'printf %s "$MYSQL_DATABAS
 [[ -n "$shared_db" && "$target_db" != "$shared_db" ]] || { printf 'error: isolated database unexpectedly matches the shared validation database\n' >&2; exit 1; }
 actual_mariadb="$("${compose[@]}" exec -T mariadb mariadb --version)"
 [[ "$actual_mariadb" == *"$source_mariadb"* ]] || { printf 'error: MariaDB version does not match snapshot metadata (expected %s)\n' "$source_mariadb" >&2; exit 1; }
-"${compose[@]}" exec -T mariadb bash -lc 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -e "CREATE DATABASE `'$target_db'`; GRANT ALL PRIVILEGES ON `'$target_db'`.* TO '\''eqemu'\''@'\''%'\''"' >>"$log" 2>&1
-created=1
+root_sql "CREATE DATABASE \`$target_db\`" >>"$log" 2>&1
+database_created=1
+root_sql "CREATE USER '$target_user'@'%' IDENTIFIED BY '$target_password'" >>"$log" 2>&1
+user_created=1
+root_sql "GRANT ALL PRIVILEGES ON \`$target_db\`.* TO '$target_user'@'%'" >>"$log" 2>&1
 
 snapshot_stream() {
   case "$snapshot" in
@@ -142,21 +173,27 @@ if snapshot_stream | grep -Eiq '(^|[^A-Za-z_])(USE[[:space:]]+`?[A-Za-z0-9_]+`?[
   exit 1
 fi
 import_snapshot() {
-  snapshot_stream | "${compose[@]}" exec -T mariadb bash -lc 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" '"$target_db"
+  snapshot_stream | target_mysql
 }
 query_file_expect_ok() {
   local path="$1" output
-  output="$(cat "$path" | "${compose[@]}" exec -T mariadb bash -lc 'mysql -N -B -uroot -p"$MYSQL_ROOT_PASSWORD" '"$target_db")"
+  output="$(target_mysql <"$path")"
   [[ "$output" == ok ]] || { printf 'error: assertion %s must return exactly one scalar value: ok\n' "$(basename "$path")" >&2; return 1; }
 }
 run_candidate() {
   local mode="$1"
-  "${compose[@]}" run --rm --no-deps -T -e "MIGRATION_TARGET_DB=$target_db" -e "MIGRATION_SCENARIOS_JSON=$scenarios_json" --entrypoint bash eqemu-server -lc '
+  "${compose[@]}" run --rm --no-deps -T \
+    -e "MIGRATION_TARGET_DB=$target_db" -e "MIGRATION_TARGET_USER=$target_user" \
+    -e "MIGRATION_TARGET_PASSWORD=$target_password" -e "MIGRATION_SCENARIOS_JSON=$scenarios_json" \
+    --entrypoint bash eqemu-server -lc '
 set -euo pipefail
 runtime=/tmp/migration-rehearsal-runtime
 ~/code/scripts/lib/prepare-zone-cli-runtime.sh "$runtime"
-jq --arg db "$MIGRATION_TARGET_DB" ".server.database.db = \$db | .server.qsdatabase.db = \$db" "$runtime/eqemu_config.json" >"$runtime/config.tmp"
+jq --arg db "$MIGRATION_TARGET_DB" --arg user "$MIGRATION_TARGET_USER" --arg password "$MIGRATION_TARGET_PASSWORD" \
+  "def isolated: .host = \"mariadb\" | .port = \"3306\" | .db = \$db | .username = \$user | .password = \$password; .server.database |= isolated | .server.qsdatabase |= isolated | .server.content_database |= isolated" \
+  "$runtime/eqemu_config.json" >"$runtime/config.tmp"
 mv "$runtime/config.tmp" "$runtime/eqemu_config.json"
+unset MIGRATION_TARGET_PASSWORD
 cd "$runtime"
 ~/code/build/bin/world database:updates --skip-backup --force
 if [[ "'"$mode"'" == scenarios ]]; then
@@ -168,39 +205,45 @@ fi' >>"$log" 2>&1
 
 failure_step=restore_snapshot
 import_snapshot >>"$log" 2>&1
-snapshot_versions="$("${compose[@]}" exec -T mariadb bash -lc 'mysql -N -B -uroot -p"$MYSQL_ROOT_PASSWORD" '"$target_db"' -e "SELECT CONCAT(version,CHAR(58),bots_version,CHAR(58),custom_version) FROM db_version LIMIT 1"')"
+snapshot_versions="$(target_query 'SELECT CONCAT(version,CHAR(58),bots_version,CHAR(58),custom_version) FROM db_version LIMIT 1')"
 expected_versions="$source_server_version:$source_bots_version:$source_custom_version"
 [[ "$snapshot_versions" == "$expected_versions" ]] || { printf 'error: restored database versions %s do not match manifest %s\n' "$snapshot_versions" "$expected_versions" >&2; exit 1; }
 failure_step=seed_old_format
-cat "$seed_sql" | "${compose[@]}" exec -T mariadb bash -lc 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" '"$target_db" >>"$log" 2>&1
+target_mysql <"$seed_sql" >>"$log" 2>&1
 failure_step=candidate_update
 run_candidate scenarios
 failure_step=upgraded_assertions
 query_file_expect_ok "$upgraded_assert_sql"
-first_state="$("${compose[@]}" exec -T mariadb bash -lc 'mysql -N -B -uroot -p"$MYSQL_ROOT_PASSWORD" '"$target_db"' -e "SELECT CONCAT(version,CHAR(58),bots_version,CHAR(58),custom_version) FROM db_version LIMIT 1; SELECT SHA2(GROUP_CONCAT(CONCAT(table_name,CHAR(58),column_name,CHAR(58),column_type,CHAR(58),is_nullable) ORDER BY table_name,ordinal_position SEPARATOR CHAR(10)),256) FROM information_schema.columns WHERE table_schema=DATABASE()"')"
+first_state="$(target_query 'SELECT CONCAT(version,CHAR(58),bots_version,CHAR(58),custom_version) FROM db_version LIMIT 1; SELECT SHA2(GROUP_CONCAT(CONCAT(table_name,CHAR(58),column_name,CHAR(58),column_type,CHAR(58),is_nullable) ORDER BY table_name,ordinal_position SEPARATOR CHAR(10)),256) FROM information_schema.columns WHERE table_schema=DATABASE()')"
 candidate_versions="${first_state%%$'\n'*}"
 [[ "$candidate_versions" =~ ^[0-9]+:[0-9]+:[0-9]+$ ]] || { printf 'error: Candidate updater left invalid database versions\n' >&2; exit 1; }
 failure_step=idempotent_update
 run_candidate no-scenarios
-second_state="$("${compose[@]}" exec -T mariadb bash -lc 'mysql -N -B -uroot -p"$MYSQL_ROOT_PASSWORD" '"$target_db"' -e "SELECT CONCAT(version,CHAR(58),bots_version,CHAR(58),custom_version) FROM db_version LIMIT 1; SELECT SHA2(GROUP_CONCAT(CONCAT(table_name,CHAR(58),column_name,CHAR(58),column_type,CHAR(58),is_nullable) ORDER BY table_name,ordinal_position SEPARATOR CHAR(10)),256) FROM information_schema.columns WHERE table_schema=DATABASE()"')"
+second_state="$(target_query 'SELECT CONCAT(version,CHAR(58),bots_version,CHAR(58),custom_version) FROM db_version LIMIT 1; SELECT SHA2(GROUP_CONCAT(CONCAT(table_name,CHAR(58),column_name,CHAR(58),column_type,CHAR(58),is_nullable) ORDER BY table_name,ordinal_position SEPARATOR CHAR(10)),256) FROM information_schema.columns WHERE table_schema=DATABASE()')"
 [[ "$first_state" == "$second_state" ]] || { printf 'error: second updater run changed database version or schema\n' >&2; exit 1; }
 
 failure_step=rollback_restore
 start_ms="$(date +%s%3N)"
-"${compose[@]}" exec -T mariadb bash -lc 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -e "DROP DATABASE `'$target_db'`; CREATE DATABASE `'$target_db'`"' >>"$log" 2>&1
+root_sql "DROP DATABASE \`$target_db\`; CREATE DATABASE \`$target_db\`" >>"$log" 2>&1
 import_snapshot >>"$log" 2>&1
 restore_ms=$(( $(date +%s%3N) - start_ms ))
 failure_step=restored_assertions
 query_file_expect_ok "$restored_assert_sql"
 failure_step=old_build_recovery
-"${compose[@]}" run --rm --no-deps -T -e "MIGRATION_TARGET_DB=$target_db" -e "OLD_WORLD=$old_world_path" -e "OLD_WORLD_SHA=$old_world_sha" --entrypoint bash eqemu-server -lc '
+"${compose[@]}" run --rm --no-deps -T \
+  -e "MIGRATION_TARGET_DB=$target_db" -e "MIGRATION_TARGET_USER=$target_user" \
+  -e "MIGRATION_TARGET_PASSWORD=$target_password" -e "OLD_WORLD=$old_world_path" -e "OLD_WORLD_SHA=$old_world_sha" \
+  --entrypoint bash eqemu-server -lc '
 set -euo pipefail
 [[ -x "$OLD_WORLD" ]] || { printf "error: matching old world binary is unavailable: %s\n" "$OLD_WORLD" >&2; exit 125; }
 [[ "$(sha256sum "$OLD_WORLD" | awk "{print \$1}")" == "$OLD_WORLD_SHA" ]] || { printf "error: old world binary checksum mismatch\n" >&2; exit 1; }
 runtime=/tmp/migration-old-build-runtime
 ~/code/scripts/lib/prepare-zone-cli-runtime.sh "$runtime"
-jq --arg db "$MIGRATION_TARGET_DB" ".server.database.db = \$db | .server.qsdatabase.db = \$db" "$runtime/eqemu_config.json" >"$runtime/config.tmp"
+jq --arg db "$MIGRATION_TARGET_DB" --arg user "$MIGRATION_TARGET_USER" --arg password "$MIGRATION_TARGET_PASSWORD" \
+  "def isolated: .host = \"mariadb\" | .port = \"3306\" | .db = \$db | .username = \$user | .password = \$password; .server.database |= isolated | .server.qsdatabase |= isolated | .server.content_database |= isolated" \
+  "$runtime/eqemu_config.json" >"$runtime/config.tmp"
 mv "$runtime/config.tmp" "$runtime/eqemu_config.json"
+unset MIGRATION_TARGET_PASSWORD
 cd "$runtime"
 "$OLD_WORLD" database:version' >>"$log" 2>&1
 

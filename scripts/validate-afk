@@ -64,5 +64,5 @@ printf 'Validation evidence: %s\n' "$evidence_dir"
 
 # This entry point is the committed-Candidate gate, never a worker preview.
 # Do not allow an operator's ambient worker-only setting to skip validation.
-env -u VALIDATION_WORKER_VALIDATE_DRY_RUN \
+env -u VALIDATION_WORKER_VALIDATE_DRY_RUN VALIDATION_WORKER_AFK_MODE=1 \
   "$script_dir/validation-worker.sh" run --request "$request_path"
