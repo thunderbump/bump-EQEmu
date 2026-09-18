@@ -9,8 +9,8 @@ usage() {
   cat <<'EOF'
 Usage: scripts/rehearse-database-migration.sh [--stack validation] [--dry-run]
 
-Rehearses the Candidate updater and rollback in a uniquely named database in the
-validation MariaDB service. MIGRATION_REHEARSAL_MANIFEST must name a JSON
+Rehearses the Candidate updater and rollback in a disposable MariaDB container,
+volume and internal network. The validation stack supplies read-only test assets. MIGRATION_REHEARSAL_MANIFEST must name a JSON
 manifest; snapshot and SQL paths are relative to that manifest. See
  docs/testing/database-migration-rehearsal.md for the manifest contract.
 EOF
@@ -25,18 +25,10 @@ if [[ "$AKKSTACK_STACK_ROLE" != validation ]]; then
 fi
 
 stack_dir="$AKKSTACK_STACK_DIR"
-validation_marker="$stack_dir/.afk-validation-stack"
-if [[ "$stack_dir" != "$AKKSTACK_VALIDATION_DEFAULT_RESOLVED" ]] \
-  && [[ ! -f "$validation_marker" || "$(cat "$validation_marker")" != afk-validation-stack-v1 ]]; then
-  printf 'error: migration rehearsal requires the default validation AkkStack or its explicit .afk-validation-stack marker\n' >&2
-  exit 2
-fi
-
 manifest="${MIGRATION_REHEARSAL_MANIFEST:-}"
 evidence_dir="${MIGRATION_REHEARSAL_EVIDENCE_DIR:-}"
 if [[ "$AKKSTACK_DRY_RUN" -eq 1 ]]; then
-  akkstack_print_dry_run "would verify a checksummed deployed snapshot and matching old build, create a unique isolated database, seed old-format fixtures, run the Candidate updater twice, run manifest scenarios, restore the snapshot, prove old-build recovery, record restore cost, and drop the isolated database" docker-compose.yml docker-compose.dev.yml
-  printf '  destination guard: validation role; gameplay and shared validation databases rejected\n'
+  printf '%s\n' 'would create a disposable database container, volume and internal network; restore the snapshot, run updater and recovery assertions, record restore cost, and remove only this run resources'
   exit 0
 fi
 
@@ -79,15 +71,8 @@ restored_assert_sha="$(sha256sum "$restored_assert_sql" | awk '{print $1}')"
 old_world_path="$(required_string '.old_build.world_binary_container_path' old_build.world_binary_container_path)"
 old_world_sha="$(required_string '.old_build.world_binary_sha256' old_build.world_binary_sha256)"
 [[ "$old_world_path" == /* ]] || { printf 'error: old_build.world_binary_container_path must be an absolute container path\n' >&2; exit 2; }
-compose_override_member="$(jq -er '.old_build.compose_file // empty | select(type == "string" and length > 0)' "$manifest" 2>/dev/null || true)"
-compose_override=""
-if [[ -n "$compose_override_member" ]]; then
-  compose_override="$(resolve_member "$compose_override_member")"
-  old_build_host_dir="$(resolve_member "$(required_string '.old_build.host_directory' old_build.host_directory)")"
-  [[ -d "$old_build_host_dir" ]] || { printf 'error: old_build.host_directory must name a directory\n' >&2; exit 2; }
-  expected_override="$(printf 'services:\n  eqemu-server:\n    volumes:\n      - %s' "$(jq -Rn --arg mount "$old_build_host_dir:/opt/eqemu-old:ro" '$mount')")"
-  [[ "$(cat "$compose_override")" == "$expected_override" ]] || { printf 'error: old-build Compose override is not the expected read-only mount\n' >&2; exit 2; }
-fi
+old_build_host_dir="$(resolve_member "$(required_string '.old_build.host_directory' old_build.host_directory)")"
+[[ -d "$old_build_host_dir" && "$old_world_path" == /opt/eqemu-old/* ]] || { printf 'error: old build must be mounted beneath /opt/eqemu-old\n' >&2; exit 2; }
 build_identity_attested="$(jq -r '.source.build_identity_attested // false | if type == "boolean" then tostring else error("not a boolean") end' "$manifest" 2>/dev/null)" || { printf 'error: source.build_identity_attested must be boolean\n' >&2; exit 2; }
 [[ "$source_mariadb" =~ ^[0-9]+([.][0-9]+){1,3}$ ]] || { printf 'error: source.mariadb_version must be a numeric dotted version\n' >&2; exit 2; }
 [[ "$snapshot_sha" =~ ^[0-9a-f]{64}$ && "$old_world_sha" =~ ^[0-9a-f]{64}$ ]] || { printf 'error: manifest checksums must be lowercase SHA-256 values\n' >&2; exit 2; }
@@ -95,42 +80,61 @@ actual_snapshot_sha="$(sha256sum "$snapshot" | awk '{print $1}')"
 [[ "$actual_snapshot_sha" == "$snapshot_sha" ]] || { printf 'error: snapshot checksum mismatch for %s\n' "$snapshot_id" >&2; exit 1; }
 
 candidate_commit="$(git -C "$repo_root" rev-parse HEAD)"
-run_token="$(date -u +%Y%m%dT%H%M%SZ)-$$-$RANDOM"
-target_suffix="${run_token//[^A-Za-z0-9]/_}"
-target_db="afk_migration_$target_suffix"
-target_user="afk_mig_$$_${RANDOM}"
-target_password="$(printf '%s' "$run_token-$RANDOM-$candidate_commit" | sha256sum | awk '{print $1}')"
-[[ "$target_db" =~ ^afk_migration_[A-Za-z0-9_]+$ && "$target_user" =~ ^afk_mig_[A-Za-z0-9_]+$ ]] || { printf 'error: failed to construct safe isolated database identity\n' >&2; exit 2; }
+run_token="eqemu-rehearsal-$(cat /proc/sys/kernel/random/uuid)"
+target_db=peq
+target_password="$(cat /proc/sys/kernel/random/uuid)"
+db_image="mariadb:$source_mariadb"
+runtime_image=eqemulator/eqemu-server:v16-dev
+db_image_id=unresolved
+runtime_image_id=unresolved
 if [[ -z "$evidence_dir" ]]; then evidence_dir="$(mktemp -d "${TMPDIR:-/tmp}/eqemu-migration-evidence.XXXXXX")"; fi
 if [[ -e "$evidence_dir" && ! -d "$evidence_dir" ]]; then printf 'error: evidence destination is not a directory\n' >&2; exit 2; fi
+umask 077
 mkdir -p "$evidence_dir"
 evidence_dir="$(realpath "$evidence_dir")"
 result="$evidence_dir/result.json"
 log="$evidence_dir/rehearsal.log"
-compose=(docker-compose -f docker-compose.yml -f docker-compose.dev.yml)
-if [[ -n "$compose_override" ]]; then compose+=(-f "$compose_override"); fi
-database_created=0
-user_created=0
+db_container="$run_token-db"
+runtime_container="$run_token-runtime"
+network="$run_token"
+volume="$run_token-data"
+owner_label="org.eqemu.rehearsal=$run_token"
+network_created=0
+volume_created=0
 status=failed
 failure_step=setup
 restore_ms=null
 candidate_versions=""
 snapshot_data_state=""
 
-root_sql() {
-  local statement="$1"
-  printf '%s\n' "$statement" | "${compose[@]}" exec -T mariadb bash -lc 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot'
-}
+root_sql() { printf '%s\n' "$1" | target_mysql; }
 target_mysql() {
-  "${compose[@]}" exec -T mariadb bash -lc 'MYSQL_PWD="$2" mysql -N -B -u"$1" "$3"' _ "$target_user" "$target_password" "$target_db"
+  docker exec -i "$db_container" sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mariadb -uroot -N -B peq'
 }
-target_query() {
-  local statement="$1"
-  "${compose[@]}" exec -T mariadb bash -lc 'MYSQL_PWD="$2" mysql -N -B -u"$1" "$3" -e "$4"' _ "$target_user" "$target_password" "$target_db" "$statement"
+target_query() { printf '%s\n' "$1" | target_mysql; }
+# Hash the complete schema stream, including indexes/constraints, without SQL aggregation limits.
+schema_fingerprint() {
+  docker exec "$db_container" sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mariadb-dump -uroot --no-data --skip-comments --skip-add-drop-table peq' | sha256sum | cut -d ' ' -f1
+}
+run_runtime() {
+  local mode="$1"
+  docker run --rm --name "$runtime_container" --label "$owner_label" \
+    --network "$network" --read-only --user 0:0 --init --ulimit core=0 --stop-timeout 5 \
+    --tmpfs /tmp:rw,nosuid,size=256m --tmpfs /runtime:rw,nosuid,size=1g \
+    --mount "type=bind,src=$repo_root,dst=/home/eqemu/code,readonly" \
+    --mount "type=bind,src=$old_build_host_dir,dst=/opt/eqemu-old,readonly" \
+    --mount "type=bind,src=$stack_dir/server/shared,dst=/inputs/shared,readonly" \
+    --mount "type=bind,src=$stack_dir/server/quests,dst=/inputs/quests,readonly" \
+    --mount "type=bind,src=$stack_dir/server/maps,dst=/inputs/maps,readonly" \
+    -e "REHEARSAL_PASSWORD=$target_password" -e "MIGRATION_SCENARIOS_JSON=$scenarios_json" \
+    -e "OLD_WORLD=$old_world_path" -e "OLD_WORLD_SHA=$old_world_sha" \
+    --entrypoint bash "$runtime_image" /home/eqemu/code/scripts/lib/migration-runtime.sh "$mode"
 }
 
 write_result() {
   jq -n --arg status "$status" --arg failure_step "$failure_step" --arg candidate_commit "$candidate_commit" \
+    --arg run_id "$run_token" --arg database_image "$db_image" --arg runtime_image "$runtime_image" \
+    --arg database_image_id "$db_image_id" --arg runtime_image_id "$runtime_image_id" \
     --arg snapshot_id "$snapshot_id" --arg snapshot_sha256 "$snapshot_sha" --arg source_build "$source_build" --arg old_world_sha "$old_world_sha" \
     --arg source_mariadb_version "$source_mariadb" --argjson source_server_version "$source_server_version" \
     --argjson source_bots_version "$source_bots_version" --argjson source_custom_version "$source_custom_version" \
@@ -138,19 +142,20 @@ write_result() {
     --arg target_database "$target_db" --arg candidate_versions "$candidate_versions" --arg seed_sha "$seed_sha" \
     --arg upgraded_assert_sha "$upgraded_assert_sha" --arg restored_assert_sha "$restored_assert_sha" \
     --argjson scenarios "$scenarios_json" --arg completed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson restore_ms "$restore_ms" \
-    '{schema_version:1,status:$status,failure_step:(if $failure_step=="" then null else $failure_step end),candidate_commit:$candidate_commit,snapshot:{id:$snapshot_id,sha256:$snapshot_sha256},source:{build:$source_build,build_identity_attested:$build_identity_attested,world_binary_sha256:$old_world_sha,mariadb_version:$source_mariadb_version,database_versions:{server:$source_server_version,bots:$source_bots_version,custom:$source_custom_version}},resulting_database_versions:(if $candidate_versions=="" then null else ($candidate_versions|split(":")|map(tonumber)|{server:.[0],bots:.[1],custom:.[2]}) end),fixtures:{seed_sha256:$seed_sha,upgraded_assert_sha256:$upgraded_assert_sha,restored_assert_sha256:$restored_assert_sha},candidate_scenarios:$scenarios,target:{class:"isolated-disposable",database:$target_database},restore_elapsed_ms:$restore_ms,completed_at:$completed_at}' >"$result"
+    '{schema_version:1,run_id:$run_id,images:{database:$database_image,runtime:$runtime_image,database_id:$database_image_id,runtime_id:$runtime_image_id},status:$status,failure_step:(if $failure_step=="" then null else $failure_step end),candidate_commit:$candidate_commit,snapshot:{id:$snapshot_id,sha256:$snapshot_sha256},source:{build:$source_build,build_identity_attested:$build_identity_attested,world_binary_sha256:$old_world_sha,mariadb_version:$source_mariadb_version,database_versions:{server:$source_server_version,bots:$source_bots_version,custom:$source_custom_version}},resulting_database_versions:(if $candidate_versions=="" then null else ($candidate_versions|split(":")|map(tonumber)|{server:.[0],bots:.[1],custom:.[2]}) end),fixtures:{seed_sha256:$seed_sha,upgraded_assert_sha256:$upgraded_assert_sha,restored_assert_sha256:$restored_assert_sha},candidate_scenarios:$scenarios,target:{class:"isolated-disposable",database:$target_database},restore_elapsed_ms:$restore_ms,completed_at:$completed_at}' >"$result"
 }
 cleanup() {
   local main_status=$? cleanup_status=0 result_status=0
   trap - EXIT
   set +e
-  cd "$stack_dir"
-  if [[ "$user_created" -eq 1 ]]; then
-    root_sql "DROP USER IF EXISTS '$target_user'@'%'" >>"$log" 2>&1 || cleanup_status=1
-  fi
-  if [[ "$database_created" -eq 1 ]]; then
-    root_sql "DROP DATABASE IF EXISTS \`$target_db\`" >>"$log" 2>&1 || cleanup_status=1
-  fi
+  # Names contain an unpredictable run UUID; label checks prevent deleting foreign resources.
+  for container in "$runtime_container" "$db_container"; do
+    if [[ "$(docker inspect --format '{{ index .Config.Labels "org.eqemu.rehearsal" }}' "$container" 2>/dev/null)" == "$run_token" ]]; then
+      docker rm -f "$container" >>"$log" 2>&1 || cleanup_status=1
+    fi
+  done
+  if [[ "$volume_created" == 1 ]]; then docker volume rm "$volume" >>"$log" 2>&1 || cleanup_status=1; fi
+  if [[ "$network_created" == 1 ]]; then docker network rm "$network" >>"$log" 2>&1 || cleanup_status=1; fi
   if [[ "$cleanup_status" -ne 0 ]]; then
     status=failed
     failure_step=cleanup
@@ -163,19 +168,30 @@ cleanup() {
   exit "$main_status"
 }
 trap cleanup EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
 
-cd "$stack_dir"
-"${compose[@]}" up -d --no-recreate mariadb >>"$log" 2>&1
-shared_db="$("${compose[@]}" exec -T mariadb bash -lc 'printf %s "$MYSQL_DATABASE"')"
-[[ -n "$shared_db" && "$target_db" != "$shared_db" ]] || { printf 'error: isolated database unexpectedly matches the shared validation database\n' >&2; exit 1; }
-actual_mariadb="$("${compose[@]}" exec -T mariadb mariadb --version)"
-version_regex="${source_mariadb//./\\.}"
-[[ "$actual_mariadb" =~ (^|[^0-9])${version_regex}([^0-9]|$) ]] || { printf 'error: MariaDB version does not match snapshot metadata (expected %s)\n' "$source_mariadb" >&2; exit 1; }
-root_sql "CREATE DATABASE \`$target_db\`" >>"$log" 2>&1
-database_created=1
-root_sql "CREATE USER '$target_user'@'%' IDENTIFIED BY '$target_password'" >>"$log" 2>&1
-user_created=1
-root_sql "GRANT ALL PRIVILEGES ON \`$target_db\`.* TO '$target_user'@'%'" >>"$log" 2>&1
+# Pull/cache images on the host; containers themselves have no external network.
+for image in "$db_image" "$runtime_image"; do
+  docker image inspect "$image" >/dev/null 2>&1 || docker pull "$image" >>"$log" 2>&1
+done
+db_image_id="$(docker image inspect --format '{{.Id}}' "$db_image")"
+runtime_image_id="$(docker image inspect --format '{{.Id}}' "$runtime_image")"
+docker network create --internal --label "$owner_label" "$network" >>"$log"
+network_created=1
+docker volume create --label "$owner_label" "$volume" >>"$log"
+volume_created=1
+docker run -d --name "$db_container" --label "$owner_label" --network "$network" --network-alias mariadb \
+  --mount "type=volume,src=$volume,dst=/var/lib/mysql" \
+  -e "MYSQL_ROOT_PASSWORD=$target_password" -e MYSQL_ROOT_HOST=% -e MYSQL_DATABASE=peq "$db_image" >>"$log" 2>&1
+ready=0
+for attempt in {1..90}; do
+  if target_query 'SELECT 1' >/dev/null 2>&1; then ready=1; break; fi
+  sleep 1
+done
+[[ "$ready" == 1 ]] || { printf 'error: disposable database did not become ready\n' >&2; exit 1; }
+actual_mariadb="$(target_query 'SELECT VERSION()')"
+[[ "$actual_mariadb" == "$source_mariadb"-* ]] || { printf 'error: disposable MariaDB version differs from capture\n' >&2; exit 1; }
 
 snapshot_stream() {
   case "$snapshot" in
@@ -185,10 +201,6 @@ snapshot_stream() {
     *) printf 'error: snapshot must end in .sql, .sql.gz, or .sql.zst\n' >&2; return 2 ;;
   esac
 }
-if snapshot_stream | grep -Eiq '(^|[^A-Za-z_])(USE[[:space:]]+`?[A-Za-z0-9_]+`?[[:space:]]*;|CREATE[[:space:]]+(DATABASE|SCHEMA)|DROP[[:space:]]+(DATABASE|SCHEMA))'; then
-  printf 'error: snapshot contains database-selection DDL and is unsafe for an isolated target\n' >&2
-  exit 1
-fi
 import_snapshot() {
   snapshot_stream | target_mysql
 }
@@ -197,28 +209,7 @@ query_file_expect_ok() {
   output="$(target_mysql <"$path")"
   [[ "$output" == ok ]] || { printf 'error: assertion %s must return exactly one scalar value: ok\n' "$(basename "$path")" >&2; return 1; }
 }
-run_candidate() {
-  local mode="$1"
-  "${compose[@]}" run --rm --no-deps -T \
-    -e "MIGRATION_TARGET_DB=$target_db" -e "MIGRATION_TARGET_USER=$target_user" \
-    -e "MIGRATION_TARGET_PASSWORD=$target_password" -e "MIGRATION_SCENARIOS_JSON=$scenarios_json" \
-    --entrypoint bash eqemu-server -lc '
-set -euo pipefail
-runtime=/tmp/migration-rehearsal-runtime
-~/code/scripts/lib/prepare-zone-cli-runtime.sh "$runtime"
-jq --arg db "$MIGRATION_TARGET_DB" --arg user "$MIGRATION_TARGET_USER" --arg password "$MIGRATION_TARGET_PASSWORD" \
-  "def isolated: .host = \"mariadb\" | .port = \"3306\" | .db = \$db | .username = \$user | .password = \$password; .server.database |= isolated | .server.qsdatabase |= isolated | .server.content_database |= isolated" \
-  "$runtime/eqemu_config.json" >"$runtime/config.tmp"
-mv "$runtime/config.tmp" "$runtime/eqemu_config.json"
-unset MIGRATION_TARGET_PASSWORD
-cd "$runtime"
-~/code/build/bin/world database:updates --skip-backup --force
-if [[ "'"$mode"'" == scenarios ]]; then
-  while IFS= read -r command; do
-    bash -lc "$command"
-  done < <(jq -r ".[]" <<<"$MIGRATION_SCENARIOS_JSON")
-fi' >>"$log" 2>&1
-}
+run_candidate() { run_runtime "$1" >>"$log" 2>&1; }
 
 failure_step=restore_snapshot
 import_snapshot >>"$log" 2>&1
@@ -232,12 +223,12 @@ failure_step=candidate_update
 run_candidate scenarios
 failure_step=upgraded_assertions
 query_file_expect_ok "$upgraded_assert_sql"
-first_state="$(target_query "SELECT CONCAT(version,CHAR(58),bots_version,CHAR(58),custom_version) FROM db_version LIMIT 1; SELECT SHA2(GROUP_CONCAT(CONCAT(table_name,CHAR(58),column_name,CHAR(58),column_type,CHAR(58),is_nullable) ORDER BY table_name,ordinal_position SEPARATOR '\\n'),256) FROM information_schema.columns WHERE table_schema=DATABASE()")"
-candidate_versions="${first_state%%$'\n'*}"
-[[ "$candidate_versions" =~ ^[0-9]+:[0-9]+:[0-9]+$ ]] || { printf 'error: Candidate updater left invalid database versions\n' >&2; exit 1; }
+first_state="$(schema_fingerprint)"
+candidate_versions="$(target_query 'SELECT CONCAT(version,CHAR(58),bots_version,CHAR(58),custom_version) FROM db_version LIMIT 1')"
+[[ "$candidate_versions" =~ ^[0-9]+:[0-9]+:[0-9]+$ ]] || { printf 'error: invalid Candidate versions\n' >&2; exit 1; }
 failure_step=idempotent_update
 run_candidate no-scenarios
-second_state="$(target_query "SELECT CONCAT(version,CHAR(58),bots_version,CHAR(58),custom_version) FROM db_version LIMIT 1; SELECT SHA2(GROUP_CONCAT(CONCAT(table_name,CHAR(58),column_name,CHAR(58),column_type,CHAR(58),is_nullable) ORDER BY table_name,ordinal_position SEPARATOR '\\n'),256) FROM information_schema.columns WHERE table_schema=DATABASE()")"
+second_state="$(schema_fingerprint)"
 [[ "$first_state" == "$second_state" ]] || { printf 'error: second updater run changed database version or schema\n' >&2; exit 1; }
 failure_step=idempotent_data_assertions
 query_file_expect_ok "$upgraded_assert_sql"
@@ -252,47 +243,7 @@ query_file_expect_ok "$restored_assert_sql"
 restored_data_state="$(target_query 'SELECT CONCAT((SELECT COUNT(*) FROM character_data),CHAR(58),(SELECT COALESCE(BIT_XOR(CRC32(CONCAT(id,CHAR(58),account_id))),0) FROM character_data),CHAR(58),(SELECT COALESCE(SUM(copper + 10 * silver + 100 * gold + 1000 * platinum + copper_bank + 10 * silver_bank + 100 * gold_bank + 1000 * platinum_bank + copper_cursor + 10 * silver_cursor + 100 * gold_cursor + 1000 * platinum_cursor),0) FROM character_currency),CHAR(58),(SELECT COUNT(*) FROM bot_data),CHAR(58),(SELECT COALESCE(SUM(owner_id),0) FROM bot_data),CHAR(58),(SELECT COALESCE(BIT_XOR(CRC32(CONCAT(bot_id,CHAR(58),owner_id))),0) FROM bot_data))')"
 [[ "$restored_data_state" == "$snapshot_data_state" ]] || { printf 'error: rollback restore changed representative ownership or currency state\n' >&2; exit 1; }
 failure_step=old_build_recovery
-"${compose[@]}" run --rm --no-deps -T \
-  -e "MIGRATION_TARGET_DB=$target_db" -e "MIGRATION_TARGET_USER=$target_user" \
-  -e "MIGRATION_TARGET_PASSWORD=$target_password" -e "OLD_WORLD=$old_world_path" -e "OLD_WORLD_SHA=$old_world_sha" \
-  --entrypoint bash eqemu-server -lc '
-set -euo pipefail
-[[ -x "$OLD_WORLD" ]] || { printf "error: matching old world binary is unavailable: %s\n" "$OLD_WORLD" >&2; exit 125; }
-[[ "$(sha256sum "$OLD_WORLD" | awk "{print \$1}")" == "$OLD_WORLD_SHA" ]] || { printf "error: old world binary checksum mismatch\n" >&2; exit 1; }
-runtime=/tmp/migration-old-build-runtime
-~/code/scripts/lib/prepare-zone-cli-runtime.sh "$runtime"
-jq --arg db "$MIGRATION_TARGET_DB" --arg user "$MIGRATION_TARGET_USER" --arg password "$MIGRATION_TARGET_PASSWORD" \
-  "def isolated: .host = \"mariadb\" | .port = \"3306\" | .db = \$db | .username = \$user | .password = \$password;
-   .server.database |= isolated |
-   .server.qsdatabase |= isolated |
-   .server.content_database |= isolated |
-   .server.auto_database_updates = false |
-   .server.world |= with_entries(select(.key | test(\"^loginserver([0-9]+)?$\") | not))" \
-  "$runtime/eqemu_config.json" >"$runtime/config.tmp"
-mv "$runtime/config.tmp" "$runtime/eqemu_config.json"
-unset MIGRATION_TARGET_PASSWORD
-jq -e ".server.auto_database_updates == false and
-  ([.server.world | to_entries[] | select(.key | test(\"^loginserver([0-9]+)?$\"))] | length == 0)" \
-  "$runtime/eqemu_config.json" >/dev/null || {
-  printf "error: old-build runtime did not suppress database updates and login-server registration\n" >&2
-  exit 1
-}
-cd "$runtime"
-startup_log="$(mktemp)"
-startup_status=0
-# A normal world process remains running. Reaching its listener proves startup
-# progressed through database-backed loading; timeout bounds and terminates it.
-timeout --signal=TERM --kill-after=5s 20s "$OLD_WORLD" >"$startup_log" 2>&1 || startup_status=$?
-cat "$startup_log"
-if [[ "$startup_status" -ne 124 ]]; then
-  printf "error: old world exited before the bounded startup window (status %s)\n" "$startup_status" >&2
-  exit 1
-fi
-if ! grep -Fq "Server (TCP) listener started" "$startup_log"; then
-  printf "error: old world did not reach its listener after database-backed startup\n" >&2
-  exit 1
-fi
-rm -f "$startup_log"' >>"$log" 2>&1
+run_runtime recovery >>"$log" 2>&1
 
 failure_step=post_startup_restored_assertions
 query_file_expect_ok "$restored_assert_sql"

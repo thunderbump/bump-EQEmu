@@ -1,23 +1,22 @@
 # Database migration rehearsal and maintenance rollback
 
-`./scripts/validate.sh --stack validation migration-rehearsal` is the repository-owned migration profile. It uses the existing EQEmu `world database:updates` updater and the default validation AkkStack MariaDB process, but creates a uniquely named `afk_migration_*` database and a unique MariaDB account whose grants are confined to that database. Snapshot import, fixtures, assertions, Candidate scenarios, and old-build recovery use that restricted account. Candidate and old-build runtime configuration routes `database`, `qsdatabase`, and `content_database` to the isolated database on the validation MariaDB service. The wrapper accepts the default `../bump-akk-stack-validation` path or a relocated stack carrying an operator-installed `.afk-validation-stack` marker; it does not trust a relocatable role label or `AKKSTACK_DIR` alone. It also rejects an isolated name that does not have the reserved prefix. SQL screening is defense in depth rather than the database security boundary.
+`./scripts/validate.sh --stack validation migration-rehearsal` creates a fresh MariaDB container, volume and internal Docker network for each run. Candidate and archived-world processes join only that network, have no published ports, and use generated configuration with no login-server entries or automatic startup updates. No existing database credentials, database volumes or server configuration are loaded. The validation stack supplies only read-only shared-memory files, maps and quests; the Candidate build and archived old build are also read-only inputs. Runtime files live in container tmpfs. The run owns and cleans up its database container, runtime container, volume and network, retaining private logs and result evidence outside them. There is no shared-database compatibility mode.
 
-The dump and archived old binaries are operational artifacts and must remain outside Git. Prepare a captured baseline in place, inspect the generated SQL and read-only Compose mount, and then explicitly enable it:
+The dump and archived old binaries are operational artifacts and must remain outside Git. Prepare a captured baseline in place, inspect the generated SQL, and then explicitly enable it:
 
 ```sh
 ./scripts/prepare-migration-rehearsal-fixture.sh --baseline-dir /path/to/captured-baseline
 # If capture metadata omitted MariaDB's version, add the version verified on the
 # source and validation servers: --mariadb-version X.Y.Z
-# Review the generated manifest, SQL, extracted binary hash, and Compose override.
+# Review the generated manifest, SQL and extracted binary hash.
 # For a worker-managed/relocated validation stack, mark that inspected stack once:
-printf '%s\n' afk-validation-stack-v1 > /path/to/bump-akk-stack-validation/.afk-validation-stack
 mkdir -p "${VALIDATION_WORKER_HOME:-.validation-worker}"
 install -m 600 /path/to/captured-baseline/migration-rehearsal.manifest-path \
   "${VALIDATION_WORKER_HOME:-.validation-worker}/migration-rehearsal-manifest"
 ./scripts/validate-afk
 ```
 
-Preparation requires `manifest.json`, one `database.sql` snapshot (optionally `.gz` or `.zst`), and `installed-binaries.tar.gz`. It compares each artifact with its exact declared checksum field, safely extracts exactly one executable named `world`, and writes the rehearsal manifest, fixture SQL, Compose override, and environment selection beneath the baseline. It neither starts Docker nor configures the gate. After review, installing the generated one-line selection file makes the ordinary no-argument AFK command load that absolute manifest path; an explicit `MIGRATION_REHEARSAL_MANIFEST` environment value takes precedence. If capture metadata uses an unrecognized shape, `--help` lists explicit metadata overrides; if the archive contains multiple `world` binaries, select one with `--world-member`. Keep all generated files with the access-controlled baseline and out of Git.
+Preparation requires `manifest.json`, one `database.sql` snapshot (optionally `.gz` or `.zst`), and `installed-binaries.tar.gz`. It compares each artifact with its exact declared checksum field, safely extracts exactly one executable named `world`, and writes the rehearsal manifest, fixture SQL and environment selection beneath the baseline. It neither starts Docker nor configures the gate. After review, installing the generated one-line selection file makes the ordinary no-argument AFK command load that absolute manifest path; an explicit `MIGRATION_REHEARSAL_MANIFEST` environment value takes precedence. If capture metadata uses an unrecognized shape, `--help` lists explicit metadata overrides; if the archive contains multiple `world` binaries, select one with `--world-member`. Keep all generated files with the access-controlled baseline and out of Git.
 
 For a focused run after inspection without installing the persistent worker selection, source the generated `migration-rehearsal.env` file and run `./scripts/validate.sh --stack validation migration-rehearsal`. The portable worker inherits `MIGRATION_REHEARSAL_MANIFEST` and writes `migration-rehearsal/result.json` under exact-Candidate evidence. Snapshot identity and checksum, source build, source server/bot/custom database versions, MariaDB version, Candidate commit, outcome, failure phase, isolated database name, and measured restore milliseconds are recorded. Logs must not contain credentials. Missing fixture infrastructure exits nonzero; it is not a skipped pass.
 
@@ -41,8 +40,7 @@ The manifest has this shape:
   "old_build": {
     "world_binary_container_path": "/opt/eqemu-old/9334/world",
     "world_binary_sha256": "<64 lowercase hex characters>",
-    "host_directory": "migration-rehearsal-fixture/old-build",
-    "compose_file": "migration-rehearsal-fixture/docker-compose.migration-rehearsal.yml"
+    "host_directory": "migration-rehearsal-fixture/old-build"
   },
   "fixtures": {
     "seed_sql": "seed-old-format.sql",
@@ -56,7 +54,7 @@ The manifest has this shape:
 }
 ```
 
-Snapshot, SQL fixture, old-build host directory, and optional Compose override paths are relative to and confined beneath the manifest directory. The override is accepted only when it exactly defines the generated read-only old-build mount; arbitrary fixture-provided Compose settings are rejected. `old_build.world_binary_container_path` is different: it must be an absolute path inside the one-off `eqemu-server` container. The preparation command generates a read-only mount for that path.
+Snapshot, SQL fixture and old-build host directory paths are relative to and confined beneath the manifest directory. `old_build.world_binary_container_path` must be beneath `/opt/eqemu-old/`, the fixed read-only archive mount. Fixture-provided Compose overrides are no longer used. The database image is `mariadb:<captured-version>` and the runtime image is `eqemulator/eqemu-server:v16-dev`; images are cached/pulled on the host before isolated execution. Database readiness is bounded at 90 seconds and old-world startup at 30 seconds. The outer fixture timeout still bounds the entire run. TERM/INT triggers cleanup; an uncatchable host/process failure can leave UUID-named, labelled resources for operator cleanup.
 
 `source.build` is capture metadata, not an attestation that the installed binary was produced from that checkout. `source.build_identity_attested` remains false for this capture. The separately checked world-binary hash and successful database-backed startup establish exactly which archived binary recovered, without fabricating source-to-binary provenance.
 

@@ -20,8 +20,7 @@ when the capture uses another shape:
   --custom-version NUMBER
   --world-member ARCHIVE_PATH
 
-The command writes migration-rehearsal-manifest.json, fixture SQL, a Compose
-mount override, and explicit selection files beneath DIR. It never configures
+The command writes migration-rehearsal-manifest.json, fixture SQL and explicit selection files beneath DIR. It never configures
 or runs validation by itself.
 EOF
 }
@@ -299,8 +298,6 @@ SQL
 sed -i "s/@SOURCE_DATABASE_VERSIONS@/$server_version:$bots_version:$custom_version/" \
   "$fixture_dir/assert-restored.sql"
 
-compose_override="$fixture_dir/docker-compose.migration-rehearsal.yml"
-printf 'services:\n  eqemu-server:\n    volumes:\n      - %s\n' "$(jq -Rn --arg mount "$extract_dir:/opt/eqemu-old:ro" '$mount')" >"$compose_override"
 manifest_path="$baseline_dir/migration-rehearsal-manifest.json"
 jq -n \
   --arg snapshot_id "$snapshot_id" --arg snapshot_file "$(basename "$snapshot")" --arg snapshot_sha "$snapshot_sha" \
@@ -308,7 +305,7 @@ jq -n \
   --argjson server_version "$server_version" --argjson bots_version "$bots_version" --argjson custom_version "$custom_version" \
   --arg world_path "/opt/eqemu-old/$old_world_relative" --arg world_sha "$old_world_sha" \
   --arg capture_manifest_sha "$capture_manifest_sha" \
-  '{snapshot:{id:$snapshot_id,file:$snapshot_file,sha256:$snapshot_sha},source:{build:$source_build,build_identity_attested:false,mariadb_version:$mariadb_version,database_versions:{server:$server_version,bots:$bots_version,custom:$custom_version},capture_manifest_sha256:$capture_manifest_sha},old_build:{world_binary_container_path:$world_path,world_binary_sha256:$world_sha,host_directory:"migration-rehearsal-fixture/old-build",compose_file:"migration-rehearsal-fixture/docker-compose.migration-rehearsal.yml"},fixtures:{seed_sql:"migration-rehearsal-fixture/seed-old-format.sql",upgraded_assert_sql:"migration-rehearsal-fixture/assert-upgraded.sql",restored_assert_sql:"migration-rehearsal-fixture/assert-restored.sql"},candidate_scenarios:["~/code/build/bin/zone tests:actor-events"]}' >"$manifest_path"
+  '{snapshot:{id:$snapshot_id,file:$snapshot_file,sha256:$snapshot_sha},source:{build:$source_build,build_identity_attested:false,mariadb_version:$mariadb_version,database_versions:{server:$server_version,bots:$bots_version,custom:$custom_version},capture_manifest_sha256:$capture_manifest_sha},old_build:{world_binary_container_path:$world_path,world_binary_sha256:$world_sha,host_directory:"migration-rehearsal-fixture/old-build"},fixtures:{seed_sql:"migration-rehearsal-fixture/seed-old-format.sql",upgraded_assert_sql:"migration-rehearsal-fixture/assert-upgraded.sql",restored_assert_sql:"migration-rehearsal-fixture/assert-restored.sql"},candidate_scenarios:["/home/eqemu/code/build/bin/zone tests:actor-events"]}' >"$manifest_path"
 
 env_path="$baseline_dir/migration-rehearsal.env"
 selection_path="$baseline_dir/migration-rehearsal.manifest-path"
