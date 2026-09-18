@@ -18,14 +18,42 @@ case "$1" in
     /home/eqemu/code/build/bin/world database:updates --skip-backup --force
     ;;
   scenarios)
-    while IFS= read -r command; do bash -lc "$command"; done < <(jq -r '.[]' <<<"$MIGRATION_SCENARIOS_JSON")
+    # JSON strings may contain newlines; NUL framing preserves each array
+    # element as one shell command.
+    while IFS= read -r -d '' command; do
+      bash -lc "$command"
+    done < <(jq -j '.[] + "\u0000"' <<<"$MIGRATION_SCENARIOS_JSON")
     ;;
   recovery)
     [[ "$(sha256sum "$OLD_WORLD" | cut -d ' ' -f1)" == "$OLD_WORLD_SHA" ]]
-    startup_status=0
-    timeout --signal=TERM --kill-after=5s 30s "$OLD_WORLD" > startup.log 2>&1 || startup_status=$?
+    "$OLD_WORLD" > startup.log 2>&1 &
+    world_pid=$!
+    # Checking the process after the full window distinguishes a genuinely
+    # surviving world from one that happens to exit with timeout's status 124.
+    sleep 30
+    if ! kill -0 "$world_pid" 2>/dev/null; then
+      wait "$world_pid" || true
+      cat startup.log
+      printf 'error: archived world exited before the recovery window elapsed\n' >&2
+      exit 1
+    fi
+    stop_world() {
+      kill -TERM "$world_pid" 2>/dev/null || true
+      for _ in 1 2 3 4 5; do
+        kill -0 "$world_pid" 2>/dev/null || break
+        sleep 1
+      done
+      if kill -0 "$world_pid" 2>/dev/null; then kill -KILL "$world_pid" 2>/dev/null || true; fi
+      wait "$world_pid" || true
+    }
+    if ! grep -Fq 'Server (TCP) listener started' startup.log; then
+      stop_world
+      cat startup.log
+      printf 'error: archived world did not reach its TCP listener\n' >&2
+      exit 1
+    fi
+    stop_world
     cat startup.log
-    [[ "$startup_status" == 124 ]] && grep -Fq 'Server (TCP) listener started' startup.log
     ;;
   *) exit 2 ;;
 esac

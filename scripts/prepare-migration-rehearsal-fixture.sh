@@ -266,32 +266,36 @@ SELECT IF(
         'idx_actor_events_actor_cursor', 'idx_actor_events_zone_created',
         'idx_actor_action_queue_actor_idempotency', 'idx_actor_action_queue_claim_path',
         'idx_actor_action_queue_actor_state')) = 9
-  AND (SELECT COUNT(*)
+  AND (SELECT COUNT(DISTINCT CASE
+        WHEN tc.table_name = 'actor_status'
+          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%status_jsonisnull%'
+          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%json_valid(status_json)%'
+          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%char_length(status_json)<=4096%'
+          THEN 'actor_status.status_json'
+        WHEN tc.table_name = 'actor_events'
+          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%json_valid(event_json)%'
+          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%char_length(event_json)<=16384%'
+          THEN 'actor_events.event_json'
+        WHEN tc.table_name = 'actor_action_queue'
+          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%source_metadata_jsonisnull%'
+          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%json_valid(source_metadata_json)%'
+          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%char_length(source_metadata_json)<=4096%'
+          THEN 'actor_action_queue.source_metadata_json'
+        WHEN tc.table_name = 'actor_action_queue'
+          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%json_valid(action_json)%'
+          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%char_length(action_json)<=16384%'
+          THEN 'actor_action_queue.action_json'
+        WHEN tc.table_name = 'actor_action_queue'
+          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%result_jsonisnull%'
+          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%json_valid(result_json)%'
+          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%char_length(result_json)<=16384%'
+          THEN 'actor_action_queue.result_json'
+      END)
     FROM information_schema.table_constraints tc
     JOIN information_schema.check_constraints cc
       ON cc.constraint_schema = tc.constraint_schema
       AND cc.constraint_name = tc.constraint_name
-    WHERE tc.table_schema = DATABASE() AND tc.constraint_type = 'CHECK'
-      AND (
-        (tc.table_name = 'actor_status'
-          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%status_jsonisnull%'
-          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%json_valid(status_json)%'
-          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%char_length(status_json)<=4096%')
-        OR (tc.table_name = 'actor_events'
-          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%json_valid(event_json)%'
-          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%char_length(event_json)<=16384%')
-        OR (tc.table_name = 'actor_action_queue'
-          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%source_metadata_jsonisnull%'
-          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%json_valid(source_metadata_json)%'
-          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%char_length(source_metadata_json)<=4096%')
-        OR (tc.table_name = 'actor_action_queue'
-          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%json_valid(action_json)%'
-          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%char_length(action_json)<=16384%')
-        OR (tc.table_name = 'actor_action_queue'
-          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%result_jsonisnull%'
-          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%json_valid(result_json)%'
-          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%char_length(result_json)<=16384%')
-      )) = 5
+    WHERE tc.table_schema = DATABASE() AND tc.constraint_type = 'CHECK') = 5
   AND (SELECT COUNT(*) FROM `character_data`
        WHERE `id` NOT IN (SELECT `fixture_character_1_id` FROM `afk_migration_fixture_baseline`
                           UNION SELECT `fixture_character_2_id` FROM `afk_migration_fixture_baseline`)) =
@@ -330,7 +334,7 @@ SELECT IF(
       c.`copper_bank` + 10 * c.`silver_bank` + 100 * c.`gold_bank` + 1000 * c.`platinum_bank`)
     FROM `character_currency` c JOIN `afk_migration_fixture_baseline` f
       ON c.`id` IN (f.`fixture_character_1_id`, f.`fixture_character_2_id`)) = 20000,
-  'ok', 'failed');
+  'ok', 'failed:upgraded_schema_or_conservation');
 SQL
 
 cat >"$fixture_dir/assert-restored.sql" <<'SQL'
@@ -344,7 +348,7 @@ SELECT IF(
     WHERE `name` IN ('AfkMigSender', 'AfkMigReceiver')) = 0
   AND (SELECT COUNT(*) FROM `bot_data`
     WHERE `name` IN ('AfkMigSenderBot', 'AfkMigReceiverBot')) = 0,
-  'ok', 'failed');
+  'ok', 'failed:restored_version_schema_or_fixture_rows');
 SQL
 sed -i "s/@SOURCE_DATABASE_VERSIONS@/$server_version:$bots_version:$custom_version/" \
   "$fixture_dir/assert-restored.sql"

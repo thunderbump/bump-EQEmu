@@ -900,6 +900,8 @@ test_prepare_migration_fixture_builds_reviewable_inputs_without_running_docker()
   assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "currency_copper_total"
   assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "information_schema.check_constraints"
   assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "char_length(event_json)<=16384"
+  assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "COUNT(DISTINCT CASE"
+  assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "failed:upgraded_schema_or_conservation"
   assert_not_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "chk_actor_events_event_json_bounded"
   assert_contains "$(cat "$baseline/migration-rehearsal-fixture/seed-old-format.sql")" 'INSERT INTO `character_data`'
   assert_contains "$(cat "$baseline/migration-rehearsal-fixture/seed-old-format.sql")" "reserved migration fixture identity collides"

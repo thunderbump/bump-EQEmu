@@ -81,6 +81,19 @@ actual_snapshot_sha="$(sha256sum "$snapshot" | awk '{print $1}')"
 [[ "$actual_snapshot_sha" == "$snapshot_sha" ]] || { printf 'error: snapshot checksum mismatch for %s\n' "$snapshot_id" >&2; exit 1; }
 
 candidate_commit="$(git -C "$repo_root" rev-parse HEAD)"
+candidate_worktree_clean=false
+if git -C "$repo_root" diff --quiet --ignore-submodules -- &&
+   git -C "$repo_root" diff --cached --quiet --ignore-submodules --; then
+  candidate_worktree_clean=true
+fi
+candidate_world_sha=unavailable
+candidate_zone_sha=unavailable
+if [[ -f "$repo_root/build/bin/world" ]]; then
+  candidate_world_sha="$(sha256sum "$repo_root/build/bin/world" | awk '{print $1}')"
+fi
+if [[ -f "$repo_root/build/bin/zone" ]]; then
+  candidate_zone_sha="$(sha256sum "$repo_root/build/bin/zone" | awk '{print $1}')"
+fi
 run_token="eqemu-rehearsal-$(cat /proc/sys/kernel/random/uuid)"
 target_db=peq
 target_password="$(cat /proc/sys/kernel/random/uuid)"
@@ -164,6 +177,8 @@ write_result() {
   jq -n --arg status "$status" --arg failure_step "$failure_step" --arg candidate_commit "$candidate_commit" \
     --arg run_id "$run_token" --arg database_image "$db_image" --arg runtime_image "$runtime_image" \
     --arg database_image_id "$db_image_id" --arg runtime_image_id "$runtime_image_id" \
+    --arg candidate_world_sha "$candidate_world_sha" --arg candidate_zone_sha "$candidate_zone_sha" \
+    --argjson candidate_worktree_clean "$candidate_worktree_clean" \
     --arg snapshot_id "$snapshot_id" --arg snapshot_sha256 "$snapshot_sha" --arg source_build "$source_build" --arg old_world_sha "$old_world_sha" \
     --arg fixture_preparer_commit "$fixture_preparer_commit" --arg source_mariadb_version "$source_mariadb" --argjson source_server_version "$source_server_version" \
     --argjson source_bots_version "$source_bots_version" --argjson source_custom_version "$source_custom_version" \
@@ -171,7 +186,7 @@ write_result() {
     --arg target_database "$target_db" --arg candidate_versions "$candidate_versions" --arg seed_sha "$seed_sha" \
     --arg upgraded_assert_sha "$upgraded_assert_sha" --arg restored_assert_sha "$restored_assert_sha" \
     --argjson scenarios "$scenarios_json" --arg completed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson restore_ms "$restore_ms" \
-    '{schema_version:1,run_id:$run_id,images:{database:$database_image,runtime:$runtime_image,database_id:$database_image_id,runtime_id:$runtime_image_id},status:$status,failure_step:(if $failure_step=="" then null else $failure_step end),candidate_commit:$candidate_commit,snapshot:{id:$snapshot_id,sha256:$snapshot_sha256},source:{build:$source_build,build_identity_attested:$build_identity_attested,fixture_preparer_commit:$fixture_preparer_commit,world_binary_sha256:$old_world_sha,mariadb_version:$source_mariadb_version,database_versions:{server:$source_server_version,bots:$source_bots_version,custom:$source_custom_version}},resulting_database_versions:(if $candidate_versions=="" then null else ($candidate_versions|split(":")|map(tonumber)|{server:.[0],bots:.[1],custom:.[2]}) end),fixtures:{seed_sha256:$seed_sha,upgraded_assert_sha256:$upgraded_assert_sha,restored_assert_sha256:$restored_assert_sha},candidate_scenarios:$scenarios,target:{class:"isolated-disposable",database:$target_database},restore_elapsed_ms:$restore_ms,completed_at:$completed_at}' >"$result"
+    '{schema_version:1,run_id:$run_id,images:{database:$database_image,runtime:$runtime_image,database_id:$database_image_id,runtime_id:$runtime_image_id},status:$status,failure_step:(if $failure_step=="" then null else $failure_step end),candidate_commit:$candidate_commit,candidate:{source_commit:$candidate_commit,worktree_clean:$candidate_worktree_clean,artifact_identity_attested:false,world_sha256:$candidate_world_sha,zone_sha256:$candidate_zone_sha},snapshot:{id:$snapshot_id,sha256:$snapshot_sha256},source:{build:$source_build,build_identity_attested:$build_identity_attested,fixture_preparer_commit:$fixture_preparer_commit,world_binary_sha256:$old_world_sha,mariadb_version:$source_mariadb_version,database_versions:{server:$source_server_version,bots:$source_bots_version,custom:$source_custom_version}},resulting_database_versions:(if $candidate_versions=="" then null else ($candidate_versions|split(":")|map(tonumber)|{server:.[0],bots:.[1],custom:.[2]}) end),fixtures:{seed_sha256:$seed_sha,upgraded_assert_sha256:$upgraded_assert_sha,restored_assert_sha256:$restored_assert_sha},candidate_scenarios:$scenarios,target:{class:"isolated-disposable",database:$target_database},restore_elapsed_ms:$restore_ms,completed_at:$completed_at}' >"$result"
 }
 cleanup() {
   local main_status=$? cleanup_status=0 result_status=0
@@ -256,7 +271,13 @@ import_snapshot() {
 query_file_expect_ok() {
   local path="$1" output
   output="$(target_mysql <"$path")"
-  [[ "$output" == ok ]] || { printf 'error: assertion %s must return exactly one scalar value: ok\n' "$(basename "$path")" >&2; return 1; }
+  if [[ "$output" != ok ]]; then
+    # Assertion files contain only bounded, repository-authored labels. Include
+    # their scalar result so failures are actionable without exposing row data.
+    printf 'error: assertion %s failed (%s); expected exactly one scalar value: ok\n' \
+      "$(basename "$path")" "${output:-no output}" >&2
+    return 1
+  fi
 }
 run_candidate() { run_runtime "$1" >>"$log" 2>&1; }
 
@@ -280,7 +301,11 @@ candidate_versions="$(target_query 'SELECT CONCAT(version,CHAR(58),bots_version,
 failure_step=idempotent_update
 run_candidate update
 second_state="$(schema_fingerprint)"
-[[ "$first_state" == "$second_state" ]] || { printf 'error: second updater run changed database version or schema\n' >&2; exit 1; }
+second_candidate_versions="$(target_query 'SELECT CONCAT(version,CHAR(58),bots_version,CHAR(58),custom_version) FROM db_version LIMIT 1')"
+[[ "$first_state" == "$second_state" && "$candidate_versions" == "$second_candidate_versions" ]] || {
+  printf 'error: second updater run changed database version or schema\n' >&2
+  exit 1
+}
 failure_step=idempotent_data_assertions
 query_file_expect_ok "$upgraded_assert_sql"
 

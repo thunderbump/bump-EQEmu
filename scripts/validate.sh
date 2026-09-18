@@ -106,7 +106,21 @@ run_tier2_readonly() {
 run_migration_rehearsal() {
   local args=(--stack "$AKKSTACK_STACK_ROLE")
   [[ "$AKKSTACK_DRY_RUN" -eq 0 ]] || args+=(--dry-run)
-  "$repo_root/scripts/rehearse-database-migration.sh" "${args[@]}"
+  if [[ "$AKKSTACK_DRY_RUN" -eq 1 ]]; then
+    "$repo_root/scripts/rehearse-database-migration.sh" "${args[@]}"
+    return
+  fi
+
+  local deadline="${MIGRATION_REHEARSAL_TIMEOUT_SECONDS:-5400}"
+  [[ "$deadline" =~ ^[1-9][0-9]*$ ]] || {
+    printf 'error: MIGRATION_REHEARSAL_TIMEOUT_SECONDS must be a positive integer\n' >&2
+    return 2
+  }
+  command -v timeout >/dev/null || { printf 'error: timeout is required\n' >&2; return 125; }
+  # This deadline covers image setup, import, updates, scenarios and recovery.
+  # TERM lets the rehearsal's EXIT trap remove its owned Docker resources.
+  timeout --signal=TERM --kill-after=30s "${deadline}s" \
+    "$repo_root/scripts/rehearse-database-migration.sh" "${args[@]}"
 }
 
 run_actor_queue_tier3() {

@@ -74,6 +74,14 @@ sys.exit(98)
             evidence = json.loads((root/'evidence/result.json').read_text())
             self.assertEqual(evidence['status'], 'failed')
             self.assertFalse(evidence['source']['build_identity_attested'])
+            self.assertFalse(evidence['candidate']['artifact_identity_attested'])
+
+    def test_runtime_preserves_multiline_scenarios_and_checks_process_survival(self):
+        runtime = (ROOT / 'scripts/lib/migration-runtime.sh').read_text()
+        self.assertIn("read -r -d '' command", runtime)
+        self.assertIn('.[] + "\\u0000"', runtime)
+        self.assertIn('kill -0 "$world_pid"', runtime)
+        self.assertNotIn('startup_status" == 124', runtime)
 
 
 if __name__ == '__main__':
