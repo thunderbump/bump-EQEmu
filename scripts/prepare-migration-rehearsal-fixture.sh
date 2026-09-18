@@ -241,100 +241,118 @@ UPDATE `afk_migration_fixture_baseline` SET
 SQL
 
 cat >"$fixture_dir/assert-upgraded.sql" <<'SQL'
-SELECT IF(
-  (SELECT `actor_table_count` FROM `afk_migration_fixture_baseline`) = 0
-  AND (SELECT COUNT(*) FROM information_schema.columns
-    WHERE table_schema = DATABASE() AND
-      (table_name, column_name, column_type, is_nullable) IN (
-        ('actor_profiles', 'actor_id', 'int(10) unsigned', 'NO'),
-        ('actor_profiles', 'bot_id', 'int(10) unsigned', 'YES'),
-        ('actor_status', 'status_json', 'longtext', 'YES'),
-        ('actor_events', 'event_id', 'bigint(20) unsigned', 'NO'),
-        ('actor_events', 'event_json', 'longtext', 'NO'),
-        ('actor_action_queue', 'action_id', 'bigint(20) unsigned', 'NO'),
-        ('actor_action_queue', 'idempotency_key', 'varchar(128)', 'NO'),
-        ('actor_action_queue', 'result_json', 'longtext', 'YES'))) = 8
-  AND (SELECT CONCAT_WS(':',
-      SUM(table_name = 'actor_profiles'), SUM(table_name = 'actor_status'),
-      SUM(table_name = 'actor_events'), SUM(table_name = 'actor_action_queue'))
-    FROM information_schema.columns WHERE table_schema = DATABASE()
-      AND table_name IN ('actor_profiles', 'actor_status', 'actor_events', 'actor_action_queue')) = '8:8:10:17'
-  AND (SELECT COUNT(DISTINCT CONCAT(table_name, ':', index_name))
-    FROM information_schema.statistics WHERE table_schema = DATABASE()
-      AND index_name IN ('idx_actor_profiles_bot_id', 'idx_actor_profiles_owner_character_id',
-        'idx_actor_status_zone_binding', 'idx_actor_status_state_heartbeat',
-        'idx_actor_events_actor_cursor', 'idx_actor_events_zone_created',
-        'idx_actor_action_queue_actor_idempotency', 'idx_actor_action_queue_claim_path',
-        'idx_actor_action_queue_actor_state')) = 9
-  AND (SELECT COUNT(DISTINCT CASE
-        WHEN tc.table_name = 'actor_status'
-          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%status_jsonisnull%'
-          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%json_valid(status_json)%'
-          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%char_length(status_json)<=4096%'
-          THEN 'actor_status.status_json'
-        WHEN tc.table_name = 'actor_events'
-          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%json_valid(event_json)%'
-          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%char_length(event_json)<=16384%'
-          THEN 'actor_events.event_json'
-        WHEN tc.table_name = 'actor_action_queue'
-          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%source_metadata_jsonisnull%'
-          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%json_valid(source_metadata_json)%'
-          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%char_length(source_metadata_json)<=4096%'
-          THEN 'actor_action_queue.source_metadata_json'
-        WHEN tc.table_name = 'actor_action_queue'
-          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%json_valid(action_json)%'
-          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%char_length(action_json)<=16384%'
-          THEN 'actor_action_queue.action_json'
-        WHEN tc.table_name = 'actor_action_queue'
-          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%result_jsonisnull%'
-          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%json_valid(result_json)%'
-          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%char_length(result_json)<=16384%'
-          THEN 'actor_action_queue.result_json'
-      END)
-    FROM information_schema.table_constraints tc
-    JOIN information_schema.check_constraints cc
-      ON cc.constraint_schema = tc.constraint_schema
-      AND cc.constraint_name = tc.constraint_name
-    WHERE tc.table_schema = DATABASE() AND tc.constraint_type = 'CHECK') = 5
-  AND (SELECT COUNT(*) FROM `character_data`
-       WHERE `id` NOT IN (SELECT `fixture_character_1_id` FROM `afk_migration_fixture_baseline`
-                          UNION SELECT `fixture_character_2_id` FROM `afk_migration_fixture_baseline`)) =
-      (SELECT `character_count` FROM `afk_migration_fixture_baseline`)
-  AND (SELECT COALESCE(BIT_XOR(CRC32(CONCAT(`id`, ':', `account_id`))), 0)
-       FROM `character_data`
-       WHERE `id` NOT IN (SELECT `fixture_character_1_id` FROM `afk_migration_fixture_baseline`
-                          UNION SELECT `fixture_character_2_id` FROM `afk_migration_fixture_baseline`)) =
-      (SELECT `character_owner_checksum` FROM `afk_migration_fixture_baseline`)
-  AND (SELECT COALESCE(SUM(`copper` + 10 * `silver` + 100 * `gold` + 1000 * `platinum` +
-      `copper_bank` + 10 * `silver_bank` + 100 * `gold_bank` + 1000 * `platinum_bank` +
-      `copper_cursor` + 10 * `silver_cursor` + 100 * `gold_cursor` + 1000 * `platinum_cursor`), 0)
-    FROM `character_currency`
+-- Keep each predicate separately named so a failed private rehearsal reports
+-- only bounded assertion labels, never captured row values.
+SET @afk_actor_tables_absent_before =
+  (SELECT `actor_table_count` FROM `afk_migration_fixture_baseline`) = 0;
+SET @afk_critical_columns = (SELECT COUNT(*) FROM information_schema.columns
+  WHERE table_schema = DATABASE() AND
+    (table_name, column_name, column_type, is_nullable) IN (
+      ('actor_profiles', 'actor_id', 'int(10) unsigned', 'NO'),
+      ('actor_profiles', 'bot_id', 'int(10) unsigned', 'YES'),
+      ('actor_status', 'status_json', 'longtext', 'YES'),
+      ('actor_events', 'event_id', 'bigint(20) unsigned', 'NO'),
+      ('actor_events', 'event_json', 'longtext', 'NO'),
+      ('actor_action_queue', 'action_id', 'bigint(20) unsigned', 'NO'),
+      ('actor_action_queue', 'idempotency_key', 'varchar(128)', 'NO'),
+      ('actor_action_queue', 'result_json', 'longtext', 'YES'))) = 8;
+SET @afk_column_counts = (SELECT CONCAT_WS(':',
+    SUM(table_name = 'actor_profiles'), SUM(table_name = 'actor_status'),
+    SUM(table_name = 'actor_events'), SUM(table_name = 'actor_action_queue'))
+  FROM information_schema.columns WHERE table_schema = DATABASE()
+    AND table_name IN ('actor_profiles', 'actor_status', 'actor_events', 'actor_action_queue')) = '8:8:10:17';
+SET @afk_indexes = (SELECT COUNT(DISTINCT CONCAT(table_name, ':', index_name))
+  FROM information_schema.statistics WHERE table_schema = DATABASE()
+    AND index_name IN ('idx_actor_profiles_bot_id', 'idx_actor_profiles_owner_character_id',
+      'idx_actor_status_zone_binding', 'idx_actor_status_state_heartbeat',
+      'idx_actor_events_actor_cursor', 'idx_actor_events_zone_created',
+      'idx_actor_action_queue_actor_idempotency', 'idx_actor_action_queue_claim_path',
+      'idx_actor_action_queue_actor_state')) = 9;
+SET @afk_json_constraints = (SELECT COUNT(DISTINCT CASE
+      WHEN tc.table_name = 'actor_status'
+        AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(9), ''), CHAR(10), ''), CHAR(13), '') LIKE '%status_jsonisnull%'
+        AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(9), ''), CHAR(10), ''), CHAR(13), '') LIKE '%json_valid(status_json)%'
+        AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(9), ''), CHAR(10), ''), CHAR(13), '') LIKE '%char_length(status_json)<=4096%'
+        THEN 'actor_status.status_json'
+      WHEN tc.table_name = 'actor_events'
+        AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(9), ''), CHAR(10), ''), CHAR(13), '') LIKE '%json_valid(event_json)%'
+        AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(9), ''), CHAR(10), ''), CHAR(13), '') LIKE '%char_length(event_json)<=16384%'
+        THEN 'actor_events.event_json'
+      WHEN tc.table_name = 'actor_action_queue'
+        AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(9), ''), CHAR(10), ''), CHAR(13), '') LIKE '%source_metadata_jsonisnull%'
+        AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(9), ''), CHAR(10), ''), CHAR(13), '') LIKE '%json_valid(source_metadata_json)%'
+        AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(9), ''), CHAR(10), ''), CHAR(13), '') LIKE '%char_length(source_metadata_json)<=4096%'
+        THEN 'actor_action_queue.source_metadata_json'
+      WHEN tc.table_name = 'actor_action_queue'
+        AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(9), ''), CHAR(10), ''), CHAR(13), '') LIKE '%json_valid(action_json)%'
+        AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(9), ''), CHAR(10), ''), CHAR(13), '') LIKE '%char_length(action_json)<=16384%'
+        THEN 'actor_action_queue.action_json'
+      WHEN tc.table_name = 'actor_action_queue'
+        AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(9), ''), CHAR(10), ''), CHAR(13), '') LIKE '%result_jsonisnull%'
+        AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(9), ''), CHAR(10), ''), CHAR(13), '') LIKE '%json_valid(result_json)%'
+        AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(9), ''), CHAR(10), ''), CHAR(13), '') LIKE '%char_length(result_json)<=16384%'
+        THEN 'actor_action_queue.result_json'
+    END)
+  FROM information_schema.table_constraints tc
+  JOIN information_schema.check_constraints cc
+    ON cc.constraint_schema = tc.constraint_schema AND cc.constraint_name = tc.constraint_name
+  WHERE tc.table_schema = DATABASE() AND tc.constraint_type = 'CHECK') = 5;
+SET @afk_character_count = (SELECT COUNT(*) FROM `character_data`
     WHERE `id` NOT IN (SELECT `fixture_character_1_id` FROM `afk_migration_fixture_baseline`
                        UNION SELECT `fixture_character_2_id` FROM `afk_migration_fixture_baseline`)) =
-      (SELECT `currency_copper_total` FROM `afk_migration_fixture_baseline`)
-  AND (SELECT COUNT(*) FROM `bot_data`
-       WHERE `bot_id` NOT IN (SELECT `fixture_bot_1_id` FROM `afk_migration_fixture_baseline`
-                              UNION SELECT `fixture_bot_2_id` FROM `afk_migration_fixture_baseline`)) =
-      (SELECT `bot_count` FROM `afk_migration_fixture_baseline`)
-  AND (SELECT COALESCE(SUM(`owner_id`), 0) FROM `bot_data`
-       WHERE `bot_id` NOT IN (SELECT `fixture_bot_1_id` FROM `afk_migration_fixture_baseline`
-                              UNION SELECT `fixture_bot_2_id` FROM `afk_migration_fixture_baseline`)) =
-      (SELECT `bot_owner_id_total` FROM `afk_migration_fixture_baseline`)
-  AND (SELECT COALESCE(BIT_XOR(CRC32(CONCAT(`bot_id`, ':', `owner_id`))), 0) FROM `bot_data`
-       WHERE `bot_id` NOT IN (SELECT `fixture_bot_1_id` FROM `afk_migration_fixture_baseline`
-                              UNION SELECT `fixture_bot_2_id` FROM `afk_migration_fixture_baseline`)) =
-      (SELECT `bot_owner_checksum` FROM `afk_migration_fixture_baseline`)
-  AND (SELECT COUNT(*) FROM `character_data` c JOIN `afk_migration_fixture_baseline` f
-       ON (c.`id` = f.`fixture_character_1_id` AND c.`name` = 'AfkMigSender')
-       OR (c.`id` = f.`fixture_character_2_id` AND c.`name` = 'AfkMigReceiver')) = 2
-  AND (SELECT COUNT(*) FROM `bot_data` b JOIN `afk_migration_fixture_baseline` f
-       ON (b.`bot_id` = f.`fixture_bot_1_id` AND b.`owner_id` = f.`fixture_character_1_id`)
-       OR (b.`bot_id` = f.`fixture_bot_2_id` AND b.`owner_id` = f.`fixture_character_2_id`)) = 2
-  AND (SELECT SUM(c.`copper` + 10 * c.`silver` + 100 * c.`gold` + 1000 * c.`platinum` +
-      c.`copper_bank` + 10 * c.`silver_bank` + 100 * c.`gold_bank` + 1000 * c.`platinum_bank`)
-    FROM `character_currency` c JOIN `afk_migration_fixture_baseline` f
-      ON c.`id` IN (f.`fixture_character_1_id`, f.`fixture_character_2_id`)) = 20000,
-  'ok', 'failed:upgraded_schema_or_conservation');
+  (SELECT `character_count` FROM `afk_migration_fixture_baseline`);
+SET @afk_character_owners = (SELECT COALESCE(BIT_XOR(CRC32(CONCAT(`id`, ':', `account_id`))), 0)
+    FROM `character_data`
+    WHERE `id` NOT IN (SELECT `fixture_character_1_id` FROM `afk_migration_fixture_baseline`
+                       UNION SELECT `fixture_character_2_id` FROM `afk_migration_fixture_baseline`)) =
+  (SELECT `character_owner_checksum` FROM `afk_migration_fixture_baseline`);
+SET @afk_currency = (SELECT COALESCE(SUM(`copper` + 10 * `silver` + 100 * `gold` + 1000 * `platinum` +
+    `copper_bank` + 10 * `silver_bank` + 100 * `gold_bank` + 1000 * `platinum_bank` +
+    `copper_cursor` + 10 * `silver_cursor` + 100 * `gold_cursor` + 1000 * `platinum_cursor`), 0)
+  FROM `character_currency`
+  WHERE `id` NOT IN (SELECT `fixture_character_1_id` FROM `afk_migration_fixture_baseline`
+                     UNION SELECT `fixture_character_2_id` FROM `afk_migration_fixture_baseline`)) =
+  (SELECT `currency_copper_total` FROM `afk_migration_fixture_baseline`);
+SET @afk_bot_count = (SELECT COUNT(*) FROM `bot_data`
+    WHERE `bot_id` NOT IN (SELECT `fixture_bot_1_id` FROM `afk_migration_fixture_baseline`
+                           UNION SELECT `fixture_bot_2_id` FROM `afk_migration_fixture_baseline`)) =
+  (SELECT `bot_count` FROM `afk_migration_fixture_baseline`);
+SET @afk_bot_owner_total = (SELECT COALESCE(SUM(`owner_id`), 0) FROM `bot_data`
+    WHERE `bot_id` NOT IN (SELECT `fixture_bot_1_id` FROM `afk_migration_fixture_baseline`
+                           UNION SELECT `fixture_bot_2_id` FROM `afk_migration_fixture_baseline`)) =
+  (SELECT `bot_owner_id_total` FROM `afk_migration_fixture_baseline`);
+SET @afk_bot_owners = (SELECT COALESCE(BIT_XOR(CRC32(CONCAT(`bot_id`, ':', `owner_id`))), 0) FROM `bot_data`
+    WHERE `bot_id` NOT IN (SELECT `fixture_bot_1_id` FROM `afk_migration_fixture_baseline`
+                           UNION SELECT `fixture_bot_2_id` FROM `afk_migration_fixture_baseline`)) =
+  (SELECT `bot_owner_checksum` FROM `afk_migration_fixture_baseline`);
+SET @afk_fixture_characters = (SELECT COUNT(*) FROM `character_data` c JOIN `afk_migration_fixture_baseline` f
+    ON (c.`id` = f.`fixture_character_1_id` AND c.`name` = 'AfkMigSender')
+    OR (c.`id` = f.`fixture_character_2_id` AND c.`name` = 'AfkMigReceiver')) = 2;
+SET @afk_fixture_bots = (SELECT COUNT(*) FROM `bot_data` b JOIN `afk_migration_fixture_baseline` f
+    ON (b.`bot_id` = f.`fixture_bot_1_id` AND b.`owner_id` = f.`fixture_character_1_id`)
+    OR (b.`bot_id` = f.`fixture_bot_2_id` AND b.`owner_id` = f.`fixture_character_2_id`)) = 2;
+SET @afk_fixture_currency = (SELECT SUM(c.`copper` + 10 * c.`silver` + 100 * c.`gold` + 1000 * c.`platinum` +
+    c.`copper_bank` + 10 * c.`silver_bank` + 100 * c.`gold_bank` + 1000 * c.`platinum_bank` +
+    c.`copper_cursor` + 10 * c.`silver_cursor` + 100 * c.`gold_cursor` + 1000 * c.`platinum_cursor`)
+  FROM `character_currency` c JOIN `afk_migration_fixture_baseline` f
+    ON c.`id` IN (f.`fixture_character_1_id`, f.`fixture_character_2_id`)) = 20000;
+
+SET @afk_failures = CONCAT_WS(',',
+  IF(@afk_actor_tables_absent_before, NULL, 'preexisting_actor_tables'),
+  IF(@afk_critical_columns, NULL, 'critical_columns'),
+  IF(@afk_column_counts, NULL, 'column_counts'),
+  IF(@afk_indexes, NULL, 'indexes'),
+  IF(@afk_json_constraints, NULL, 'json_constraints'),
+  IF(@afk_character_count, NULL, 'character_count'),
+  IF(@afk_character_owners, NULL, 'character_owners'),
+  IF(@afk_currency, NULL, 'currency'),
+  IF(@afk_bot_count, NULL, 'bot_count'),
+  IF(@afk_bot_owner_total, NULL, 'bot_owner_total'),
+  IF(@afk_bot_owners, NULL, 'bot_owners'),
+  IF(@afk_fixture_characters, NULL, 'fixture_characters'),
+  IF(@afk_fixture_bots, NULL, 'fixture_bots'),
+  IF(@afk_fixture_currency, NULL, 'fixture_currency'));
+SELECT IF(@afk_failures = '', 'ok', CONCAT('failed:', @afk_failures));
 SQL
 
 cat >"$fixture_dir/assert-restored.sql" <<'SQL'

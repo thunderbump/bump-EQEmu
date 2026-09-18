@@ -56,7 +56,7 @@ resolve_member() {
 snapshot_id="$(required_string '.snapshot.id' snapshot.id)"
 snapshot_sha="$(required_string '.snapshot.sha256' snapshot.sha256)"
 source_build="$(required_string '.source.build' source.build)"
-fixture_preparer_commit="$(jq -er '.source.fixture_preparer_commit // "unrecorded" | select(type == "string" and (. == "unrecorded" or test("^[0-9a-f]{40}$")))' "$manifest" 2>/dev/null)" || { printf 'error: source.fixture_preparer_commit must be a Git commit when present\n' >&2; exit 2; }
+fixture_preparer_commit="$(jq -er '.source.fixture_preparer_commit | select(type == "string" and test("^[0-9a-f]{40}$"))' "$manifest" 2>/dev/null)" || { printf 'error: source.fixture_preparer_commit must be the exact 40-character Candidate commit\n' >&2; exit 2; }
 source_mariadb="$(required_string '.source.mariadb_version' source.mariadb_version)"
 source_server_version="$(jq -er '.source.database_versions.server | numbers' "$manifest")" || { printf 'error: manifest requires numeric source.database_versions.server\n' >&2; exit 2; }
 source_bots_version="$(jq -er '.source.database_versions.bots | numbers' "$manifest")" || { printf 'error: manifest requires numeric source.database_versions.bots\n' >&2; exit 2; }
@@ -72,6 +72,9 @@ restored_assert_sha="$(sha256sum "$restored_assert_sql" | awk '{print $1}')"
 old_world_path="$(required_string '.old_build.world_binary_container_path' old_build.world_binary_container_path)"
 old_world_sha="$(required_string '.old_build.world_binary_sha256' old_build.world_binary_sha256)"
 [[ "$old_world_path" == /* ]] || { printf 'error: old_build.world_binary_container_path must be an absolute container path\n' >&2; exit 2; }
+case "/$old_world_path/" in
+  */./*|*/../*) printf 'error: old world path may not contain . or .. components\n' >&2; exit 2 ;;
+esac
 old_build_host_dir="$(resolve_member "$(required_string '.old_build.host_directory' old_build.host_directory)")"
 [[ -d "$old_build_host_dir" && "$old_world_path" == /opt/eqemu-old/* ]] || { printf 'error: old build must be mounted beneath /opt/eqemu-old\n' >&2; exit 2; }
 build_identity_attested="$(jq -r '.source.build_identity_attested // false | if type == "boolean" then tostring else error("not a boolean") end' "$manifest" 2>/dev/null)" || { printf 'error: source.build_identity_attested must be boolean\n' >&2; exit 2; }
@@ -81,6 +84,11 @@ actual_snapshot_sha="$(sha256sum "$snapshot" | awk '{print $1}')"
 [[ "$actual_snapshot_sha" == "$snapshot_sha" ]] || { printf 'error: snapshot checksum mismatch for %s\n' "$snapshot_id" >&2; exit 1; }
 
 candidate_commit="$(git -C "$repo_root" rev-parse HEAD)"
+[[ "$fixture_preparer_commit" == "$candidate_commit" ]] || {
+  printf 'error: fixture preparer commit %s does not match Candidate %s; regenerate the fixture\n' \
+    "$fixture_preparer_commit" "$candidate_commit" >&2
+  exit 125
+}
 candidate_worktree_clean=false
 if git -C "$repo_root" diff --quiet --ignore-submodules -- &&
    git -C "$repo_root" diff --cached --quiet --ignore-submodules --; then
@@ -255,7 +263,13 @@ for attempt in {1..90}; do
 done
 [[ "$ready" == 1 ]] || { printf 'error: disposable database did not become ready\n' >&2; exit 1; }
 actual_mariadb="$(target_query 'SELECT VERSION()')"
-[[ "$actual_mariadb" == "$source_mariadb"-* ]] || { printf 'error: disposable MariaDB version differs from capture\n' >&2; exit 1; }
+# A major/minor image tag intentionally floats within that release line; a
+# manifest with a patch (or fuller) version requires that exact version token.
+if [[ "$source_mariadb" =~ ^[0-9]+[.][0-9]+$ ]]; then
+  [[ "$actual_mariadb" == "$source_mariadb".* ]] || { printf 'error: disposable MariaDB version differs from capture\n' >&2; exit 1; }
+else
+  [[ "$actual_mariadb" == "$source_mariadb"-* ]] || { printf 'error: disposable MariaDB version differs from capture\n' >&2; exit 1; }
+fi
 
 snapshot_stream() {
   case "$snapshot" in

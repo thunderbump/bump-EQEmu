@@ -18,9 +18,12 @@ class DisposableRehearsal(unittest.TestCase):
             for name in ('snapshot.sql', 'seed.sql', 'assert.sql', 'world'):
                 (root / name).write_text('fixture')
             digest = hashlib.sha256(b'fixture').hexdigest()
-            (root / 'manifest.json').write_text(json.dumps({
+            candidate_commit = subprocess.check_output(
+                ['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip()
+            manifest = {
                 'snapshot': {'id': 'test', 'file': 'snapshot.sql', 'sha256': digest},
                 'source': {'build': 'unattested', 'build_identity_attested': False,
+                           'fixture_preparer_commit': candidate_commit,
                            'mariadb_version': '10.5.4',
                            'database_versions': {'server': 9328, 'bots': 9055, 'custom': 0}},
                 'old_build': {'host_directory': 'old', 'world_binary_container_path': '/opt/eqemu-old/world',
@@ -28,7 +31,8 @@ class DisposableRehearsal(unittest.TestCase):
                 'fixtures': {'seed_sql': 'seed.sql', 'upgraded_assert_sql': 'assert.sql',
                              'restored_assert_sql': 'assert.sql'},
                 'candidate_scenarios': ['true'],
-            }))
+            }
+            (root / 'manifest.json').write_text(json.dumps(manifest))
             (root / 'old').mkdir()
             stack = root / 'validation-stack'
             for asset in ('server/shared', 'server/quests/plugins', 'server/quests/lua_modules'):
@@ -57,8 +61,27 @@ sys.exit(98)
                        AKKSTACK_DIR=str(stack), FAKE_DOCKER_ROOT=str(root),
                        MIGRATION_REHEARSAL_MANIFEST=str(root/'manifest.json'),
                        MIGRATION_REHEARSAL_EVIDENCE_DIR=str(root/'evidence'))
-            result = subprocess.run([str(ROOT/'scripts/rehearse-database-migration.sh')], env=env,
-                                    capture_output=True, text=True)
+            command = [str(ROOT/'scripts/rehearse-database-migration.sh')]
+
+            manifest['old_build']['world_binary_container_path'] = \
+                '/opt/eqemu-old/../home/eqemu/code/build/bin/world'
+            (root / 'manifest.json').write_text(json.dumps(manifest))
+            rejected = subprocess.run(command, env=env, capture_output=True, text=True)
+            self.assertEqual(rejected.returncode, 2)
+            self.assertIn('may not contain . or .. components', rejected.stderr)
+            self.assertFalse((root / 'calls').exists())
+
+            manifest['old_build']['world_binary_container_path'] = '/opt/eqemu-old/world'
+            manifest['source']['fixture_preparer_commit'] = '0' * 40
+            (root / 'manifest.json').write_text(json.dumps(manifest))
+            rejected = subprocess.run(command, env=env, capture_output=True, text=True)
+            self.assertEqual(rejected.returncode, 125)
+            self.assertIn('does not match Candidate', rejected.stderr)
+            self.assertFalse((root / 'calls').exists())
+
+            manifest['source']['fixture_preparer_commit'] = candidate_commit
+            (root / 'manifest.json').write_text(json.dumps(manifest))
+            result = subprocess.run(command, env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 23, result.stderr)
             calls = [json.loads(line) for line in (root/'calls').read_text().splitlines()]
             network = next(c for c in calls if c[:2] == ['network','create'])
@@ -82,6 +105,11 @@ sys.exit(98)
         self.assertIn('.[] + "\\u0000"', runtime)
         self.assertIn('kill -0 "$world_pid"', runtime)
         self.assertNotIn('startup_status" == 124', runtime)
+
+    def test_major_minor_mariadb_versions_allow_only_a_bounded_patch_suffix(self):
+        script = (ROOT / 'scripts/rehearse-database-migration.sh').read_text()
+        self.assertIn('^[0-9]+[.][0-9]+$', script)
+        self.assertIn('"$source_mariadb".*', script)
 
 
 if __name__ == '__main__':
