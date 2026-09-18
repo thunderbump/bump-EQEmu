@@ -56,6 +56,7 @@ resolve_member() {
 snapshot_id="$(required_string '.snapshot.id' snapshot.id)"
 snapshot_sha="$(required_string '.snapshot.sha256' snapshot.sha256)"
 source_build="$(required_string '.source.build' source.build)"
+fixture_preparer_commit="$(jq -er '.source.fixture_preparer_commit // "unrecorded" | select(type == "string" and (. == "unrecorded" or test("^[0-9a-f]{40}$")))' "$manifest" 2>/dev/null)" || { printf 'error: source.fixture_preparer_commit must be a Git commit when present\n' >&2; exit 2; }
 source_mariadb="$(required_string '.source.mariadb_version' source.mariadb_version)"
 source_server_version="$(jq -er '.source.database_versions.server | numbers' "$manifest")" || { printf 'error: manifest requires numeric source.database_versions.server\n' >&2; exit 2; }
 source_bots_version="$(jq -er '.source.database_versions.bots | numbers' "$manifest")" || { printf 'error: manifest requires numeric source.database_versions.bots\n' >&2; exit 2; }
@@ -139,7 +140,14 @@ select_runtime_dir() {
 }
 run_runtime() {
   local mode="$1"
-  docker run --rm --name "$runtime_container" --label "$owner_label" \
+  local -a deadline=()
+  if [[ "$mode" == scenarios ]]; then
+    # Bound both the scenario process and the Docker client. The EXIT trap uses
+    # the ownership label to force-remove the container if timeout's TERM/KILL
+    # cannot complete Docker's five-second stop sequence.
+    deadline=(timeout --signal=TERM --kill-after=10s "${MIGRATION_REHEARSAL_SCENARIO_TIMEOUT_SECONDS:-300}s")
+  fi
+  "${deadline[@]}" docker run --rm --name "$runtime_container" --label "$owner_label" \
     --network "$network" --read-only --user 0:0 --init --ulimit core=0 --stop-timeout 5 \
     --tmpfs /tmp:rw,nosuid,size=256m --tmpfs /runtime:rw,nosuid,size=1g \
     --mount "type=bind,src=$repo_root,dst=/home/eqemu/code,readonly" \
@@ -157,13 +165,13 @@ write_result() {
     --arg run_id "$run_token" --arg database_image "$db_image" --arg runtime_image "$runtime_image" \
     --arg database_image_id "$db_image_id" --arg runtime_image_id "$runtime_image_id" \
     --arg snapshot_id "$snapshot_id" --arg snapshot_sha256 "$snapshot_sha" --arg source_build "$source_build" --arg old_world_sha "$old_world_sha" \
-    --arg source_mariadb_version "$source_mariadb" --argjson source_server_version "$source_server_version" \
+    --arg fixture_preparer_commit "$fixture_preparer_commit" --arg source_mariadb_version "$source_mariadb" --argjson source_server_version "$source_server_version" \
     --argjson source_bots_version "$source_bots_version" --argjson source_custom_version "$source_custom_version" \
     --argjson build_identity_attested "$build_identity_attested" \
     --arg target_database "$target_db" --arg candidate_versions "$candidate_versions" --arg seed_sha "$seed_sha" \
     --arg upgraded_assert_sha "$upgraded_assert_sha" --arg restored_assert_sha "$restored_assert_sha" \
     --argjson scenarios "$scenarios_json" --arg completed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson restore_ms "$restore_ms" \
-    '{schema_version:1,run_id:$run_id,images:{database:$database_image,runtime:$runtime_image,database_id:$database_image_id,runtime_id:$runtime_image_id},status:$status,failure_step:(if $failure_step=="" then null else $failure_step end),candidate_commit:$candidate_commit,snapshot:{id:$snapshot_id,sha256:$snapshot_sha256},source:{build:$source_build,build_identity_attested:$build_identity_attested,world_binary_sha256:$old_world_sha,mariadb_version:$source_mariadb_version,database_versions:{server:$source_server_version,bots:$source_bots_version,custom:$source_custom_version}},resulting_database_versions:(if $candidate_versions=="" then null else ($candidate_versions|split(":")|map(tonumber)|{server:.[0],bots:.[1],custom:.[2]}) end),fixtures:{seed_sha256:$seed_sha,upgraded_assert_sha256:$upgraded_assert_sha,restored_assert_sha256:$restored_assert_sha},candidate_scenarios:$scenarios,target:{class:"isolated-disposable",database:$target_database},restore_elapsed_ms:$restore_ms,completed_at:$completed_at}' >"$result"
+    '{schema_version:1,run_id:$run_id,images:{database:$database_image,runtime:$runtime_image,database_id:$database_image_id,runtime_id:$runtime_image_id},status:$status,failure_step:(if $failure_step=="" then null else $failure_step end),candidate_commit:$candidate_commit,snapshot:{id:$snapshot_id,sha256:$snapshot_sha256},source:{build:$source_build,build_identity_attested:$build_identity_attested,fixture_preparer_commit:$fixture_preparer_commit,world_binary_sha256:$old_world_sha,mariadb_version:$source_mariadb_version,database_versions:{server:$source_server_version,bots:$source_bots_version,custom:$source_custom_version}},resulting_database_versions:(if $candidate_versions=="" then null else ($candidate_versions|split(":")|map(tonumber)|{server:.[0],bots:.[1],custom:.[2]}) end),fixtures:{seed_sha256:$seed_sha,upgraded_assert_sha256:$upgraded_assert_sha,restored_assert_sha256:$restored_assert_sha},candidate_scenarios:$scenarios,target:{class:"isolated-disposable",database:$target_database},restore_elapsed_ms:$restore_ms,completed_at:$completed_at}' >"$result"
 }
 cleanup() {
   local main_status=$? cleanup_status=0 result_status=0
@@ -201,6 +209,8 @@ trap 'exit 130' INT
 # actor command do not boot a zone, so map and full quest trees are not inputs.
 failure_step=prerequisites
 command -v docker >/dev/null || { printf 'error: docker is required\n' >&2; exit 125; }
+command -v timeout >/dev/null || { printf 'error: timeout is required\n' >&2; exit 125; }
+[[ "${MIGRATION_REHEARSAL_SCENARIO_TIMEOUT_SECONDS:-300}" =~ ^[1-9][0-9]*$ ]] || { printf 'error: MIGRATION_REHEARSAL_SCENARIO_TIMEOUT_SECONDS must be a positive integer\n' >&2; exit 2; }
 case "$snapshot" in
   *.gz) command -v gzip >/dev/null || { printf 'error: gzip is required for the selected snapshot\n' >&2; exit 125; } ;;
   *.zst) command -v zstd >/dev/null || { printf 'error: zstd is required for the selected snapshot\n' >&2; exit 125; } ;;
@@ -259,6 +269,8 @@ snapshot_data_state="$(representative_data_state)"
 failure_step=seed_old_format
 target_mysql <"$seed_sql" >>"$log" 2>&1
 failure_step=candidate_update
+run_candidate update
+failure_step=candidate_scenarios
 run_candidate scenarios
 failure_step=upgraded_assertions
 query_file_expect_ok "$upgraded_assert_sql"
@@ -266,7 +278,7 @@ first_state="$(schema_fingerprint)"
 candidate_versions="$(target_query 'SELECT CONCAT(version,CHAR(58),bots_version,CHAR(58),custom_version) FROM db_version LIMIT 1')"
 [[ "$candidate_versions" =~ ^[0-9]+:[0-9]+:[0-9]+$ ]] || { printf 'error: invalid Candidate versions\n' >&2; exit 1; }
 failure_step=idempotent_update
-run_candidate no-scenarios
+run_candidate update
 second_state="$(schema_fingerprint)"
 [[ "$first_state" == "$second_state" ]] || { printf 'error: second updater run changed database version or schema\n' >&2; exit 1; }
 failure_step=idempotent_data_assertions

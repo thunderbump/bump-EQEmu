@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+
 usage() {
   cat <<'EOF'
 Usage: scripts/prepare-migration-rehearsal-fixture.sh --baseline-dir DIR [metadata options]
@@ -64,6 +67,9 @@ for candidate in database.sql.gz database.sql.zst database.sql; do
   fi
 done
 [[ -n "$snapshot" ]] || { printf 'error: captured baseline is missing database.sql[.gz|.zst]\n' >&2; exit 2; }
+if [[ "$snapshot" == *.zst ]]; then
+  command -v zstd >/dev/null || { printf 'error: zstd is required for database.sql.zst snapshots\n' >&2; exit 125; }
+fi
 binary_archive="$baseline_dir/installed-binaries.tar.gz"
 [[ -f "$binary_archive" ]] || { printf 'error: captured baseline is missing installed-binaries.tar.gz\n' >&2; exit 2; }
 
@@ -106,6 +112,10 @@ if [[ -z "$server_version" || -z "$bots_version" || -z "$custom_version" ]]; the
 fi
 [[ -n "$source_build" && -n "$mariadb_version" && -n "$server_version" && -n "$bots_version" && -n "$custom_version" ]] || {
   printf 'error: capture metadata is incomplete; provide the documented metadata options\n' >&2
+  exit 2
+}
+[[ "$mariadb_version" =~ ^[0-9]+([.][0-9]+)+$ ]] || {
+  printf 'error: MariaDB version must be a dotted numeric version\n' >&2
   exit 2
 }
 [[ "$server_version" =~ ^[0-9]+$ && "$bots_version" =~ ^[0-9]+$ && "$custom_version" =~ ^[0-9]+$ ]] || {
@@ -154,6 +164,8 @@ old_world="$(realpath "$old_world")"
 old_world_relative="${old_world#"$extract_dir/"}"
 old_world_sha="$(sha256sum "$old_world" | awk '{print $1}')"
 capture_manifest_sha="$(sha256sum "$capture_manifest" | awk '{print $1}')"
+preparer_commit="$(git -C "$repo_root" rev-parse HEAD)"
+[[ "$preparer_commit" =~ ^[0-9a-f]{40}$ ]] || { printf 'error: could not identify fixture preparer commit\n' >&2; exit 2; }
 
 cat >"$fixture_dir/seed-old-format.sql" <<'SQL'
 DROP TABLE IF EXISTS `afk_migration_fixture_baseline`;
@@ -164,7 +176,11 @@ CREATE TABLE `afk_migration_fixture_baseline` (
   `bot_count` BIGINT UNSIGNED NOT NULL,
   `bot_owner_id_total` DECIMAL(65,0) NOT NULL,
   `bot_owner_checksum` BIGINT UNSIGNED NOT NULL,
-  `actor_table_count` BIGINT UNSIGNED NOT NULL
+  `actor_table_count` BIGINT UNSIGNED NOT NULL,
+  `fixture_character_1_id` INT UNSIGNED NULL,
+  `fixture_character_2_id` INT UNSIGNED NULL,
+  `fixture_bot_1_id` INT UNSIGNED NULL,
+  `fixture_bot_2_id` INT UNSIGNED NULL
 ) ENGINE=InnoDB;
 INSERT INTO `afk_migration_fixture_baseline`
 SELECT
@@ -179,21 +195,21 @@ SELECT
   (SELECT COALESCE(BIT_XOR(CRC32(CONCAT(`bot_id`, ':', `owner_id`))), 0) FROM `bot_data`),
   (SELECT COUNT(*) FROM information_schema.tables
     WHERE table_schema = DATABASE() AND table_name IN
-      ('actor_profiles', 'actor_status', 'actor_events', 'actor_action_queue'));
+      ('actor_profiles', 'actor_status', 'actor_events', 'actor_action_queue')),
+  NULL, NULL, NULL, NULL;
 
--- Seed representative records in production ownership/currency tables. Abort
--- instead of overwriting if any reserved identity is already present.
+-- Seed representative records in production ownership/currency tables. Let
+-- each production table allocate ordinary IDs: forcing IDs near UINT32_MAX
+-- advances AUTO_INCREMENT and can make unrelated runtime scenario inserts fail.
+-- The allocated IDs are recorded so assertions can distinguish fixture rows.
+-- Abort instead of overwriting if any reserved name is already present.
 DELIMITER //
 CREATE PROCEDURE `afk_assert_fixture_identities_available`()
 BEGIN
   IF EXISTS (SELECT 1 FROM `character_data`
-      WHERE `id` IN (4294967001, 4294967002)
-         OR `name` IN ('AfkMigSender', 'AfkMigReceiver'))
-    OR EXISTS (SELECT 1 FROM `character_currency`
-      WHERE `id` IN (4294967001, 4294967002))
+      WHERE `name` IN ('AfkMigSender', 'AfkMigReceiver'))
     OR EXISTS (SELECT 1 FROM `bot_data`
-      WHERE `bot_id` IN (4294967001, 4294967002)
-         OR `name` IN ('AfkMigSenderBot', 'AfkMigReceiverBot')) THEN
+      WHERE `name` IN ('AfkMigSenderBot', 'AfkMigReceiverBot')) THEN
     SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'reserved migration fixture identity collides with snapshot data';
   END IF;
 END//
@@ -202,20 +218,26 @@ CALL `afk_assert_fixture_identities_available`();
 DROP PROCEDURE `afk_assert_fixture_identities_available`;
 
 INSERT INTO `character_data`
-  (`id`, `account_id`, `name`, `last_name`, `level`, `class`, `race`)
+  (`account_id`, `name`, `last_name`, `level`, `class`, `race`)
 VALUES
-  (4294967001, 0, 'AfkMigSender', 'MigrationFixture', 1, 1, 1),
-  (4294967002, 0, 'AfkMigReceiver', 'MigrationFixture', 1, 1, 1);
+  (0, 'AfkMigSender', 'MigrationFixture', 1, 1, 1),
+  (0, 'AfkMigReceiver', 'MigrationFixture', 1, 1, 1);
+UPDATE `afk_migration_fixture_baseline` SET
+  `fixture_character_1_id` = (SELECT `id` FROM `character_data` WHERE `name` = 'AfkMigSender'),
+  `fixture_character_2_id` = (SELECT `id` FROM `character_data` WHERE `name` = 'AfkMigReceiver');
 INSERT INTO `character_currency`
   (`id`, `platinum`, `gold`, `silver`, `copper`,
    `platinum_bank`, `gold_bank`, `silver_bank`, `copper_bank`)
-VALUES
-  (4294967001, 7, 0, 0, 0, 3, 0, 0, 0),
-  (4294967002, 2, 0, 0, 0, 8, 0, 0, 0);
-INSERT INTO `bot_data` (`bot_id`, `owner_id`, `name`, `level`, `class`, `race`)
-VALUES
-  (4294967001, 4294967001, 'AfkMigSenderBot', 1, 1, 1),
-  (4294967002, 4294967002, 'AfkMigReceiverBot', 1, 1, 1);
+SELECT `fixture_character_1_id`, 7, 0, 0, 0, 3, 0, 0, 0 FROM `afk_migration_fixture_baseline`
+UNION ALL
+SELECT `fixture_character_2_id`, 2, 0, 0, 0, 8, 0, 0, 0 FROM `afk_migration_fixture_baseline`;
+INSERT INTO `bot_data` (`owner_id`, `name`, `level`, `class`, `race`)
+SELECT `fixture_character_1_id`, 'AfkMigSenderBot', 1, 1, 1 FROM `afk_migration_fixture_baseline`
+UNION ALL
+SELECT `fixture_character_2_id`, 'AfkMigReceiverBot', 1, 1, 1 FROM `afk_migration_fixture_baseline`;
+UPDATE `afk_migration_fixture_baseline` SET
+  `fixture_bot_1_id` = (SELECT `bot_id` FROM `bot_data` WHERE `name` = 'AfkMigSenderBot'),
+  `fixture_bot_2_id` = (SELECT `bot_id` FROM `bot_data` WHERE `name` = 'AfkMigReceiverBot');
 SQL
 
 cat >"$fixture_dir/assert-upgraded.sql" <<'SQL'
@@ -271,32 +293,43 @@ SELECT IF(
           AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%char_length(result_json)<=16384%')
       )) = 5
   AND (SELECT COUNT(*) FROM `character_data`
-       WHERE `id` NOT IN (4294967001, 4294967002)) =
+       WHERE `id` NOT IN (SELECT `fixture_character_1_id` FROM `afk_migration_fixture_baseline`
+                          UNION SELECT `fixture_character_2_id` FROM `afk_migration_fixture_baseline`)) =
       (SELECT `character_count` FROM `afk_migration_fixture_baseline`)
   AND (SELECT COALESCE(BIT_XOR(CRC32(CONCAT(`id`, ':', `account_id`))), 0)
-       FROM `character_data` WHERE `id` NOT IN (4294967001, 4294967002)) =
+       FROM `character_data`
+       WHERE `id` NOT IN (SELECT `fixture_character_1_id` FROM `afk_migration_fixture_baseline`
+                          UNION SELECT `fixture_character_2_id` FROM `afk_migration_fixture_baseline`)) =
       (SELECT `character_owner_checksum` FROM `afk_migration_fixture_baseline`)
   AND (SELECT COALESCE(SUM(`copper` + 10 * `silver` + 100 * `gold` + 1000 * `platinum` +
       `copper_bank` + 10 * `silver_bank` + 100 * `gold_bank` + 1000 * `platinum_bank` +
       `copper_cursor` + 10 * `silver_cursor` + 100 * `gold_cursor` + 1000 * `platinum_cursor`), 0)
-    FROM `character_currency` WHERE `id` NOT IN (4294967001, 4294967002)) =
+    FROM `character_currency`
+    WHERE `id` NOT IN (SELECT `fixture_character_1_id` FROM `afk_migration_fixture_baseline`
+                       UNION SELECT `fixture_character_2_id` FROM `afk_migration_fixture_baseline`)) =
       (SELECT `currency_copper_total` FROM `afk_migration_fixture_baseline`)
   AND (SELECT COUNT(*) FROM `bot_data`
-       WHERE `bot_id` NOT IN (4294967001, 4294967002)) =
+       WHERE `bot_id` NOT IN (SELECT `fixture_bot_1_id` FROM `afk_migration_fixture_baseline`
+                              UNION SELECT `fixture_bot_2_id` FROM `afk_migration_fixture_baseline`)) =
       (SELECT `bot_count` FROM `afk_migration_fixture_baseline`)
   AND (SELECT COALESCE(SUM(`owner_id`), 0) FROM `bot_data`
-       WHERE `bot_id` NOT IN (4294967001, 4294967002)) =
+       WHERE `bot_id` NOT IN (SELECT `fixture_bot_1_id` FROM `afk_migration_fixture_baseline`
+                              UNION SELECT `fixture_bot_2_id` FROM `afk_migration_fixture_baseline`)) =
       (SELECT `bot_owner_id_total` FROM `afk_migration_fixture_baseline`)
   AND (SELECT COALESCE(BIT_XOR(CRC32(CONCAT(`bot_id`, ':', `owner_id`))), 0) FROM `bot_data`
-       WHERE `bot_id` NOT IN (4294967001, 4294967002)) =
+       WHERE `bot_id` NOT IN (SELECT `fixture_bot_1_id` FROM `afk_migration_fixture_baseline`
+                              UNION SELECT `fixture_bot_2_id` FROM `afk_migration_fixture_baseline`)) =
       (SELECT `bot_owner_checksum` FROM `afk_migration_fixture_baseline`)
-  AND (SELECT COUNT(*) FROM `character_data`
-       WHERE (`id`, `name`) IN ((4294967001, 'AfkMigSender'), (4294967002, 'AfkMigReceiver'))) = 2
-  AND (SELECT COUNT(*) FROM `bot_data`
-       WHERE (`bot_id`, `owner_id`) IN ((4294967001, 4294967001), (4294967002, 4294967002))) = 2
-  AND (SELECT SUM(`copper` + 10 * `silver` + 100 * `gold` + 1000 * `platinum` +
-      `copper_bank` + 10 * `silver_bank` + 100 * `gold_bank` + 1000 * `platinum_bank`)
-    FROM `character_currency` WHERE `id` IN (4294967001, 4294967002)) = 20000,
+  AND (SELECT COUNT(*) FROM `character_data` c JOIN `afk_migration_fixture_baseline` f
+       ON (c.`id` = f.`fixture_character_1_id` AND c.`name` = 'AfkMigSender')
+       OR (c.`id` = f.`fixture_character_2_id` AND c.`name` = 'AfkMigReceiver')) = 2
+  AND (SELECT COUNT(*) FROM `bot_data` b JOIN `afk_migration_fixture_baseline` f
+       ON (b.`bot_id` = f.`fixture_bot_1_id` AND b.`owner_id` = f.`fixture_character_1_id`)
+       OR (b.`bot_id` = f.`fixture_bot_2_id` AND b.`owner_id` = f.`fixture_character_2_id`)) = 2
+  AND (SELECT SUM(c.`copper` + 10 * c.`silver` + 100 * c.`gold` + 1000 * c.`platinum` +
+      c.`copper_bank` + 10 * c.`silver_bank` + 100 * c.`gold_bank` + 1000 * c.`platinum_bank`)
+    FROM `character_currency` c JOIN `afk_migration_fixture_baseline` f
+      ON c.`id` IN (f.`fixture_character_1_id`, f.`fixture_character_2_id`)) = 20000,
   'ok', 'failed');
 SQL
 
@@ -308,10 +341,9 @@ SELECT IF(
     WHERE table_schema = DATABASE() AND table_name IN
       ('actor_profiles', 'actor_status', 'actor_events', 'actor_action_queue')) = 0
   AND (SELECT COUNT(*) FROM `character_data`
-    WHERE `id` IN (4294967001, 4294967002) OR `name` IN ('AfkMigSender', 'AfkMigReceiver')) = 0
-  AND (SELECT COUNT(*) FROM `character_currency` WHERE `id` IN (4294967001, 4294967002)) = 0
+    WHERE `name` IN ('AfkMigSender', 'AfkMigReceiver')) = 0
   AND (SELECT COUNT(*) FROM `bot_data`
-    WHERE `bot_id` IN (4294967001, 4294967002) OR `name` IN ('AfkMigSenderBot', 'AfkMigReceiverBot')) = 0,
+    WHERE `name` IN ('AfkMigSenderBot', 'AfkMigReceiverBot')) = 0,
   'ok', 'failed');
 SQL
 sed -i "s/@SOURCE_DATABASE_VERSIONS@/$server_version:$bots_version:$custom_version/" \
@@ -323,8 +355,8 @@ jq -n \
   --arg source_build "$source_build" --arg mariadb_version "$mariadb_version" \
   --argjson server_version "$server_version" --argjson bots_version "$bots_version" --argjson custom_version "$custom_version" \
   --arg world_path "/opt/eqemu-old/$old_world_relative" --arg world_sha "$old_world_sha" \
-  --arg capture_manifest_sha "$capture_manifest_sha" \
-  '{snapshot:{id:$snapshot_id,file:$snapshot_file,sha256:$snapshot_sha},source:{build:$source_build,build_identity_attested:false,mariadb_version:$mariadb_version,database_versions:{server:$server_version,bots:$bots_version,custom:$custom_version},capture_manifest_sha256:$capture_manifest_sha},old_build:{world_binary_container_path:$world_path,world_binary_sha256:$world_sha,host_directory:"migration-rehearsal-fixture/old-build"},fixtures:{seed_sql:"migration-rehearsal-fixture/seed-old-format.sql",upgraded_assert_sql:"migration-rehearsal-fixture/assert-upgraded.sql",restored_assert_sql:"migration-rehearsal-fixture/assert-restored.sql"},candidate_scenarios:["/home/eqemu/code/build/bin/zone tests:actor-events"]}' >"$manifest_path"
+  --arg capture_manifest_sha "$capture_manifest_sha" --arg preparer_commit "$preparer_commit" \
+  '{snapshot:{id:$snapshot_id,file:$snapshot_file,sha256:$snapshot_sha},source:{build:$source_build,build_identity_attested:false,mariadb_version:$mariadb_version,database_versions:{server:$server_version,bots:$bots_version,custom:$custom_version},capture_manifest_sha256:$capture_manifest_sha,fixture_preparer_commit:$preparer_commit},old_build:{world_binary_container_path:$world_path,world_binary_sha256:$world_sha,host_directory:"migration-rehearsal-fixture/old-build"},fixtures:{seed_sql:"migration-rehearsal-fixture/seed-old-format.sql",upgraded_assert_sql:"migration-rehearsal-fixture/assert-upgraded.sql",restored_assert_sql:"migration-rehearsal-fixture/assert-restored.sql"},candidate_scenarios:["/home/eqemu/code/build/bin/zone tests:actor-events"]}' >"$manifest_path"
 
 env_path="$baseline_dir/migration-rehearsal.env"
 selection_path="$baseline_dir/migration-rehearsal.manifest-path"

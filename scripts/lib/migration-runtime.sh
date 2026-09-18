@@ -14,11 +14,11 @@ jq -n --arg password "$REHEARSAL_PASSWORD" '
 ' > eqemu_config.json
 unset REHEARSAL_PASSWORD
 case "$1" in
-  scenarios|no-scenarios)
+  update)
     /home/eqemu/code/build/bin/world database:updates --skip-backup --force
-    if [[ "$1" == scenarios ]]; then
-      while IFS= read -r command; do bash -lc "$command"; done < <(jq -r '.[]' <<<"$MIGRATION_SCENARIOS_JSON")
-    fi
+    ;;
+  scenarios)
+    while IFS= read -r command; do bash -lc "$command"; done < <(jq -r '.[]' <<<"$MIGRATION_SCENARIOS_JSON")
     ;;
   recovery)
     [[ "$(sha256sum "$OLD_WORLD" | cut -d ' ' -f1)" == "$OLD_WORLD_SHA" ]]

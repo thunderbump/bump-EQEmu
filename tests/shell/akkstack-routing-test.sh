@@ -854,9 +854,12 @@ test_migration_rehearsal_dry_run_and_guards() {
   assert_contains "$rehearsal_source" 'server/quests/plugins'
   assert_contains "$rehearsal_source" 'server/plugins'
   assert_contains "$rehearsal_source" 'post_startup_data_state="$(representative_data_state)"'
+  assert_contains "$rehearsal_source" 'failure_step=candidate_scenarios'
+  assert_contains "$rehearsal_source" 'timeout --signal=TERM --kill-after=10s'
   assert_not_contains "$rehearsal_source" 'server/maps'
   runtime_source="$(cat "$fixture_repo/scripts/lib/migration-runtime.sh")"
   assert_contains "$runtime_source" 'mkdir -p logs shared maps quests'
+  assert_contains "$runtime_source" '  update)'
   assert_not_contains "$runtime_source" '/inputs/maps'
 
 }
@@ -888,6 +891,7 @@ test_prepare_migration_fixture_builds_reviewable_inputs_without_running_docker()
     .snapshot.file == "database.sql.gz" and
     .source.build == "unattested-source" and
     .source.build_identity_attested == false and
+    (.source.fixture_preparer_commit | test("^[0-9a-f]{40}$")) and
     .source.database_versions == {server:9328,bots:9055,custom:0} and
     .old_build.world_binary_container_path == "/opt/eqemu-old/bin/world" and
     .candidate_scenarios == ["/home/eqemu/code/build/bin/zone tests:actor-events"]
@@ -899,10 +903,17 @@ test_prepare_migration_fixture_builds_reviewable_inputs_without_running_docker()
   assert_not_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "chk_actor_events_event_json_bounded"
   assert_contains "$(cat "$baseline/migration-rehearsal-fixture/seed-old-format.sql")" 'INSERT INTO `character_data`'
   assert_contains "$(cat "$baseline/migration-rehearsal-fixture/seed-old-format.sql")" "reserved migration fixture identity collides"
+  assert_contains "$(cat "$baseline/migration-rehearsal-fixture/seed-old-format.sql")" 'fixture_character_1_id'
+  assert_not_contains "$(cat "$baseline/migration-rehearsal-fixture/seed-old-format.sql")" "4294967001"
   assert_not_contains "$(cat "$baseline/migration-rehearsal-fixture/seed-old-format.sql")" "afk_migration_fixture_old_format"
   assert_contains "$(cat "$baseline/migration-rehearsal.env")" "MIGRATION_REHEARSAL_MANIFEST="
   [[ "$(cat "$baseline/migration-rehearsal.manifest-path")" == "$baseline/migration-rehearsal-manifest.json" ]] || return 1
   assert_contains "$output" "Review it"
+
+  capture_run status output env PATH="$fake_bin:$PATH" \
+    "$fixture_repo/scripts/prepare-migration-rehearsal-fixture.sh" --baseline-dir "$baseline" --mariadb-version not-a-version
+  [[ "$status" -eq 2 ]] || return 1
+  assert_contains "$output" "MariaDB version must be a dotted numeric version"
 
   # Exercise the preparer's actual manifest through all prerequisite parsing.
   # The fake Compose command is reached only after false attestation, checksums,
