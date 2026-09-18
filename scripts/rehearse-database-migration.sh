@@ -87,7 +87,8 @@ if [[ -n "$compose_override_member" ]]; then
   expected_override="$(printf 'services:\n  eqemu-server:\n    volumes:\n      - %s' "$(jq -Rn --arg mount "$old_build_host_dir:/opt/eqemu-old:ro" '$mount')")"
   [[ "$(cat "$compose_override")" == "$expected_override" ]] || { printf 'error: old-build Compose override is not the expected read-only mount\n' >&2; exit 2; }
 fi
-build_identity_attested="$(jq -er '.source.build_identity_attested // false | booleans' "$manifest" 2>/dev/null)" || { printf 'error: source.build_identity_attested must be boolean\n' >&2; exit 2; }
+build_identity_attested="$(jq -r '.source.build_identity_attested // false | if type == "boolean" then tostring else error("not a boolean") end' "$manifest" 2>/dev/null)" || { printf 'error: source.build_identity_attested must be boolean\n' >&2; exit 2; }
+[[ "$source_mariadb" =~ ^[0-9]+([.][0-9]+){1,3}$ ]] || { printf 'error: source.mariadb_version must be a numeric dotted version\n' >&2; exit 2; }
 [[ "$snapshot_sha" =~ ^[0-9a-f]{64}$ && "$old_world_sha" =~ ^[0-9a-f]{64}$ ]] || { printf 'error: manifest checksums must be lowercase SHA-256 values\n' >&2; exit 2; }
 actual_snapshot_sha="$(sha256sum "$snapshot" | awk '{print $1}')"
 [[ "$actual_snapshot_sha" == "$snapshot_sha" ]] || { printf 'error: snapshot checksum mismatch for %s\n' "$snapshot_id" >&2; exit 1; }
@@ -136,7 +137,7 @@ write_result() {
     --arg target_database "$target_db" --arg candidate_versions "$candidate_versions" --arg seed_sha "$seed_sha" \
     --arg upgraded_assert_sha "$upgraded_assert_sha" --arg restored_assert_sha "$restored_assert_sha" \
     --argjson scenarios "$scenarios_json" --arg completed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson restore_ms "$restore_ms" \
-    '{schema_version:1,status:$status,failure_step:(if $failure_step=="" then null else $failure_step end),candidate_commit:$candidate_commit,snapshot:{id:$snapshot_id,sha256:$snapshot_sha256},source:{build:$source_build,build_identity_attested:$build_identity_attested,world_binary_sha256:$old_world_sha,mariadb_version:$source_mariadb,database_versions:{server:$source_server_version,bots:$source_bots_version,custom:$source_custom_version}},resulting_database_versions:(if $candidate_versions=="" then null else ($candidate_versions|split(":")|map(tonumber)|{server:.[0],bots:.[1],custom:.[2]}) end),fixtures:{seed_sha256:$seed_sha,upgraded_assert_sha256:$upgraded_assert_sha,restored_assert_sha256:$restored_assert_sha},candidate_scenarios:$scenarios,target:{class:"isolated-disposable",database:$target_database},restore_elapsed_ms:$restore_ms,completed_at:$completed_at}' >"$result"
+    '{schema_version:1,status:$status,failure_step:(if $failure_step=="" then null else $failure_step end),candidate_commit:$candidate_commit,snapshot:{id:$snapshot_id,sha256:$snapshot_sha256},source:{build:$source_build,build_identity_attested:$build_identity_attested,world_binary_sha256:$old_world_sha,mariadb_version:$source_mariadb_version,database_versions:{server:$source_server_version,bots:$source_bots_version,custom:$source_custom_version}},resulting_database_versions:(if $candidate_versions=="" then null else ($candidate_versions|split(":")|map(tonumber)|{server:.[0],bots:.[1],custom:.[2]}) end),fixtures:{seed_sha256:$seed_sha,upgraded_assert_sha256:$upgraded_assert_sha,restored_assert_sha256:$restored_assert_sha},candidate_scenarios:$scenarios,target:{class:"isolated-disposable",database:$target_database},restore_elapsed_ms:$restore_ms,completed_at:$completed_at}' >"$result"
 }
 cleanup() {
   local main_status=$? cleanup_status=0 result_status=0
@@ -167,7 +168,8 @@ cd "$stack_dir"
 shared_db="$("${compose[@]}" exec -T mariadb bash -lc 'printf %s "$MYSQL_DATABASE"')"
 [[ -n "$shared_db" && "$target_db" != "$shared_db" ]] || { printf 'error: isolated database unexpectedly matches the shared validation database\n' >&2; exit 1; }
 actual_mariadb="$("${compose[@]}" exec -T mariadb mariadb --version)"
-[[ "$actual_mariadb" == *"$source_mariadb"* ]] || { printf 'error: MariaDB version does not match snapshot metadata (expected %s)\n' "$source_mariadb" >&2; exit 1; }
+version_regex="${source_mariadb//./\\.}"
+[[ "$actual_mariadb" =~ (^|[^0-9])${version_regex}([^0-9]|$) ]] || { printf 'error: MariaDB version does not match snapshot metadata (expected %s)\n' "$source_mariadb" >&2; exit 1; }
 root_sql "CREATE DATABASE \`$target_db\`" >>"$log" 2>&1
 database_created=1
 root_sql "CREATE USER '$target_user'@'%' IDENTIFIED BY '$target_password'" >>"$log" 2>&1
@@ -236,6 +238,8 @@ failure_step=idempotent_update
 run_candidate no-scenarios
 second_state="$(target_query "SELECT CONCAT(version,CHAR(58),bots_version,CHAR(58),custom_version) FROM db_version LIMIT 1; SELECT SHA2(GROUP_CONCAT(CONCAT(table_name,CHAR(58),column_name,CHAR(58),column_type,CHAR(58),is_nullable) ORDER BY table_name,ordinal_position SEPARATOR '\\n'),256) FROM information_schema.columns WHERE table_schema=DATABASE()")"
 [[ "$first_state" == "$second_state" ]] || { printf 'error: second updater run changed database version or schema\n' >&2; exit 1; }
+failure_step=idempotent_data_assertions
+query_file_expect_ok "$upgraded_assert_sql"
 
 failure_step=rollback_restore
 start_ms="$(date +%s%3N)"

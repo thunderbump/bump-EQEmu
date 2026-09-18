@@ -70,22 +70,41 @@ binary_archive="$baseline_dir/installed-binaries.tar.gz"
 
 snapshot_sha="$(sha256sum "$snapshot" | awk '{print $1}')"
 archive_sha="$(sha256sum "$binary_archive" | awk '{print $1}')"
-# The capture manifest is untrusted input, but requiring its recorded digests to
-# match both artifacts detects a stale or accidentally mixed capture.
-grep -Fqi -- "$snapshot_sha" "$capture_manifest" || { printf 'error: manifest.json does not record the database snapshot checksum\n' >&2; exit 1; }
-grep -Fqi -- "$archive_sha" "$capture_manifest" || { printf 'error: manifest.json does not record the installed-binaries checksum\n' >&2; exit 1; }
-
 read_capture() {
   local expression="$1"
   jq -er "$expression | select(. != null and . != \"\")" "$capture_manifest" 2>/dev/null || true
 }
+# Compare the digests only with their declared artifact fields. An unscoped text
+# search could accidentally accept a digest copied into an unrelated note.
+snapshot_name="$(basename "$snapshot")"
+recorded_snapshot_sha="$(jq -er --arg name "$snapshot_name" '
+  .files[$name].sha256 // .artifacts.database.sha256 // .snapshot.sha256
+  | select(type == "string") | ascii_downcase
+' "$capture_manifest" 2>/dev/null || true)"
+recorded_archive_sha="$(jq -er '
+  .files["installed-binaries.tar.gz"].sha256 // .artifacts.binaries.sha256 // .old_build.archive_sha256
+  | select(type == "string") | ascii_downcase
+' "$capture_manifest" 2>/dev/null || true)"
+[[ "$recorded_snapshot_sha" == "$snapshot_sha" ]] || { printf 'error: manifest.json database snapshot checksum does not match the captured artifact\n' >&2; exit 1; }
+[[ "$recorded_archive_sha" == "$archive_sha" ]] || { printf 'error: manifest.json installed-binaries checksum does not match the captured artifact\n' >&2; exit 1; }
+
 [[ -n "$snapshot_id" ]] || snapshot_id="$(read_capture '.snapshot.id // .baseline_id // .id')"
 [[ -n "$snapshot_id" ]] || snapshot_id="$(basename "$baseline_dir")"
-[[ -n "$source_build" ]] || source_build="$(read_capture '.source.checkout_commit // .source.commit // .source.build // .source_checkout')"
+[[ -n "$source_build" ]] || source_build="$(read_capture '.source.checkout_commit // .source.commit // .source.build // .source_checkout // .source_checkout_sha')"
 [[ -n "$mariadb_version" ]] || mariadb_version="$(read_capture '.source.mariadb_version // .database.mariadb_version // .mariadb_version')"
 [[ -n "$server_version" ]] || server_version="$(read_capture '.source.database_versions.server // .database_versions.server // .database.version')"
 [[ -n "$bots_version" ]] || bots_version="$(read_capture '.source.database_versions.bots // .database_versions.bots // .database.bots_version')"
 [[ -n "$custom_version" ]] || custom_version="$(read_capture '.source.database_versions.custom // .database_versions.custom // .database.custom_version')"
+if [[ -z "$server_version" || -z "$bots_version" || -z "$custom_version" ]]; then
+  database_version_row="$(read_capture '.database_version_row')"
+  if [[ -n "$database_version_row" ]]; then
+    IFS=$'\t' read -r captured_server captured_bots captured_custom extra <<<"$database_version_row"
+    [[ -z "${extra:-}" ]] || { printf 'error: database_version_row must contain exactly three tab-separated values\n' >&2; exit 2; }
+    [[ -n "$server_version" ]] || server_version="$captured_server"
+    [[ -n "$bots_version" ]] || bots_version="$captured_bots"
+    [[ -n "$custom_version" ]] || custom_version="$captured_custom"
+  fi
+fi
 [[ -n "$source_build" && -n "$mariadb_version" && -n "$server_version" && -n "$bots_version" && -n "$custom_version" ]] || {
   printf 'error: capture metadata is incomplete; provide the documented metadata options\n' >&2
   exit 2
@@ -109,10 +128,16 @@ with tarfile.open(archive, "r:gz") as tf:
         target = (destination / member.name).resolve()
         if destination != target and destination not in target.parents:
             raise SystemExit("error: installed-binaries archive contains an escaping path")
-        if member.issym() or member.islnk():
+        if member.issym():
             link = (target.parent / member.linkname).resolve()
-            if destination != link and destination not in link.parents:
-                raise SystemExit("error: installed-binaries archive contains an escaping link")
+        elif member.islnk():
+            # tar hard-link names are relative to the archive root, unlike
+            # symbolic-link targets, which are relative to the link's parent.
+            link = (destination / member.linkname).resolve()
+        else:
+            continue
+        if destination != link and destination not in link.parents:
+            raise SystemExit("error: installed-binaries archive contains an escaping link")
     tf.extractall(destination)
 PY
 
@@ -156,6 +181,25 @@ SELECT
   (SELECT COUNT(*) FROM information_schema.tables
     WHERE table_schema = DATABASE() AND table_name IN
       ('actor_profiles', 'actor_status', 'actor_events', 'actor_action_queue'));
+
+-- Reserved, deterministic old-format semantic records keep the rehearsal
+-- meaningful even when a captured database happens to have sparse gameplay
+-- data. They model two owners, including character/bot ownership and balances
+-- on both sides of a transfer, without altering real snapshot rows.
+DROP TABLE IF EXISTS `afk_migration_fixture_old_format`;
+CREATE TABLE `afk_migration_fixture_old_format` (
+  `fixture_key` VARCHAR(32) NOT NULL,
+  `character_owner_id` BIGINT UNSIGNED NOT NULL,
+  `bot_owner_id` BIGINT UNSIGNED NOT NULL,
+  `wallet_copper` BIGINT UNSIGNED NOT NULL,
+  `bank_copper` BIGINT UNSIGNED NOT NULL,
+  PRIMARY KEY (`fixture_key`)
+) ENGINE=InnoDB;
+INSERT INTO `afk_migration_fixture_old_format`
+  (`fixture_key`, `character_owner_id`, `bot_owner_id`, `wallet_copper`, `bank_copper`)
+VALUES
+  ('afk_reserved_sender', 4294967001, 4294967001, 7000, 3000),
+  ('afk_reserved_receiver', 4294967002, 4294967002, 2000, 8000);
 SQL
 
 cat >"$fixture_dir/assert-upgraded.sql" <<'SQL'
@@ -178,7 +222,13 @@ SELECT IF(
   AND (SELECT COALESCE(SUM(`owner_id`), 0) FROM `bot_data`) =
       (SELECT `bot_owner_id_total` FROM `afk_migration_fixture_baseline`)
   AND (SELECT COALESCE(BIT_XOR(CRC32(CONCAT(`bot_id`, ':', `owner_id`))), 0) FROM `bot_data`) =
-      (SELECT `bot_owner_checksum` FROM `afk_migration_fixture_baseline`),
+      (SELECT `bot_owner_checksum` FROM `afk_migration_fixture_baseline`)
+  AND (SELECT COUNT(*) FROM `afk_migration_fixture_old_format`) = 2
+  AND (SELECT SUM(`wallet_copper` + `bank_copper`) FROM `afk_migration_fixture_old_format`) = 20000
+  AND (SELECT COUNT(*) FROM `afk_migration_fixture_old_format`
+       WHERE (`fixture_key`, `character_owner_id`, `bot_owner_id`) IN
+         (('afk_reserved_sender', 4294967001, 4294967001),
+          ('afk_reserved_receiver', 4294967002, 4294967002))) = 2,
   'ok', 'failed');
 SQL
 

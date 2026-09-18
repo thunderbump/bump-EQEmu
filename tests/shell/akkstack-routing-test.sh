@@ -866,6 +866,10 @@ test_migration_rehearsal_enforces_restricted_database_contract() {
   assert_contains "$source" 'timeout --signal=TERM --kill-after=5s 20s "$OLD_WORLD"'
   assert_contains "$source" 'grep -Fq "Server (TCP) listener started"'
   assert_contains "$source" 'failure_step=post_startup_restored_assertions'
+  assert_contains "$source" 'failure_step=idempotent_data_assertions'
+  assert_contains "$source" 'query_file_expect_ok "$upgraded_assert_sql"'
+  assert_contains "$source" 'build_identity_attested="$(jq -r'
+  assert_contains "$source" 'version_regex="${source_mariadb//./\\.}"'
   assert_contains "$source" 'database_created=1'
   assert_contains "$source" 'user_created=1'
   assert_contains "$source" 'exit "$main_status"'
@@ -875,7 +879,7 @@ test_migration_rehearsal_enforces_restricted_database_contract() {
 }
 
 test_prepare_migration_fixture_builds_reviewable_inputs_without_running_docker() {
-  local fixture_repo fixture_parent baseline fake_bin marker snapshot_sha archive_sha status output
+  local fixture_repo fixture_parent baseline fake_bin marker snapshot_sha archive_sha evidence_source status output
   make_fixture fixture_repo fixture_parent
   baseline="$tmp_root/captured-baseline"
   fake_bin="$tmp_root/prepare-fake-bin"
@@ -888,7 +892,7 @@ test_prepare_migration_fixture_builds_reviewable_inputs_without_running_docker()
   snapshot_sha="$(sha256sum "$baseline/database.sql.gz" | awk '{print $1}')"
   archive_sha="$(sha256sum "$baseline/installed-binaries.tar.gz" | awk '{print $1}')"
   jq -n --arg snapshot_sha "$snapshot_sha" --arg archive_sha "$archive_sha" \
-    '{baseline_id:"fixture-baseline",source:{checkout_commit:"unattested-source",mariadb_version:"10.11",database_versions:{server:9328,bots:9055,custom:0}},artifacts:{database:{sha256:$snapshot_sha},binaries:{sha256:$archive_sha}}}' >"$baseline/manifest.json"
+    '{baseline_id:"fixture-baseline",source_checkout_sha:"unattested-source",mariadb_version:"10.11",database_version_row:"9328\t9055\t0",files:{"database.sql.gz":{sha256:$snapshot_sha},"installed-binaries.tar.gz":{sha256:$archive_sha}}}' >"$baseline/manifest.json"
   printf '#!/usr/bin/env bash\n: >%q\nexit 99\n' "$marker" >"$fake_bin/docker-compose"
   chmod +x "$fake_bin/docker-compose"
 
@@ -906,13 +910,28 @@ test_prepare_migration_fixture_builds_reviewable_inputs_without_running_docker()
   ' "$baseline/migration-rehearsal-manifest.json" >/dev/null || return 1
   assert_contains "$(cat "$baseline/migration-rehearsal-fixture/docker-compose.migration-rehearsal.yml")" ":/opt/eqemu-old:ro"
   assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "currency_copper_total"
+  assert_contains "$(cat "$baseline/migration-rehearsal-fixture/seed-old-format.sql")" "afk_reserved_sender"
   assert_contains "$(cat "$baseline/migration-rehearsal.env")" "MIGRATION_REHEARSAL_MANIFEST="
   [[ "$(cat "$baseline/migration-rehearsal.manifest-path")" == "$baseline/migration-rehearsal-manifest.json" ]] || return 1
   assert_contains "$output" "Review it"
+
+  # Exercise the preparer's actual manifest through all prerequisite parsing.
+  # The fake Compose command is reached only after false attestation, checksums,
+  # paths, and generated override validation have succeeded.
+  rm -f "$marker"
+  capture_run status output env PATH="$fake_bin:$PATH" AKKSTACK_DIR="$fixture_parent/bump-akk-stack-validation" \
+    MIGRATION_REHEARSAL_MANIFEST="$baseline/migration-rehearsal-manifest.json" \
+    MIGRATION_REHEARSAL_EVIDENCE_DIR="$baseline/prerequisite-evidence" \
+    "$repo_root/scripts/rehearse-database-migration.sh" --stack validation
+  [[ "$status" -eq 99 ]] || return 1
+  [[ -e "$marker" ]] || return 1
+  evidence_source="$(jq -r '.source.mariadb_version + ":" + (.source.build_identity_attested|tostring)' "$baseline/prerequisite-evidence/result.json")"
+  [[ "$evidence_source" == "10.11:false" ]] || return 1
+  assert_not_contains "$output" "build_identity_attested must be boolean"
 }
 
 test_prepare_migration_fixture_rejects_unrecorded_checksums() {
-  local fixture_repo fixture_parent baseline status output
+  local fixture_repo fixture_parent baseline snapshot_sha archive_sha status output
   make_fixture fixture_repo fixture_parent
   baseline="$tmp_root/mismatched-baseline"
   mkdir -p "$baseline/archive"
@@ -920,12 +939,15 @@ test_prepare_migration_fixture_rejects_unrecorded_checksums() {
   printf '#!/bin/sh\n' >"$baseline/archive/world"
   chmod +x "$baseline/archive/world"
   tar -C "$baseline/archive" -czf "$baseline/installed-binaries.tar.gz" world
-  printf '%s\n' '{"checksums":["wrong"]}' >"$baseline/manifest.json"
+  snapshot_sha="$(sha256sum "$baseline/database.sql.gz" | awk '{print $1}')"
+  archive_sha="$(sha256sum "$baseline/installed-binaries.tar.gz" | awk '{print $1}')"
+  jq -n --arg snapshot_sha "$snapshot_sha" --arg archive_sha "$archive_sha" \
+    '{notes:($snapshot_sha + " " + $archive_sha),files:{"database.sql.gz":{sha256:"wrong"},"installed-binaries.tar.gz":{sha256:"wrong"}}}' >"$baseline/manifest.json"
 
   capture_run status output "$fixture_repo/scripts/prepare-migration-rehearsal-fixture.sh" --baseline-dir "$baseline"
 
   [[ "$status" -eq 1 ]] || return 1
-  assert_contains "$output" "does not record the database snapshot checksum"
+  assert_contains "$output" "database snapshot checksum does not match"
   [[ ! -e "$baseline/migration-rehearsal-manifest.json" ]] || return 1
 }
 
