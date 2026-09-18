@@ -2,12 +2,10 @@
 # Runs only inside the disposable rehearsal container. Never load an AkkStack config.
 set -euo pipefail
 cd /runtime
-mkdir -p logs shared
+mkdir -p logs shared maps quests
 cp -a /inputs/shared/. shared/
-ln -s /inputs/maps maps
-ln -s /inputs/quests quests
-ln -s /inputs/quests/plugins plugins
-ln -s /inputs/quests/lua_modules lua_modules
+ln -s /inputs/plugins plugins
+ln -s /inputs/lua_modules lua_modules
 jq -n --arg password "$REHEARSAL_PASSWORD" '
   {host:"mariadb",port:"3306",db:"peq",username:"root",password:$password} as $db |
   {server:{database:$db,qsdatabase:$db,content_database:$db,auto_database_updates:false,

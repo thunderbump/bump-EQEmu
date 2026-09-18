@@ -30,6 +30,9 @@ class DisposableRehearsal(unittest.TestCase):
                 'candidate_scenarios': ['true'],
             }))
             (root / 'old').mkdir()
+            stack = root / 'validation-stack'
+            for asset in ('server/shared', 'server/quests/plugins', 'server/quests/lua_modules'):
+                (stack / asset).mkdir(parents=True, exist_ok=True)
             docker = root / 'docker'
             docker.write_text('''#!/usr/bin/env python3
 import json, os, sys
@@ -51,7 +54,8 @@ sys.exit(98)
 ''')
             docker.chmod(0o755)
             env = dict(os.environ, PATH=str(root)+os.pathsep+os.environ['PATH'],
-                       FAKE_DOCKER_ROOT=str(root), MIGRATION_REHEARSAL_MANIFEST=str(root/'manifest.json'),
+                       AKKSTACK_DIR=str(stack), FAKE_DOCKER_ROOT=str(root),
+                       MIGRATION_REHEARSAL_MANIFEST=str(root/'manifest.json'),
                        MIGRATION_REHEARSAL_EVIDENCE_DIR=str(root/'evidence'))
             result = subprocess.run([str(ROOT/'scripts/rehearse-database-migration.sh')], env=env,
                                     capture_output=True, text=True)

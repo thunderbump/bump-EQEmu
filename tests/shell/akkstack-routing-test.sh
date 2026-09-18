@@ -205,7 +205,7 @@ make_stack() {
   local stack_dir="$1"
   local checkout_dir="$2"
 
-  mkdir -p "$stack_dir"
+  mkdir -p "$stack_dir/server/shared" "$stack_dir/server/quests/plugins" "$stack_dir/server/quests/lua_modules"
   printf 'ENV=development\n' >"$stack_dir/.env"
   ln -s "$checkout_dir" "$stack_dir/code"
   touch "$stack_dir/docker-compose.yml"
@@ -834,7 +834,7 @@ EOF
 }
 
 test_migration_rehearsal_dry_run_and_guards() {
-  local fixture_repo fixture_parent status output
+  local fixture_repo fixture_parent status output rehearsal_source runtime_source
   make_fixture fixture_repo fixture_parent
 
   capture_run status output "$fixture_repo/scripts/validate.sh" --stack validation --dry-run migration-rehearsal
@@ -849,6 +849,15 @@ test_migration_rehearsal_dry_run_and_guards() {
   capture_run status output "$fixture_repo/scripts/rehearse-database-migration.sh" --stack validation
   [[ "$status" -eq 125 ]] || return 1
   assert_contains "$output" "MIGRATION_REHEARSAL_MANIFEST"
+
+  rehearsal_source="$(cat "$fixture_repo/scripts/rehearse-database-migration.sh")"
+  assert_contains "$rehearsal_source" 'server/quests/plugins'
+  assert_contains "$rehearsal_source" 'server/plugins'
+  assert_contains "$rehearsal_source" 'post_startup_data_state="$(representative_data_state)"'
+  assert_not_contains "$rehearsal_source" 'server/maps'
+  runtime_source="$(cat "$fixture_repo/scripts/lib/migration-runtime.sh")"
+  assert_contains "$runtime_source" 'mkdir -p logs shared maps quests'
+  assert_not_contains "$runtime_source" '/inputs/maps'
 
 }
 
@@ -885,7 +894,9 @@ test_prepare_migration_fixture_builds_reviewable_inputs_without_running_docker()
   ' "$baseline/migration-rehearsal-manifest.json" >/dev/null || return 1
   [[ ! -e "$baseline/migration-rehearsal-fixture/docker-compose.migration-rehearsal.yml" ]] || return 1
   assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "currency_copper_total"
-  assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "chk_actor_events_event_json_bounded"
+  assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "information_schema.check_constraints"
+  assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "char_length(event_json)<=16384"
+  assert_not_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "chk_actor_events_event_json_bounded"
   assert_contains "$(cat "$baseline/migration-rehearsal-fixture/seed-old-format.sql")" 'INSERT INTO `character_data`'
   assert_contains "$(cat "$baseline/migration-rehearsal-fixture/seed-old-format.sql")" "reserved migration fixture identity collides"
   assert_not_contains "$(cat "$baseline/migration-rehearsal-fixture/seed-old-format.sql")" "afk_migration_fixture_old_format"
@@ -906,6 +917,19 @@ test_prepare_migration_fixture_builds_reviewable_inputs_without_running_docker()
   evidence_source="$(jq -r '.source.mariadb_version + ":" + (.source.build_identity_attested|tostring)' "$baseline/prerequisite-evidence/result.json")"
   [[ "$evidence_source" == "10.11:false" ]] || return 1
   assert_not_contains "$output" "build_identity_attested must be boolean"
+
+  # Runtime inputs are diagnosed before image work, resource creation, or an
+  # expensive snapshot restore.
+  rm -f "$marker"
+  rm -rf "$fixture_parent/bump-akk-stack-validation/server/quests/plugins"
+  capture_run status output env PATH="$fake_bin:$PATH" AKKSTACK_DIR="$fixture_parent/bump-akk-stack-validation" \
+    MIGRATION_REHEARSAL_MANIFEST="$baseline/migration-rehearsal-manifest.json" \
+    MIGRATION_REHEARSAL_EVIDENCE_DIR="$baseline/missing-assets-evidence" \
+    "$fixture_repo/scripts/rehearse-database-migration.sh" --stack validation
+  [[ "$status" -eq 125 ]] || return 1
+  [[ ! -e "$marker" ]] || return 1
+  assert_contains "$output" "requires the validation stack plugins directory"
+  [[ "$(jq -r .failure_step "$baseline/missing-assets-evidence/result.json")" == prerequisites ]] || return 1
 }
 
 test_prepare_migration_fixture_rejects_unrecorded_checksums() {

@@ -106,6 +106,9 @@ failure_step=setup
 restore_ms=null
 candidate_versions=""
 snapshot_data_state=""
+shared_dir=""
+plugins_dir=""
+lua_modules_dir=""
 
 root_sql() { printf '%s\n' "$1" | target_mysql; }
 target_mysql() {
@@ -116,6 +119,24 @@ target_query() { printf '%s\n' "$1" | target_mysql; }
 schema_fingerprint() {
   docker exec "$db_container" sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mariadb-dump -uroot --no-data --skip-comments --skip-add-drop-table peq' | sha256sum | cut -d ' ' -f1
 }
+representative_data_state() {
+  target_query 'SELECT CONCAT((SELECT COUNT(*) FROM character_data),CHAR(58),(SELECT COALESCE(BIT_XOR(CRC32(CONCAT(id,CHAR(58),account_id))),0) FROM character_data),CHAR(58),(SELECT COALESCE(SUM(copper + 10 * silver + 100 * gold + 1000 * platinum + copper_bank + 10 * silver_bank + 100 * gold_bank + 1000 * platinum_bank + copper_cursor + 10 * silver_cursor + 100 * gold_cursor + 1000 * platinum_cursor),0) FROM character_currency),CHAR(58),(SELECT COUNT(*) FROM bot_data),CHAR(58),(SELECT COALESCE(SUM(owner_id),0) FROM bot_data),CHAR(58),(SELECT COALESCE(BIT_XOR(CRC32(CONCAT(bot_id,CHAR(58),owner_id))),0) FROM bot_data))'
+}
+select_runtime_dir() {
+  local label="$1"
+  shift
+  local candidate
+  for candidate in "$@"; do
+    if [[ -d "$candidate" ]]; then
+      realpath -e "$candidate"
+      return
+    fi
+  done
+  printf 'error: migration rehearsal requires the validation stack %s directory; checked:' "$label" >&2
+  printf ' %s' "$@" >&2
+  printf '\n' >&2
+  return 125
+}
 run_runtime() {
   local mode="$1"
   docker run --rm --name "$runtime_container" --label "$owner_label" \
@@ -123,9 +144,9 @@ run_runtime() {
     --tmpfs /tmp:rw,nosuid,size=256m --tmpfs /runtime:rw,nosuid,size=1g \
     --mount "type=bind,src=$repo_root,dst=/home/eqemu/code,readonly" \
     --mount "type=bind,src=$old_build_host_dir,dst=/opt/eqemu-old,readonly" \
-    --mount "type=bind,src=$stack_dir/server/shared,dst=/inputs/shared,readonly" \
-    --mount "type=bind,src=$stack_dir/server/quests,dst=/inputs/quests,readonly" \
-    --mount "type=bind,src=$stack_dir/server/maps,dst=/inputs/maps,readonly" \
+    --mount "type=bind,src=$shared_dir,dst=/inputs/shared,readonly" \
+    --mount "type=bind,src=$plugins_dir,dst=/inputs/plugins,readonly" \
+    --mount "type=bind,src=$lua_modules_dir,dst=/inputs/lua_modules,readonly" \
     -e "REHEARSAL_PASSWORD=$target_password" -e "MIGRATION_SCENARIOS_JSON=$scenarios_json" \
     -e "OLD_WORLD=$old_world_path" -e "OLD_WORLD_SHA=$old_world_sha" \
     --entrypoint bash "$runtime_image" /home/eqemu/code/scripts/lib/migration-runtime.sh "$mode"
@@ -149,11 +170,15 @@ cleanup() {
   trap - EXIT
   set +e
   # Names contain an unpredictable run UUID; label checks prevent deleting foreign resources.
-  for container in "$runtime_container" "$db_container"; do
-    if [[ "$(docker inspect --format '{{ index .Config.Labels "org.eqemu.rehearsal" }}' "$container" 2>/dev/null)" == "$run_token" ]]; then
-      docker rm -f "$container" >>"$log" 2>&1 || cleanup_status=1
-    fi
-  done
+  # Before resource creation there is nothing to inspect; this keeps prerequisite
+  # failures free of Docker operations as well as database restoration work.
+  if [[ "$network_created" == 1 || "$volume_created" == 1 ]]; then
+    for container in "$runtime_container" "$db_container"; do
+      if [[ "$(docker inspect --format '{{ index .Config.Labels "org.eqemu.rehearsal" }}' "$container" 2>/dev/null)" == "$run_token" ]]; then
+        docker rm -f "$container" >>"$log" 2>&1 || cleanup_status=1
+      fi
+    done
+  fi
   if [[ "$volume_created" == 1 ]]; then docker volume rm "$volume" >>"$log" 2>&1 || cleanup_status=1; fi
   if [[ "$network_created" == 1 ]]; then docker network rm "$network" >>"$log" 2>&1 || cleanup_status=1; fi
   if [[ "$cleanup_status" -ne 0 ]]; then
@@ -170,6 +195,20 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
+
+# Resolve the same minimal runtime inputs used by the zone CLI profiles before
+# pulling images or restoring the snapshot. Database updates and the selected
+# actor command do not boot a zone, so map and full quest trees are not inputs.
+failure_step=prerequisites
+command -v docker >/dev/null || { printf 'error: docker is required\n' >&2; exit 125; }
+case "$snapshot" in
+  *.gz) command -v gzip >/dev/null || { printf 'error: gzip is required for the selected snapshot\n' >&2; exit 125; } ;;
+  *.zst) command -v zstd >/dev/null || { printf 'error: zstd is required for the selected snapshot\n' >&2; exit 125; } ;;
+esac
+shared_dir="$(select_runtime_dir shared-memory "$stack_dir/server/shared")" || exit $?
+plugins_dir="$(select_runtime_dir plugins "$stack_dir/server/quests/plugins" "$stack_dir/server/plugins")" || exit $?
+lua_modules_dir="$(select_runtime_dir lua-modules "$stack_dir/server/quests/lua_modules" "$stack_dir/server/lua_modules")" || exit $?
+failure_step=setup
 
 # Pull/cache images on the host; containers themselves have no external network.
 for image in "$db_image" "$runtime_image"; do
@@ -216,7 +255,7 @@ import_snapshot >>"$log" 2>&1
 snapshot_versions="$(target_query 'SELECT CONCAT(version,CHAR(58),bots_version,CHAR(58),custom_version) FROM db_version LIMIT 1')"
 expected_versions="$source_server_version:$source_bots_version:$source_custom_version"
 [[ "$snapshot_versions" == "$expected_versions" ]] || { printf 'error: restored database versions %s do not match manifest %s\n' "$snapshot_versions" "$expected_versions" >&2; exit 1; }
-snapshot_data_state="$(target_query 'SELECT CONCAT((SELECT COUNT(*) FROM character_data),CHAR(58),(SELECT COALESCE(BIT_XOR(CRC32(CONCAT(id,CHAR(58),account_id))),0) FROM character_data),CHAR(58),(SELECT COALESCE(SUM(copper + 10 * silver + 100 * gold + 1000 * platinum + copper_bank + 10 * silver_bank + 100 * gold_bank + 1000 * platinum_bank + copper_cursor + 10 * silver_cursor + 100 * gold_cursor + 1000 * platinum_cursor),0) FROM character_currency),CHAR(58),(SELECT COUNT(*) FROM bot_data),CHAR(58),(SELECT COALESCE(SUM(owner_id),0) FROM bot_data),CHAR(58),(SELECT COALESCE(BIT_XOR(CRC32(CONCAT(bot_id,CHAR(58),owner_id))),0) FROM bot_data))')"
+snapshot_data_state="$(representative_data_state)"
 failure_step=seed_old_format
 target_mysql <"$seed_sql" >>"$log" 2>&1
 failure_step=candidate_update
@@ -240,13 +279,15 @@ import_snapshot >>"$log" 2>&1
 restore_ms=$(( $(date +%s%3N) - start_ms ))
 failure_step=restored_assertions
 query_file_expect_ok "$restored_assert_sql"
-restored_data_state="$(target_query 'SELECT CONCAT((SELECT COUNT(*) FROM character_data),CHAR(58),(SELECT COALESCE(BIT_XOR(CRC32(CONCAT(id,CHAR(58),account_id))),0) FROM character_data),CHAR(58),(SELECT COALESCE(SUM(copper + 10 * silver + 100 * gold + 1000 * platinum + copper_bank + 10 * silver_bank + 100 * gold_bank + 1000 * platinum_bank + copper_cursor + 10 * silver_cursor + 100 * gold_cursor + 1000 * platinum_cursor),0) FROM character_currency),CHAR(58),(SELECT COUNT(*) FROM bot_data),CHAR(58),(SELECT COALESCE(SUM(owner_id),0) FROM bot_data),CHAR(58),(SELECT COALESCE(BIT_XOR(CRC32(CONCAT(bot_id,CHAR(58),owner_id))),0) FROM bot_data))')"
+restored_data_state="$(representative_data_state)"
 [[ "$restored_data_state" == "$snapshot_data_state" ]] || { printf 'error: rollback restore changed representative ownership or currency state\n' >&2; exit 1; }
 failure_step=old_build_recovery
 run_runtime recovery >>"$log" 2>&1
 
 failure_step=post_startup_restored_assertions
 query_file_expect_ok "$restored_assert_sql"
+post_startup_data_state="$(representative_data_state)"
+[[ "$post_startup_data_state" == "$snapshot_data_state" ]] || { printf 'error: archived world startup changed representative ownership or currency state\n' >&2; exit 1; }
 failure_step=
 status=passed
 printf 'Migration rehearsal passed for Candidate %s; restore took %sms.\n' "$candidate_commit" "$restore_ms"

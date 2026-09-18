@@ -244,13 +244,32 @@ SELECT IF(
         'idx_actor_events_actor_cursor', 'idx_actor_events_zone_created',
         'idx_actor_action_queue_actor_idempotency', 'idx_actor_action_queue_claim_path',
         'idx_actor_action_queue_actor_state')) = 9
-  AND (SELECT COUNT(*) FROM information_schema.table_constraints
-    WHERE table_schema = DATABASE() AND constraint_type = 'CHECK'
-      AND constraint_name IN ('chk_actor_status_status_json_bounded',
-        'chk_actor_events_event_json_bounded',
-        'chk_actor_action_queue_source_metadata_json_bounded',
-        'chk_actor_action_queue_action_json_bounded',
-        'chk_actor_action_queue_result_json_bounded')) = 5
+  AND (SELECT COUNT(*)
+    FROM information_schema.table_constraints tc
+    JOIN information_schema.check_constraints cc
+      ON cc.constraint_schema = tc.constraint_schema
+      AND cc.constraint_name = tc.constraint_name
+    WHERE tc.table_schema = DATABASE() AND tc.constraint_type = 'CHECK'
+      AND (
+        (tc.table_name = 'actor_status'
+          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%status_jsonisnull%'
+          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%json_valid(status_json)%'
+          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%char_length(status_json)<=4096%')
+        OR (tc.table_name = 'actor_events'
+          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%json_valid(event_json)%'
+          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%char_length(event_json)<=16384%')
+        OR (tc.table_name = 'actor_action_queue'
+          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%source_metadata_jsonisnull%'
+          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%json_valid(source_metadata_json)%'
+          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%char_length(source_metadata_json)<=4096%')
+        OR (tc.table_name = 'actor_action_queue'
+          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%json_valid(action_json)%'
+          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%char_length(action_json)<=16384%')
+        OR (tc.table_name = 'actor_action_queue'
+          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%result_jsonisnull%'
+          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%json_valid(result_json)%'
+          AND REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(10), '') LIKE '%char_length(result_json)<=16384%')
+      )) = 5
   AND (SELECT COUNT(*) FROM `character_data`
        WHERE `id` NOT IN (4294967001, 4294967002)) =
       (SELECT `character_count` FROM `afk_migration_fixture_baseline`)
