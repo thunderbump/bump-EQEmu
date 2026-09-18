@@ -850,6 +850,18 @@ test_migration_rehearsal_dry_run_and_guards() {
   capture_run status output "$fixture_repo/scripts/rehearse-database-migration.sh" --stack validation
   [[ "$status" -eq 125 ]] || return 1
   assert_contains "$output" "MIGRATION_REHEARSAL_MANIFEST"
+
+  mkdir -p "$fixture_parent/relocated-stack"
+  capture_run status output env AKKSTACK_DIR="$fixture_parent/relocated-stack" \
+    "$fixture_repo/scripts/rehearse-database-migration.sh" --stack validation --dry-run
+  [[ "$status" -eq 2 ]] || return 1
+  assert_contains "$output" "default validation AkkStack or its explicit .afk-validation-stack marker"
+
+  printf '%s\n' afk-validation-stack-v1 >"$fixture_parent/relocated-stack/.afk-validation-stack"
+  capture_run status output env AKKSTACK_DIR="$fixture_parent/relocated-stack" \
+    "$fixture_repo/scripts/rehearse-database-migration.sh" --stack validation --dry-run
+  [[ "$status" -eq 0 ]] || return 1
+  assert_contains "$output" "unique isolated database"
 }
 
 test_migration_rehearsal_enforces_restricted_database_contract() {
@@ -861,6 +873,9 @@ test_migration_rehearsal_enforces_restricted_database_contract() {
   assert_contains "$source" 'snapshot_stream | target_mysql'
   assert_contains "$source" '.server.content_database |= isolated'
   assert_contains "$source" '.host = \"mariadb\" | .port = \"3306\"'
+  assert_contains "$source" '.server.auto_database_updates = false'
+  assert_contains "$source" 'test(\"^loginserver([0-9]+)?$\") | not'
+  assert_contains "$source" 'old-build runtime did not suppress database updates and login-server registration'
   assert_contains "$source" 'target_user="afk_mig_$$_${RANDOM}"'
   assert_contains "$source" "SEPARATOR '\\\\n'"
   assert_contains "$source" 'timeout --signal=TERM --kill-after=5s 20s "$OLD_WORLD"'
@@ -892,9 +907,10 @@ test_prepare_migration_fixture_builds_reviewable_inputs_without_running_docker()
   snapshot_sha="$(sha256sum "$baseline/database.sql.gz" | awk '{print $1}')"
   archive_sha="$(sha256sum "$baseline/installed-binaries.tar.gz" | awk '{print $1}')"
   jq -n --arg snapshot_sha "$snapshot_sha" --arg archive_sha "$archive_sha" \
-    '{baseline_id:"fixture-baseline",source_checkout_sha:"unattested-source",mariadb_version:"10.11",database_version_row:"9328\t9055\t0",files:{"database.sql.gz":{sha256:$snapshot_sha},"installed-binaries.tar.gz":{sha256:$archive_sha}}}' >"$baseline/manifest.json"
+    '{baseline_id:"fixture-baseline",source:"captured-container-name",source_checkout_sha:"unattested-source",mariadb_version:"10.11",database_version_row:"9328\t9055\t0",files:{"database.sql.gz":{sha256:$snapshot_sha},"installed-binaries.tar.gz":{sha256:$archive_sha}}}' >"$baseline/manifest.json"
   printf '#!/usr/bin/env bash\n: >%q\nexit 99\n' "$marker" >"$fake_bin/docker-compose"
-  chmod +x "$fake_bin/docker-compose"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" 0123456789abcdef0123456789abcdef01234567\n' >"$fake_bin/git"
+  chmod +x "$fake_bin/docker-compose" "$fake_bin/git"
 
   capture_run status output env PATH="$fake_bin:$PATH" "$fixture_repo/scripts/prepare-migration-rehearsal-fixture.sh" --baseline-dir "$baseline"
 
@@ -910,7 +926,10 @@ test_prepare_migration_fixture_builds_reviewable_inputs_without_running_docker()
   ' "$baseline/migration-rehearsal-manifest.json" >/dev/null || return 1
   assert_contains "$(cat "$baseline/migration-rehearsal-fixture/docker-compose.migration-rehearsal.yml")" ":/opt/eqemu-old:ro"
   assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "currency_copper_total"
-  assert_contains "$(cat "$baseline/migration-rehearsal-fixture/seed-old-format.sql")" "afk_reserved_sender"
+  assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "chk_actor_events_event_json_bounded"
+  assert_contains "$(cat "$baseline/migration-rehearsal-fixture/seed-old-format.sql")" 'INSERT INTO `character_data`'
+  assert_contains "$(cat "$baseline/migration-rehearsal-fixture/seed-old-format.sql")" "reserved migration fixture identity collides"
+  assert_not_contains "$(cat "$baseline/migration-rehearsal-fixture/seed-old-format.sql")" "afk_migration_fixture_old_format"
   assert_contains "$(cat "$baseline/migration-rehearsal.env")" "MIGRATION_REHEARSAL_MANIFEST="
   [[ "$(cat "$baseline/migration-rehearsal.manifest-path")" == "$baseline/migration-rehearsal-manifest.json" ]] || return 1
   assert_contains "$output" "Review it"
@@ -922,7 +941,7 @@ test_prepare_migration_fixture_builds_reviewable_inputs_without_running_docker()
   capture_run status output env PATH="$fake_bin:$PATH" AKKSTACK_DIR="$fixture_parent/bump-akk-stack-validation" \
     MIGRATION_REHEARSAL_MANIFEST="$baseline/migration-rehearsal-manifest.json" \
     MIGRATION_REHEARSAL_EVIDENCE_DIR="$baseline/prerequisite-evidence" \
-    "$repo_root/scripts/rehearse-database-migration.sh" --stack validation
+    "$fixture_repo/scripts/rehearse-database-migration.sh" --stack validation
   [[ "$status" -eq 99 ]] || return 1
   [[ -e "$marker" ]] || return 1
   evidence_source="$(jq -r '.source.mariadb_version + ":" + (.source.build_identity_attested|tostring)' "$baseline/prerequisite-evidence/result.json")"

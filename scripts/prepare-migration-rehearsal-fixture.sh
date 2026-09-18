@@ -90,11 +90,11 @@ recorded_archive_sha="$(jq -er '
 
 [[ -n "$snapshot_id" ]] || snapshot_id="$(read_capture '.snapshot.id // .baseline_id // .id')"
 [[ -n "$snapshot_id" ]] || snapshot_id="$(basename "$baseline_dir")"
-[[ -n "$source_build" ]] || source_build="$(read_capture '.source.checkout_commit // .source.commit // .source.build // .source_checkout // .source_checkout_sha')"
-[[ -n "$mariadb_version" ]] || mariadb_version="$(read_capture '.source.mariadb_version // .database.mariadb_version // .mariadb_version')"
-[[ -n "$server_version" ]] || server_version="$(read_capture '.source.database_versions.server // .database_versions.server // .database.version')"
-[[ -n "$bots_version" ]] || bots_version="$(read_capture '.source.database_versions.bots // .database_versions.bots // .database.bots_version')"
-[[ -n "$custom_version" ]] || custom_version="$(read_capture '.source.database_versions.custom // .database_versions.custom // .database.custom_version')"
+[[ -n "$source_build" ]] || source_build="$(read_capture '(.source | objects | .checkout_commit // .commit // .build) // .source_checkout // .source_checkout_sha')"
+[[ -n "$mariadb_version" ]] || mariadb_version="$(read_capture '(.source | objects | .mariadb_version) // .database.mariadb_version // .mariadb_version')"
+[[ -n "$server_version" ]] || server_version="$(read_capture '(.source | objects | .database_versions.server) // .database_versions.server // .database.version')"
+[[ -n "$bots_version" ]] || bots_version="$(read_capture '(.source | objects | .database_versions.bots) // .database_versions.bots // .database.bots_version')"
+[[ -n "$custom_version" ]] || custom_version="$(read_capture '(.source | objects | .database_versions.custom) // .database_versions.custom // .database.custom_version')"
 if [[ -z "$server_version" || -z "$bots_version" || -z "$custom_version" ]]; then
   database_version_row="$(read_capture '.database_version_row')"
   if [[ -n "$database_version_row" ]]; then
@@ -182,65 +182,122 @@ SELECT
     WHERE table_schema = DATABASE() AND table_name IN
       ('actor_profiles', 'actor_status', 'actor_events', 'actor_action_queue'));
 
--- Reserved, deterministic old-format semantic records keep the rehearsal
--- meaningful even when a captured database happens to have sparse gameplay
--- data. They model two owners, including character/bot ownership and balances
--- on both sides of a transfer, without altering real snapshot rows.
-DROP TABLE IF EXISTS `afk_migration_fixture_old_format`;
-CREATE TABLE `afk_migration_fixture_old_format` (
-  `fixture_key` VARCHAR(32) NOT NULL,
-  `character_owner_id` BIGINT UNSIGNED NOT NULL,
-  `bot_owner_id` BIGINT UNSIGNED NOT NULL,
-  `wallet_copper` BIGINT UNSIGNED NOT NULL,
-  `bank_copper` BIGINT UNSIGNED NOT NULL,
-  PRIMARY KEY (`fixture_key`)
-) ENGINE=InnoDB;
-INSERT INTO `afk_migration_fixture_old_format`
-  (`fixture_key`, `character_owner_id`, `bot_owner_id`, `wallet_copper`, `bank_copper`)
+-- Seed representative records in production ownership/currency tables. Abort
+-- instead of overwriting if any reserved identity is already present.
+DELIMITER //
+CREATE PROCEDURE `afk_assert_fixture_identities_available`()
+BEGIN
+  IF EXISTS (SELECT 1 FROM `character_data`
+      WHERE `id` IN (4294967001, 4294967002)
+         OR `name` IN ('AfkMigSender', 'AfkMigReceiver'))
+    OR EXISTS (SELECT 1 FROM `character_currency`
+      WHERE `id` IN (4294967001, 4294967002))
+    OR EXISTS (SELECT 1 FROM `bot_data`
+      WHERE `bot_id` IN (4294967001, 4294967002)
+         OR `name` IN ('AfkMigSenderBot', 'AfkMigReceiverBot')) THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'reserved migration fixture identity collides with snapshot data';
+  END IF;
+END//
+DELIMITER ;
+CALL `afk_assert_fixture_identities_available`();
+DROP PROCEDURE `afk_assert_fixture_identities_available`;
+
+INSERT INTO `character_data`
+  (`id`, `account_id`, `name`, `last_name`, `level`, `class`, `race`)
 VALUES
-  ('afk_reserved_sender', 4294967001, 4294967001, 7000, 3000),
-  ('afk_reserved_receiver', 4294967002, 4294967002, 2000, 8000);
+  (4294967001, 0, 'AfkMigSender', 'MigrationFixture', 1, 1, 1),
+  (4294967002, 0, 'AfkMigReceiver', 'MigrationFixture', 1, 1, 1);
+INSERT INTO `character_currency`
+  (`id`, `platinum`, `gold`, `silver`, `copper`,
+   `platinum_bank`, `gold_bank`, `silver_bank`, `copper_bank`)
+VALUES
+  (4294967001, 7, 0, 0, 0, 3, 0, 0, 0),
+  (4294967002, 2, 0, 0, 0, 8, 0, 0, 0);
+INSERT INTO `bot_data` (`bot_id`, `owner_id`, `name`, `level`, `class`, `race`)
+VALUES
+  (4294967001, 4294967001, 'AfkMigSenderBot', 1, 1, 1),
+  (4294967002, 4294967002, 'AfkMigReceiverBot', 1, 1, 1);
 SQL
 
 cat >"$fixture_dir/assert-upgraded.sql" <<'SQL'
 SELECT IF(
   (SELECT `actor_table_count` FROM `afk_migration_fixture_baseline`) = 0
-  AND (SELECT COUNT(*) FROM information_schema.tables
-    WHERE table_schema = DATABASE() AND table_name IN
-      ('actor_profiles', 'actor_status', 'actor_events', 'actor_action_queue')) = 4
-  AND (SELECT COUNT(*) FROM `character_data`) =
+  AND (SELECT COUNT(*) FROM information_schema.columns
+    WHERE table_schema = DATABASE() AND
+      (table_name, column_name, column_type, is_nullable) IN (
+        ('actor_profiles', 'actor_id', 'int(10) unsigned', 'NO'),
+        ('actor_profiles', 'bot_id', 'int(10) unsigned', 'YES'),
+        ('actor_status', 'status_json', 'longtext', 'YES'),
+        ('actor_events', 'event_id', 'bigint(20) unsigned', 'NO'),
+        ('actor_events', 'event_json', 'longtext', 'NO'),
+        ('actor_action_queue', 'action_id', 'bigint(20) unsigned', 'NO'),
+        ('actor_action_queue', 'idempotency_key', 'varchar(128)', 'NO'),
+        ('actor_action_queue', 'result_json', 'longtext', 'YES'))) = 8
+  AND (SELECT CONCAT_WS(':',
+      SUM(table_name = 'actor_profiles'), SUM(table_name = 'actor_status'),
+      SUM(table_name = 'actor_events'), SUM(table_name = 'actor_action_queue'))
+    FROM information_schema.columns WHERE table_schema = DATABASE()
+      AND table_name IN ('actor_profiles', 'actor_status', 'actor_events', 'actor_action_queue')) = '8:8:10:17'
+  AND (SELECT COUNT(DISTINCT CONCAT(table_name, ':', index_name))
+    FROM information_schema.statistics WHERE table_schema = DATABASE()
+      AND index_name IN ('idx_actor_profiles_bot_id', 'idx_actor_profiles_owner_character_id',
+        'idx_actor_status_zone_binding', 'idx_actor_status_state_heartbeat',
+        'idx_actor_events_actor_cursor', 'idx_actor_events_zone_created',
+        'idx_actor_action_queue_actor_idempotency', 'idx_actor_action_queue_claim_path',
+        'idx_actor_action_queue_actor_state')) = 9
+  AND (SELECT COUNT(*) FROM information_schema.table_constraints
+    WHERE table_schema = DATABASE() AND constraint_type = 'CHECK'
+      AND constraint_name IN ('chk_actor_status_status_json_bounded',
+        'chk_actor_events_event_json_bounded',
+        'chk_actor_action_queue_source_metadata_json_bounded',
+        'chk_actor_action_queue_action_json_bounded',
+        'chk_actor_action_queue_result_json_bounded')) = 5
+  AND (SELECT COUNT(*) FROM `character_data`
+       WHERE `id` NOT IN (4294967001, 4294967002)) =
       (SELECT `character_count` FROM `afk_migration_fixture_baseline`)
-  AND (SELECT COALESCE(BIT_XOR(CRC32(CONCAT(`id`, ':', `account_id`))), 0) FROM `character_data`) =
+  AND (SELECT COALESCE(BIT_XOR(CRC32(CONCAT(`id`, ':', `account_id`))), 0)
+       FROM `character_data` WHERE `id` NOT IN (4294967001, 4294967002)) =
       (SELECT `character_owner_checksum` FROM `afk_migration_fixture_baseline`)
   AND (SELECT COALESCE(SUM(`copper` + 10 * `silver` + 100 * `gold` + 1000 * `platinum` +
       `copper_bank` + 10 * `silver_bank` + 100 * `gold_bank` + 1000 * `platinum_bank` +
       `copper_cursor` + 10 * `silver_cursor` + 100 * `gold_cursor` + 1000 * `platinum_cursor`), 0)
-    FROM `character_currency`) =
+    FROM `character_currency` WHERE `id` NOT IN (4294967001, 4294967002)) =
       (SELECT `currency_copper_total` FROM `afk_migration_fixture_baseline`)
-  AND (SELECT COUNT(*) FROM `bot_data`) =
+  AND (SELECT COUNT(*) FROM `bot_data`
+       WHERE `bot_id` NOT IN (4294967001, 4294967002)) =
       (SELECT `bot_count` FROM `afk_migration_fixture_baseline`)
-  AND (SELECT COALESCE(SUM(`owner_id`), 0) FROM `bot_data`) =
+  AND (SELECT COALESCE(SUM(`owner_id`), 0) FROM `bot_data`
+       WHERE `bot_id` NOT IN (4294967001, 4294967002)) =
       (SELECT `bot_owner_id_total` FROM `afk_migration_fixture_baseline`)
-  AND (SELECT COALESCE(BIT_XOR(CRC32(CONCAT(`bot_id`, ':', `owner_id`))), 0) FROM `bot_data`) =
+  AND (SELECT COALESCE(BIT_XOR(CRC32(CONCAT(`bot_id`, ':', `owner_id`))), 0) FROM `bot_data`
+       WHERE `bot_id` NOT IN (4294967001, 4294967002)) =
       (SELECT `bot_owner_checksum` FROM `afk_migration_fixture_baseline`)
-  AND (SELECT COUNT(*) FROM `afk_migration_fixture_old_format`) = 2
-  AND (SELECT SUM(`wallet_copper` + `bank_copper`) FROM `afk_migration_fixture_old_format`) = 20000
-  AND (SELECT COUNT(*) FROM `afk_migration_fixture_old_format`
-       WHERE (`fixture_key`, `character_owner_id`, `bot_owner_id`) IN
-         (('afk_reserved_sender', 4294967001, 4294967001),
-          ('afk_reserved_receiver', 4294967002, 4294967002))) = 2,
+  AND (SELECT COUNT(*) FROM `character_data`
+       WHERE (`id`, `name`) IN ((4294967001, 'AfkMigSender'), (4294967002, 'AfkMigReceiver'))) = 2
+  AND (SELECT COUNT(*) FROM `bot_data`
+       WHERE (`bot_id`, `owner_id`) IN ((4294967001, 4294967001), (4294967002, 4294967002))) = 2
+  AND (SELECT SUM(`copper` + 10 * `silver` + 100 * `gold` + 1000 * `platinum` +
+      `copper_bank` + 10 * `silver_bank` + 100 * `gold_bank` + 1000 * `platinum_bank`)
+    FROM `character_currency` WHERE `id` IN (4294967001, 4294967002)) = 20000,
   'ok', 'failed');
 SQL
 
-cat >"$fixture_dir/assert-restored.sql" <<SQL
+cat >"$fixture_dir/assert-restored.sql" <<'SQL'
 SELECT IF(
   (SELECT CONCAT(version, ':', bots_version, ':', custom_version) FROM db_version LIMIT 1) =
-    '$server_version:$bots_version:$custom_version'
+    '@SOURCE_DATABASE_VERSIONS@'
   AND (SELECT COUNT(*) FROM information_schema.tables
     WHERE table_schema = DATABASE() AND table_name IN
-      ('actor_profiles', 'actor_status', 'actor_events', 'actor_action_queue')) = 0,
+      ('actor_profiles', 'actor_status', 'actor_events', 'actor_action_queue')) = 0
+  AND (SELECT COUNT(*) FROM `character_data`
+    WHERE `id` IN (4294967001, 4294967002) OR `name` IN ('AfkMigSender', 'AfkMigReceiver')) = 0
+  AND (SELECT COUNT(*) FROM `character_currency` WHERE `id` IN (4294967001, 4294967002)) = 0
+  AND (SELECT COUNT(*) FROM `bot_data`
+    WHERE `bot_id` IN (4294967001, 4294967002) OR `name` IN ('AfkMigSenderBot', 'AfkMigReceiverBot')) = 0,
   'ok', 'failed');
 SQL
+sed -i "s/@SOURCE_DATABASE_VERSIONS@/$server_version:$bots_version:$custom_version/" \
+  "$fixture_dir/assert-restored.sql"
 
 compose_override="$fixture_dir/docker-compose.migration-rehearsal.yml"
 printf 'services:\n  eqemu-server:\n    volumes:\n      - %s\n' "$(jq -Rn --arg mount "$extract_dir:/opt/eqemu-old:ro" '$mount')" >"$compose_override"

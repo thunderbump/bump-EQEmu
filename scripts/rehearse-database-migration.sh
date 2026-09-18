@@ -25,9 +25,10 @@ if [[ "$AKKSTACK_STACK_ROLE" != validation ]]; then
 fi
 
 stack_dir="$AKKSTACK_STACK_DIR"
-gameplay_resolved="$AKKSTACK_GAMEPLAY_DEFAULT_RESOLVED"
-if [[ -e "$AKKSTACK_GAMEPLAY_DEFAULT_DIR" && "$stack_dir" == "$gameplay_resolved" ]]; then
-  printf 'error: migration rehearsal refuses the gameplay AkkStack destination\n' >&2
+validation_marker="$stack_dir/.afk-validation-stack"
+if [[ "$stack_dir" != "$AKKSTACK_VALIDATION_DEFAULT_RESOLVED" ]] \
+  && [[ ! -f "$validation_marker" || "$(cat "$validation_marker")" != afk-validation-stack-v1 ]]; then
+  printf 'error: migration rehearsal requires the default validation AkkStack or its explicit .afk-validation-stack marker\n' >&2
   exit 2
 fi
 
@@ -261,10 +262,21 @@ set -euo pipefail
 runtime=/tmp/migration-old-build-runtime
 ~/code/scripts/lib/prepare-zone-cli-runtime.sh "$runtime"
 jq --arg db "$MIGRATION_TARGET_DB" --arg user "$MIGRATION_TARGET_USER" --arg password "$MIGRATION_TARGET_PASSWORD" \
-  "def isolated: .host = \"mariadb\" | .port = \"3306\" | .db = \$db | .username = \$user | .password = \$password; .server.database |= isolated | .server.qsdatabase |= isolated | .server.content_database |= isolated" \
+  "def isolated: .host = \"mariadb\" | .port = \"3306\" | .db = \$db | .username = \$user | .password = \$password;
+   .server.database |= isolated |
+   .server.qsdatabase |= isolated |
+   .server.content_database |= isolated |
+   .server.auto_database_updates = false |
+   .server.world |= with_entries(select(.key | test(\"^loginserver([0-9]+)?$\") | not))" \
   "$runtime/eqemu_config.json" >"$runtime/config.tmp"
 mv "$runtime/config.tmp" "$runtime/eqemu_config.json"
 unset MIGRATION_TARGET_PASSWORD
+jq -e ".server.auto_database_updates == false and
+  ([.server.world | to_entries[] | select(.key | test(\"^loginserver([0-9]+)?$\"))] | length == 0)" \
+  "$runtime/eqemu_config.json" >/dev/null || {
+  printf "error: old-build runtime did not suppress database updates and login-server registration\n" >&2
+  exit 1
+}
 cd "$runtime"
 startup_log="$(mktemp)"
 startup_status=0
