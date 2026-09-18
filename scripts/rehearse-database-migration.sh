@@ -85,7 +85,7 @@ candidate_commit="$(git -C "$repo_root" rev-parse HEAD)"
 run_token="$(date -u +%Y%m%dT%H%M%SZ)-$$-$RANDOM"
 target_suffix="${run_token//[^A-Za-z0-9]/_}"
 target_db="afk_migration_$target_suffix"
-target_user="afk_mig_${$}_${RANDOM}"
+target_user="afk_mig_$$_${RANDOM}"
 target_password="$(printf '%s' "$run_token-$RANDOM-$candidate_commit" | sha256sum | awk '{print $1}')"
 [[ "$target_db" =~ ^afk_migration_[A-Za-z0-9_]+$ && "$target_user" =~ ^afk_mig_[A-Za-z0-9_]+$ ]] || { printf 'error: failed to construct safe isolated database identity\n' >&2; exit 2; }
 if [[ -z "$evidence_dir" ]]; then evidence_dir="$(mktemp -d "${TMPDIR:-/tmp}/eqemu-migration-evidence.XXXXXX")"; fi
@@ -214,12 +214,12 @@ failure_step=candidate_update
 run_candidate scenarios
 failure_step=upgraded_assertions
 query_file_expect_ok "$upgraded_assert_sql"
-first_state="$(target_query 'SELECT CONCAT(version,CHAR(58),bots_version,CHAR(58),custom_version) FROM db_version LIMIT 1; SELECT SHA2(GROUP_CONCAT(CONCAT(table_name,CHAR(58),column_name,CHAR(58),column_type,CHAR(58),is_nullable) ORDER BY table_name,ordinal_position SEPARATOR CHAR(10)),256) FROM information_schema.columns WHERE table_schema=DATABASE()')"
+first_state="$(target_query "SELECT CONCAT(version,CHAR(58),bots_version,CHAR(58),custom_version) FROM db_version LIMIT 1; SELECT SHA2(GROUP_CONCAT(CONCAT(table_name,CHAR(58),column_name,CHAR(58),column_type,CHAR(58),is_nullable) ORDER BY table_name,ordinal_position SEPARATOR '\\n'),256) FROM information_schema.columns WHERE table_schema=DATABASE()")"
 candidate_versions="${first_state%%$'\n'*}"
 [[ "$candidate_versions" =~ ^[0-9]+:[0-9]+:[0-9]+$ ]] || { printf 'error: Candidate updater left invalid database versions\n' >&2; exit 1; }
 failure_step=idempotent_update
 run_candidate no-scenarios
-second_state="$(target_query 'SELECT CONCAT(version,CHAR(58),bots_version,CHAR(58),custom_version) FROM db_version LIMIT 1; SELECT SHA2(GROUP_CONCAT(CONCAT(table_name,CHAR(58),column_name,CHAR(58),column_type,CHAR(58),is_nullable) ORDER BY table_name,ordinal_position SEPARATOR CHAR(10)),256) FROM information_schema.columns WHERE table_schema=DATABASE()')"
+second_state="$(target_query "SELECT CONCAT(version,CHAR(58),bots_version,CHAR(58),custom_version) FROM db_version LIMIT 1; SELECT SHA2(GROUP_CONCAT(CONCAT(table_name,CHAR(58),column_name,CHAR(58),column_type,CHAR(58),is_nullable) ORDER BY table_name,ordinal_position SEPARATOR '\\n'),256) FROM information_schema.columns WHERE table_schema=DATABASE()")"
 [[ "$first_state" == "$second_state" ]] || { printf 'error: second updater run changed database version or schema\n' >&2; exit 1; }
 
 failure_step=rollback_restore
@@ -245,8 +245,24 @@ jq --arg db "$MIGRATION_TARGET_DB" --arg user "$MIGRATION_TARGET_USER" --arg pas
 mv "$runtime/config.tmp" "$runtime/eqemu_config.json"
 unset MIGRATION_TARGET_PASSWORD
 cd "$runtime"
-"$OLD_WORLD" database:version' >>"$log" 2>&1
+startup_log="$(mktemp)"
+startup_status=0
+# A normal world process remains running. Reaching its listener proves startup
+# progressed through database-backed loading; timeout bounds and terminates it.
+timeout --signal=TERM --kill-after=5s 20s "$OLD_WORLD" >"$startup_log" 2>&1 || startup_status=$?
+cat "$startup_log"
+if [[ "$startup_status" -ne 124 ]]; then
+  printf "error: old world exited before the bounded startup window (status %s)\n" "$startup_status" >&2
+  exit 1
+fi
+if ! grep -Fq "Server (TCP) listener started" "$startup_log"; then
+  printf "error: old world did not reach its listener after database-backed startup\n" >&2
+  exit 1
+fi
+rm -f "$startup_log"' >>"$log" 2>&1
 
+failure_step=post_startup_restored_assertions
+query_file_expect_ok "$restored_assert_sql"
 failure_step=
 status=passed
 printf 'Migration rehearsal passed for Candidate %s; restore took %sms.\n' "$candidate_commit" "$restore_ms"

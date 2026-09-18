@@ -861,9 +861,16 @@ test_migration_rehearsal_enforces_restricted_database_contract() {
   assert_contains "$source" 'snapshot_stream | target_mysql'
   assert_contains "$source" '.server.content_database |= isolated'
   assert_contains "$source" '.host = \"mariadb\" | .port = \"3306\"'
+  assert_contains "$source" 'target_user="afk_mig_$$_${RANDOM}"'
+  assert_contains "$source" "SEPARATOR '\\\\n'"
+  assert_contains "$source" 'timeout --signal=TERM --kill-after=5s 20s "$OLD_WORLD"'
+  assert_contains "$source" 'grep -Fq "Server (TCP) listener started"'
+  assert_contains "$source" 'failure_step=post_startup_restored_assertions'
   assert_contains "$source" 'database_created=1'
   assert_contains "$source" 'user_created=1'
   assert_contains "$source" 'exit "$main_status"'
+  assert_not_contains "$source" '"$OLD_WORLD" database:version'
+  assert_not_contains "$source" 'SEPARATOR CHAR(10)'
   assert_not_contains "$source" 'snapshot_stream | "${compose[@]}" exec -T mariadb bash -lc '\''mysql -uroot'
 }
 
