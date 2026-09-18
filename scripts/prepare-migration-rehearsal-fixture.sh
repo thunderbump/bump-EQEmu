@@ -268,35 +268,85 @@ SET @afk_indexes = (SELECT COUNT(DISTINCT CONCAT(table_name, ':', index_name))
       'idx_actor_events_actor_cursor', 'idx_actor_events_zone_created',
       'idx_actor_action_queue_actor_idempotency', 'idx_actor_action_queue_claim_path',
       'idx_actor_action_queue_actor_state')) = 9;
-SET @afk_json_constraints = (SELECT COUNT(DISTINCT CASE
-      WHEN tc.table_name = 'actor_status'
-        AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(9), ''), CHAR(10), ''), CHAR(13), '') LIKE '%status_jsonisnull%'
-        AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(9), ''), CHAR(10), ''), CHAR(13), '') LIKE '%json_valid(status_json)%'
-        AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(9), ''), CHAR(10), ''), CHAR(13), '') LIKE '%char_length(status_json)<=4096%'
-        THEN 'actor_status.status_json'
-      WHEN tc.table_name = 'actor_events'
-        AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(9), ''), CHAR(10), ''), CHAR(13), '') LIKE '%json_valid(event_json)%'
-        AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(9), ''), CHAR(10), ''), CHAR(13), '') LIKE '%char_length(event_json)<=16384%'
-        THEN 'actor_events.event_json'
-      WHEN tc.table_name = 'actor_action_queue'
-        AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(9), ''), CHAR(10), ''), CHAR(13), '') LIKE '%source_metadata_jsonisnull%'
-        AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(9), ''), CHAR(10), ''), CHAR(13), '') LIKE '%json_valid(source_metadata_json)%'
-        AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(9), ''), CHAR(10), ''), CHAR(13), '') LIKE '%char_length(source_metadata_json)<=4096%'
-        THEN 'actor_action_queue.source_metadata_json'
-      WHEN tc.table_name = 'actor_action_queue'
-        AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(9), ''), CHAR(10), ''), CHAR(13), '') LIKE '%json_valid(action_json)%'
-        AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(9), ''), CHAR(10), ''), CHAR(13), '') LIKE '%char_length(action_json)<=16384%'
-        THEN 'actor_action_queue.action_json'
-      WHEN tc.table_name = 'actor_action_queue'
-        AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(9), ''), CHAR(10), ''), CHAR(13), '') LIKE '%result_jsonisnull%'
-        AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(9), ''), CHAR(10), ''), CHAR(13), '') LIKE '%json_valid(result_json)%'
-        AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(cc.check_clause), '`', ''), ' ', ''), CHAR(9), ''), CHAR(10), ''), CHAR(13), '') LIKE '%char_length(result_json)<=16384%'
-        THEN 'actor_action_queue.result_json'
-    END)
-  FROM information_schema.table_constraints tc
-  JOIN information_schema.check_constraints cc
-    ON cc.constraint_schema = tc.constraint_schema AND cc.constraint_name = tc.constraint_name
-  WHERE tc.table_schema = DATABASE() AND tc.constraint_type = 'CHECK') = 5;
+-- MariaDB 10.5.4 truncates information_schema.check_constraints.check_clause
+-- to 64 characters, which hides the length bound on several of these checks.
+-- Exercise both halves of each required constraint instead of matching metadata.
+DROP PROCEDURE IF EXISTS `afk_verify_actor_json_constraints`;
+DELIMITER //
+CREATE PROCEDURE `afk_verify_actor_json_constraints`()
+BEGIN
+  DECLARE status_invalid, status_oversize, event_invalid, event_oversize BOOL DEFAULT FALSE;
+  DECLARE source_invalid, source_oversize, action_invalid, action_oversize BOOL DEFAULT FALSE;
+  DECLARE result_invalid, result_oversize BOOL DEFAULT FALSE;
+
+  START TRANSACTION;
+  BEGIN
+    DECLARE CONTINUE HANDLER FOR 4025 SET status_invalid = TRUE;
+    INSERT INTO `actor_status` (`actor_id`, `state`, `status_json`, `updated_at`)
+      VALUES (0, 'afk-constraint-test', 'not-json', UTC_TIMESTAMP());
+  END;
+  BEGIN
+    DECLARE CONTINUE HANDLER FOR 4025 SET status_oversize = TRUE;
+    INSERT INTO `actor_status` (`actor_id`, `state`, `status_json`, `updated_at`)
+      VALUES (1, 'afk-constraint-test', CONCAT('"', REPEAT('x', 4096), '"'), UTC_TIMESTAMP());
+  END;
+  BEGIN
+    DECLARE CONTINUE HANDLER FOR 4025 SET event_invalid = TRUE;
+    INSERT INTO `actor_events` (`actor_id`, `event_type`, `event_json`, `created_at`)
+      VALUES (0, 'afk-constraint-test', 'not-json', UTC_TIMESTAMP());
+  END;
+  BEGIN
+    DECLARE CONTINUE HANDLER FOR 4025 SET event_oversize = TRUE;
+    INSERT INTO `actor_events` (`actor_id`, `event_type`, `event_json`, `created_at`)
+      VALUES (0, 'afk-constraint-test', CONCAT('"', REPEAT('x', 16384), '"'), UTC_TIMESTAMP());
+  END;
+  BEGIN
+    DECLARE CONTINUE HANDLER FOR 4025 SET source_invalid = TRUE;
+    INSERT INTO `actor_action_queue`
+      (`actor_id`, `source`, `source_metadata_json`, `action_type`, `action_json`, `idempotency_key`, `state`, `created_at`, `updated_at`)
+      VALUES (0, 'afk-constraint-test', 'not-json', 'test', '{}', 'source-invalid', 'test', UTC_TIMESTAMP(), UTC_TIMESTAMP());
+  END;
+  BEGIN
+    DECLARE CONTINUE HANDLER FOR 4025 SET source_oversize = TRUE;
+    INSERT INTO `actor_action_queue`
+      (`actor_id`, `source`, `source_metadata_json`, `action_type`, `action_json`, `idempotency_key`, `state`, `created_at`, `updated_at`)
+      VALUES (0, 'afk-constraint-test', CONCAT('"', REPEAT('x', 4096), '"'), 'test', '{}', 'source-oversize', 'test', UTC_TIMESTAMP(), UTC_TIMESTAMP());
+  END;
+  BEGIN
+    DECLARE CONTINUE HANDLER FOR 4025 SET action_invalid = TRUE;
+    INSERT INTO `actor_action_queue`
+      (`actor_id`, `source`, `action_type`, `action_json`, `idempotency_key`, `state`, `created_at`, `updated_at`)
+      VALUES (0, 'afk-constraint-test', 'test', 'not-json', 'action-invalid', 'test', UTC_TIMESTAMP(), UTC_TIMESTAMP());
+  END;
+  BEGIN
+    DECLARE CONTINUE HANDLER FOR 4025 SET action_oversize = TRUE;
+    INSERT INTO `actor_action_queue`
+      (`actor_id`, `source`, `action_type`, `action_json`, `idempotency_key`, `state`, `created_at`, `updated_at`)
+      VALUES (0, 'afk-constraint-test', 'test', CONCAT('"', REPEAT('x', 16384), '"'), 'action-oversize', 'test', UTC_TIMESTAMP(), UTC_TIMESTAMP());
+  END;
+  BEGIN
+    DECLARE CONTINUE HANDLER FOR 4025 SET result_invalid = TRUE;
+    INSERT INTO `actor_action_queue`
+      (`actor_id`, `source`, `action_type`, `action_json`, `idempotency_key`, `state`, `result_json`, `created_at`, `updated_at`)
+      VALUES (0, 'afk-constraint-test', 'test', '{}', 'result-invalid', 'test', 'not-json', UTC_TIMESTAMP(), UTC_TIMESTAMP());
+  END;
+  BEGIN
+    DECLARE CONTINUE HANDLER FOR 4025 SET result_oversize = TRUE;
+    INSERT INTO `actor_action_queue`
+      (`actor_id`, `source`, `action_type`, `action_json`, `idempotency_key`, `state`, `result_json`, `created_at`, `updated_at`)
+      VALUES (0, 'afk-constraint-test', 'test', '{}', 'result-oversize', 'test', CONCAT('"', REPEAT('x', 16384), '"'), UTC_TIMESTAMP(), UTC_TIMESTAMP());
+  END;
+
+  ROLLBACK;
+  SET @afk_status_json_constraint = status_invalid AND status_oversize;
+  SET @afk_event_json_constraint = event_invalid AND event_oversize;
+  SET @afk_source_metadata_json_constraint = source_invalid AND source_oversize;
+  SET @afk_action_json_constraint = action_invalid AND action_oversize;
+  SET @afk_result_json_constraint = result_invalid AND result_oversize;
+END//
+DELIMITER ;
+CALL `afk_verify_actor_json_constraints`();
+DROP PROCEDURE `afk_verify_actor_json_constraints`;
 SET @afk_character_count = (SELECT COUNT(*) FROM `character_data`
     WHERE `id` NOT IN (SELECT `fixture_character_1_id` FROM `afk_migration_fixture_baseline`
                        UNION SELECT `fixture_character_2_id` FROM `afk_migration_fixture_baseline`)) =
@@ -342,7 +392,11 @@ SET @afk_failures = CONCAT_WS(',',
   IF(@afk_critical_columns, NULL, 'critical_columns'),
   IF(@afk_column_counts, NULL, 'column_counts'),
   IF(@afk_indexes, NULL, 'indexes'),
-  IF(@afk_json_constraints, NULL, 'json_constraints'),
+  IF(@afk_status_json_constraint, NULL, 'actor_status.status_json_constraint'),
+  IF(@afk_event_json_constraint, NULL, 'actor_events.event_json_constraint'),
+  IF(@afk_source_metadata_json_constraint, NULL, 'actor_action_queue.source_metadata_json_constraint'),
+  IF(@afk_action_json_constraint, NULL, 'actor_action_queue.action_json_constraint'),
+  IF(@afk_result_json_constraint, NULL, 'actor_action_queue.result_json_constraint'),
   IF(@afk_character_count, NULL, 'character_count'),
   IF(@afk_character_owners, NULL, 'character_owners'),
   IF(@afk_currency, NULL, 'currency'),

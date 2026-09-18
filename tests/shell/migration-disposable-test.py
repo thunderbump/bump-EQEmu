@@ -111,6 +111,20 @@ sys.exit(98)
         self.assertIn('^[0-9]+[.][0-9]+$', script)
         self.assertIn('"$source_mariadb".*', script)
 
+    def test_json_constraints_are_checked_behaviorally_not_via_truncated_metadata(self):
+        preparer = (ROOT / 'scripts/prepare-migration-rehearsal-fixture.sh').read_text()
+        assertion = preparer.split(
+            'cat >"$fixture_dir/assert-upgraded.sql"', 1)[1].split('\nSQL\n', 1)[0]
+        self.assertNotIn('FROM information_schema.check_constraints', assertion)
+        self.assertEqual(assertion.count('DECLARE CONTINUE HANDLER FOR 4025'), 10)
+        for label in (
+                'actor_status.status_json_constraint',
+                'actor_events.event_json_constraint',
+                'actor_action_queue.source_metadata_json_constraint',
+                'actor_action_queue.action_json_constraint',
+                'actor_action_queue.result_json_constraint'):
+            self.assertIn(label, assertion)
+
 
 if __name__ == '__main__':
     unittest.main()

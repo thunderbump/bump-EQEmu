@@ -898,9 +898,10 @@ test_prepare_migration_fixture_builds_reviewable_inputs_without_running_docker()
   ' "$baseline/migration-rehearsal-manifest.json" >/dev/null || return 1
   [[ ! -e "$baseline/migration-rehearsal-fixture/docker-compose.migration-rehearsal.yml" ]] || return 1
   assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "currency_copper_total"
-  assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "information_schema.check_constraints"
-  assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "char_length(event_json)<=16384"
-  assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "COUNT(DISTINCT CASE"
+  assert_not_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "FROM information_schema.check_constraints"
+  assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "DECLARE CONTINUE HANDLER FOR 4025"
+  assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "REPEAT('x', 16384)"
+  assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "actor_events.event_json_constraint"
   assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "CONCAT('failed:', @afk_failures)"
   assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "critical_columns"
   assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "fixture_currency"
