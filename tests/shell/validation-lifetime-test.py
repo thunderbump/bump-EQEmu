@@ -28,7 +28,7 @@ if os.environ.get('MODE') == 'pass':
 state = pathlib.Path(os.environ['DOCKER_STATE'])
 resources = json.loads(state.read_text())
 for kind in ('container', 'network', 'volume'):
-    resources[kind+'-owned'] = dict(kind=kind, labels={'org.eqemu.validation': os.environ['VALIDATION_WORKER_LIFETIME_TOKEN']})
+    resources[kind+'-owned'] = dict(kind=kind, stopped=os.environ.get('STOPPED_CONTAINER')=='1', labels={'org.eqemu.validation': os.environ['VALIDATION_WORKER_LIFETIME_TOKEN']})
 state.write_text(json.dumps(resources))
 pathlib.Path(os.environ['VALIDATION_WORKER_DOCKER_MARKER']).touch()
 pathlib.Path(os.environ['MARKER']).write_text(str(os.getpid()))
@@ -59,11 +59,12 @@ kind, action, *args = sys.argv[1:]
 if os.environ.get('DOCKER_FAIL') == '1': raise SystemExit(1)
 if action == 'ls':
     token=args[-1].split('=',2)[-1]
-    print('\\n'.join(k for k,v in state.items() if v['kind']==kind and v['labels'].get('org.eqemu.validation')==token))
+    print('\\n'.join(k for k,v in state.items() if v['kind']==kind and v['labels'].get('org.eqemu.validation')==token and (kind!='container' or not v.get('stopped') or '--all' in args)))
 elif action == 'inspect':
     labels=state[args[-1]]['labels']
     print(json.dumps([{'Config': {'Labels': labels}} if kind=='container' else {'Labels':labels}]))
 elif action == 'rm':
+    if kind=='volume' and 'container-owned' in state: raise SystemExit(1)
     del state[args[-1]]; path.write_text(json.dumps(state))
 else: raise SystemExit(2)
 ''')
@@ -173,6 +174,55 @@ else: raise SystemExit(2)
         self.assertEqual(os.readlink(self.stack/'code'),before)
         os.killpg(process.pid,signal.SIGTERM);process.wait(timeout=15)
         self.assert_clean()
+
+    def test_stopped_container_is_removed_before_its_volume(self):
+        process,_,_=self.start(extra={'STOPPED_CONTAINER':'1'});self.await_started()
+        os.killpg(process.pid,signal.SIGTERM)
+        self.assertEqual(process.wait(timeout=15),143)
+        self.assert_clean();self.next_passes()
+
+    def test_cancel_during_lease_wait_does_not_launch_validation(self):
+        process,_,_=self.start();self.await_started()
+        request,evidence=self.request('waiting')
+        value=json.loads(request.read_text());value['lock_wait_seconds']=120
+        request.write_text(json.dumps(value))
+        waiting=subprocess.Popen([str(WORKER),'run','--request',str(request)],env=self.env,start_new_session=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        self.processes.append(waiting);self.groups.append(waiting.pid)
+        time.sleep(.3)
+        os.killpg(waiting.pid,signal.SIGTERM)
+        self.assertEqual(waiting.wait(timeout=3),143)
+        self.assertFalse((evidence/'lifetime.json').exists())
+        self.assertIsNone(process.poll())
+        os.killpg(process.pid,signal.SIGTERM);process.wait(timeout=15)
+        self.assert_clean()
+
+    def test_hard_kill_at_lease_publication_and_retirement_is_recoverable(self):
+        for point in ('publish', 'retire'):
+            with self.subTest(point=point):
+                request,evidence=self.request(point)
+                evidence.mkdir()
+                script = r"""
+import importlib.util, os, pathlib, sys
+spec=importlib.util.spec_from_file_location('lifetime',sys.argv[1]);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+point=sys.argv[2]; original=pathlib.Path.rename
+count=0
+def crash(self,target):
+    global count
+    result=original(self,target)
+    if (point=='publish' and '.pending-' in self.name) or (point=='retire' and '.released-' in pathlib.Path(target).name):
+        os._exit(99)
+    return result
+pathlib.Path.rename=crash
+sys.argv=['lifetime',*sys.argv[3:]]
+module.main()
+"""
+                args=['python3','-c',script,str(ROOT/'scripts/validation-lifetime.py'),point,'--worker-home',str(self.worker),'--stack',str(self.stack),'--evidence',str(evidence),'--checkout',str(self.source),'--wait','0','--timeout','10','--','true']
+                result=subprocess.run(args,env=self.env,capture_output=True,text=True,timeout=10)
+                self.assertEqual(result.returncode,99,result.stderr)
+                result=self.recover(request)
+                self.assertEqual(result.returncode,0,result.stderr)
+                self.assert_clean()
+        self.next_passes()
 
     def test_legacy_unowned_lock_is_never_deleted(self):
         lock=self.worker/'locks/validation-slot.lock';lock.mkdir(parents=True)

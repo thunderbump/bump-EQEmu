@@ -10,6 +10,7 @@ import signal
 import subprocess
 import sys
 import time
+import tempfile
 import uuid
 
 LABEL = 'org.eqemu.validation'
@@ -21,11 +22,14 @@ def save(path, value):
     temporary.replace(path)
 
 
-def guard(path, wait=0):
+def guard(path, wait=0, interrupted=None):
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(str(path) + '.guard', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     deadline = time.monotonic() + wait
     while True:
+        if interrupted:
+            os.close(fd)
+            raise InterruptedError('Validation interrupted while waiting for a lease.')
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             return fd
@@ -49,7 +53,7 @@ def clean(owner):
     deadline = time.monotonic() + 20
     if (evidence / 'docker-owned').exists():
         for kind in ('container', 'volume', 'network'):
-            ids = docker(deadline, kind, 'ls', '-q', '--filter', f'label={LABEL}={owner["token"]}').split()
+            ids = docker(deadline, kind, 'ls', *(['--all'] if kind == 'container' else []), '-q', '--filter', f'label={LABEL}={owner["token"]}').split()
             for identity in ids:
                 obj = json.loads(docker(deadline, kind, 'inspect', identity))[0]
                 labels = obj.get('Config', {}).get('Labels', {}) if kind == 'container' else obj.get('Labels', {})
@@ -90,8 +94,11 @@ def release(owner):
             continue
         if json.loads((path / 'owner.json').read_text()) != owner:
             raise RuntimeError('lease ownership changed; refusing removal')
-        (path / 'owner.json').unlink()
-        path.rmdir()
+        # Stop advertising the lease atomically while its full record exists.
+        retired = path.with_name(path.name + '.released-' + owner['token'])
+        path.rename(retired)
+        (retired / 'owner.json').unlink()
+        retired.rmdir()
 
 
 def recover(locks, held):
@@ -184,17 +191,24 @@ def main():
     try:
         for lock in locks:
             category = 'worker_busy' if lock == locks[0] else 'stack_busy'
-            held[str(lock)] = guard(lock, args.wait)
+            held[str(lock)] = guard(lock, args.wait, interrupted)
+        if interrupted:
+            raise InterruptedError('Validation interrupted before recovery.')
         recover(locks, held)
         if args.recover:
             print('Validation recovery complete; no live lease was removed.')
             return 0
         owner = dict(schema_version=1, token=uuid.uuid4().hex, locks=[str(p) for p in locks], evidence=str(evidence), stack=str(Path(args.stack).resolve()) if args.stack else '', checkout=str(Path(args.checkout).resolve()))
-        for lock in locks:
-            lock.mkdir()
-            save(lock / 'owner.json', owner)
         save(evidence / 'lifetime.json', owner)
+        for lock in locks:
+            # A killed publisher can leave an inert pending directory, never
+            # an advertised lease without a complete ownership record.
+            pending = Path(tempfile.mkdtemp(prefix=lock.name + '.pending-', dir=lock.parent))
+            save(pending / 'owner.json', owner)
+            pending.rename(lock)
         env = {**os.environ, 'VALIDATION_WORKER_LIFETIME_TOKEN': owner['token'], 'VALIDATION_WORKER_LIFETIME_PARENT': str(os.getpid()), 'VALIDATION_WORKER_DOCKER_MARKER': str(evidence / 'docker-owned')}
+        if interrupted:
+            raise InterruptedError('Validation interrupted before launch.')
         category = 'launch_failed'
         child = subprocess.Popen(args.command[1:], env=env, start_new_session=True, pass_fds=tuple(held.values()))
         deadline = time.monotonic() + args.timeout
@@ -207,7 +221,9 @@ def main():
         else:
             status = child.returncode
             category = ''
-    except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError) as error:
+    except InterruptedError as error:
+        status, category, message = 128 + (interrupted[0] if interrupted else signal.SIGTERM), 'interrupted', str(error)
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.SubprocessError) as error:
         message = str(error)
     finally:
         try:
@@ -216,7 +232,7 @@ def main():
             if owner:
                 clean(owner)
                 release(owner)
-        except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError) as error:
+        except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.SubprocessError) as error:
             status, category, message = 1, 'cleanup_failed', str(error)
         if category and not args.recover:
             result_path = evidence / 'result.json'
