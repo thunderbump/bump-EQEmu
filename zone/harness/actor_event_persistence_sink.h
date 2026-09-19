@@ -17,8 +17,10 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <thread>
+#include <vector>
 
 class Mob;
 
@@ -35,6 +37,13 @@ public:
 // actor loop without introducing the generalized evidence sequencer/outbox.
 class ActorEventRepositoryPersistenceSink final : public ActorEventPersistenceSink {
 public:
+	enum class PersistenceDisposition {
+		Persisted,
+		NotRequired,
+		Retry,
+		DeadLetter,
+	};
+
 	struct PendingSpeechEvent {
 		uint32_t bot_id = 0;
 		uint32_t entity_id = 0;
@@ -43,6 +52,10 @@ public:
 		std::string channel;
 		std::string text;
 		uint32_t audible_radius = 0;
+		uint32_t actor_id = 0;
+		std::optional<uint32_t> owner_character_id;
+		bool identity_resolved = false;
+		bool identity_lookup_failed = false;
 	};
 
 	struct Metrics {
@@ -54,6 +67,10 @@ public:
 		uint64_t persisted_bytes = 0;
 		uint64_t persistence_attempts = 0;
 		uint64_t persistence_failures = 0;
+		uint64_t not_required_records = 0;
+		uint64_t not_required_bytes = 0;
+		uint64_t dead_letter_records = 0;
+		uint64_t dead_letter_bytes = 0;
 		uint64_t saturated_records = 0;
 		uint64_t stopped_records = 0;
 		uint64_t queue_records = 0;
@@ -64,7 +81,7 @@ public:
 		uint64_t flush_nanoseconds = 0;
 	};
 
-	using PersistenceOperation = std::function<bool(const PendingSpeechEvent&)>;
+	using PersistenceOperation = std::function<PersistenceDisposition(const PendingSpeechEvent&)>;
 
 	explicit ActorEventRepositoryPersistenceSink(size_t max_records = 64, size_t max_bytes = 64 * 1024,
 												 PersistenceOperation persistence_operation = {});
@@ -77,12 +94,14 @@ public:
 	ActorEventCaptureResult Enqueue(PendingSpeechEvent event);
 	bool FlushFor(std::chrono::milliseconds timeout);
 	Metrics GetMetrics() const;
+	std::vector<PendingSpeechEvent> GetDeadLetters() const;
 
 private:
 	struct WorkerState;
 
 	static size_t EventBytes(const PendingSpeechEvent& event);
-	static bool PersistToRepository(const std::shared_ptr<WorkerState>& state, const PendingSpeechEvent& event);
+	static PersistenceDisposition PersistToRepository(
+		const std::shared_ptr<WorkerState>& state, PendingSpeechEvent& event);
 	static void Run(const std::shared_ptr<WorkerState>& state);
 	void Stop();
 

@@ -24,6 +24,7 @@
 #include "mob.h"
 #include "zone.h"
 
+#include <optional>
 #include <vector>
 
 extern Zone *zone;
@@ -196,18 +197,23 @@ FallbackDialogue::PublicGameplayContextInput BuildZoneFallbackDialoguePublicGame
 	};
 }
 
-void DeliverFallbackDialogueResult(Mob *target, const FallbackDialogue::TargetedSayResult &result)
+bool DeliverFallbackDialogueResult(Mob *target, const FallbackDialogue::TargetedSayResult &result)
 {
 	if (!target || !result.handled) {
-		return;
+		return true;
 	}
 
 	if (result.output_type == FallbackDialogue::OutputType::Say) {
-		target->Say("%s", result.message.c_str());
-	} else if (result.output_type == FallbackDialogue::OutputType::Emote) {
-		target->Emote("%s", result.message.c_str());
+		return target->Say("%s", result.message.c_str());
 	}
+	if (result.output_type == FallbackDialogue::OutputType::Emote) {
+		return target->Emote("%s", result.message.c_str());
+	}
+
+	return true;
 }
+
+std::optional<FallbackDialogue::TargetedSayResult> deferred_dialogue_result;
 
 }
 
@@ -240,14 +246,37 @@ void HandleTargetedSay(
 
 void ProcessReadyDelayedDialogue()
 {
+	// A popped result has already left DelayedDialogueQueue. Retain one result
+	// here when evidence capacity is unavailable, and do not pop later results
+	// until it is emitted. This keeps both memory and per-tick retry work bounded.
+	if (deferred_dialogue_result.has_value()) {
+		auto *speaker = entity_list.GetMob(static_cast<uint16>(deferred_dialogue_result->speaker_id));
+		auto *target = entity_list.GetMob(static_cast<uint16>(deferred_dialogue_result->target_id));
+		if (!speaker || !target || speaker->GetTarget() != target) {
+			deferred_dialogue_result.reset();
+		} else if (!DeliverFallbackDialogueResult(target, *deferred_dialogue_result)) {
+			return;
+		} else {
+			FallbackDialogue::LogDiagnostic(*deferred_dialogue_result);
+			deferred_dialogue_result.reset();
+		}
+	}
+
+	constexpr size_t max_results_per_tick = 8;
 	FallbackDialogue::TargetedSayResult result;
-	while (ZoneFallbackDialogueQueue().PopReadyResult(CurrentFallbackDialogueInteraction, result)) {
+	for (size_t processed = 0;
+		 processed < max_results_per_tick &&
+		 ZoneFallbackDialogueQueue().PopReadyResult(CurrentFallbackDialogueInteraction, result);
+		 ++processed) {
 		auto *target = entity_list.GetMob(static_cast<uint16>(result.target_id));
 		if (!target) {
 			continue;
 		}
 
-		DeliverFallbackDialogueResult(target, result);
+		if (!DeliverFallbackDialogueResult(target, result)) {
+			deferred_dialogue_result = std::move(result);
+			return;
+		}
 		FallbackDialogue::LogDiagnostic(result);
 	}
 }

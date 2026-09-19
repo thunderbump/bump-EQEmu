@@ -326,11 +326,11 @@ void ExpectBoundedPersistenceOverloadAndRecovery() {
 			slow_started = true;
 			slow_started_cv.notify_all();
 			if (!slow_release_cv.wait_for(lock, 1s, [&]() { return slow_released; })) {
-				return false;
+				return PersistenceSink::PersistenceDisposition::Retry;
 			}
 		}
 		persisted_order.push_back(event.bot_id);
-		return true;
+		return PersistenceSink::PersistenceDisposition::Persisted;
 	});
 
 	const auto capture_started = std::chrono::steady_clock::now();
@@ -364,8 +364,10 @@ void ExpectBoundedPersistenceOverloadAndRecovery() {
 				"recovery should flush retained required evidence in capture order");
 
 	std::atomic<bool> persistence_available{false};
-	PersistenceSink unavailable_sink(
-		2, 512, [&](const PersistenceSink::PendingSpeechEvent&) { return persistence_available.load(); });
+	PersistenceSink unavailable_sink(2, 512, [&](const PersistenceSink::PendingSpeechEvent&) {
+		return persistence_available.load() ? PersistenceSink::PersistenceDisposition::Persisted
+										: PersistenceSink::PersistenceDisposition::Retry;
+	});
 	ExpectEqual(unavailable_sink.Enqueue(pending(10)), ActorEventCaptureResult::Accepted,
 				"unavailable persistence should retain the first event");
 	ExpectEqual(unavailable_sink.Enqueue(pending(11)), ActorEventCaptureResult::Accepted,
@@ -383,6 +385,23 @@ void ExpectBoundedPersistenceOverloadAndRecovery() {
 	const auto recovered = unavailable_sink.GetMetrics();
 	ExpectEqual(recovered.persisted_records, uint64_t(2), "recovery should retain and persist both accepted events");
 	ExpectEqual(recovered.queue_records, uint64_t(0), "recovery should empty the queue");
+
+	PersistenceSink dead_letter_sink(1, 512, [](const PersistenceSink::PendingSpeechEvent&) {
+		return PersistenceSink::PersistenceDisposition::DeadLetter;
+	});
+	ExpectEqual(dead_letter_sink.Enqueue(pending(20)), ActorEventCaptureResult::Accepted,
+				"evidence whose identity changes after capture should enter the bounded queue");
+	Expect(dead_letter_sink.FlushFor(1s), "dead-lettered evidence should leave the active retry queue");
+	const auto dead_lettered = dead_letter_sink.GetMetrics();
+	ExpectEqual(dead_lettered.persisted_records, uint64_t(0),
+				"dead-lettered evidence must not be reported as persisted");
+	ExpectEqual(dead_lettered.dead_letter_records, uint64_t(1),
+				"an unresolvable capture-time identity should remain visible in metrics");
+	ExpectEqual(dead_lettered.queue_records, uint64_t(1),
+				"dead-lettered evidence should remain inside the configured memory bound");
+	const auto dead_letters = dead_letter_sink.GetDeadLetters();
+	ExpectEqual(dead_letters.size(), static_cast<size_t>(1), "the dead-letter record should remain inspectable");
+	ExpectEqual(dead_letters.front().text, pending(20).text, "the dead letter should retain the evidence payload");
 
 	std::cout << "[METRIC] actor-evidence attempted_records="
 			  << burst_complete.attempted_records + recovered.attempted_records
@@ -420,7 +439,7 @@ void ExpectBoundedPersistenceShutdown() {
 			operation->changed.wait(lock, [&]() { return operation->release; });
 			operation->finished = true;
 			operation->changed.notify_all();
-			return false;
+			return PersistenceSink::PersistenceDisposition::Retry;
 		});
 		ExpectEqual(sink.Enqueue({.bot_id = 1, .text = "wedged-persistence"}),
 					EQ::ZoneHarness::ActorEventCaptureResult::Accepted,
@@ -966,10 +985,10 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 					blocked_started_cv.notify_all();
 					if (!blocked_release_cv.wait_for(
 							lock, std::chrono::seconds(1), [&]() { return blocked_released; })) {
-						return false;
+						return EQ::ZoneHarness::ActorEventRepositoryPersistenceSink::PersistenceDisposition::Retry;
 					}
 				}
-				return true;
+				return EQ::ZoneHarness::ActorEventRepositoryPersistenceSink::PersistenceDisposition::Persisted;
 			});
 		recorder.SetPersistenceSink(&blocked_sink);
 		const auto overload_cursor = recorder.MaxEventID();

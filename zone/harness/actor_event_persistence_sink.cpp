@@ -20,6 +20,7 @@
 #include <condition_variable>
 #include <cstdlib>
 #include <deque>
+#include <iostream>
 #include <mutex>
 #include <optional>
 
@@ -45,6 +46,7 @@ struct ActorEventRepositoryPersistenceSink::WorkerState {
 	std::condition_variable work_available;
 	std::condition_variable state_changed;
 	std::deque<PendingSpeechEvent> queue;
+	std::deque<PendingSpeechEvent> dead_letters;
 	Metrics metrics;
 	bool persistence_in_flight = false;
 	bool stop_requested = false;
@@ -101,8 +103,8 @@ ActorEventCaptureResult ActorEventRepositoryPersistenceSink::Enqueue(PendingSpee
 	if (state->stop_requested) {
 		state->metrics.stopped_records++;
 		result = ActorEventCaptureResult::Stopped;
-	} else if (state->queue.size() >= state->max_records || event_bytes > state->max_bytes ||
-			   state->metrics.queue_bytes > state->max_bytes - event_bytes) {
+	} else if (state->queue.size() + state->dead_letters.size() >= state->max_records ||
+			   event_bytes > state->max_bytes || state->metrics.queue_bytes > state->max_bytes - event_bytes) {
 		// The caller receives an explicit deferral signal. Never evict an older
 		// required event to make a new event appear successful.
 		state->metrics.saturated_records++;
@@ -111,7 +113,7 @@ ActorEventCaptureResult ActorEventRepositoryPersistenceSink::Enqueue(PendingSpee
 		state->queue.push_back(std::move(event));
 		state->metrics.accepted_records++;
 		state->metrics.accepted_bytes += event_bytes;
-		state->metrics.queue_records = state->queue.size();
+		state->metrics.queue_records = state->queue.size() + state->dead_letters.size();
 		state->metrics.queue_bytes += event_bytes;
 		state->metrics.queue_high_water_records =
 			std::max(state->metrics.queue_high_water_records, state->metrics.queue_records);
@@ -144,14 +146,25 @@ ActorEventRepositoryPersistenceSink::Metrics ActorEventRepositoryPersistenceSink
 	return state->metrics;
 }
 
+std::vector<ActorEventRepositoryPersistenceSink::PendingSpeechEvent>
+ActorEventRepositoryPersistenceSink::GetDeadLetters() const {
+	const auto state = state_;
+	if (!state) {
+		return {};
+	}
+	std::lock_guard lock(state->mutex);
+	return {state->dead_letters.begin(), state->dead_letters.end()};
+}
+
 size_t ActorEventRepositoryPersistenceSink::EventBytes(const PendingSpeechEvent& event) {
 	// Count the fixed scalar envelope as well as variable payload bytes. This is
 	// an accounting bound, not allocator-specific heap introspection.
 	return sizeof(PendingSpeechEvent) + event.channel.size() + event.text.size();
 }
 
-bool ActorEventRepositoryPersistenceSink::PersistToRepository(
-	const std::shared_ptr<WorkerState>& state, const PendingSpeechEvent& event) {
+ActorEventRepositoryPersistenceSink::PersistenceDisposition
+ActorEventRepositoryPersistenceSink::PersistToRepository(
+	const std::shared_ptr<WorkerState>& state, PendingSpeechEvent& event) {
 	if (!state->database_connection_initialized) {
 		state->database_connection_initialized = true;
 		const auto config = EQEmuConfig::get();
@@ -162,40 +175,48 @@ bool ActorEventRepositoryPersistenceSink::PersistToRepository(
 					   config->DatabaseDB,
 					   config->DatabasePort,
 					   "actor-events")) {
-			return false;
+			return PersistenceDisposition::Retry;
 		}
 	}
 
-	// Keep "no actor profile" distinct from a failed lookup. Treating a failed
-	// lookup as absence would silently acknowledge required evidence while the
-	// store is unavailable.
-	auto profile_result = state->persistence_database.QueryDatabase(fmt::format(
-		"SELECT actor_id, owner_character_id, enabled FROM actor_profiles WHERE bot_id = {} LIMIT 1", event.bot_id));
-	if (!profile_result.Success()) {
-		return false;
+	if (!event.identity_resolved) {
+		// Resolve once, then retain the binding with the event across insert
+		// retries. A clean first lookup can classify ordinary bots as not requiring
+		// actor evidence. After any lookup outage, absence/disablement is ambiguous
+		// and must be retained as a visible dead letter instead of acknowledged.
+		auto profile_result = state->persistence_database.QueryDatabase(fmt::format(
+			"SELECT actor_id, owner_character_id, enabled FROM actor_profiles WHERE bot_id = {} LIMIT 1", event.bot_id));
+		if (!profile_result.Success()) {
+			event.identity_lookup_failed = true;
+			return PersistenceDisposition::Retry;
+		}
+		if (profile_result.RowCount() == 0) {
+			return event.identity_lookup_failed ? PersistenceDisposition::DeadLetter
+										: PersistenceDisposition::NotRequired;
+		}
+		auto row = profile_result.begin();
+		if (!row[0] || !row[2]) {
+			event.identity_lookup_failed = true;
+			return PersistenceDisposition::Retry;
+		}
+		event.actor_id = static_cast<uint32_t>(strtoul(row[0], nullptr, 10));
+		const bool enabled = strtoul(row[2], nullptr, 10) != 0;
+		if (!event.actor_id || !enabled) {
+			return event.identity_lookup_failed ? PersistenceDisposition::DeadLetter
+										: PersistenceDisposition::NotRequired;
+		}
+		event.owner_character_id = row[1]
+			? std::optional<uint32_t>(static_cast<uint32_t>(strtoul(row[1], nullptr, 10)))
+			: std::nullopt;
+		event.identity_resolved = true;
 	}
-	if (profile_result.RowCount() == 0) {
-		return true;
-	}
-	auto row = profile_result.begin();
-	if (!row[0] || !row[2]) {
-		return false;
-	}
-	const auto actor_id = static_cast<uint32_t>(strtoul(row[0], nullptr, 10));
-	const bool enabled = strtoul(row[2], nullptr, 10) != 0;
-	if (!actor_id || !enabled) {
-		return true;
-	}
-	const auto owner_character_id = row[1]
-		? std::optional<uint32_t>(static_cast<uint32_t>(strtoul(row[1], nullptr, 10)))
-		: std::nullopt;
 
 	return ActorEventsRepository::AppendObservedSpeechEmitted(
 			   state->persistence_database,
 			   {
-				   .actor_id = actor_id,
+				   .actor_id = event.actor_id,
 				   .bot_id = event.bot_id,
-				   .owner_character_id = owner_character_id,
+				   .owner_character_id = event.owner_character_id,
 				   .zone_id = event.zone_id ? std::optional<uint32_t>(event.zone_id) : std::nullopt,
 				   .instance_id = std::optional<uint32_t>(event.instance_id),
 				   .entity_id = event.entity_id ? std::optional<uint32_t>(event.entity_id) : std::nullopt,
@@ -203,7 +224,9 @@ bool ActorEventRepositoryPersistenceSink::PersistToRepository(
 				   .text = event.text,
 				   .audible_radius = event.audible_radius,
 			   })
-			   .event_id != 0;
+			   .event_id != 0
+		? PersistenceDisposition::Persisted
+		: PersistenceDisposition::Retry;
 }
 
 void ActorEventRepositoryPersistenceSink::Run(const std::shared_ptr<WorkerState>& state) {
@@ -226,7 +249,7 @@ void ActorEventRepositoryPersistenceSink::Run(const std::shared_ptr<WorkerState>
 		}
 
 		const auto started_at = std::chrono::steady_clock::now();
-		const bool persisted = state->persistence_operation ? state->persistence_operation(event)
+		const auto disposition = state->persistence_operation ? state->persistence_operation(event)
 														  : PersistToRepository(state, event);
 		const auto elapsed = static_cast<uint64_t>(
 			std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - started_at)
@@ -240,16 +263,34 @@ void ActorEventRepositoryPersistenceSink::Run(const std::shared_ptr<WorkerState>
 			state->state_changed.notify_all();
 			return;
 		}
-		if (persisted) {
+		if (disposition == PersistenceDisposition::Persisted ||
+			disposition == PersistenceDisposition::NotRequired ||
+			disposition == PersistenceDisposition::DeadLetter) {
 			state->queue.pop_front();
-			state->metrics.persisted_records++;
-			state->metrics.persisted_bytes += event_bytes;
-			state->metrics.queue_records = state->queue.size();
-			state->metrics.queue_bytes -= event_bytes;
+			if (disposition == PersistenceDisposition::Persisted) {
+				state->metrics.persisted_records++;
+				state->metrics.persisted_bytes += event_bytes;
+			} else if (disposition == PersistenceDisposition::NotRequired) {
+				state->metrics.not_required_records++;
+				state->metrics.not_required_bytes += event_bytes;
+			} else {
+				state->dead_letters.push_back(event);
+				state->metrics.dead_letter_records++;
+				state->metrics.dead_letter_bytes += event_bytes;
+				std::cerr << "[ACTOR-EVIDENCE-DEAD-LETTER] bot_id=" << event.bot_id
+						  << " entity_id=" << event.entity_id
+						  << " reason=identity_unavailable_at_flush\n";
+			}
+			state->metrics.queue_records = state->queue.size() + state->dead_letters.size();
+			if (disposition != PersistenceDisposition::DeadLetter) {
+				state->metrics.queue_bytes -= event_bytes;
+			}
 			state->state_changed.notify_all();
 			continue;
 		}
 
+		// Persist identity-resolution progress on the retained queue record.
+		state->queue.front() = event;
 		state->metrics.persistence_failures++;
 		state->state_changed.notify_all();
 		// Retain the failed front record and retry it in order. A short bounded
