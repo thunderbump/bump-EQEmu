@@ -122,7 +122,9 @@ network="$run_token"
 volume="$run_token-data"
 owner_label="org.eqemu.rehearsal=$run_token"
 worker_label=()
+worker_timeout_args=()
 if [[ -n "${VALIDATION_WORKER_LIFETIME_TOKEN:-}" ]]; then
+  worker_timeout_args=(--foreground)
   worker_label=(--label "org.eqemu.validation=$VALIDATION_WORKER_LIFETIME_TOKEN")
 fi
 
@@ -172,7 +174,7 @@ run_runtime() {
     # Bound both the scenario process and the Docker client. The EXIT trap uses
     # the ownership label to force-remove the container if timeout's TERM/KILL
     # cannot complete Docker's five-second stop sequence.
-    deadline=(timeout --foreground --signal=TERM --kill-after=10s "${MIGRATION_REHEARSAL_SCENARIO_TIMEOUT_SECONDS:-300}s")
+    deadline=(timeout "${worker_timeout_args[@]}" --signal=TERM --kill-after=10s "${MIGRATION_REHEARSAL_SCENARIO_TIMEOUT_SECONDS:-300}s")
   fi
   "${deadline[@]}" docker run --rm --name "$runtime_container" --label "$owner_label" "${worker_label[@]}" \
     --network "$network" --read-only --user 0:0 --init --ulimit core=0 --stop-timeout 5 \

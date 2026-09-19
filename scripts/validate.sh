@@ -10,7 +10,9 @@ stack_dir="$AKKSTACK_STACK_DIR"
 compose_files=(docker-compose.yml docker-compose.dev.yml)
 compose=(docker-compose)
 owned_container_args=()
+timeout_args=()
 if [[ -n "${VALIDATION_WORKER_LIFETIME_TOKEN:-}" ]]; then
+  timeout_args=(--foreground)
   owned_container_args=(--label "org.eqemu.validation=$VALIDATION_WORKER_LIFETIME_TOKEN")
 fi
 mark_owned_docker() {
@@ -129,7 +131,7 @@ run_migration_rehearsal() {
   command -v timeout >/dev/null || { printf 'error: timeout is required\n' >&2; return 125; }
   # This deadline covers image setup, import, updates, scenarios and recovery.
   # TERM lets the rehearsal's EXIT trap remove its owned Docker resources.
-  timeout --foreground --signal=TERM --kill-after=30s "${deadline}s" \
+  timeout "${timeout_args[@]}" --signal=TERM --kill-after=30s "${deadline}s" \
     "$repo_root/scripts/rehearse-database-migration.sh" "${args[@]}"
 }
 
