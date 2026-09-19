@@ -155,6 +155,8 @@ make_afk_contract_repo() {
   source_ref="$fixture_source"
   cp "$repo_root/scripts/validation-worker.sh" "$source_ref/scripts/validation-worker.sh"
   cp "$repo_root/scripts/validate-afk" "$source_ref/scripts/validate-afk"
+  cp "$repo_root/scripts/public-fixture-summary.py" "$source_ref/scripts/public-fixture-summary.py"
+  git -C "$source_ref" add scripts/public-fixture-summary.py
   install_fake_preparer "$source_ref"
   chmod +x "$source_ref/scripts/validation-worker.sh" "$source_ref/scripts/validate-afk"
   git -C "$source_ref" add scripts/validation-worker.sh scripts/validate-afk
@@ -903,6 +905,7 @@ test_current_afk_command_stops_when_preparation_fails() {
       VALIDATION_AFK_EVIDENCE_DIR="$evidence" "$source/scripts/validate-afk"
     [[ "$status" -ne 0 ]] || return 1
     assert_json_equals "$evidence/result.json" .category fixture_preparation_failed
+    assert_json_equals "$evidence/public-summary.json" .step fixture_preparation
     [[ ! -f "$evidence/afk-checks.json" ]] || return 1
     [[ ! -e "$evidence/stack-binding.json" ]] || return 1
     [[ -s "$evidence/logs/fixture-preparation.log" || "$mode" == preparer ]] || return 1
@@ -924,6 +927,23 @@ test_current_afk_command_classifies_missing_migration_fixture() {
   assert_json_equals "$evidence/result.json" .category prerequisite_unavailable
   assert_json_equals "$evidence/afk-checks.json" .status inconclusive
   assert_json_equals "$evidence/afk-checks.json" '.checks | map(.status) | join(",")' "passed,inconclusive,not_run"
+}
+
+test_public_summary_failure_preserves_validation_exit_status() {
+  local source evidence status output
+  make_afk_contract_repo source broken-summary
+  printf 'raise RuntimeError("summary failed")\n' >"$source/scripts/public-fixture-summary.py"
+  git -C "$source" add scripts/public-fixture-summary.py
+  git -C "$source" commit -m 'break optional summary' >/dev/null 2>&1
+  evidence="$tmp_root/broken-summary-evidence"
+  capture_run status output env HOME="$tmp_root/operator-home" \
+    VALIDATION_WORKER_HOME="$tmp_root/worker-broken-summary" \
+    VALIDATION_WORKER_TEST_PREPARE_EXIT=23 \
+    VALIDATION_AFK_EVIDENCE_DIR="$evidence" "$source/scripts/validate-afk"
+  [[ "$status" -eq 23 ]] || return 1
+  assert_json_equals "$evidence/result.json" .exit_code 23
+  [[ ! -e "$evidence/public-summary.json" ]] || return 1
+  [[ -s "$evidence/logs/public-summary.log" ]] || return 1
 }
 
 test_current_afk_command_rejects_arguments() {
@@ -1340,6 +1360,7 @@ run_test "current AFK command validates exact HEAD without arguments" test_curre
 run_test "current AFK command prepares its own manifest from the Candidate" test_current_afk_command_prepares_own_manifest_from_candidate
 run_test "current AFK command stops before checks when preparation fails" test_current_afk_command_stops_when_preparation_fails
 run_test "current AFK command classifies a missing migration fixture" test_current_afk_command_classifies_missing_migration_fixture
+run_test "summary failure preserves validation exit status" test_public_summary_failure_preserves_validation_exit_status
 run_test "current AFK command rejects arguments" test_current_afk_command_rejects_arguments
 run_test "current AFK command returns nonzero for failure and missing stack" test_current_afk_command_returns_nonzero_for_failure_and_missing_stack
 run_test "AFK contract reports stable passing checks" test_afk_contract_passes_with_stable_checks
