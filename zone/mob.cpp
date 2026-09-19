@@ -5079,18 +5079,27 @@ void Mob::Say(const char *format, ...)
 		}
 	else if (RuleB(Chat, AutoInjectSaylinksToSay)) {
 		std::string new_message = EQ::SayLinkEngine::InjectSaylinksIfNotExist(buf);
+		const auto evidence =
+			EQ::ZoneHarness::ActorEventRecorder::ObserveSpeechEmitted(talker, "say", new_message, distance);
+		if (evidence == EQ::ZoneHarness::ActorEventCaptureResult::Saturated ||
+			evidence == EQ::ZoneHarness::ActorEventCaptureResult::Stopped) {
+			return;
+		}
 		entity_list.MessageCloseString(
 			talker, false, distance, Chat::NPCQuestSay,
 			GENERIC_SAY, GetCleanName(), new_message.c_str()
 		);
-		EQ::ZoneHarness::ActorEventRecorder::ObserveSpeechEmitted(talker, "say", new_message, distance);
 	}
 	else {
+		const auto evidence = EQ::ZoneHarness::ActorEventRecorder::ObserveSpeechEmitted(talker, "say", buf, distance);
+		if (evidence == EQ::ZoneHarness::ActorEventCaptureResult::Saturated ||
+			evidence == EQ::ZoneHarness::ActorEventCaptureResult::Stopped) {
+			return;
+		}
 		entity_list.MessageCloseString(
 			talker, false, distance, Chat::NPCQuestSay,
 			GENERIC_SAY, GetCleanName(), buf
 		);
-		EQ::ZoneHarness::ActorEventRecorder::ObserveSpeechEmitted(talker, "say", buf, distance);
 	}
 }
 
@@ -5165,11 +5174,15 @@ void Mob::Emote(const char *format, ...)
 	vsnprintf(buf, 1000, format, ap);
 	va_end(ap);
 
+	const auto evidence = EQ::ZoneHarness::ActorEventRecorder::ObserveSpeechEmitted(this, "emote", buf, 200);
+	if (evidence == EQ::ZoneHarness::ActorEventCaptureResult::Saturated ||
+		evidence == EQ::ZoneHarness::ActorEventCaptureResult::Stopped) {
+		return;
+	}
 	entity_list.MessageCloseString(
 		this, false, 200, 10,
 		GENERIC_EMOTE, GetCleanName(), buf
 	);
-	EQ::ZoneHarness::ActorEventRecorder::ObserveSpeechEmitted(this, "emote", buf, 200);
 }
 
 void Mob::QuestJournalledSay(Client *QuestInitiator, const char *str, Journal::Options &opts)

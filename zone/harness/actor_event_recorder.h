@@ -23,6 +23,13 @@ namespace EQ::ZoneHarness {
 
 class ActorEventPersistenceSink;
 
+enum class ActorEventCaptureResult {
+	NotRequired,
+	Accepted,
+	Saturated,
+	Stopped,
+};
+
 struct ActorEventEntity {
 	uint16_t entity_id = 0;
 	std::string entity_ref;
@@ -78,7 +85,12 @@ public:
 		int32_t original_cast_time_ms
 	);
 	static void ObserveTargetChanged(Mob *actor, Mob *previous_target, Mob *target);
-	static void ObserveSpeechEmitted(Mob *actor, const std::string &channel, const std::string &text, uint32_t audible_radius);
+	static ActorEventCaptureResult ObserveSpeechEmitted(
+		Mob *actor,
+		const std::string &channel,
+		const std::string &text,
+		uint32_t audible_radius
+	);
 
 	void SetPersistenceSink(ActorEventPersistenceSink *sink);
 	void Record(const std::string &type, const std::string &message);
@@ -91,7 +103,12 @@ public:
 		int32_t original_cast_time_ms
 	);
 	void RecordTargetChanged(Mob *actor, Mob *previous_target, Mob *target);
-	void RecordSpeechEmitted(Mob *actor, const std::string &channel, const std::string &text, uint32_t audible_radius);
+	ActorEventCaptureResult RecordSpeechEmitted(
+		Mob *actor,
+		const std::string &channel,
+		const std::string &text,
+		uint32_t audible_radius
+	);
 	std::vector<ActorEvent> Drain();
 	std::vector<ActorEvent> Since(uint64_t since_id, size_t limit) const;
 	uint64_t PendingCount() const;
