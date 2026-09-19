@@ -26,6 +26,7 @@
 #include "common/repositories/actor_profiles_repository.h"
 #include "common/repositories/actor_status_repository.h"
 #include "common/repositories/player_event_logs_repository.h"
+#include "common/rulesys.h"
 #include "common/strings.h"
 #include "zone/bot.h"
 #include "zone/actor_action_executor.h"
@@ -164,6 +165,41 @@ private:
 	std::vector<uint32_t> actor_ids_;
 };
 
+class ConfigurablePersistenceSink final : public EQ::ZoneHarness::ActorEventPersistenceSink {
+public:
+	EQ::ZoneHarness::ActorEventCaptureResult PersistSpeechEmitted(
+		Mob*,
+		const EQ::ZoneHarness::ActorEvent& event
+	) override {
+		attempted_texts.push_back(event.speech.text);
+		return result;
+	}
+
+	EQ::ZoneHarness::ActorEventCaptureResult result =
+		EQ::ZoneHarness::ActorEventCaptureResult::Saturated;
+	std::vector<std::string> attempted_texts;
+};
+
+class ScopedRuleOverride {
+public:
+	ScopedRuleOverride(const std::string& name, const std::string& value) : name_(name) {
+		if (RuleManager::Instance()->GetRule(name_, original_)) {
+			changed_ = RuleManager::Instance()->SetRule(name_, value, nullptr, false, false);
+		}
+	}
+
+	~ScopedRuleOverride() {
+		if (changed_) {
+			RuleManager::Instance()->SetRule(name_, original_, nullptr, false, false);
+		}
+	}
+
+private:
+	std::string name_;
+	std::string original_;
+	bool changed_ = false;
+};
+
 class BlockingPersistenceSink final : public EQ::ZoneHarness::ActorEventPersistenceSink {
 public:
 	EQ::ZoneHarness::ActorEventCaptureResult PersistSpeechEmitted(Mob*, const EQ::ZoneHarness::ActorEvent&) override {
@@ -272,6 +308,74 @@ void ExpectRecorderShutdownWaitsForInFlightCallbacks() {
 		   "active recorder teardown should finish once in-flight callbacks drain");
 	ExpectEqual(recorder->Since(0, 4).size(), static_cast<size_t>(1),
 				"blocked speech callback should still record one actor event before teardown completes");
+}
+
+void ExpectSpeechDefersAndRetriesThroughProductionPath(
+	Bot* actor,
+	EQ::ZoneHarness::ActorEventRecorder& recorder,
+	EQ::ZoneHarness::ActorEventPersistenceSink* original_sink
+) {
+	using EQ::ZoneHarness::ActorEventCaptureResult;
+
+	ConfigurablePersistenceSink controlled_sink;
+	recorder.SetPersistenceSink(&controlled_sink);
+	ScopedRuleOverride saylink_rule("Chat:AutoInjectSaylinksToSay", "false");
+
+	{
+		ScopedRuleOverride dialogue_rule("Chat:QuestDialogueUsesDialogueWindow", "false");
+		const auto cursor = recorder.MaxEventID();
+		Expect(!actor->Say("%s", "deferred-normal-speech"),
+			   "normal speech should report evidence saturation to its queued caller");
+		Expect(recorder.Since(cursor, 4).empty(),
+			   "saturated normal speech must not be recorded as emitted");
+
+		controlled_sink.result = ActorEventCaptureResult::Accepted;
+		Expect(actor->Say("%s", "deferred-normal-speech"),
+			   "normal speech should succeed when evidence capacity recovers");
+		const auto recovered = recorder.Since(cursor, 4);
+		ExpectEqual(recovered.size(), static_cast<size_t>(1),
+					"retried normal speech should produce exactly one emitted event");
+	}
+
+	{
+		ScopedRuleOverride dialogue_rule("Chat:QuestDialogueUsesDialogueWindow", "true");
+		controlled_sink.result = ActorEventCaptureResult::Saturated;
+		const auto cursor = recorder.MaxEventID();
+		Expect(!actor->Say("%s", "deferred-dialogue-window-speech"),
+			   "dialogue-window speech should defer before rendering when evidence is saturated");
+		Expect(recorder.Since(cursor, 4).empty(),
+			   "saturated dialogue-window speech must not bypass required evidence");
+
+		controlled_sink.result = ActorEventCaptureResult::Accepted;
+		Expect(actor->Say("%s", "deferred-dialogue-window-speech"),
+			   "dialogue-window speech should retry after evidence capacity recovers");
+		const auto recovered = recorder.Since(cursor, 4);
+		ExpectEqual(recovered.size(), static_cast<size_t>(1),
+					"retried dialogue-window speech should produce exactly one emitted event");
+		ExpectEqual(recovered[0].speech.text, std::string("deferred-dialogue-window-speech"),
+					"dialogue-window evidence should preserve the rendered speech text");
+	}
+
+	{
+		controlled_sink.result = ActorEventCaptureResult::Saturated;
+		const auto cursor = recorder.MaxEventID();
+		Expect(!actor->Emote("%s", "deferred-emote"),
+			   "emotes should report evidence saturation before emission");
+		Expect(recorder.Since(cursor, 4).empty(), "saturated emotes must not be recorded as emitted");
+
+		controlled_sink.result = ActorEventCaptureResult::Accepted;
+		Expect(actor->Emote("%s", "deferred-emote"), "emotes should retry after evidence capacity recovers");
+		const auto recovered = recorder.Since(cursor, 4);
+		ExpectEqual(recovered.size(), static_cast<size_t>(1),
+					"retried emotes should produce exactly one emitted event");
+		ExpectEqual(recovered[0].speech.channel, std::string("emote"),
+					"retried emote evidence should preserve its channel");
+	}
+
+	ExpectEqual(controlled_sink.attempted_texts.size(), static_cast<size_t>(6),
+				"speech and emote paths should capture before each deferred or emitted action");
+	recorder.Drain();
+	recorder.SetPersistenceSink(original_sink);
 }
 
 void ExpectBoundedPersistenceOverloadAndRecovery() {
@@ -429,6 +533,7 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 
 		const auto actor_bot_id = next_free_bot_id(0);
 		fixture.AssignBotID(fixture.OwnedBot(), actor_bot_id);
+		ExpectSpeechDefersAndRetriesThroughProductionPath(fixture.OwnedBot(), recorder, &persistence_sink);
 
 		ActorProfilesRepository::ActorProfileRecord profile{};
 		profile.actor_type = "autonomous_actor";

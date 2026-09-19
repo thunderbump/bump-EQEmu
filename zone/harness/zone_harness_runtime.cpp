@@ -347,9 +347,9 @@ bool ExecuteAutonomousActorAction(Bot *actor, Mob *target, const std::string &ki
 	}
 
 	if (kind == "say") {
-		actor->Say("%s", detail.c_str());
-		reason = "say_emitted";
-		return true;
+		const bool emitted = actor->Say("%s", detail.c_str());
+		reason = emitted ? "say_emitted" : "evidence_capacity_deferred";
+		return emitted;
 	}
 
 	reason = "unsupported_action_kind";
@@ -1923,7 +1923,8 @@ AutonomousActorLoopScenarioResult ZoneHarnessRuntime::RunAutonomousActorLoop(uin
 		}
 
 		for (auto &action: result.actions) {
-			if (!action.accepted && action.reason.empty()) {
+			if (!action.accepted &&
+				(action.reason.empty() || action.reason == "evidence_capacity_deferred")) {
 				action.accepted = ExecuteAutonomousActorAction(
 					fixture.actor,
 					fixture.primary_target,
@@ -2235,10 +2236,15 @@ void ZoneHarnessRuntime::ProcessAutonomousActorPrototypeActionLocked()
 		action.kind == "target" ? prototype.fixture.primary_target->GetCleanName() : action.detail,
 		reason
 	);
+	if (!accepted && reason == "evidence_capacity_deferred") {
+		// Evidence saturation is temporary backpressure. Leave the action at the
+		// front so the next bounded zone tick retries it in order.
+		return;
+	}
+
 	if (accepted) {
 		prototype.last_event_cursor = events.MaxEventID();
 	}
-
 	prototype.pending_actions.erase(prototype.pending_actions.begin());
 }
 
