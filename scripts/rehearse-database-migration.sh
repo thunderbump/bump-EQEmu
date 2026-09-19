@@ -125,6 +125,7 @@ network_created=0
 volume_created=0
 status=failed
 failure_step=setup
+assertion_result=""
 restore_ms=null
 candidate_versions=""
 snapshot_data_state=""
@@ -182,7 +183,7 @@ run_runtime() {
 }
 
 write_result() {
-  jq -n --arg status "$status" --arg failure_step "$failure_step" --arg candidate_commit "$candidate_commit" \
+  jq -n --arg status "$status" --arg failure_step "$failure_step" --arg assertion_result "$assertion_result" --arg candidate_commit "$candidate_commit" \
     --arg run_id "$run_token" --arg database_image "$db_image" --arg runtime_image "$runtime_image" \
     --arg database_image_id "$db_image_id" --arg runtime_image_id "$runtime_image_id" \
     --arg candidate_world_sha "$candidate_world_sha" --arg candidate_zone_sha "$candidate_zone_sha" \
@@ -194,7 +195,7 @@ write_result() {
     --arg target_database "$target_db" --arg candidate_versions "$candidate_versions" --arg seed_sha "$seed_sha" \
     --arg upgraded_assert_sha "$upgraded_assert_sha" --arg restored_assert_sha "$restored_assert_sha" \
     --argjson scenarios "$scenarios_json" --arg completed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson restore_ms "$restore_ms" \
-    '{schema_version:1,run_id:$run_id,images:{database:$database_image,runtime:$runtime_image,database_id:$database_image_id,runtime_id:$runtime_image_id},status:$status,failure_step:(if $failure_step=="" then null else $failure_step end),candidate_commit:$candidate_commit,candidate:{source_commit:$candidate_commit,worktree_clean:$candidate_worktree_clean,artifact_identity_attested:false,world_sha256:$candidate_world_sha,zone_sha256:$candidate_zone_sha},snapshot:{id:$snapshot_id,sha256:$snapshot_sha256},source:{build:$source_build,build_identity_attested:$build_identity_attested,fixture_preparer_commit:$fixture_preparer_commit,world_binary_sha256:$old_world_sha,mariadb_version:$source_mariadb_version,database_versions:{server:$source_server_version,bots:$source_bots_version,custom:$source_custom_version}},resulting_database_versions:(if $candidate_versions=="" then null else ($candidate_versions|split(":")|map(tonumber)|{server:.[0],bots:.[1],custom:.[2]}) end),fixtures:{seed_sha256:$seed_sha,upgraded_assert_sha256:$upgraded_assert_sha,restored_assert_sha256:$restored_assert_sha},candidate_scenarios:$scenarios,target:{class:"isolated-disposable",database:$target_database},restore_elapsed_ms:$restore_ms,completed_at:$completed_at}' >"$result"
+    '{schema_version:1,assertion_result:$assertion_result,run_id:$run_id,images:{database:$database_image,runtime:$runtime_image,database_id:$database_image_id,runtime_id:$runtime_image_id},status:$status,failure_step:(if $failure_step=="" then null else $failure_step end),candidate_commit:$candidate_commit,candidate:{source_commit:$candidate_commit,worktree_clean:$candidate_worktree_clean,artifact_identity_attested:false,world_sha256:$candidate_world_sha,zone_sha256:$candidate_zone_sha},snapshot:{id:$snapshot_id,sha256:$snapshot_sha256},source:{build:$source_build,build_identity_attested:$build_identity_attested,fixture_preparer_commit:$fixture_preparer_commit,world_binary_sha256:$old_world_sha,mariadb_version:$source_mariadb_version,database_versions:{server:$source_server_version,bots:$source_bots_version,custom:$source_custom_version}},resulting_database_versions:(if $candidate_versions=="" then null else ($candidate_versions|split(":")|map(tonumber)|{server:.[0],bots:.[1],custom:.[2]}) end),fixtures:{seed_sha256:$seed_sha,upgraded_assert_sha256:$upgraded_assert_sha,restored_assert_sha256:$restored_assert_sha},candidate_scenarios:$scenarios,target:{class:"isolated-disposable",database:$target_database},restore_elapsed_ms:$restore_ms,completed_at:$completed_at}' >"$result"
 }
 cleanup() {
   local main_status=$? cleanup_status=0 result_status=0
@@ -286,6 +287,7 @@ query_file_expect_ok() {
   local path="$1" output
   output="$(target_mysql <"$path")"
   if [[ "$output" != ok ]]; then
+    assertion_result="${output:0:1024}"
     # Assertion files contain only bounded, repository-authored labels. Include
     # their scalar result so failures are actionable without exposing row data.
     printf 'error: assertion %s failed (%s); expected exactly one scalar value: ok\n' \

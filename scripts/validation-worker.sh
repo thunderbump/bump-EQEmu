@@ -87,12 +87,16 @@ ensure_log_files() {
 write_result() {
   local evidence_dir="$1" status="$2" category="$3" exit_code="$4" message="$5" checkout_dir="${6:-}" head_commit="${7:-}"
   local stack_path_source="${8:-}"
-  local result_json
+  local result_json validation_elapsed_ms=null
+  if [[ "${validation_started_at_ns:-}" =~ ^[0-9]+$ ]]; then
+    validation_elapsed_ms=$(( ($(date +%s%N) - validation_started_at_ns) / 1000000 ))
+  fi
 
   mkdir -p "$evidence_dir"
   result_json="$evidence_dir/result.json"
 
   jq -n \
+    --argjson validation_elapsed_ms "$validation_elapsed_ms" \
     --arg status "$status" \
     --arg category "$category" \
     --arg message "$message" \
@@ -117,6 +121,7 @@ write_result() {
     --argjson timeout_seconds "$timeout_seconds" \
     --argjson lock_wait_seconds "$lock_wait_seconds" \
     '{
+      validation_elapsed_ms:$validation_elapsed_ms,
       status:$status,
       category:$category,
       exit_code:$exit_code,
@@ -150,7 +155,12 @@ write_result() {
     }' \
     >"$result_json"
 
-  cp "$result_json" "$evidence_dir/worker-output.json"
+  cp "$result_json" "$evidence_dir/worker-output.json" || return $?
+  # Optional publication metadata must never replace the validation exit status.
+  if ! python3 "$script_dir/public-fixture-summary.py" "$evidence_dir" >"$evidence_dir/logs/public-summary.log" 2>&1; then
+    printf 'Public fixture summary unavailable; private diagnostics retained.\n' >&2
+  fi
+  return 0
 }
 
 write_afk_checks() {
@@ -797,6 +807,7 @@ run_request() {
   project= repo= ref= commit= profile= run_id= evidence_dir= timeout_seconds= lock_wait_seconds= stack_role= stack_path=
   request_source_type= request_source_repo= request_source_ref= request_source_commit= request_source_checkout_path=
   stack_path_source=
+  validation_started_at_ns=
   STACK_BINDING_STATUS= STACK_BINDING_SOURCE= STACK_BINDING_STACK_DIR= STACK_BINDING_CODE_PATH= STACK_BINDING_TARGET= STACK_BINDING_PREVIOUS_KIND= STACK_BINDING_PREVIOUS_TARGET= STACK_BINDING_RESTORE_NEEDED=0
 
   if ! validate_request "$request_path" >/tmp/validation-worker-request-error.$$ 2>&1; then
