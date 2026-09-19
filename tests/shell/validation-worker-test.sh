@@ -153,6 +153,8 @@ make_afk_contract_repo() {
   local suffix="${2:-}" fixture_source
   make_source_repo fixture_source "$suffix"
   source_ref="$fixture_source"
+  cp "$repo_root/scripts/validation-lifetime.py" "$source_ref/scripts/validation-lifetime.py"
+  git -C "$source_ref" add scripts/validation-lifetime.py
   cp "$repo_root/scripts/validation-worker.sh" "$source_ref/scripts/validation-worker.sh"
   cp "$repo_root/scripts/validate-afk" "$source_ref/scripts/validate-afk"
   cp "$repo_root/scripts/public-fixture-summary.py" "$source_ref/scripts/public-fixture-summary.py"
@@ -520,11 +522,11 @@ SCRIPT
 
   [[ "$status" -eq 1 ]] || return 1
   assert_json_equals "$evidence/result.json" .category timeout
-  assert_contains "$(cat "$evidence/result.json")" "submodule initialization timed out"
+  assert_contains "$(cat "$evidence/result.json")" "Validation exceeded the repository deadline."
   [[ -f "$evidence/logs/submodule.log" ]] || return 1
 }
 
-test_stack_lock_is_not_held_during_submodule_initialization() {
+test_stack_busy_prevents_submodule_initialization() {
   local source request evidence status output head stack other_checkout stack_lock
   make_source_repo_with_submodule source
   reset_worker_home
@@ -544,7 +546,7 @@ test_stack_lock_is_not_held_during_submodule_initialization() {
 
   [[ "$status" -eq 1 ]] || return 1
   assert_json_equals "$evidence/result.json" .category stack_busy
-  [[ -f "$tmp_root/worker-home/checkouts/run-$(basename "$evidence")/vendor/submodule-fixture/marker.txt" ]] || return 1
+  [[ ! -e "$tmp_root/worker-home/checkouts/run-$(basename "$evidence")" ]] || return 1
 }
 
 test_commit_mismatch() {
@@ -1053,6 +1055,8 @@ test_afk_contract_is_independent_of_the_trusted_harness_location() {
   worker_request="$evidence/worker-request.json"
   mkdir -p "$harness_root/scripts/lib" "$stack" "$evidence"
   cp "$candidate_checkout/scripts/validation-worker.sh" "$harness_root/scripts/validation-worker.sh"
+  cp "$candidate_checkout/scripts/validation-lifetime.py" "$harness_root/scripts/validation-lifetime.py"
+  cp "$candidate_checkout/scripts/public-fixture-summary.py" "$harness_root/scripts/public-fixture-summary.py"
   cp "$candidate_checkout/scripts/validate.sh" "$harness_root/scripts/validate.sh"
   cp "$candidate_checkout/scripts/check-akkstack-contract.sh" "$harness_root/scripts/check-akkstack-contract.sh"
   cp "$candidate_checkout/scripts/lib/akkstack-routing.sh" "$harness_root/scripts/lib/akkstack-routing.sh"
@@ -1149,6 +1153,8 @@ test_afk_contract_fetches_a_self_contained_checkout_from_a_linked_worktree() {
   local source linked_root linked_worktree request evidence status output head
   make_source_repo_with_submodule source afk-linked
   install_fake_preparer "$source"
+  cp "$repo_root/scripts/validation-lifetime.py" "$source/scripts/validation-lifetime.py"
+  git -C "$source" add scripts/validation-lifetime.py
   cp "$repo_root/scripts/validation-worker.sh" "$source/scripts/validation-worker.sh"
   chmod +x "$source/scripts/validation-worker.sh"
   git -C "$source" add scripts/validation-worker.sh
@@ -1184,14 +1190,16 @@ test_afk_contract_treats_nonzero_inner_exit_after_passed_checks_as_inconclusive(
   real_rm="$(command -v rm)"
   mkdir "$evidence" "$fake_bin"
   write_afk_request "$request" "$head" "$evidence"
-  cat >"$fake_bin/rm" <<SCRIPT
-#!/usr/bin/env bash
-if [[ " \$* " == *".validation-worker-code.lock"* ]]; then
-  exit 1
+  cat >>"$source/scripts/validate.sh" <<'SCRIPT'
+if [[ " $* " == *" tier3-harness"* ]]; then
+  ln -sfn /operator-replacement "$AKKSTACK_DIR/code"
 fi
-exec "$real_rm" "\$@"
 SCRIPT
-  chmod +x "$fake_bin/rm"
+  git -C "$source" add scripts/validate.sh
+  git -C "$source" commit -m 'inject binding ownership conflict' >/dev/null 2>&1
+  configure_afk_host "$source"
+  head="$(git -C "$source" rev-parse HEAD)"
+  write_afk_request "$request" "$head" "$evidence"
 
   capture_run status output env HOME="$tmp_root/operator-home" PATH="$fake_bin:$PATH" VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 "$source/scripts/validation-worker.sh" run --request "$request"
 
@@ -1199,6 +1207,7 @@ SCRIPT
   assert_json_equals "$evidence/worker/afk-checks.json" .status passed
   assert_json_equals "$evidence/result.json" .status inconclusive
   assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,passed,inconclusive"
+  rm -rf "$tmp_root/operator-home/Projects/bump-eqemu/bump-akk-stack-validation/.validation-worker-code.lock"
 }
 
 test_afk_contract_rejects_unapproved_submodule_transports_before_initialization() {
@@ -1341,7 +1350,7 @@ run_test "invalid request writes structured evidence" test_invalid_request_write
 run_test "fake repo fetch checkout writes evidence" test_fetch_checkout_and_evidence
 run_test "fetched checkout initializes submodules before validation" test_fetch_checkout_initializes_submodules_before_validation
 run_test "submodule timeout is categorized" test_submodule_timeout_is_categorized
-run_test "stack lock is not held during submodule initialization" test_stack_lock_is_not_held_during_submodule_initialization
+run_test "stack busy prevents submodule initialization" test_stack_busy_prevents_submodule_initialization
 run_test "commit mismatch is categorized" test_commit_mismatch
 run_test "fetch failure is categorized" test_fetch_failure
 run_test "local-checkout request still works" test_local_checkout_request_works

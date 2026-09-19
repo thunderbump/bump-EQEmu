@@ -622,3 +622,42 @@ may need the one-off container to be stopped after validation.
 - Client-visible behavior or packet flow: Tier 1 plus Tier 4 and Tier 5.
 
 Escalate only as far as the touched area requires.
+
+### Validation lifetime and timeout recovery
+
+The worker now owns one process group and both validation leases for the whole
+request, including checkout preparation. This holds the stack slot longer during
+fetch, but gives timeout handling one owner. `timeout_seconds` bounds checkout,
+fixture preparation and checks together. Cleanup has separate bounded time for
+stopping children and removing owned Docker resources; it can finish after that
+deadline. A timeout or cleanup failure never becomes a pass.
+
+The Python `validation-lifetime.py` supervisor uses inherited `flock` descriptors.
+A killed supervisor cannot free a slot while its child processes still hold it.
+Nested repository deadlines stay in that process group. AFK gives fixture commands
+60 seconds after TERM before forcing termination; inference retains its existing
+grace. `validate-afk` waits for worker cleanup before returning.
+
+Each run writes `lifetime.json` in private evidence and matching `owner.json`
+records in the worker and stack lock directories. Only one-off containers and
+disposable rehearsal containers, volumes and networks receive the random
+`org.eqemu.validation` ownership label. Cleanup checks that exact label and never
+stops the shared MariaDB service. It restores the stack code symlink only when
+its current target still matches the recorded binding. Cleanup failure retains
+the lease records and fails the run.
+
+A later invocation can recover abandoned records once both leases are available.
+To recover without starting new validation, use the original request and worker
+home:
+
+```sh
+VALIDATION_WORKER_HOME=/path/to/worker ./scripts/validation-worker.sh recover --request /path/to/evidence/request.json
+```
+
+Recovery preserves test results and logs and writes `recovery.json`. Live children,
+unknown legacy locks, inconsistent records, unavailable Docker, or an independently
+changed code binding cause refusal. A hard-killed supervisor with live children
+still requires those children to finish or an operator to inspect and stop them;
+recovery does not kill an unverified process. Old unlabelled Docker resources and
+legacy locks require manual inspection. Never delete locks merely because they
+are old.

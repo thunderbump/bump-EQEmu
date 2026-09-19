@@ -121,6 +121,13 @@ runtime_container="$run_token-runtime"
 network="$run_token"
 volume="$run_token-data"
 owner_label="org.eqemu.rehearsal=$run_token"
+worker_label=()
+worker_timeout_args=()
+if [[ -n "${VALIDATION_WORKER_LIFETIME_TOKEN:-}" ]]; then
+  worker_timeout_args=(--foreground)
+  worker_label=(--label "org.eqemu.validation=$VALIDATION_WORKER_LIFETIME_TOKEN")
+fi
+
 network_created=0
 volume_created=0
 status=failed
@@ -167,9 +174,9 @@ run_runtime() {
     # Bound both the scenario process and the Docker client. The EXIT trap uses
     # the ownership label to force-remove the container if timeout's TERM/KILL
     # cannot complete Docker's five-second stop sequence.
-    deadline=(timeout --signal=TERM --kill-after=10s "${MIGRATION_REHEARSAL_SCENARIO_TIMEOUT_SECONDS:-300}s")
+    deadline=(timeout "${worker_timeout_args[@]}" --signal=TERM --kill-after=10s "${MIGRATION_REHEARSAL_SCENARIO_TIMEOUT_SECONDS:-300}s")
   fi
-  "${deadline[@]}" docker run --rm --name "$runtime_container" --label "$owner_label" \
+  "${deadline[@]}" docker run --rm --name "$runtime_container" --label "$owner_label" "${worker_label[@]}" \
     --network "$network" --read-only --user 0:0 --init --ulimit core=0 --stop-timeout 5 \
     --tmpfs /tmp:rw,nosuid,size=256m --tmpfs /runtime:rw,nosuid,size=1g \
     --mount "type=bind,src=$repo_root,dst=/home/eqemu/code,readonly" \
@@ -250,11 +257,12 @@ for image in "$db_image" "$runtime_image"; do
 done
 db_image_id="$(docker image inspect --format '{{.Id}}' "$db_image")"
 runtime_image_id="$(docker image inspect --format '{{.Id}}' "$runtime_image")"
-docker network create --internal --label "$owner_label" "$network" >>"$log"
+[[ -z "${VALIDATION_WORKER_DOCKER_MARKER:-}" ]] || : >"$VALIDATION_WORKER_DOCKER_MARKER"
+docker network create --internal --label "$owner_label" "${worker_label[@]}" "$network" >>"$log"
 network_created=1
-docker volume create --label "$owner_label" "$volume" >>"$log"
+docker volume create --label "$owner_label" "${worker_label[@]}" "$volume" >>"$log"
 volume_created=1
-docker run -d --name "$db_container" --label "$owner_label" --network "$network" --network-alias mariadb \
+docker run -d --name "$db_container" --label "$owner_label" "${worker_label[@]}" --network "$network" --network-alias mariadb \
   --mount "type=volume,src=$volume,dst=/var/lib/mysql" \
   -e "MYSQL_ROOT_PASSWORD=$target_password" -e MYSQL_ROOT_HOST=% -e MYSQL_DATABASE=peq "$db_image" >>"$log" 2>&1
 ready=0

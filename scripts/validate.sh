@@ -9,6 +9,16 @@ akkstack_init_routing "$repo_root" validation "$@"
 stack_dir="$AKKSTACK_STACK_DIR"
 compose_files=(docker-compose.yml docker-compose.dev.yml)
 compose=(docker-compose)
+owned_container_args=()
+timeout_args=()
+if [[ -n "${VALIDATION_WORKER_LIFETIME_TOKEN:-}" ]]; then
+  timeout_args=(--foreground)
+  owned_container_args=(--label "org.eqemu.validation=$VALIDATION_WORKER_LIFETIME_TOKEN")
+fi
+mark_owned_docker() {
+  [[ -z "${VALIDATION_WORKER_DOCKER_MARKER:-}" ]] || : >"$VALIDATION_WORKER_DOCKER_MARKER"
+}
+
 for compose_file in "${compose_files[@]}"; do
   compose+=(-f "$compose_file")
 done
@@ -73,7 +83,8 @@ run_preflight() {
 run_tier1() {
   (
     cd "$stack_dir"
-    "${compose[@]}" run --rm --no-deps --entrypoint bash eqemu-server -lc \
+    mark_owned_docker
+    "${compose[@]}" run "${owned_container_args[@]}" --rm --no-deps --entrypoint bash eqemu-server -lc \
       'cd ~/code && cmake --preset linux-debug && cmake --build build --parallel && ./build/bin/tests'
   )
 }
@@ -88,7 +99,8 @@ run_mariadb() {
 run_tier2_readonly_zone_tests() {
   (
     cd "$stack_dir"
-    "${compose[@]}" run --rm --no-deps --entrypoint bash eqemu-server -lc \
+    mark_owned_docker
+    "${compose[@]}" run "${owned_container_args[@]}" --rm --no-deps --entrypoint bash eqemu-server -lc \
       'set -euo pipefail
 runtime=/tmp/zone-cli-validation-runtime
 ~/code/scripts/lib/prepare-zone-cli-runtime.sh "$runtime"
@@ -119,7 +131,7 @@ run_migration_rehearsal() {
   command -v timeout >/dev/null || { printf 'error: timeout is required\n' >&2; return 125; }
   # This deadline covers image setup, import, updates, scenarios and recovery.
   # TERM lets the rehearsal's EXIT trap remove its owned Docker resources.
-  timeout --signal=TERM --kill-after=30s "${deadline}s" \
+  timeout "${timeout_args[@]}" --signal=TERM --kill-after=30s "${deadline}s" \
     "$repo_root/scripts/rehearse-database-migration.sh" "${args[@]}"
 }
 
@@ -128,7 +140,8 @@ run_actor_queue_tier3() {
   run_mariadb
   (
     cd "$stack_dir"
-    "${compose[@]}" run --rm --no-deps --entrypoint bash eqemu-server -lc \
+    mark_owned_docker
+    "${compose[@]}" run "${owned_container_args[@]}" --rm --no-deps --entrypoint bash eqemu-server -lc \
       'set -euo pipefail
 test -x ~/code/build/bin/zone || { printf "error: actor-queue-tier3 requires a prior Tier 1 build; missing executable ~/code/build/bin/zone\n" >&2; exit 2; }
 runtime=/tmp/actor-queue-tier3-runtime

@@ -64,5 +64,19 @@ printf 'Validation evidence: %s\n' "$evidence_dir"
 
 # This entry point is the committed-Candidate gate, never a worker preview.
 # Do not allow an operator's ambient worker-only setting to skip validation.
-env -u VALIDATION_WORKER_VALIDATE_DRY_RUN VALIDATION_WORKER_AFK_MODE=1 \
-  "$script_dir/validation-worker.sh" run --request "$request_path"
+# Keep the caller attached until the worker has finished its bounded cleanup.
+worker_pid=
+forward_signal() {
+  [[ -z "$worker_pid" ]] || kill -TERM "$worker_pid" 2>/dev/null || true
+}
+trap forward_signal TERM INT
+env -u VALIDATION_WORKER_VALIDATE_DRY_RUN -u VALIDATION_WORKER_LIFETIME_TOKEN -u VALIDATION_WORKER_LIFETIME_PARENT VALIDATION_WORKER_AFK_MODE=1 \
+  "$script_dir/validation-worker.sh" run --request "$request_path" &
+worker_pid=$!
+set +e
+while true; do
+  wait "$worker_pid"
+  worker_status=$?
+  kill -0 "$worker_pid" 2>/dev/null || break
+done
+exit "$worker_status"
