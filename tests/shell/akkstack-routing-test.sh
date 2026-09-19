@@ -205,7 +205,7 @@ make_stack() {
   local stack_dir="$1"
   local checkout_dir="$2"
 
-  mkdir -p "$stack_dir"
+  mkdir -p "$stack_dir/server/shared" "$stack_dir/server/quests/plugins" "$stack_dir/server/quests/lua_modules"
   printf 'ENV=development\n' >"$stack_dir/.env"
   ln -s "$checkout_dir" "$stack_dir/code"
   touch "$stack_dir/docker-compose.yml"
@@ -614,47 +614,6 @@ test_actor_queue_tier3_dry_run_classifies_mutation_and_cleanup() {
   assert_contains "$output" "scenario-owned rows are cleaned up"
 }
 
-test_actor_queue_stop_waits_for_delayed_container_creation() {
-  local fixture_repo fixture_parent fake_bin state_file removed_file status output
-  make_fixture fixture_repo fixture_parent
-  fake_bin="$(mktemp -d "$tmp_root/fake-delayed-actor-container-bin.XXXXXX")"
-  state_file="$tmp_root/delayed-actor-container-inspects"
-  removed_file="$tmp_root/delayed-actor-container-removed"
-  printf '0\n' >"$state_file"
-
-  cat >"$fake_bin/docker" <<'SCRIPT'
-#!/usr/bin/env bash
-set -euo pipefail
-if [[ "$1" == "info" ]]; then
-  exit 0
-fi
-if [[ "$1 $2" == "container inspect" ]]; then
-  [[ ! -e "$DELAYED_CONTAINER_REMOVED" ]] || exit 1
-  count="$(cat "$DELAYED_CONTAINER_STATE")"
-  count=$((count + 1))
-  printf '%s\n' "$count" >"$DELAYED_CONTAINER_STATE"
-  # Simulate a daemon-side create completing after several absence checks.
-  [[ "$count" -eq 4 ]]
-  exit
-fi
-if [[ "$1 $2 $3" == "container rm --force" ]]; then
-  : >"$DELAYED_CONTAINER_REMOVED"
-  exit 0
-fi
-exit 1
-SCRIPT
-  chmod +x "$fake_bin/docker"
-
-  capture_run status output env PATH="$fake_bin:$PATH" \
-    DELAYED_CONTAINER_STATE="$state_file" DELAYED_CONTAINER_REMOVED="$removed_file" \
-    ACTOR_QUEUE_VALIDATION_CONTAINER=actor-delayed-create ACTOR_QUEUE_STOP_STABILIZATION_SECONDS=1 \
-    "$fixture_repo/scripts/validate.sh" actor-queue-stop
-
-  [[ "$status" -eq 0 ]] || return 1
-  [[ -e "$removed_file" ]] || return 1
-  [[ "$(cat "$state_file")" -eq 4 ]] || return 1
-}
-
 test_zone_cli_profiles_share_runtime_setup() {
   local fixture_repo fixture_parent fake_bin payload_file status output
   make_fixture fixture_repo fixture_parent
@@ -681,8 +640,7 @@ EOF
   [[ "$status" -eq 0 ]] || return 1
   assert_contains "$(cat "$payload_file")" '~/code/scripts/lib/prepare-zone-cli-runtime.sh "$runtime"'
 
-  capture_run status output env PATH="$fake_bin:$PATH" ACTOR_QUEUE_VALIDATION_CONTAINER=actor-routing-test \
-    "$fixture_repo/scripts/validate.sh" actor-queue-tier3
+  capture_run status output env PATH="$fake_bin:$PATH" "$fixture_repo/scripts/validate.sh" actor-queue-tier3
   [[ "$status" -eq 0 ]] || return 1
   assert_contains "$(cat "$payload_file")" '~/code/scripts/lib/prepare-zone-cli-runtime.sh "$runtime"'
 }
@@ -868,12 +826,148 @@ EOF
   printf '#!/usr/bin/env bash\nexit 1\n' >"$fake_bin/mysqladmin"
   chmod +x "$fake_bin/mysqladmin"
 
-  capture_run status output env PATH="$fake_bin:$PATH" ACTOR_QUEUE_VALIDATION_CONTAINER=actor-readiness-test \
-    timeout 5 "$fixture_repo/scripts/validate.sh" actor-queue-tier3
+  capture_run status output env PATH="$fake_bin:$PATH" timeout 5 "$fixture_repo/scripts/validate.sh" actor-queue-tier3
 
   [[ "$status" -ne 0 && "$status" -ne 124 ]] || return 1
   assert_contains "$output" "MariaDB service mariadb was not ready within 1 seconds"
   assert_contains "$output" "inspect the selected AkkStack MariaDB service logs"
+}
+
+test_migration_rehearsal_dry_run_and_guards() {
+  local fixture_repo fixture_parent status output rehearsal_source runtime_source
+  make_fixture fixture_repo fixture_parent
+
+  capture_run status output "$fixture_repo/scripts/validate.sh" --stack validation --dry-run migration-rehearsal
+  [[ "$status" -eq 0 ]] || return 1
+  assert_contains "$output" "disposable database container"
+  assert_contains "$output" "restore cost"
+
+  capture_run status output "$fixture_repo/scripts/rehearse-database-migration.sh" --stack gameplay --dry-run
+  [[ "$status" -eq 2 ]] || return 1
+  assert_contains "$output" "only accepts --stack validation"
+
+  capture_run status output "$fixture_repo/scripts/rehearse-database-migration.sh" --stack validation
+  [[ "$status" -eq 125 ]] || return 1
+  assert_contains "$output" "MIGRATION_REHEARSAL_MANIFEST"
+
+  rehearsal_source="$(cat "$fixture_repo/scripts/rehearse-database-migration.sh")"
+  assert_contains "$rehearsal_source" 'server/quests/plugins'
+  assert_contains "$rehearsal_source" 'server/plugins'
+  assert_contains "$rehearsal_source" 'post_startup_data_state="$(representative_data_state)"'
+  assert_contains "$rehearsal_source" 'failure_step=candidate_scenarios'
+  assert_contains "$rehearsal_source" '--signal=TERM --kill-after=10s'
+  assert_not_contains "$rehearsal_source" 'server/maps'
+  runtime_source="$(cat "$fixture_repo/scripts/lib/migration-runtime.sh")"
+  assert_contains "$runtime_source" 'mkdir -p logs shared maps quests'
+  assert_contains "$runtime_source" '  update)'
+  assert_not_contains "$runtime_source" '/inputs/maps'
+
+}
+
+test_prepare_migration_fixture_builds_reviewable_inputs_without_running_docker() {
+  local fixture_repo fixture_parent baseline prepared fake_bin marker snapshot_sha archive_sha evidence_source status output
+  make_fixture fixture_repo fixture_parent
+  baseline="$tmp_root/captured-baseline"
+  prepared="$tmp_root/prepared-fixture"
+  fake_bin="$tmp_root/prepare-fake-bin"
+  marker="$tmp_root/prepare-docker-called"
+  mkdir -p "$baseline/archive/bin" "$fake_bin"
+  printf '%s\n' 'CREATE TABLE db_version (version INT, bots_version INT, custom_version INT);' | gzip >"$baseline/database.sql.gz"
+  printf '#!/usr/bin/env bash\necho old-world\n' >"$baseline/archive/bin/world"
+  chmod +x "$baseline/archive/bin/world"
+  tar -C "$baseline/archive" -czf "$baseline/installed-binaries.tar.gz" bin/world
+  snapshot_sha="$(sha256sum "$baseline/database.sql.gz" | awk '{print $1}')"
+  archive_sha="$(sha256sum "$baseline/installed-binaries.tar.gz" | awk '{print $1}')"
+  jq -n --arg snapshot_sha "$snapshot_sha" --arg archive_sha "$archive_sha" \
+    '{baseline_id:"fixture-baseline",source:"captured-container-name",source_checkout_sha:"unattested-source",mariadb_version:"10.11",database_version_row:"9328\t9055\t0",files:{"database.sql.gz":{sha256:$snapshot_sha},"installed-binaries.tar.gz":{sha256:$archive_sha}}}' >"$baseline/manifest.json"
+  printf '#!/usr/bin/env bash\n: >%q\nexit 99\n' "$marker" >"$fake_bin/docker"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" 0123456789abcdef0123456789abcdef01234567\n' >"$fake_bin/git"
+  chmod +x "$fake_bin/docker" "$fake_bin/git"
+
+  capture_run status output env PATH="$fake_bin:$PATH" "$fixture_repo/scripts/prepare-migration-rehearsal-fixture.sh" --baseline-dir "$baseline" --output-dir "$prepared"
+
+  [[ "$status" -eq 0 ]] || return 1
+  [[ ! -e "$marker" ]] || return 1
+  jq -e '
+    .snapshot.file == "database.sql.gz" and
+    .source.build == "unattested-source" and
+    .source.build_identity_attested == false and
+    (.source.fixture_preparer_commit | test("^[0-9a-f]{40}$")) and
+    .source.database_versions == {server:9328,bots:9055,custom:0} and
+    .old_build.world_binary_container_path == "/opt/eqemu-old/bin/world" and
+    .candidate_scenarios == ["/home/eqemu/code/build/bin/zone tests:actor-events"]
+  ' "$prepared/migration-rehearsal-manifest.json" >/dev/null || return 1
+  [[ ! -e "$prepared/migration-rehearsal-fixture/docker-compose.migration-rehearsal.yml" ]] || return 1
+  assert_contains "$(cat "$prepared/migration-rehearsal-fixture/assert-upgraded.sql")" "currency_copper_total"
+  assert_not_contains "$(cat "$prepared/migration-rehearsal-fixture/assert-upgraded.sql")" "FROM information_schema.check_constraints"
+  assert_contains "$(cat "$prepared/migration-rehearsal-fixture/assert-upgraded.sql")" "DECLARE CONTINUE HANDLER FOR 4025"
+  assert_contains "$(cat "$prepared/migration-rehearsal-fixture/assert-upgraded.sql")" "REPEAT('x', 16383)"
+  assert_contains "$(cat "$prepared/migration-rehearsal-fixture/assert-upgraded.sql")" "REPEAT('x', 16382)"
+  assert_contains "$(cat "$prepared/migration-rehearsal-fixture/assert-upgraded.sql")" "actor_events.event_json_constraint"
+  assert_contains "$(cat "$prepared/migration-rehearsal-fixture/assert-upgraded.sql")" "CONCAT('failed:', @afk_failures)"
+  assert_contains "$(cat "$prepared/migration-rehearsal-fixture/assert-upgraded.sql")" "critical_columns"
+  assert_contains "$(cat "$prepared/migration-rehearsal-fixture/assert-upgraded.sql")" "fixture_currency"
+  assert_not_contains "$(cat "$prepared/migration-rehearsal-fixture/assert-upgraded.sql")" "chk_actor_events_event_json_bounded"
+  assert_contains "$(cat "$prepared/migration-rehearsal-fixture/seed-old-format.sql")" 'INSERT INTO `character_data`'
+  assert_contains "$(cat "$prepared/migration-rehearsal-fixture/seed-old-format.sql")" "reserved migration fixture identity collides"
+  assert_contains "$(cat "$prepared/migration-rehearsal-fixture/seed-old-format.sql")" 'fixture_character_1_id'
+  assert_not_contains "$(cat "$prepared/migration-rehearsal-fixture/seed-old-format.sql")" "4294967001"
+  assert_not_contains "$(cat "$prepared/migration-rehearsal-fixture/seed-old-format.sql")" "afk_migration_fixture_old_format"
+  assert_contains "$output" "Review it"
+
+  capture_run status output env PATH="$fake_bin:$PATH" \
+    "$fixture_repo/scripts/prepare-migration-rehearsal-fixture.sh" --baseline-dir "$baseline" --output-dir "$tmp_root/invalid-version-output" --mariadb-version not-a-version
+  [[ "$status" -eq 2 ]] || return 1
+  assert_contains "$output" "MariaDB version must be a dotted numeric version"
+
+  # Exercise the preparer's actual manifest through all prerequisite parsing.
+  # The fake Compose command is reached only after false attestation, checksums,
+  # paths and capture metadata validation have succeeded.
+  rm -f "$marker"
+  capture_run status output env PATH="$fake_bin:$PATH" AKKSTACK_DIR="$fixture_parent/bump-akk-stack-validation" \
+    MIGRATION_REHEARSAL_MANIFEST="$prepared/migration-rehearsal-manifest.json" \
+    MIGRATION_REHEARSAL_EVIDENCE_DIR="$baseline/prerequisite-evidence" \
+    "$fixture_repo/scripts/rehearse-database-migration.sh" --stack validation
+  [[ "$status" -eq 99 ]] || return 1
+  [[ -e "$marker" ]] || return 1
+  evidence_source="$(jq -r '.source.mariadb_version + ":" + (.source.build_identity_attested|tostring)' "$baseline/prerequisite-evidence/result.json")"
+  [[ "$evidence_source" == "10.11:false" ]] || return 1
+  assert_not_contains "$output" "build_identity_attested must be boolean"
+
+  # Runtime inputs are diagnosed before image work, resource creation, or an
+  # expensive snapshot restore.
+  rm -f "$marker"
+  rm -rf "$fixture_parent/bump-akk-stack-validation/server/quests/plugins"
+  capture_run status output env PATH="$fake_bin:$PATH" AKKSTACK_DIR="$fixture_parent/bump-akk-stack-validation" \
+    MIGRATION_REHEARSAL_MANIFEST="$prepared/migration-rehearsal-manifest.json" \
+    MIGRATION_REHEARSAL_EVIDENCE_DIR="$baseline/missing-assets-evidence" \
+    "$fixture_repo/scripts/rehearse-database-migration.sh" --stack validation
+  [[ "$status" -eq 125 ]] || return 1
+  [[ ! -e "$marker" ]] || return 1
+  assert_contains "$output" "requires the validation stack plugins directory"
+  [[ "$(jq -r .failure_step "$baseline/missing-assets-evidence/result.json")" == prerequisites ]] || return 1
+}
+
+test_prepare_migration_fixture_rejects_unrecorded_checksums() {
+  local fixture_repo fixture_parent baseline prepared snapshot_sha archive_sha status output
+  make_fixture fixture_repo fixture_parent
+  baseline="$tmp_root/mismatched-baseline"
+  prepared="$tmp_root/mismatched-output"
+  mkdir -p "$baseline/archive"
+  printf 'snapshot' | gzip >"$baseline/database.sql.gz"
+  printf '#!/bin/sh\n' >"$baseline/archive/world"
+  chmod +x "$baseline/archive/world"
+  tar -C "$baseline/archive" -czf "$baseline/installed-binaries.tar.gz" world
+  snapshot_sha="$(sha256sum "$baseline/database.sql.gz" | awk '{print $1}')"
+  archive_sha="$(sha256sum "$baseline/installed-binaries.tar.gz" | awk '{print $1}')"
+  jq -n --arg snapshot_sha "$snapshot_sha" --arg archive_sha "$archive_sha" \
+    '{notes:($snapshot_sha + " " + $archive_sha),files:{"database.sql.gz":{sha256:"wrong"},"installed-binaries.tar.gz":{sha256:"wrong"}}}' >"$baseline/manifest.json"
+
+  capture_run status output "$fixture_repo/scripts/prepare-migration-rehearsal-fixture.sh" --baseline-dir "$baseline" --output-dir "$prepared"
+
+  [[ "$status" -eq 1 ]] || return 1
+  assert_contains "$output" "database snapshot checksum does not match"
+  [[ ! -e "$prepared/migration-rehearsal-manifest.json" ]] || return 1
 }
 
 test_safe_dry_run_keeps_readonly_composition() {
@@ -904,7 +998,6 @@ run_test "zone harness command exercises headless target twice with cursor clean
 run_test "zone harness routes Bot Loot Request result to non-TTY stdout" test_zone_harness_routes_bot_loot_result_to_non_tty_stdout
 run_test "validate tier3-harness delegates to smoke script" test_validate_tier3_harness_delegates_to_smoke_script
 run_test "actor queue Tier 3 dry run classifies mutation and cleanup" test_actor_queue_tier3_dry_run_classifies_mutation_and_cleanup
-run_test "actor queue stop catches delayed daemon-side container creation" test_actor_queue_stop_waits_for_delayed_container_creation
 run_test "zone CLI profiles share runtime setup" test_zone_cli_profiles_share_runtime_setup
 run_test "zone CLI runtime rejects unsafe paths before deletion" test_zone_cli_runtime_rejects_unsafe_paths_before_deletion
 run_test "help mentions stack and dry-run" test_help_mentions_stack_and_dry_run
@@ -912,6 +1005,9 @@ run_test "dry-run prints route and skips Docker" test_dry_run_prints_route_and_s
 run_test "tier2-readonly dry-run describes one-off container" test_tier2_readonly_dry_run_describes_single_one_off_container
 run_test "tier2-readonly runtime payload rewrites DB host to mariadb service DNS" test_tier2_readonly_uses_service_dns_runtime_config
 run_test "actor queue Tier 3 fails when MariaDB never becomes ready" test_actor_queue_tier3_fails_when_mariadb_never_becomes_ready
+run_test "migration rehearsal dry run describes isolation and rejects unsafe selection" test_migration_rehearsal_dry_run_and_guards
+run_test "migration fixture preparation creates reviewable inputs without Docker" test_prepare_migration_fixture_builds_reviewable_inputs_without_running_docker
+run_test "migration fixture preparation rejects mismatched captures" test_prepare_migration_fixture_rejects_unrecorded_checksums
 run_test "safe dry-run keeps readonly composition" test_safe_dry_run_keeps_readonly_composition
 
 if [[ "$failures" -gt 0 ]]; then

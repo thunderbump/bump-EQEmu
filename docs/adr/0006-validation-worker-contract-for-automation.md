@@ -16,6 +16,14 @@ Automated Bump EQEmu validation will use a portable **Validation Worker** contra
 - The automation workflow should compile worker validation into Case's normal `test`/`check` command model instead of bypassing Case's verifier or task schema.
 - Worker evidence is mechanical proof for Case to review; the worker does not directly mark Case tasks tested.
 - Each worker owns one validation slot at first. Validation profiles take an exclusive worker-local lock with bounded waiting so persistent validation DB and Compose state are not shared by concurrent runs.
-- The current AFK Run Preparer invokes the repository's no-argument `scripts/validate-afk` command. It resolves the exact committed Candidate `HEAD` and delegates checkout preparation, validation-stack binding, locking, timeout handling, one Tier 1 build plus the canonical harness and durable actor queue scenarios, and evidence production to this worker.
+- The current AFK Run Preparer invokes the repository's no-argument `scripts/validate-afk` command. It resolves the exact committed Candidate `HEAD` and delegates checkout preparation, validation-stack binding, locking, timeout handling, Tier 1 plus isolated migration rehearsal plus canonical Tier 3 execution, and evidence production to this worker.
 - The tracked `afk.toml` remains the legacy request-driven AFK contract; it is not the current no-argument invocation surface.
-- Both AFK entry points pin every Candidate to the combined `tier1-tier3-harness` profile because they have no trusted base commit or change classification. The `safe` profile remains available to non-AFK automation whose scope does not require Tier 3.
+- Both AFK entry points conservatively pin every Candidate to `tier1-migration-tier3` because they have no trusted base commit or schema-change classification. Lighter profiles remain available to automation with a trusted selection mechanism.
+
+
+## Actor proof and unconfirmed Docker creation
+
+The AFK gate now includes the actor proof in the disposable migration environment.
+It uses the existing lifetime supervisor rather than a second actor stop and SQL
+cleanup sequence. Unconfirmed Docker creation retains the environment and leases
+for operator resolution. See [the current actor proof and recovery contract](../testing/process.md#actor-proof-in-the-disposable-gate).

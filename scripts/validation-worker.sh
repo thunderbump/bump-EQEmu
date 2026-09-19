@@ -5,32 +5,6 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
 worker_home="${VALIDATION_WORKER_HOME:-$repo_root/.validation-worker}"
 lock_name="validation-slot"
-RUN_REQUEST_CLEANUP_ACTIVE=0
-RUN_REQUEST_CLEANUP_EVIDENCE_DIR=
-RUN_REQUEST_CLEANUP_LOCK_DIR=
-RUN_REQUEST_CLEANUP_STACK_LOCK_DIR=
-RUN_REQUEST_CHILD_PID=
-RUN_REQUEST_CHILD_PGID=
-RUN_REQUEST_CHECKOUT_DIR=
-RUN_REQUEST_HEAD_COMMIT=
-RUN_REQUEST_STACK_PATH_SOURCE=
-RUN_REQUEST_AFK_LOG_PREFIX=logs
-RUN_REQUEST_AFK_ACTIVE_INDEX=-1
-RUN_REQUEST_DEADLINE_NS=
-RUN_REQUEST_COMMAND_DEADLINE_NS=
-RUN_REQUEST_ACTOR_CLEANUP_REQUIRED=0
-RUN_REQUEST_ACTOR_CONTAINER_MAY_BE_ACTIVE=0
-RUN_REQUEST_CHILD_TOKEN=
-termination_grace_seconds="${VALIDATION_WORKER_TERMINATION_GRACE_SECONDS:-5}"
-actor_cleanup_reserve_seconds="${VALIDATION_WORKER_ACTOR_CLEANUP_RESERVE_SECONDS:-120}"
-if [[ ! "$termination_grace_seconds" =~ ^[0-9]+$ || "$termination_grace_seconds" -eq 0 ]]; then
-  printf 'error: VALIDATION_WORKER_TERMINATION_GRACE_SECONDS must be a positive integer\n' >&2
-  exit 2
-fi
-if [[ ! "$actor_cleanup_reserve_seconds" =~ ^[0-9]+$ || "$actor_cleanup_reserve_seconds" -eq 0 ]]; then
-  printf 'error: VALIDATION_WORKER_ACTOR_CLEANUP_RESERVE_SECONDS must be a positive integer\n' >&2
-  exit 2
-fi
 
 usage() {
   cat <<'USAGE'
@@ -39,6 +13,7 @@ Usage: scripts/validation-worker.sh <command> [options]
 Commands:
   profiles --json        List portable validation worker profiles.
   run --request <path>   Execute a validation worker request JSON.
+  recover --request <path> Recover abandoned leases without running validation.
   self-test              Run validation worker shell self-tests.
   -h, --help             Show this help.
 
@@ -50,7 +25,8 @@ Request JSON fields:
   checkout.path      Optional local-checkout request path. Also accepts local_checkout.path,
                      target_worktree_checkout, target_checkout_path, or repo.path without a ref.
   profile            Required validation profile: preflight, tier1, tier2-readonly,
-                     tier3-harness, actor-queue-tier3, tier1-tier3-harness, or safe.
+                     tier3-harness, actor-queue-tier3, migration-rehearsal,
+                     tier1-migration-tier3, tier1-tier3-harness, or safe.
   run_id             Required stable run identifier used for worker-owned checkout storage.
   evidence_dir       Required directory where request.json, result.json, and logs are written.
   timeout_seconds    Optional validation timeout in seconds. Defaults to 3600.
@@ -65,8 +41,6 @@ skip fetch, require an existing checkout, and verify submodules are already
 initialized and pinned to recorded commits instead of mutating the checkout.
 Set VALIDATION_WORKER_VALIDATE_DRY_RUN=1 to delegate with --dry-run for local
 contract tests. If stack.path is omitted, AKKSTACK_DIR remains a path override.
-VALIDATION_WORKER_ACTOR_CLEANUP_RESERVE_SECONDS controls the portion of the
-shared timeout reserved for actor database cleanup (default: 120 seconds).
 USAGE
 }
 
@@ -86,17 +60,14 @@ VALIDATION_PROFILES='[
   {"name":"tier2-readonly","portable":false},
   {"name":"tier3-harness","portable":true,"description":"Run the canonical Tier 3 Zone Harness smoke.","mutation_classification":"read-mostly/runtime-fixture","timeout_guidance":"Medium. Roughly 10-20 minutes including harness startup.","lock_guidance":"Takes the exclusive worker slot for the whole run. Also takes the stack binding lock when stack.path is used."},
   {"name":"actor-queue-tier3","portable":true,"steps":["tier1","actor-queue-tier3"],"description":"Build Tier 1, then run the durable Autonomous Actor queue executor integration proof.","mutation_classification":"database-mutating/runtime-fixture","timeout_guidance":"Longer. Give one shared budget that covers Tier 1 and the actor queue runtime.","lock_guidance":"Takes the exclusive worker and stack binding locks; mutates the validation database and cleans scenario-owned rows."},
-  {"name":"tier1-tier3-harness","portable":true,"steps":["tier1","tier3-harness","actor-queue-tier3"],"description":"Run Tier 1 once, then the canonical Tier 3 harness and durable actor queue proof under one timeout budget.","mutation_classification":"database-mutating/runtime-fixture","timeout_guidance":"Longer. Give one shared budget that covers Tier 1 and both required runtime scenarios.","lock_guidance":"Takes the exclusive worker and stack binding locks for the full combined run; the actor scenario cleans its database fixture."}
+  {"name":"migration-rehearsal","portable":true,"description":"Upgrade and restore a known snapshot in a uniquely named disposable database.","mutation_classification":"isolated-schema-mutating","timeout_guidance":"Long. Budget for two imports, two updater runs, scenarios, and old-build recovery.","lock_guidance":"Takes the exclusive worker and stack binding locks; never targets the shared validation database."},
+  {"name":"tier1-migration-tier3","portable":true,"steps":["tier1","migration-rehearsal","tier3-harness"],"description":"Conservative schema-work gate: build, isolated migration rehearsal, then canonical Tier 3.","mutation_classification":"isolated-schema-mutating/runtime-fixture","timeout_guidance":"Long. Budget for build, snapshot restore rehearsal, and Tier 3.","lock_guidance":"Takes the exclusive worker and stack binding locks for the whole run."},
+  {"name":"tier1-tier3-harness","portable":true,"steps":["tier1","tier3-harness"],"description":"Run Tier 1 first, then Tier 3 harness under one timeout budget.","mutation_classification":"read-mostly/runtime-fixture","timeout_guidance":"Longer. Give one shared budget that covers both Tier 1 and Tier 3.","lock_guidance":"Takes the exclusive worker slot for both tiers under one run. Also takes the stack binding lock when stack.path is used."}
 ]'
-# Every required runtime proof has a stable scenario identifier, a dispatch profile,
-# an exact completion marker emitted by the scenario itself, and its own log. Add
-# future actor proofs here; the worker requires the marker after a zero exit so an
-# accidentally skipped or no-op scenario cannot produce a pass. Tier 1 is a build
-# step rather than a runtime scenario and therefore has no completion marker.
 AFK_CHECK_PLAN='[
-  {"name":"tier1-build-and-unit-tests","scenario":"tier1-build-and-unit-tests","profile":"tier1","log_file":"tier1-build-and-unit-tests.log","failure_status":"rejected","failure_message":"Tier 1 validation failed","inconclusive_message":"Tier 1 validation was inconclusive"},
-  {"name":"tier3-zone-harness","scenario":"canonical-zone-harness","profile":"tier3-harness","log_file":"tier3-zone-harness.log","completion_marker":"[PASS] canonical-zone-harness","failure_status":"rejected","failure_message":"Tier 3 Zone Harness validation failed","inconclusive_message":"Tier 3 Zone Harness validation was inconclusive"},
-  {"name":"actor-queue-runtime","scenario":"actor-events-runtime","profile":"actor-queue-tier3","log_file":"actor-queue-runtime.log","completion_marker":"[PASS] actor-events-runtime","failure_status":"rejected","failure_message":"Durable actor queue validation failed","inconclusive_message":"Durable actor queue validation was inconclusive"}
+  {"name":"tier1-build-and-unit-tests","profile":"tier1","log_path":"worker/logs/tier1-build-and-unit-tests.log","failure_status":"rejected","failure_message":"Tier 1 validation failed","inconclusive_message":"Tier 1 validation was inconclusive"},
+  {"name":"isolated-database-migration-rehearsal","profile":"migration-rehearsal","log_path":"worker/logs/database-migration-rehearsal.log","failure_status":"rejected","failure_message":"Database migration rehearsal failed","inconclusive_message":"Database migration rehearsal prerequisites were unavailable"},
+  {"name":"tier3-zone-harness","profile":"tier3-harness","log_path":"worker/logs/tier3-zone-harness.log","failure_status":"rejected","failure_message":"Tier 3 Zone Harness validation failed","inconclusive_message":"Tier 3 Zone Harness validation was inconclusive"}
 ]'
 
 emit_profiles_json() {
@@ -117,12 +88,16 @@ ensure_log_files() {
 write_result() {
   local evidence_dir="$1" status="$2" category="$3" exit_code="$4" message="$5" checkout_dir="${6:-}" head_commit="${7:-}"
   local stack_path_source="${8:-}"
-  local result_json
+  local result_json validation_elapsed_ms=null
+  if [[ "${validation_started_at_ns:-}" =~ ^[0-9]+$ ]]; then
+    validation_elapsed_ms=$(( ($(date +%s%N) - validation_started_at_ns) / 1000000 ))
+  fi
 
   mkdir -p "$evidence_dir"
   result_json="$evidence_dir/result.json"
 
   jq -n \
+    --argjson validation_elapsed_ms "$validation_elapsed_ms" \
     --arg status "$status" \
     --arg category "$category" \
     --arg message "$message" \
@@ -147,6 +122,7 @@ write_result() {
     --argjson timeout_seconds "$timeout_seconds" \
     --argjson lock_wait_seconds "$lock_wait_seconds" \
     '{
+      validation_elapsed_ms:$validation_elapsed_ms,
       status:$status,
       category:$category,
       exit_code:$exit_code,
@@ -180,32 +156,27 @@ write_result() {
     }' \
     >"$result_json"
 
-  if [[ -n "${RESULT_CHECKS_PATH:-}" && -f "$RESULT_CHECKS_PATH" ]]; then
-    jq --slurpfile registered "$RESULT_CHECKS_PATH" \
-      '. + {checks:$registered[0].checks}' "$result_json" >"$result_json.tmp"
-    mv "$result_json.tmp" "$result_json"
+  cp "$result_json" "$evidence_dir/worker-output.json" || return $?
+  # Optional publication metadata must never replace the validation exit status.
+  if ! python3 "$script_dir/public-fixture-summary.py" "$evidence_dir" >"$evidence_dir/logs/public-summary.log" 2>&1; then
+    printf 'Public fixture summary unavailable; private diagnostics retained.\n' >&2
   fi
-  cp "$result_json" "$evidence_dir/worker-output.json"
+  return 0
 }
 
 write_afk_checks() {
-  local path="$1" overall_status="$2" log_prefix="${3:-logs}" statuses_json
+  local path="$1" overall_status="$2" statuses_json
   statuses_json="$(jq -cn '$ARGS.positional' --args "${afk_check_statuses[@]}")"
   jq -n \
     --arg overall_status "$overall_status" \
-    --arg log_prefix "$log_prefix" \
     --argjson plan "$AFK_CHECK_PLAN" \
     --argjson statuses "$statuses_json" \
     '{
       status:$overall_status,
       checks:[$plan | to_entries[] | {
         name:.value.name,
-        scenario:.value.scenario,
-        profile:.value.profile,
         status:$statuses[.key],
-        completion_marker:(.value.completion_marker // null),
-        candidate_commit:($ENV.AFK_CHECK_CANDIDATE_COMMIT // null),
-        log_path:($log_prefix + "/" + .value.log_file)
+        log_path:.value.log_path
       }]
     }' >"$path"
 }
@@ -220,15 +191,11 @@ initialize_afk_check_statuses() {
 }
 
 ensure_afk_check_logs() {
-  local evidence_dir="$1" truncate="${2:-0}" log_file
-  mkdir -p "$evidence_dir/logs"
-  while IFS= read -r log_file; do
-    if [[ "$truncate" == "1" ]]; then
-      : >"$evidence_dir/logs/$log_file"
-    else
-      : >>"$evidence_dir/logs/$log_file"
-    fi
-  done < <(jq -r '.[].log_file' <<<"$AFK_CHECK_PLAN")
+  local evidence_root="$1" log_path
+  while IFS= read -r log_path; do
+    mkdir -p "$evidence_root/$(dirname "$log_path")"
+    : >>"$evidence_root/$log_path"
+  done < <(jq -r '.[].log_path' <<<"$AFK_CHECK_PLAN")
 }
 
 write_inconclusive_afk_checks() {
@@ -236,7 +203,7 @@ write_inconclusive_afk_checks() {
   jq '
     (.checks | [to_entries[] | select(.value.status != "not_run") | .key] | last) as $last
     | .status = "inconclusive"
-    | if $last == null then . else .checks[$last].status = "inconclusive" end
+    | .checks[$last].status = "inconclusive"
   ' "$source" >"$destination"
 }
 
@@ -299,10 +266,10 @@ run_afk_request() {
       repo:$repo,
       ref:$commit,
       commit:$commit,
-      profile:"tier1-tier3-harness",
+      profile:"tier1-migration-tier3",
       run_id:$run_id,
       evidence_dir:$evidence_dir,
-      timeout_seconds:2600,
+      timeout_seconds:5400,
       lock_wait_seconds:0,
       stack:{role:"validation", path:$stack_path}
     }' >"$worker_request"
@@ -313,11 +280,11 @@ run_afk_request() {
   worker_status=$?
   set -e
 
-  ensure_afk_check_logs "$worker_evidence"
+  ensure_afk_check_logs "$evidence_dir"
   if [[ ! -f "$checks_path" ]]; then
     initialize_afk_check_statuses
     afk_check_statuses[0]=inconclusive
-    write_afk_checks "$checks_path" inconclusive worker/logs
+    write_afk_checks "$checks_path" inconclusive
   fi
   overall_status="$(json_get '.status | strings' "$checks_path")"
   case "$overall_status" in
@@ -482,50 +449,6 @@ validate_request() {
   fi
 }
 
-acquire_lock() {
-  local evidence_dir="$1" wait_seconds="$2" lock_dir="$worker_home/locks/$lock_name.lock" start now
-  mkdir -p "$worker_home/locks"
-  start="$(date +%s)"
-  while true; do
-    if mkdir "$lock_dir" 2>/dev/null; then
-      printf '%s acquired %s\n' "$(now_utc)" "$lock_dir" >>"$evidence_dir/logs/lock.log"
-      printf '%s' "$lock_dir"
-      return 0
-    fi
-    now="$(date +%s)"
-    if (( now - start >= wait_seconds )); then
-      printf '%s busy after %ss waiting for %s\n' "$(now_utc)" "$wait_seconds" "$lock_dir" >>"$evidence_dir/logs/lock.log"
-      return 1
-    fi
-    sleep 1
-  done
-}
-
-acquire_named_lock() {
-  local evidence_dir="$1" wait_seconds="$2" lock_dir="$3" label="$4" start now
-  start="$(date +%s)"
-  while true; do
-    if mkdir "$lock_dir" 2>/dev/null; then
-      printf '%s acquired %s lock %s\n' "$(now_utc)" "$label" "$lock_dir" >>"$evidence_dir/logs/lock.log"
-      printf '%s' "$lock_dir"
-      return 0
-    fi
-    now="$(date +%s)"
-    if (( now - start >= wait_seconds )); then
-      printf '%s busy after %ss waiting for %s lock %s\n' "$(now_utc)" "$wait_seconds" "$label" "$lock_dir" >>"$evidence_dir/logs/lock.log"
-      return 1
-    fi
-    sleep 1
-  done
-}
-
-release_lock() {
-  local lock_dir="${1:-}"
-  if [[ -n "$lock_dir" ]]; then
-    rm -rf "$lock_dir"
-  fi
-}
-
 resolve_path() {
   local path="$1"
   if command -v realpath >/dev/null 2>&1; then
@@ -555,7 +478,8 @@ write_stack_binding() {
     --arg message "$message" \
     --arg completed_at "$(now_utc)" \
     '{status:$status, role:$role, source:$source, stack_dir:$stack_dir, code_path:$code_path, target:$target, previous_kind:$previous_kind, previous_target:$previous_target, restore_status:$restore_status, message:$message, completed_at:$completed_at}' \
-    >"$evidence_dir/stack-binding.json"
+    >"$evidence_dir/stack-binding.json.tmp"
+  mv "$evidence_dir/stack-binding.json.tmp" "$evidence_dir/stack-binding.json"
 }
 
 bind_validation_stack() {
@@ -605,7 +529,6 @@ bind_validation_stack() {
     return 0
   fi
 
-  ln -sfn "$resolved_target" "$code_path"
   STACK_BINDING_STATUS=rebound
   STACK_BINDING_SOURCE="$source"
   STACK_BINDING_STACK_DIR="$stack_dir"
@@ -615,295 +538,17 @@ bind_validation_stack() {
   STACK_BINDING_PREVIOUS_TARGET="$previous_target"
   STACK_BINDING_RESTORE_NEEDED=1
   write_stack_binding "$evidence_dir" rebound validation "$source" "$stack_dir" "$code_path" "$resolved_target" "$previous_kind" "$previous_target" pending "stack code symlink rebound to worker checkout"
-}
-
-restore_validation_stack() {
-  local evidence_dir="$1" restore_status=not-needed cleanup_status=0
-
-  [[ -n "${STACK_BINDING_STATUS:-}" ]] || return 0
-
-  if [[ "${STACK_BINDING_RESTORE_NEEDED:-0}" == "1" ]]; then
-    case "$STACK_BINDING_PREVIOUS_KIND" in
-      symlink)
-        if ln -sfn "$STACK_BINDING_PREVIOUS_TARGET" "$STACK_BINDING_CODE_PATH"; then
-          restore_status=restored
-        else
-          restore_status=failed
-          cleanup_status=1
-        fi
-        ;;
-      missing)
-        if rm -f "$STACK_BINDING_CODE_PATH"; then
-          restore_status=removed
-        else
-          restore_status=failed
-          cleanup_status=1
-        fi
-        ;;
-      *)
-        restore_status=not-needed
-        ;;
-    esac
-  fi
-
-  STACK_BINDING_RESTORE_NEEDED=0
-  write_stack_binding "$evidence_dir" "$STACK_BINDING_STATUS" validation "$STACK_BINDING_SOURCE" "$STACK_BINDING_STACK_DIR" "$STACK_BINDING_CODE_PATH" "$STACK_BINDING_TARGET" "$STACK_BINDING_PREVIOUS_KIND" "$STACK_BINDING_PREVIOUS_TARGET" "$restore_status" "stack code binding cleanup complete" || cleanup_status=1
-  return "$cleanup_status"
-}
-
-mark_active_afk_check_inconclusive() {
-  local index="${RUN_REQUEST_AFK_ACTIVE_INDEX:--1}" last_index=-1
-  [[ "$profile" == "tier1-tier3-harness" && -n "${RESULT_CHECKS_PATH:-}" ]] || return 0
-  if [[ "$index" -lt 0 ]]; then
-    for index in "${!afk_check_statuses[@]}"; do
-      [[ "${afk_check_statuses[$index]}" == "not_run" ]] || last_index="$index"
-    done
-    index="$last_index"
-  fi
-  if [[ "$index" -ge 0 ]]; then
-    afk_check_statuses[$index]=inconclusive
-  fi
-  write_afk_checks "$RESULT_CHECKS_PATH" inconclusive "$RUN_REQUEST_AFK_LOG_PREFIX"
-}
-
-write_terminal_run_failure() {
-  local category="$1" exit_code="$2" message="$3"
-  mark_active_afk_check_inconclusive || true
-  write_result "$RUN_REQUEST_CLEANUP_EVIDENCE_DIR" failed "$category" "$exit_code" "$message" \
-    "$RUN_REQUEST_CHECKOUT_DIR" "$RUN_REQUEST_HEAD_COMMIT" "$RUN_REQUEST_STACK_PATH_SOURCE"
-}
-
-run_tracked_command() {
-  local status
-
-  # Give every potentially long-running child its own process group and an
-  # inherited identity token. The token also finds descendants that create a
-  # new session/process group, which PGID-only tracking cannot observe.
-  RUN_REQUEST_CHILD_TOKEN="validation-worker-$$-$(date +%s%N)-$RANDOM"
-  set +e
-  setsid env VALIDATION_WORKER_COMMAND_TOKEN="$RUN_REQUEST_CHILD_TOKEN" "$@" &
-  RUN_REQUEST_CHILD_PID=$!
-  RUN_REQUEST_CHILD_PGID=$RUN_REQUEST_CHILD_PID
-  wait "$RUN_REQUEST_CHILD_PID"
-  status=$?
-  if request_command_has_live_members; then
-    # Normal leader completion is not command-tree completion. Terminate and
-    # prove the leaked descendants dead before shared locks can be released.
-    terminate_request_child
-    if [[ "$?" -ne 0 ]]; then
-      write_terminal_run_failure child_termination_failed 1 \
-        "validation command descendants remained active after KILL grace period; stack cleanup withheld" || true
-      trap - RETURN EXIT
-      exit 1
-    fi
-    # Preserve timeout classification after proving the remaining command tree
-    # dead. A successful command that leaked descendants is still an internal
-    # validation failure rather than a success.
-    if [[ "$status" -ne 124 && "$status" -ne 137 ]]; then
-      status=125
-    fi
-  else
-    RUN_REQUEST_CHILD_PID=
-    RUN_REQUEST_CHILD_PGID=
-    RUN_REQUEST_CHILD_TOKEN=
-  fi
-  # Do not enable errexit here. Shell options are global, and callers disable
-  # it while capturing expected rejection/timeout statuses.
-  return "$status"
-}
-
-run_tracked_timeout_command() {
-  local remaining_ns remaining_ms remaining_duration
-  remaining_ns=$(( ${RUN_REQUEST_COMMAND_DEADLINE_NS:-$RUN_REQUEST_DEADLINE_NS} - $(date +%s%N) ))
-  remaining_ms=$(( remaining_ns / 1000000 ))
-  if [[ "$remaining_ms" -le 0 ]]; then
-    return 124
-  fi
-  printf -v remaining_duration '%d.%03ds' "$(( remaining_ms / 1000 ))" "$(( remaining_ms % 1000 ))"
-  # --foreground keeps the managed command in the process group created by
-  # run_tracked_command, so killing that group cannot leave it behind.
-  run_tracked_command timeout --foreground --signal=TERM --kill-after="${termination_grace_seconds}s" "$remaining_duration" "$@"
-}
-
-process_group_has_live_members() {
-  local pgid="$1"
-
-  # The group leader remains as a zombie until this shell waits for it. Ignore
-  # zombies while deciding whether any command descendant can still retain
-  # validation-stack resources.
-  ps -eo pgid=,stat= 2>/dev/null | awk -v target="$pgid" '
-    $1 == target && $2 !~ /^Z/ { found = 1 }
-    END { exit(found ? 0 : 1) }
-  '
-}
-
-command_token_pids() {
-  local token="${RUN_REQUEST_CHILD_TOKEN:-}" proc pid stat_line stat_rest state entry
-  [[ -n "$token" ]] || return 0
-  for proc in /proc/[0-9]*; do
-    pid="${proc##*/}"
-    [[ "$pid" != "$$" && -r "$proc/environ" && -r "$proc/stat" ]] || continue
-    IFS= read -r stat_line <"$proc/stat" 2>/dev/null || continue
-    stat_rest="${stat_line##*) }"
-    state="${stat_rest%% *}"
-    [[ "$state" != "Z" ]] || continue
-    while IFS= read -r -d '' entry; do
-      if [[ "$entry" == "VALIDATION_WORKER_COMMAND_TOKEN=$token" ]]; then
-        printf '%s\n' "$pid"
-        break
-      fi
-    done <"$proc/environ" 2>/dev/null
-  done
-}
-
-request_command_has_live_members() {
-  if [[ -n "${RUN_REQUEST_CHILD_PGID:-}" ]] \
-    && process_group_has_live_members "$RUN_REQUEST_CHILD_PGID"; then
-    return 0
-  fi
-  [[ -n "$(command_token_pids)" ]]
-}
-
-signal_request_command() {
-  local signal="$1" pgid="${RUN_REQUEST_CHILD_PGID:-}" pid
-  if [[ -n "$pgid" ]]; then
-    kill -"$signal" -- "-$pgid" 2>/dev/null || true
-  fi
-  while IFS= read -r pid; do
-    [[ -n "$pid" ]] && kill -"$signal" "$pid" 2>/dev/null || true
-  done < <(command_token_pids)
-}
-
-terminate_request_child() {
-  local pid="${RUN_REQUEST_CHILD_PID:-}" deadline observed_pgid
-  [[ -n "$pid" ]] || return 0
-
-  # Confirm the leader's current group while it is still available. The group
-  # recorded at launch remains authoritative after the leader is reaped.
-  observed_pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
-  if [[ -z "${RUN_REQUEST_CHILD_PGID:-}" ]]; then
-    RUN_REQUEST_CHILD_PGID="$observed_pgid"
-  fi
-  signal_request_command TERM
-  deadline=$(( $(date +%s) + termination_grace_seconds ))
-  while request_command_has_live_members; do
-    if [[ "$(date +%s)" -ge "$deadline" ]]; then
-      signal_request_command KILL
-
-      # Signal delivery is asynchronous. Do not restore the shared stack or
-      # release its locks merely because KILL was sent: a descendant can still
-      # be completing exit (for example after uninterruptible I/O). Give exit
-      # one final bounded grace period and report failure rather than allowing
-      # cleanup to overlap a surviving command tree.
-      deadline=$(( $(date +%s) + termination_grace_seconds ))
-      while request_command_has_live_members; do
-        if [[ "$(date +%s)" -ge "$deadline" ]]; then
-          return 1
-        fi
-        sleep 0.1
-      done
-      break
-    fi
-    sleep 0.1
-  done
-  wait "$pid" 2>/dev/null || true
-  RUN_REQUEST_CHILD_PID=
-  RUN_REQUEST_CHILD_PGID=
-  RUN_REQUEST_CHILD_TOKEN=
-}
-
-run_request_cleanup() {
-  local cleanup_status=0 cleanup_evidence
-  [[ "${RUN_REQUEST_CLEANUP_ACTIVE:-0}" == "1" ]] || return 0
-  RUN_REQUEST_CLEANUP_ACTIVE=0
-  trap - RETURN EXIT INT TERM
-  cleanup_evidence="$RUN_REQUEST_CLEANUP_EVIDENCE_DIR"
-
-  # Restoration and both lock removals are independent best-effort operations:
-  # one cleanup failure must never strand either lock, but still makes the run
-  # fail rather than hiding incomplete cleanup.
-  restore_validation_stack "$cleanup_evidence" || cleanup_status=1
-  release_lock "$RUN_REQUEST_CLEANUP_STACK_LOCK_DIR" || cleanup_status=1
-  release_lock "$RUN_REQUEST_CLEANUP_LOCK_DIR" || cleanup_status=1
-  if [[ "$cleanup_status" -ne 0 ]]; then
-    RUN_REQUEST_CLEANUP_EVIDENCE_DIR="$cleanup_evidence"
-    write_terminal_run_failure cleanup_failed 1 "validation cleanup failed; inspect stack and lock evidence" || true
-  fi
-  RUN_REQUEST_CLEANUP_EVIDENCE_DIR=
-  RUN_REQUEST_CLEANUP_STACK_LOCK_DIR=
-  RUN_REQUEST_CLEANUP_LOCK_DIR=
-  return "$cleanup_status"
-}
-
-run_request_signal() {
-  local exit_code="$1" cleanup_status=0
-  trap - INT TERM
-  if ! terminate_request_child; then
-    # Keep the stack binding and locks intact if the command tree could not be
-    # proven dead. Releasing shared resources in this state would permit a new
-    # request to race the surviving descendant.
-    write_terminal_run_failure child_termination_failed 1 \
-      "validation command descendants remained active after KILL grace period; stack cleanup withheld" || true
-    # run_request installed cleanup as both RETURN and EXIT protection. This
-    # failure intentionally retains the binding and locks, so prevent exit from
-    # invoking the cleanup that this branch must withhold.
-    trap - EXIT
-    exit 1
-  fi
-  if [[ "${RUN_REQUEST_ACTOR_CONTAINER_MAY_BE_ACTIVE:-0}" == "1" ]]; then
-    # Signal handling must not inherit the request's potentially hour-long
-    # deadline. Give daemon-side stop/removal proof one short bounded grace.
-    RUN_REQUEST_COMMAND_DEADLINE_NS=$(( $(date +%s%N) + termination_grace_seconds * 1000000000 ))
-    if ! perform_actor_container_stop; then
-      write_terminal_run_failure actor_container_termination_failed 1 \
-        "actor validation container could not be proven absent after interruption; cleanup and locks withheld" || true
-      trap - EXIT
-      exit 1
-    fi
-  fi
-  if [[ "${RUN_REQUEST_ACTOR_CLEANUP_REQUIRED:-0}" == "1" ]]; then
-    RUN_REQUEST_COMMAND_DEADLINE_NS=$RUN_REQUEST_DEADLINE_NS
-    if ! perform_actor_queue_cleanup; then
-      if [[ "${RUN_REQUEST_ACTOR_CONTAINER_MAY_BE_ACTIVE:-0}" == "1" ]] \
-        && ! perform_actor_container_stop; then
-        write_terminal_run_failure actor_container_termination_failed 1 \
-          "actor cleanup container could not be proven absent; cleanup and locks withheld" || true
-        trap - EXIT
-        exit 1
-      fi
-      write_terminal_run_failure cleanup_failed 1 \
-        "actor queue database cleanup failed after interruption; inspect actor-queue-cleanup.log" || true
-      run_request_cleanup || true
-      exit 1
-    fi
-    if ! perform_actor_container_stop; then
-      write_terminal_run_failure actor_container_termination_failed 1 \
-        "actor cleanup container could not be proven absent; cleanup and locks withheld" || true
-      trap - EXIT
-      exit 1
-    fi
-    RUN_REQUEST_ACTOR_CLEANUP_REQUIRED=0
-  fi
-  write_terminal_run_failure interrupted "$exit_code" "validation interrupted by signal" || true
-  run_request_cleanup || cleanup_status=1
-  if [[ "$cleanup_status" -ne 0 ]]; then
-    exit 1
-  fi
-  exit "$exit_code"
+  ln -sfn "$resolved_target" "$code_path"
 }
 
 verify_checkout_submodules() {
   local checkout_dir="$1" evidence_dir="$2" mode="$3" output status
 
-  local output_path="$evidence_dir/logs/submodule-status.tmp"
-
   set +e
-  run_tracked_timeout_command git -C "$checkout_dir" submodule status --recursive >"$output_path" 2>&1
+  output="$(timeout --foreground "$timeout_seconds" git -C "$checkout_dir" submodule status --recursive 2>&1)"
   status=$?
   set -e
-  output="$(cat "$output_path")"
   printf '%s\n' "$output" >>"$evidence_dir/logs/submodule.log"
-  rm -f "$output_path"
 
   if [[ "$status" -eq 124 ]]; then
     SUBMODULE_ERROR_CATEGORY=timeout
@@ -990,10 +635,10 @@ run_isolated_submodule_update() {
   fi
 
   set +e
-  run_tracked_timeout_command env -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT \
+  env -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT \
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 \
     GIT_TERMINAL_PROMPT=0 GIT_ASKPASS= SSH_ASKPASS= \
-    git -C "$checkout_dir" "${transport_config[@]}" "${update_args[@]}" \
+    timeout --foreground "$timeout_seconds" git -C "$checkout_dir" "${transport_config[@]}" "${update_args[@]}" \
     >>"$evidence_dir/logs/submodule.log" 2>&1
   status=$?
   set -e
@@ -1041,62 +686,19 @@ initialize_checkout_submodules() {
   run_isolated_submodule_update "$checkout_dir" "$evidence_dir" yes
 }
 
-set_checkout_preparation_error() {
-  local status="$1" message="$2"
-  if [[ "$status" -eq 124 || "$status" -eq 137 ]]; then
-    PREPARE_ERROR_CATEGORY=timeout
-    PREPARE_ERROR_MESSAGE="checkout preparation timed out"
-  else
-    PREPARE_ERROR_CATEGORY=fetch_failed
-    PREPARE_ERROR_MESSAGE="$message"
-  fi
-}
-
-reset_checkout_directory() {
-  local checkout_dir="$1" evidence_dir="$2" status
-
-  set +e
-  run_tracked_timeout_command rm -rf -- "$checkout_dir" >>"$evidence_dir/logs/fetch.log" 2>&1
-  status=$?
-  set -e
-  if [[ "$status" -ne 0 ]]; then
-    set_checkout_preparation_error "$status" "failed to remove previous checkout"
-    return 1
-  fi
-
-  set +e
-  run_tracked_timeout_command mkdir -p -- "$checkout_dir" >>"$evidence_dir/logs/fetch.log" 2>&1
-  status=$?
-  set -e
-  if [[ "$status" -ne 0 ]]; then
-    set_checkout_preparation_error "$status" "failed to create checkout directory"
-    return 1
-  fi
-}
-
-run_checkout_git_step() {
-  local checkout_dir="$1" evidence_dir="$2" status
-  shift 2
-
-  set +e
-  run_tracked_timeout_command git -C "$checkout_dir" "$@" >>"$evidence_dir/logs/fetch.log" 2>&1
-  status=$?
-  set -e
-  if [[ "$status" -eq 0 ]]; then
-    return 0
-  fi
-  set_checkout_preparation_error "$status" "failed to fetch or checkout requested ref"
-  return 1
-}
-
 prepare_checkout() {
   local checkout_dir="$1" evidence_dir="$2"
+  local status
 
   if [[ "$request_source_type" == "fetch" ]]; then
-    run_checkout_git_step "$checkout_dir" "$evidence_dir" init || return 1
-    run_checkout_git_step "$checkout_dir" "$evidence_dir" remote add origin "$repo" || return 1
-    run_checkout_git_step "$checkout_dir" "$evidence_dir" fetch --depth=1 origin "$request_source_ref" || return 1
-    run_checkout_git_step "$checkout_dir" "$evidence_dir" checkout --detach FETCH_HEAD || return 1
+    if ! git -C "$checkout_dir" init >>"$evidence_dir/logs/fetch.log" 2>&1 \
+      || ! git -C "$checkout_dir" remote add origin "$repo" >>"$evidence_dir/logs/fetch.log" 2>&1 \
+      || ! git -C "$checkout_dir" fetch --depth=1 origin "$request_source_ref" >>"$evidence_dir/logs/fetch.log" 2>&1 \
+      || ! git -C "$checkout_dir" checkout --detach FETCH_HEAD >>"$evidence_dir/logs/fetch.log" 2>&1; then
+      PREPARE_ERROR_CATEGORY=fetch_failed
+      PREPARE_ERROR_MESSAGE="failed to fetch or checkout requested ref"
+      return 1
+    fi
 
     if ! initialize_checkout_submodules "$checkout_dir" "$evidence_dir"; then
       return 1
@@ -1112,38 +714,36 @@ prepare_checkout() {
   return 0
 }
 
+# Read host selection once; all generated data belongs to this run's evidence.
+prepare_afk_fixture() {
+  local checkout_dir="$1" evidence_dir="$2" config baseline mariadb_version
+  local -a arguments
+  config="${MIGRATION_REHEARSAL_BASELINE_CONFIG:-$worker_home/migration-rehearsal-baseline.json}"
+  [[ -r "$config" ]] || {
+    printf 'error: select a captured baseline in %s\n' "$config" >&2
+    return 125
+  }
+  jq -e 'type == "object" and (keys - ["directory", "mariadb_version"] | length == 0)
+    and (.directory | type == "string" and startswith("/"))
+    and ((has("mariadb_version") | not) or (.mariadb_version | type == "string" and test("^[0-9]+([.][0-9]+){1,3}$")))' \
+    "$config" >/dev/null || { printf 'error: invalid baseline configuration\n' >&2; return 2; }
+  baseline="$(jq -r .directory "$config")"
+  mariadb_version="$(jq -r '.mariadb_version // empty' "$config")"
+  arguments=(--baseline-dir "$baseline" --output-dir "$evidence_dir/prepared-fixture")
+  [[ -z "$mariadb_version" ]] || arguments+=(--mariadb-version "$mariadb_version")
+  timeout --foreground --kill-after=10 "$timeout_seconds" \
+    "$checkout_dir/scripts/prepare-migration-rehearsal-fixture.sh" "${arguments[@]}"
+}
+
 run_request() {
-  local request_path="$1" validation_status validation_step lock_dir stack_lock_dir stack_lock checkout_dir head_commit stack_path_source
-  local local_checks_path afk_log_prefix=logs
+  local request_path="$1" validation_status validation_step checkout_dir head_commit stack_path_source
   local -a validation_steps=()
+  local MIGRATION_REHEARSAL_MANIFEST="${MIGRATION_REHEARSAL_MANIFEST:-}"
   project= repo= ref= commit= profile= run_id= evidence_dir= timeout_seconds= lock_wait_seconds= stack_role= stack_path=
   request_source_type= request_source_repo= request_source_ref= request_source_commit= request_source_checkout_path=
   stack_path_source=
-  RESULT_CHECKS_PATH=
+  validation_started_at_ns=
   STACK_BINDING_STATUS= STACK_BINDING_SOURCE= STACK_BINDING_STACK_DIR= STACK_BINDING_CODE_PATH= STACK_BINDING_TARGET= STACK_BINDING_PREVIOUS_KIND= STACK_BINDING_PREVIOUS_TARGET= STACK_BINDING_RESTORE_NEEDED=0
-  RUN_REQUEST_CHECKOUT_DIR= RUN_REQUEST_HEAD_COMMIT= RUN_REQUEST_STACK_PATH_SOURCE= RUN_REQUEST_AFK_LOG_PREFIX=logs RUN_REQUEST_AFK_ACTIVE_INDEX=-1 RUN_REQUEST_DEADLINE_NS= RUN_REQUEST_COMMAND_DEADLINE_NS= RUN_REQUEST_CHILD_PID= RUN_REQUEST_CHILD_PGID= RUN_REQUEST_CHILD_TOKEN= RUN_REQUEST_ACTOR_CLEANUP_REQUIRED=0 RUN_REQUEST_ACTOR_CONTAINER_MAY_BE_ACTIVE=0
-
-  # Discover and register a requested combined gate before validating fields that
-  # can fail (notably stack.path). This is evidence initialization only; request
-  # validation below remains authoritative and prevents any dispatch.
-  profile="$(json_get '.profile | strings' "$request_path")"
-  evidence_dir="$(json_get '.evidence_dir | strings' "$request_path")"
-  commit="$(json_get '.commit | strings' "$request_path")"
-  if [[ -z "$commit" ]]; then
-    commit="$(json_get '.repo.commit | strings' "$request_path")"
-  fi
-  if [[ "$profile" == "tier1-tier3-harness" && -n "$evidence_dir" ]]; then
-    local_checks_path="$evidence_dir/afk-checks.json"
-    RESULT_CHECKS_PATH="$local_checks_path"
-    afk_log_prefix=logs
-    if [[ "${VALIDATION_WORKER_AFK_MODE:-0}" == "1" ]]; then
-      afk_log_prefix=worker/logs
-    fi
-    initialize_afk_check_statuses
-    ensure_afk_check_logs "$evidence_dir" 1
-    export AFK_CHECK_CANDIDATE_COMMIT="$commit"
-    write_afk_checks "$local_checks_path" inconclusive "$afk_log_prefix"
-  fi
 
   if ! validate_request "$request_path" >/tmp/validation-worker-request-error.$$ 2>&1; then
     evidence_dir="$(json_get '.evidence_dir | strings' "$request_path")"
@@ -1157,8 +757,10 @@ run_request() {
   fi
   rm -f /tmp/validation-worker-request-error.$$ 2>/dev/null || true
 
-  ensure_log_files "$evidence_dir"
-  copy_request_evidence "$request_path" "$evidence_dir" || true
+  if [[ "${VALIDATION_WORKER_RECOVER_ONLY:-0}" != 1 ]]; then
+    ensure_log_files "$evidence_dir"
+    copy_request_evidence "$request_path" "$evidence_dir" || true
+  fi
 
   if [[ -n "$stack_path" ]]; then
     stack_path_source=request.stack.path
@@ -1176,27 +778,19 @@ run_request() {
     checkout_dir="$(resolve_path "$request_source_checkout_path")"
   fi
 
-  if ! lock_dir="$(acquire_lock "$evidence_dir" "$lock_wait_seconds")"; then
-    write_result "$evidence_dir" failed worker_busy 1 "exclusive validation slot is busy" "$checkout_dir" "" "$stack_path_source"
-    return 1
+  if [[ -z "${VALIDATION_WORKER_LIFETIME_TOKEN:-}" || "${VALIDATION_WORKER_LIFETIME_PARENT:-}" != "$PPID" ]]; then
+    [[ "${VALIDATION_WORKER_RECOVER_ONLY:-0}" == 1 ]] || write_result "$evidence_dir" failed interrupted 1 "Validation has not completed." "$checkout_dir" "" "$stack_path_source"
+    lifetime_args=()
+    [[ "${VALIDATION_WORKER_RECOVER_ONLY:-0}" != 1 ]] || lifetime_args+=(--recover)
+    exec python3 "$script_dir/validation-lifetime.py" \
+      --worker-home "$worker_home" --stack "$stack_path" --evidence "$evidence_dir" \
+      --checkout "$checkout_dir" --wait "$lock_wait_seconds" --timeout "$timeout_seconds" \
+      "${lifetime_args[@]}" -- "$script_dir/validation-worker.sh" run --request "$request_path"
   fi
-  RUN_REQUEST_CLEANUP_ACTIVE=1
-  RUN_REQUEST_CLEANUP_EVIDENCE_DIR="$evidence_dir"
-  RUN_REQUEST_CLEANUP_LOCK_DIR="$lock_dir"
-  RUN_REQUEST_CLEANUP_STACK_LOCK_DIR=
-  RUN_REQUEST_CHECKOUT_DIR="$checkout_dir"
-  RUN_REQUEST_STACK_PATH_SOURCE="$stack_path_source"
-  RUN_REQUEST_AFK_LOG_PREFIX="$afk_log_prefix"
-  trap run_request_cleanup RETURN EXIT
-  trap 'run_request_signal 130' INT
-  trap 'run_request_signal 143' TERM
-  RUN_REQUEST_DEADLINE_NS=$(( $(date +%s%N) + (timeout_seconds * 1000000000) ))
 
   if [[ "$request_source_type" == "fetch" ]]; then
-    if ! reset_checkout_directory "$checkout_dir" "$evidence_dir"; then
-      write_result "$evidence_dir" failed "$PREPARE_ERROR_CATEGORY" 1 "$PREPARE_ERROR_MESSAGE" "$checkout_dir" "" "$stack_path_source"
-      return 1
-    fi
+    rm -rf "$checkout_dir"
+    mkdir -p "$checkout_dir"
   fi
 
   if ! prepare_checkout "$checkout_dir" "$evidence_dir"; then
@@ -1205,24 +799,24 @@ run_request() {
   fi
 
   head_commit="$(git -C "$checkout_dir" rev-parse HEAD)"
-  RUN_REQUEST_HEAD_COMMIT="$head_commit"
-  if [[ -n "$RESULT_CHECKS_PATH" && -z "$commit" ]]; then
-    export AFK_CHECK_CANDIDATE_COMMIT="$head_commit"
-    write_afk_checks "$RESULT_CHECKS_PATH" inconclusive "$afk_log_prefix"
-  fi
   if [[ -n "$commit" && "$head_commit" != "$commit" ]]; then
     write_result "$evidence_dir" failed commit_mismatch 1 "checked out HEAD does not match requested commit" "$checkout_dir" "$head_commit" "$stack_path_source"
     return 1
   fi
 
-  if [[ -n "$stack_path" ]]; then
-    stack_lock_dir="$stack_path/.validation-worker-code.lock"
-    if ! stack_lock="$(acquire_named_lock "$evidence_dir" "$lock_wait_seconds" "$stack_lock_dir" stack)"; then
-      write_result "$evidence_dir" failed stack_busy 1 "validation stack is busy" "$checkout_dir" "$head_commit" "$stack_path_source"
-      return 1
+  validation_started_at_ns="$(date +%s%N)"
+  if [[ "$profile" == "tier1-migration-tier3" && "${VALIDATION_WORKER_AFK_MODE:-0}" == "1" ]]; then
+    if prepare_afk_fixture "$checkout_dir" "$evidence_dir" >"$evidence_dir/logs/fixture-preparation.log" 2>&1; then
+      export MIGRATION_REHEARSAL_MANIFEST="$evidence_dir/prepared-fixture/migration-rehearsal-manifest.json"
+    else
+      validation_status=$?
+      write_result "$evidence_dir" failed fixture_preparation_failed "$validation_status" \
+        "Fixture preparation failed; see logs/fixture-preparation.log. No validation checks ran." \
+        "$checkout_dir" "$head_commit" "$stack_path_source"
+      return "$validation_status"
     fi
-    RUN_REQUEST_CLEANUP_STACK_LOCK_DIR="$stack_lock"
   fi
+
 
   if ! bind_validation_stack "$evidence_dir" "$stack_path" "$checkout_dir" "$stack_path_source"; then
     write_result "$evidence_dir" failed stack_binding_failed 1 "failed to bind validation stack to worker checkout" "$checkout_dir" "$head_commit" "$stack_path_source"
@@ -1234,161 +828,62 @@ run_request() {
     validation_cmd+=(--dry-run)
   fi
 
-  actor_validation_token="${head_commit:0:16}-${run_id}"
-  actor_container_name="afk-actor-${head_commit:0:12}-$(printf '%s' "$run_id" | sha256sum | cut -c1-12)"
   run_validation() {
     local profile_name="$1" log_path="${2:-$evidence_dir/logs/validation.log}"
-    local exit_code
+    local exit_code elapsed_ns remaining_ns remaining_ms remaining_duration
+
+    elapsed_ns=$(( $(date +%s%N) - validation_started_at_ns ))
+    remaining_ns=$(( (timeout_seconds * 1000000000) - elapsed_ns ))
+    remaining_ms=$(( remaining_ns / 1000000 ))
+    if [[ "$remaining_ms" -le 0 ]]; then
+      return 124
+    fi
+    printf -v remaining_duration '%d.%03ds' "$(( remaining_ms / 1000 ))" "$(( remaining_ms % 1000 ))"
 
     set +e
     if [[ -n "$stack_path" && -n "${STACK_BINDING_STATUS:-}" ]]; then
-      run_tracked_timeout_command env AKKSTACK_DIR="$stack_path" EXPECTED_EQEMU_CHECKOUT="$checkout_dir" \
-        ACTOR_QUEUE_VALIDATION_TOKEN="$actor_validation_token" ACTOR_QUEUE_VALIDATION_CONTAINER="$actor_container_name" \
-        "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
+      AKKSTACK_DIR="$stack_path" EXPECTED_EQEMU_CHECKOUT="$checkout_dir" MIGRATION_REHEARSAL_EVIDENCE_DIR="$evidence_dir/migration-rehearsal" timeout --foreground "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
     elif [[ -n "$stack_path" ]]; then
-      run_tracked_timeout_command env AKKSTACK_DIR="$stack_path" ACTOR_QUEUE_VALIDATION_TOKEN="$actor_validation_token" \
-        ACTOR_QUEUE_VALIDATION_CONTAINER="$actor_container_name" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
+      AKKSTACK_DIR="$stack_path" MIGRATION_REHEARSAL_EVIDENCE_DIR="$evidence_dir/migration-rehearsal" timeout --foreground "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
     else
-      run_tracked_timeout_command env ACTOR_QUEUE_VALIDATION_TOKEN="$actor_validation_token" \
-        ACTOR_QUEUE_VALIDATION_CONTAINER="$actor_container_name" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
+      MIGRATION_REHEARSAL_EVIDENCE_DIR="$evidence_dir/migration-rehearsal" timeout --foreground "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
     fi
     exit_code=$?
     set -e
+
     return "$exit_code"
   }
 
-  perform_actor_container_stop() {
-    local stop_status
-    set +e
-    run_validation actor-queue-stop "$evidence_dir/logs/actor-queue-stop.log"
-    stop_status=$?
-    set -e
-    if [[ "$stop_status" -eq 0 ]]; then
-      RUN_REQUEST_ACTOR_CONTAINER_MAY_BE_ACTIVE=0
-    fi
-    return "$stop_status"
-  }
-
-  perform_actor_queue_cleanup() {
-    local cleanup_status
-    RUN_REQUEST_ACTOR_CONTAINER_MAY_BE_ACTIVE=1
-    set +e
-    run_validation actor-queue-cleanup "$evidence_dir/logs/actor-queue-cleanup.log"
-    cleanup_status=$?
-    set -e
-    return "$cleanup_status"
-  }
-
-  run_validation_with_actor_cleanup() {
-    local profile_name="$1" log_path="${2:-$evidence_dir/logs/validation.log}" status cleanup_status container_stop_status
-    local now_ns remaining_ns reserve_ns
-    VALIDATION_ACTOR_CLEANUP_FAILED=0
-    if [[ "$profile_name" != "actor-queue-tier3" ]]; then
-      run_validation "$profile_name" "$log_path"
-      return $?
-    fi
-
-    # Reserve independent portions of the request's existing deadline for
-    # terminating a timed-out actor process and for the out-of-process cleanup
-    # pass. Cleanup runs while both locks and the Candidate stack binding are
-    # still held. Do not dispatch the mutating scenario when the remaining
-    # request budget cannot provide both reserves.
-    now_ns=$(date +%s%N)
-    remaining_ns=$(( RUN_REQUEST_DEADLINE_NS - now_ns ))
-    reserve_ns=$(( (termination_grace_seconds + actor_cleanup_reserve_seconds) * 1000000000 ))
-    if [[ "$remaining_ns" -le "$reserve_ns" ]]; then
-      return 124
-    fi
-    RUN_REQUEST_COMMAND_DEADLINE_NS=$(( RUN_REQUEST_DEADLINE_NS - reserve_ns ))
-    RUN_REQUEST_ACTOR_CLEANUP_REQUIRED=1
-    RUN_REQUEST_ACTOR_CONTAINER_MAY_BE_ACTIVE=1
-    set +e
-    run_validation "$profile_name" "$log_path"
-    status=$?
-    RUN_REQUEST_COMMAND_DEADLINE_NS=$RUN_REQUEST_DEADLINE_NS
-    perform_actor_container_stop
-    container_stop_status=$?
-    if [[ "$container_stop_status" -ne 0 ]]; then
-      RUN_REQUEST_COMMAND_DEADLINE_NS=
-      set -e
-      write_terminal_run_failure actor_container_termination_failed 1 \
-        "actor validation container could not be proven absent; database and stack cleanup withheld" || true
-      trap - RETURN EXIT
-      exit 1
-    fi
-    perform_actor_queue_cleanup
-    cleanup_status=$?
-    perform_actor_container_stop
-    container_stop_status=$?
-    RUN_REQUEST_COMMAND_DEADLINE_NS=
-    set -e
-    if [[ "$container_stop_status" -ne 0 ]]; then
-      write_terminal_run_failure actor_container_termination_failed 1 \
-        "actor cleanup container could not be proven absent; stack cleanup withheld" || true
-      trap - RETURN EXIT
-      exit 1
-    fi
-    if [[ "$cleanup_status" -ne 0 ]]; then
-      VALIDATION_ACTOR_CLEANUP_FAILED=1
-      return 125
-    fi
-    RUN_REQUEST_ACTOR_CLEANUP_REQUIRED=0
-    return "$status"
-  }
-
-  if [[ "$profile" == "tier1-tier3-harness" ]]; then
-    export AFK_CHECK_CANDIDATE_COMMIT="$head_commit"
+  if [[ "$profile" == "tier1-migration-tier3" && "${VALIDATION_WORKER_AFK_MODE:-0}" == "1" ]]; then
+    local_checks_path="$evidence_dir/afk-checks.json"
+    initialize_afk_check_statuses
+    ensure_afk_check_logs "$(dirname "$evidence_dir")"
     mapfile -t afk_plan_rows < <(
-      jq -r '.[] | [.profile, .log_file, (.completion_marker // "-"), .failure_status, .failure_message, .inconclusive_message] | @tsv' <<<"$AFK_CHECK_PLAN"
+      jq -r '.[] | [.profile, .log_path, .failure_status, .failure_message, .inconclusive_message] | @tsv' <<<"$AFK_CHECK_PLAN"
     )
     for afk_check_index in "${!afk_plan_rows[@]}"; do
-      RUN_REQUEST_AFK_ACTIVE_INDEX="$afk_check_index"
-      IFS=$'\t' read -r afk_profile afk_log_file afk_completion_marker afk_failure_status afk_failure_message afk_inconclusive_message <<<"${afk_plan_rows[$afk_check_index]}"
-      if run_validation_with_actor_cleanup "$afk_profile" "$evidence_dir/logs/$afk_log_file"; then
-        # Dry-run validates dispatch and routing only; validate.sh deliberately
-        # does not execute runtime scenarios or emit their production markers.
-        if [[ "${VALIDATION_WORKER_VALIDATE_DRY_RUN:-0}" != "1" && "$afk_completion_marker" != "-" ]] \
-          && ! grep -Fqx -- "$afk_completion_marker" "$evidence_dir/logs/$afk_log_file"; then
-          printf 'required completion evidence missing: %s\n' "$afk_completion_marker" >>"$evidence_dir/logs/$afk_log_file"
-          afk_check_statuses[$afk_check_index]=rejected
-          write_afk_checks "$local_checks_path" rejected "$afk_log_prefix"
-          write_result "$evidence_dir" failed validation_failed 1 "Required scenario did not emit completion evidence: $afk_completion_marker" "$checkout_dir" "$head_commit" "$stack_path_source"
-          return 1
-        fi
+      IFS=$'\t' read -r afk_profile afk_log_path afk_failure_status afk_failure_message afk_inconclusive_message <<<"${afk_plan_rows[$afk_check_index]}"
+      if run_validation "$afk_profile" "$(dirname "$evidence_dir")/$afk_log_path"; then
         afk_check_statuses[$afk_check_index]=passed
-        write_afk_checks "$local_checks_path" inconclusive "$afk_log_prefix"
         continue
       else
         validation_status=$?
       fi
-      if [[ "${VALIDATION_ACTOR_CLEANUP_FAILED:-0}" == "1" ]]; then
-        afk_check_statuses[$afk_check_index]=inconclusive
-        write_afk_checks "$local_checks_path" inconclusive "$afk_log_prefix"
-        write_result "$evidence_dir" failed cleanup_failed 1 "actor queue database cleanup failed; inspect actor-queue-cleanup.log" "$checkout_dir" "$head_commit" "$stack_path_source"
-        return 1
-      fi
-      if [[ ( "$validation_status" -eq 124 || "$validation_status" -eq 137 ) && "${VALIDATION_WORKER_AFK_MODE:-0}" != "1" ]]; then
-        afk_check_statuses[$afk_check_index]=inconclusive
-        write_afk_checks "$local_checks_path" rejected "$afk_log_prefix"
-        write_result "$evidence_dir" failed timeout 1 "validation timed out" "$checkout_dir" "$head_commit" "$stack_path_source"
-        return 1
-      fi
-      if [[ "$validation_status" -eq 124 || "$validation_status" -eq 125 || "$validation_status" -eq 127 || "$validation_status" -eq 137 ]]; then
+      if [[ "$validation_status" -eq 124 || "$validation_status" -eq 125 || "$validation_status" -eq 127 ]]; then
         afk_failure_status=inconclusive
         afk_failure_message="$afk_inconclusive_message"
       fi
       afk_check_statuses[$afk_check_index]="$afk_failure_status"
       if [[ "$afk_failure_status" == "inconclusive" ]]; then
-        write_afk_checks "$local_checks_path" inconclusive "$afk_log_prefix"
+        write_afk_checks "$local_checks_path" inconclusive
         write_result "$evidence_dir" failed prerequisite_unavailable 2 "$afk_failure_message" "$checkout_dir" "$head_commit" "$stack_path_source"
         return 2
       fi
-      write_afk_checks "$local_checks_path" rejected "$afk_log_prefix"
+      write_afk_checks "$local_checks_path" rejected
       write_result "$evidence_dir" failed validation_failed 1 "$afk_failure_message" "$checkout_dir" "$head_commit" "$stack_path_source"
       return 1
     done
-    RUN_REQUEST_AFK_ACTIVE_INDEX=-1
-    write_afk_checks "$local_checks_path" passed "$afk_log_prefix"
+    write_afk_checks "$local_checks_path" passed
     write_result "$evidence_dir" passed ok 0 "validation passed" "$checkout_dir" "$head_commit" "$stack_path_source"
     return 0
   fi
@@ -1401,16 +896,12 @@ run_request() {
   fi
 
   for validation_step in "${validation_steps[@]}"; do
-    if run_validation_with_actor_cleanup "$validation_step"; then
+    if run_validation "$validation_step"; then
       continue
     else
       validation_status=$?
     fi
-    if [[ "${VALIDATION_ACTOR_CLEANUP_FAILED:-0}" == "1" ]]; then
-      write_result "$evidence_dir" failed cleanup_failed 1 "actor queue database cleanup failed; inspect actor-queue-cleanup.log" "$checkout_dir" "$head_commit" "$stack_path_source"
-      return 1
-    fi
-    if [[ "$validation_status" -eq 124 || "$validation_status" -eq 137 ]]; then
+    if [[ "$validation_status" -eq 124 ]]; then
       write_result "$evidence_dir" failed timeout 1 "validation timed out" "$checkout_dir" "$head_commit" "$stack_path_source"
       return 1
     fi
@@ -1445,7 +936,8 @@ case "$1" in
     shift
     exec "$repo_root/tests/shell/validation-worker-test.sh" "$@"
     ;;
-  run)
+  run|recover)
+    [[ "$1" != recover ]] || export VALIDATION_WORKER_RECOVER_ONLY=1
     shift
     request_path=""
     while [[ "$#" -gt 0 ]]; do

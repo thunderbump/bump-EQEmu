@@ -4,9 +4,6 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 tmp_root="$(mktemp -d)"
 test_filter="${1:-}"
-# Production reserves enough time for Compose/MariaDB startup. Synthetic worker
-# tests use short request budgets and instant cleanup unless a test overrides it.
-export VALIDATION_WORKER_ACTOR_CLEANUP_RESERVE_SECONDS=1
 
 cleanup() {
   rm -rf "$tmp_root"
@@ -37,15 +34,6 @@ assert_json_equals() {
     printf 'Expected %s in %s to be %s, got %s\n' "$expr" "$file" "$expected" "$actual" >&2
     assertion_failed=1
   fi
-}
-
-assert_combined_checks_not_run() {
-  local evidence="$1" candidate_commit="$2"
-  [[ -f "$evidence/afk-checks.json" ]] || return 1
-  assert_json_equals "$evidence/result.json" '.checks | map(.scenario) | join(",")' "tier1-build-and-unit-tests,canonical-zone-harness,actor-events-runtime"
-  assert_json_equals "$evidence/result.json" '.checks | map(.profile) | join(",")' "tier1,tier3-harness,actor-queue-tier3"
-  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "not_run,not_run,not_run"
-  assert_json_equals "$evidence/result.json" '.checks | map(.candidate_commit) | unique | join(",")' "$candidate_commit"
 }
 
 capture_run() {
@@ -84,26 +72,6 @@ make_source_repo() {
   cat >"$source_ref/scripts/validate.sh" <<'SCRIPT'
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ "${VALIDATION_WORKER_TEST_IGNORE_TERM:-0}" == "1" ]]; then
-  trap '' TERM
-  while :; do sleep 1; done
-fi
-if [[ "${VALIDATION_WORKER_TEST_SPAWN_DESCENDANT:-0}" == "1" ]]; then
-  (
-    trap '' TERM
-    while :; do sleep 1; done
-  ) &
-  printf '%s\n' "$!" >"$VALIDATION_WORKER_TEST_DESCENDANT_PID_FILE"
-  exit 0
-fi
-if [[ "${VALIDATION_WORKER_TEST_SPAWN_SETSID_DESCENDANT:-0}" == "1" ]]; then
-  setsid bash -c 'trap "" TERM; while :; do sleep 1; done' &
-  printf '%s\n' "$!" >"$VALIDATION_WORKER_TEST_DESCENDANT_PID_FILE"
-  exit 0
-fi
-if [[ -n "${VALIDATION_WORKER_TEST_STARTED_MARKER:-}" ]]; then
-  : >"$VALIDATION_WORKER_TEST_STARTED_MARKER"
-fi
 if [[ "${VALIDATION_WORKER_TEST_SLEEP:-0}" != "0" ]]; then
   sleep "$VALIDATION_WORKER_TEST_SLEEP"
 fi
@@ -113,42 +81,21 @@ fi
 if [[ "${VALIDATION_WORKER_TEST_SLEEP_TIER3:-0}" != "0" && " $* " == *" tier3-harness"* ]]; then
   sleep "$VALIDATION_WORKER_TEST_SLEEP_TIER3"
 fi
-if [[ " $* " == *" actor-queue-tier3"* ]]; then
-  [[ -z "${VALIDATION_WORKER_TEST_ACTOR_STARTED_MARKER:-}" ]] || : >"$VALIDATION_WORKER_TEST_ACTOR_STARTED_MARKER"
-  if [[ "${VALIDATION_WORKER_TEST_SLEEP_ACTOR_QUEUE:-0}" != "0" ]]; then
-    sleep "$VALIDATION_WORKER_TEST_SLEEP_ACTOR_QUEUE"
-  fi
-fi
 if [[ "${VALIDATION_WORKER_TEST_FAIL_TIER1:-0}" == "1" && " $* " == *" tier1"* ]]; then
   printf 'tier1 requested failure\n' >&2
   exit 1
 fi
-if [[ "${VALIDATION_WORKER_TEST_FAIL_ACTOR_QUEUE:-0}" == "1" && " $* " == *" actor-queue-tier3"* ]]; then
-  printf 'actor queue requested failure\n' >&2
-  exit 1
-fi
-if [[ " $* " == *" actor-queue-stop "* ]]; then
-  [[ -z "${VALIDATION_WORKER_TEST_STOP_MARKER:-}" ]] || : >"$VALIDATION_WORKER_TEST_STOP_MARKER"
-  if [[ "${VALIDATION_WORKER_TEST_SLEEP_ACTOR_STOP:-0}" != "0" ]]; then
-    sleep "$VALIDATION_WORKER_TEST_SLEEP_ACTOR_STOP"
-  fi
-  if [[ "${VALIDATION_WORKER_TEST_FAIL_ACTOR_STOP:-0}" == "1" ]]; then
-    printf 'actor container stop requested failure\n' >&2
-    exit 1
-  fi
-fi
-if [[ " $* " == *" actor-queue-cleanup "* ]]; then
-  if [[ "${VALIDATION_WORKER_TEST_SLEEP_ACTOR_CLEANUP:-0}" != "0" ]]; then
-    sleep "$VALIDATION_WORKER_TEST_SLEEP_ACTOR_CLEANUP"
-  fi
-  [[ -z "${VALIDATION_WORKER_TEST_CLEANUP_MARKER:-}" ]] || : >"$VALIDATION_WORKER_TEST_CLEANUP_MARKER"
-  if [[ "${VALIDATION_WORKER_TEST_FAIL_ACTOR_CLEANUP:-0}" == "1" ]]; then
-    printf 'actor queue cleanup requested failure\n' >&2
-    exit 1
-  fi
-fi
 if [[ "${VALIDATION_WORKER_TEST_TIER1_EXIT_CODE:-0}" != "0" && " $* " == *" tier1"* ]]; then
   exit "$VALIDATION_WORKER_TEST_TIER1_EXIT_CODE"
+fi
+if [[ "${VALIDATION_WORKER_TEST_MIGRATION_EXIT_CODE:-0}" != "0" && " $* " == *" migration-rehearsal"* ]]; then
+  exit "$VALIDATION_WORKER_TEST_MIGRATION_EXIT_CODE"
+fi
+if [[ -n "${VALIDATION_WORKER_TEST_EXPECT_MIGRATION_MANIFEST:-}" && " $* " == *" migration-rehearsal"* ]]; then
+  [[ "${MIGRATION_REHEARSAL_MANIFEST:-}" == "$VALIDATION_WORKER_TEST_EXPECT_MIGRATION_MANIFEST" ]] || {
+    printf 'migration manifest selection was not inherited\n' >&2
+    exit 1
+  }
 fi
 if [[ "${VALIDATION_WORKER_TEST_ASSERT_STACK_BINDING:-0}" == "1" ]]; then
   [[ -n "${AKKSTACK_DIR:-}" ]] || { printf 'missing AKKSTACK_DIR\n' >&2; exit 1; }
@@ -176,12 +123,6 @@ if [[ "${VALIDATION_WORKER_TEST_ASSERT_SELF_CONTAINED_GIT:-0}" == "1" ]]; then
   }
 fi
 printf 'fake validate: %s\n' "$*"
-if [[ " $* " == *" tier3-harness "* && "${VALIDATION_WORKER_TEST_OMIT_PROOF_PROFILE:-}" != "tier3-harness" ]]; then
-  printf '[PASS] canonical-zone-harness\n'
-fi
-if [[ " $* " == *" actor-queue-tier3 "* && "${VALIDATION_WORKER_TEST_OMIT_PROOF_PROFILE:-}" != "actor-queue-tier3" ]]; then
-  printf '[PASS] actor-events-runtime\n'
-fi
 SCRIPT
   chmod +x "$source_ref/scripts/validate.sh"
   git -C "$source_ref" init >/dev/null 2>&1
@@ -191,13 +132,34 @@ SCRIPT
   git -C "$source_ref" commit -m 'add fake validate' >/dev/null 2>&1
 }
 
+install_fake_preparer() {
+  local source_ref="$1"
+  cat >"$source_ref/scripts/prepare-migration-rehearsal-fixture.sh" <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "${VALIDATION_WORKER_TEST_PREPARE_EXIT:-0}" == 0 ]] || exit "$VALIDATION_WORKER_TEST_PREPARE_EXIT"
+[[ "$1" == --baseline-dir && "$3" == --output-dir ]] || exit 92
+mkdir "$4"
+jq -n --arg head "$(git -C "$(dirname "$0")/.." rev-parse HEAD)" '{prepared_by:$head,generation:"first"}' >"$4/migration-rehearsal-manifest.json"
+SCRIPT
+  chmod +x "$source_ref/scripts/prepare-migration-rehearsal-fixture.sh"
+  git -C "$source_ref" add scripts/prepare-migration-rehearsal-fixture.sh
+  export MIGRATION_REHEARSAL_BASELINE_CONFIG="$tmp_root/baseline-config.json"
+  jq -n --arg directory "$tmp_root" '{directory:$directory}' >"$MIGRATION_REHEARSAL_BASELINE_CONFIG"
+}
+
 make_afk_contract_repo() {
   local -n source_ref="$1"
   local suffix="${2:-}" fixture_source
   make_source_repo fixture_source "$suffix"
   source_ref="$fixture_source"
+  cp "$repo_root/scripts/validation-lifetime.py" "$source_ref/scripts/validation-lifetime.py"
+  git -C "$source_ref" add scripts/validation-lifetime.py
   cp "$repo_root/scripts/validation-worker.sh" "$source_ref/scripts/validation-worker.sh"
   cp "$repo_root/scripts/validate-afk" "$source_ref/scripts/validate-afk"
+  cp "$repo_root/scripts/public-fixture-summary.py" "$source_ref/scripts/public-fixture-summary.py"
+  git -C "$source_ref" add scripts/public-fixture-summary.py
+  install_fake_preparer "$source_ref"
   chmod +x "$source_ref/scripts/validation-worker.sh" "$source_ref/scripts/validate-afk"
   git -C "$source_ref" add scripts/validation-worker.sh scripts/validate-afk
   git -C "$source_ref" commit -m 'add validation worker entry points' >/dev/null 2>&1
@@ -393,11 +355,14 @@ assert contract == {
         "command": ["./scripts/validation-worker.sh", "run"],
         "trusted_files": [
             "scripts/validation-worker.sh",
+            "scripts/validation-lifetime.py",
+            "scripts/public-fixture-summary.py",
             "scripts/validate.sh",
+            "scripts/rehearse-database-migration.sh",
             "scripts/check-akkstack-contract.sh",
             "scripts/lib/akkstack-routing.sh",
         ],
-        "timeout_seconds": 2700,
+        "timeout_seconds": 5500,
     },
 }
 PY
@@ -407,11 +372,11 @@ test_profiles_json() {
   local status output
   capture_run status output "$repo_root/scripts/validation-worker.sh" profiles --json
   [[ "$status" -eq 0 ]] || return 1
-  jq -e '.profiles | length == 5' >/dev/null <<<"$output" || return 1
+  jq -e '.profiles | length == 7' >/dev/null <<<"$output" || return 1
   jq -e '.profiles[] | select(.name == "preflight") | .mutation_classification == "read-only"' >/dev/null <<<"$output" || return 1
   jq -e '.profiles[] | select(.name == "safe") | (.timeout_guidance | length > 0) and (.lock_guidance | length > 0)' >/dev/null <<<"$output" || return 1
   jq -e '.profiles[] | select(.name == "tier3-harness")' >/dev/null <<<"$output" || return 1
-  jq -e '.profiles[] | select(.name == "tier1-tier3-harness") | .mutation_classification == "database-mutating/runtime-fixture"' >/dev/null <<<"$output" || return 1
+  jq -e '.profiles[] | select(.name == "tier1-tier3-harness")' >/dev/null <<<"$output" || return 1
   jq -e '.profiles[] | select(.name == "actor-queue-tier3") | .mutation_classification == "database-mutating/runtime-fixture"' >/dev/null <<<"$output" || return 1
 }
 
@@ -559,11 +524,11 @@ SCRIPT
 
   [[ "$status" -eq 1 ]] || return 1
   assert_json_equals "$evidence/result.json" .category timeout
-  assert_contains "$(cat "$evidence/result.json")" "submodule initialization timed out"
+  assert_contains "$(cat "$evidence/result.json")" "Validation exceeded the repository deadline."
   [[ -f "$evidence/logs/submodule.log" ]] || return 1
 }
 
-test_stack_lock_is_not_held_during_submodule_initialization() {
+test_stack_busy_prevents_submodule_initialization() {
   local source request evidence status output head stack other_checkout stack_lock
   make_source_repo_with_submodule source
   reset_worker_home
@@ -575,7 +540,7 @@ test_stack_lock_is_not_held_during_submodule_initialization() {
   mkdir -p "$stack" "$other_checkout"
   printf 'ENV=development\n' >"$stack/.env"
   ln -s "$other_checkout" "$stack/code"
-  write_request "$request" "$source" "$evidence" HEAD "$head" 0 10 "$stack" tier1-tier3-harness
+  write_request "$request" "$source" "$evidence" HEAD "$head" 0 10 "$stack"
   stack_lock="$stack/.validation-worker-code.lock"
   mkdir "$stack_lock"
 
@@ -583,8 +548,7 @@ test_stack_lock_is_not_held_during_submodule_initialization() {
 
   [[ "$status" -eq 1 ]] || return 1
   assert_json_equals "$evidence/result.json" .category stack_busy
-  assert_combined_checks_not_run "$evidence" "$head"
-  [[ -f "$tmp_root/worker-home/checkouts/run-$(basename "$evidence")/vendor/submodule-fixture/marker.txt" ]] || return 1
+  [[ ! -e "$tmp_root/worker-home/checkouts/run-$(basename "$evidence")" ]] || return 1
 }
 
 test_commit_mismatch() {
@@ -593,14 +557,13 @@ test_commit_mismatch() {
   reset_worker_home
   evidence="$tmp_root/evidence-mismatch"
   request="$tmp_root/mismatch.json"
-  write_request "$request" "$source" "$evidence" HEAD "0000000000000000000000000000000000000000" 0 10 "" tier1-tier3-harness
+  write_request "$request" "$source" "$evidence" HEAD "0000000000000000000000000000000000000000"
 
   capture_run status output worker_env "$repo_root/scripts/validation-worker.sh" run --request "$request"
 
   [[ "$status" -eq 1 ]] || return 1
   assert_json_equals "$evidence/result.json" .category commit_mismatch
   assert_json_equals "$evidence/result.json" .expected_commit 0000000000000000000000000000000000000000
-  assert_combined_checks_not_run "$evidence" 0000000000000000000000000000000000000000
 }
 
 test_fetch_failure() {
@@ -608,13 +571,12 @@ test_fetch_failure() {
   reset_worker_home
   evidence="$tmp_root/evidence-fetch-failure"
   request="$tmp_root/fetch-failure.json"
-  write_request "$request" "$tmp_root/no-such-repo" "$evidence" HEAD aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 0 10 "" tier1-tier3-harness
+  write_request "$request" "$tmp_root/no-such-repo" "$evidence" HEAD
 
   capture_run status output worker_env "$repo_root/scripts/validation-worker.sh" run --request "$request"
 
   [[ "$status" -eq 1 ]] || return 1
   assert_json_equals "$evidence/result.json" .category fetch_failed
-  assert_combined_checks_not_run "$evidence" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 }
 
 test_local_checkout_request_works() {
@@ -656,13 +618,12 @@ test_local_checkout_rejects_drifting_submodule() {
 }
 
 test_lock_contention() {
-  local source request evidence status output lock_dir existing_checkout head
+  local source request evidence status output lock_dir existing_checkout
   make_source_repo source
   reset_worker_home
   evidence="$tmp_root/evidence-busy"
   request="$tmp_root/busy.json"
-  head="$(git -C "$source" rev-parse HEAD)"
-  write_request "$request" "$source" "$evidence" HEAD "$head" 0 10 "" tier1-tier3-harness
+  write_request "$request" "$source" "$evidence" HEAD "" 0
   lock_dir="$tmp_root/worker-home/locks/validation-slot.lock"
   mkdir -p "$lock_dir"
   existing_checkout="$tmp_root/worker-home/checkouts/run-$(basename "$evidence")"
@@ -673,7 +634,6 @@ test_lock_contention() {
 
   [[ "$status" -eq 1 ]] || return 1
   assert_json_equals "$evidence/result.json" .category worker_busy
-  assert_combined_checks_not_run "$evidence" "$head"
   [[ -f "$evidence/logs/lock.log" ]] || return 1
   [[ -f "$existing_checkout/marker" ]] || return 1
   rm -rf "$lock_dir"
@@ -692,172 +652,6 @@ test_timeout() {
 
   [[ "$status" -eq 1 ]] || return 1
   assert_json_equals "$evidence/result.json" .category timeout
-}
-
-test_normal_completion_kills_surviving_command_descendants() {
-  local source request evidence status output child_pid_file child_stat
-  make_source_repo source normal-descendant
-  reset_worker_home
-  evidence="$tmp_root/evidence-normal-descendant"
-  request="$tmp_root/normal-descendant.json"
-  child_pid_file="$tmp_root/normal-descendant.pid"
-  write_request "$request" "$source" "$evidence" HEAD "" 0 10 "" preflight
-
-  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" \
-    VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TEST_SPAWN_DESCENDANT=1 \
-    VALIDATION_WORKER_TEST_DESCENDANT_PID_FILE="$child_pid_file" VALIDATION_WORKER_TERMINATION_GRACE_SECONDS=1 \
-    "$repo_root/scripts/validation-worker.sh" run --request "$request"
-
-  [[ "$status" -eq 1 ]] || return 1
-  child_stat="$(ps -o stat= -p "$(cat "$child_pid_file")" 2>/dev/null || true)"
-  [[ -z "$child_stat" || "$child_stat" == Z* ]] || return 1
-  assert_json_equals "$evidence/result.json" .category validation_failed
-  [[ ! -e "$tmp_root/worker-home/locks/validation-slot.lock" ]] || return 1
-}
-
-test_normal_completion_kills_setsid_descendant() {
-  local source request evidence status output child_pid_file child_stat
-  make_source_repo source setsid-descendant
-  reset_worker_home
-  evidence="$tmp_root/evidence-setsid-descendant"
-  request="$tmp_root/setsid-descendant.json"
-  child_pid_file="$tmp_root/setsid-descendant.pid"
-  write_request "$request" "$source" "$evidence" HEAD "" 0 10 "" preflight
-
-  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" \
-    VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TEST_SPAWN_SETSID_DESCENDANT=1 \
-    VALIDATION_WORKER_TEST_DESCENDANT_PID_FILE="$child_pid_file" VALIDATION_WORKER_TERMINATION_GRACE_SECONDS=1 \
-    "$repo_root/scripts/validation-worker.sh" run --request "$request"
-
-  [[ "$status" -eq 1 ]] || return 1
-  child_stat="$(ps -o stat= -p "$(cat "$child_pid_file")" 2>/dev/null || true)"
-  [[ -z "$child_stat" || "$child_stat" == Z* ]] || return 1
-  assert_json_equals "$evidence/result.json" .category validation_failed
-  [[ ! -e "$tmp_root/worker-home/locks/validation-slot.lock" ]] || return 1
-}
-
-test_actor_timeout_still_dispatches_cleanup() {
-  local source request evidence status output cleanup_marker stop_marker
-  make_source_repo source actor-timeout-cleanup
-  reset_worker_home
-  evidence="$tmp_root/evidence-actor-timeout-cleanup"
-  request="$tmp_root/actor-timeout-cleanup.json"
-  cleanup_marker="$tmp_root/actor-timeout-cleanup.ran"
-  stop_marker="$tmp_root/actor-timeout-stop.ran"
-  write_request "$request" "$source" "$evidence" HEAD "" 0 8 "" tier1-tier3-harness
-
-  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 \
-    VALIDATION_WORKER_TEST_SLEEP_ACTOR_QUEUE=10 VALIDATION_WORKER_TEST_SLEEP_ACTOR_CLEANUP=2 \
-    VALIDATION_WORKER_TEST_CLEANUP_MARKER="$cleanup_marker" VALIDATION_WORKER_TEST_STOP_MARKER="$stop_marker" \
-    VALIDATION_WORKER_TERMINATION_GRACE_SECONDS=1 \
-    VALIDATION_WORKER_ACTOR_CLEANUP_RESERVE_SECONDS=3 \
-    "$repo_root/scripts/validation-worker.sh" run --request "$request"
-
-  [[ "$status" -eq 1 ]] || return 1
-  [[ -f "$cleanup_marker" && -f "$stop_marker" ]] || return 1
-  [[ -f "$evidence/logs/actor-queue-stop.log" ]] || return 1
-  assert_json_equals "$evidence/result.json" .category timeout
-  assert_json_equals "$evidence/result.json" '.checks[2].status' inconclusive
-}
-
-test_interrupted_actor_container_stop_uses_short_deadline() {
-  local source request evidence actor_started output_file worker_pid status start end
-  make_source_repo source actor-interrupted-stop
-  reset_worker_home
-  evidence="$tmp_root/evidence-actor-interrupted-stop"
-  request="$tmp_root/actor-interrupted-stop.json"
-  actor_started="$tmp_root/actor-interrupted-stop.started"
-  output_file="$tmp_root/actor-interrupted-stop.out"
-  write_request "$request" "$source" "$evidence" HEAD "" 0 60 "" tier1-tier3-harness
-
-  env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 \
-    VALIDATION_WORKER_TEST_ACTOR_STARTED_MARKER="$actor_started" VALIDATION_WORKER_TEST_SLEEP_ACTOR_QUEUE=30 \
-    VALIDATION_WORKER_TEST_SLEEP_ACTOR_STOP=30 VALIDATION_WORKER_TERMINATION_GRACE_SECONDS=1 \
-    "$repo_root/scripts/validation-worker.sh" run --request "$request" >"$output_file" 2>&1 &
-  worker_pid=$!
-  for _ in {1..200}; do
-    [[ -e "$actor_started" ]] && break
-    sleep 0.05
-  done
-  [[ -e "$actor_started" ]] || return 1
-
-  start="$(date +%s)"
-  kill -TERM "$worker_pid"
-  set +e
-  wait "$worker_pid"
-  status=$?
-  set -e
-  end="$(date +%s)"
-
-  [[ "$status" -eq 1 ]] || return 1
-  [[ $((end - start)) -lt 5 ]] || return 1
-  assert_json_equals "$evidence/result.json" .category actor_container_termination_failed
-  [[ -e "$tmp_root/worker-home/locks/validation-slot.lock" ]] || return 1
-  rm -rf "$tmp_root/worker-home/locks/validation-slot.lock"
-}
-
-test_actor_container_stop_failure_retains_lock_and_skips_database_cleanup() {
-  local source request evidence status output cleanup_marker stop_marker
-  make_source_repo source actor-stop-failure
-  reset_worker_home
-  evidence="$tmp_root/evidence-actor-stop-failure"
-  request="$tmp_root/actor-stop-failure.json"
-  cleanup_marker="$tmp_root/actor-stop-failure-cleanup.ran"
-  stop_marker="$tmp_root/actor-stop-failure-stop.ran"
-  write_request "$request" "$source" "$evidence" HEAD "" 0 20 "" tier1-tier3-harness
-
-  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 \
-    VALIDATION_WORKER_TEST_STOP_MARKER="$stop_marker" VALIDATION_WORKER_TEST_FAIL_ACTOR_STOP=1 \
-    VALIDATION_WORKER_TEST_CLEANUP_MARKER="$cleanup_marker" \
-    "$repo_root/scripts/validation-worker.sh" run --request "$request"
-
-  [[ "$status" -eq 1 ]] || return 1
-  [[ -f "$stop_marker" && ! -f "$cleanup_marker" ]] || return 1
-  [[ -e "$tmp_root/worker-home/locks/validation-slot.lock" ]] || return 1
-  assert_json_equals "$evidence/result.json" .category actor_container_termination_failed
-  assert_json_equals "$evidence/result.json" '.checks[2].status' inconclusive
-  rm -rf "$tmp_root/worker-home/locks/validation-slot.lock"
-}
-
-test_actor_cleanup_is_dispatched_and_failure_is_propagated() {
-  local source request evidence status output cleanup_marker
-  make_source_repo source actor-cleanup
-  reset_worker_home
-  evidence="$tmp_root/evidence-actor-cleanup"
-  request="$tmp_root/actor-cleanup.json"
-  cleanup_marker="$tmp_root/actor-cleanup.ran"
-  write_request "$request" "$source" "$evidence" HEAD "" 0 20 "" tier1-tier3-harness
-
-  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 \
-    VALIDATION_WORKER_TEST_CLEANUP_MARKER="$cleanup_marker" VALIDATION_WORKER_TEST_FAIL_ACTOR_CLEANUP=1 \
-    "$repo_root/scripts/validation-worker.sh" run --request "$request"
-
-  [[ "$status" -eq 1 ]] || return 1
-  [[ -f "$cleanup_marker" ]] || return 1
-  [[ -f "$evidence/logs/actor-queue-cleanup.log" ]] || return 1
-  assert_json_equals "$evidence/result.json" .category cleanup_failed
-  assert_json_equals "$evidence/result.json" '.checks[2].status' inconclusive
-}
-
-test_timeout_kills_a_term_resistant_validation_child() {
-  local source request evidence status output start end
-  make_source_repo source resistant-timeout
-  reset_worker_home
-  evidence="$tmp_root/evidence-resistant-timeout"
-  request="$tmp_root/resistant-timeout.json"
-  write_request "$request" "$source" "$evidence" HEAD "" 0 1
-
-  start="$(date +%s)"
-  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" \
-    VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TEST_IGNORE_TERM=1 \
-    VALIDATION_WORKER_TERMINATION_GRACE_SECONDS=1 \
-    "$repo_root/scripts/validation-worker.sh" run --request "$request"
-  end="$(date +%s)"
-
-  [[ "$status" -eq 1 ]] || return 1
-  [[ $((end - start)) -lt 4 ]] || return 1
-  assert_json_equals "$evidence/result.json" .category timeout
-  [[ ! -e "$tmp_root/worker-home/locks/validation-slot.lock" ]] || return 1
 }
 
 test_tier3_harness_failure_is_categorized_with_logs() {
@@ -885,7 +679,7 @@ test_tier3_harness_failure_is_categorized_with_logs() {
 }
 
 test_tier1_tier3_harness_profile_runs_tier1_before_tier3() {
-  local source request evidence status output
+  local source request evidence status output validation_log first_tier1 first_tier3
   make_source_repo source
   reset_worker_home
   evidence="$tmp_root/evidence-tier1-tier3"
@@ -896,65 +690,13 @@ test_tier1_tier3_harness_profile_runs_tier1_before_tier3() {
 
   [[ "$status" -eq 0 ]] || return 1
   assert_json_equals "$evidence/result.json" .status passed
-  assert_contains "$(cat "$evidence/logs/tier1-build-and-unit-tests.log")" "fake validate: --stack validation --dry-run tier1"
-  assert_contains "$(cat "$evidence/logs/tier3-zone-harness.log")" "fake validate: --stack validation --dry-run tier3-harness"
-  assert_contains "$(cat "$evidence/logs/actor-queue-runtime.log")" "fake validate: --stack validation --dry-run actor-queue-tier3"
-  assert_json_equals "$evidence/result.json" '.checks | map(.scenario) | join(",")' "tier1-build-and-unit-tests,canonical-zone-harness,actor-events-runtime"
-}
-
-test_combined_profile_dry_run_does_not_require_runtime_markers() {
-  local source request evidence status output
-  make_source_repo source combined-dry-run-no-proof
-  reset_worker_home
-  evidence="$tmp_root/evidence-combined-dry-run-no-proof"
-  request="$tmp_root/combined-dry-run-no-proof.json"
-  write_request "$request" "$source" "$evidence" HEAD "" 0 10 "" tier1-tier3-harness
-
-  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" \
-    VALIDATION_WORKER_VALIDATE_DRY_RUN=1 \
-    VALIDATION_WORKER_TEST_OMIT_PROOF_PROFILE=actor-queue-tier3 \
-    "$repo_root/scripts/validation-worker.sh" run --request "$request"
-
-  [[ "$status" -eq 0 ]] || return 1
-  assert_json_equals "$evidence/result.json" .status passed
-  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,passed,passed"
-}
-
-test_combined_profile_rejects_a_zero_exit_without_runtime_proof() {
-  local source request evidence status output
-  make_source_repo source combined-missing-proof
-  reset_worker_home
-  evidence="$tmp_root/evidence-combined-missing-proof"
-  request="$tmp_root/combined-missing-proof.json"
-  write_request "$request" "$source" "$evidence" HEAD "" 0 10 "" tier1-tier3-harness
-  mkdir -p "$evidence/logs"
-  printf '[PASS] actor-events-runtime\n' >"$evidence/logs/actor-queue-runtime.log"
-
-  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" \
-    VALIDATION_WORKER_TEST_OMIT_PROOF_PROFILE=actor-queue-tier3 \
-    "$repo_root/scripts/validation-worker.sh" run --request "$request"
-
-  [[ "$status" -eq 1 ]] || return 1
-  assert_json_equals "$evidence/result.json" .category validation_failed
-  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,passed,rejected"
-  assert_json_equals "$evidence/result.json" '.checks[2].completion_marker' "[PASS] actor-events-runtime"
-  assert_contains "$(cat "$evidence/logs/actor-queue-runtime.log")" "required completion evidence missing: [PASS] actor-events-runtime"
-}
-
-test_combined_profile_propagates_actor_queue_failure() {
-  local source request evidence status output
-  make_source_repo source combined-actor-failure
-  reset_worker_home
-  evidence="$tmp_root/evidence-combined-actor-failure"
-  request="$tmp_root/combined-actor-failure.json"
-  write_request "$request" "$source" "$evidence" HEAD "" 0 10 "" tier1-tier3-harness
-
-  capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TEST_FAIL_ACTOR_QUEUE=1 "$repo_root/scripts/validation-worker.sh" run --request "$request"
-
-  [[ "$status" -eq 1 ]] || return 1
-  assert_json_equals "$evidence/result.json" .category validation_failed
-  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,passed,rejected"
-  assert_contains "$(cat "$evidence/logs/actor-queue-runtime.log")" "actor queue requested failure"
+  validation_log="$evidence/logs/validation.log"
+  first_tier1="$(grep -n 'fake validate: --stack validation --dry-run tier1' "$validation_log" | head -n1 | cut -d: -f1)"
+  first_tier3="$(grep -n 'fake validate: --stack validation --dry-run tier3-harness' "$validation_log" | head -n1 | cut -d: -f1)"
+  [[ -n "$first_tier1" && -n "$first_tier3" ]] || return 1
+  [[ "$first_tier1" -lt "$first_tier3" ]] || return 1
+  assert_contains "$(cat "$validation_log")" "fake validate: --stack validation --dry-run tier1"
+  assert_contains "$(cat "$validation_log")" "fake validate: --stack validation --dry-run tier3-harness"
 }
 
 test_tier1_tier3_harness_profile_uses_one_timeout_budget() {
@@ -977,7 +719,8 @@ test_tier1_tier3_harness_profile_uses_one_timeout_budget() {
     printf 'Expected composite timeout to stay under 3000ms, got %sms\n' "$elapsed_ms" >&2
     return 1
   }
-  assert_contains "$(cat "$evidence/logs/tier1-build-and-unit-tests.log")" "fake validate: --stack validation --dry-run tier1"
+  validation_log="$evidence/logs/validation.log"
+  assert_contains "$(cat "$validation_log")" "fake validate: --stack validation --dry-run tier1"
 }
 
 test_tier1_tier3_harness_profile_stops_after_tier1_failure_and_releases_lock() {
@@ -993,9 +736,9 @@ test_tier1_tier3_harness_profile_stops_after_tier1_failure_and_releases_lock() {
   [[ "$status" -eq 1 ]] || return 1
   assert_json_equals "$evidence/result.json" .status failed
   assert_json_equals "$evidence/result.json" .category validation_failed
-  validation_log="$evidence/logs/tier1-build-and-unit-tests.log"
+  validation_log="$evidence/logs/validation.log"
   assert_contains "$(cat "$validation_log")" "tier1 requested failure"
-  if grep -q 'fake validate: --stack validation --dry-run tier3-harness' "$evidence/logs/tier3-zone-harness.log"; then
+  if grep -q 'fake validate: --stack validation --dry-run tier3-harness' "$validation_log"; then
     printf 'tier3-harness should not run after tier1 failure\n' >&2
     return 1
   fi
@@ -1080,361 +823,8 @@ test_stack_lock_blocks_distinct_worker_homes_on_same_stack() {
   [[ "$(cd "$stack/code" && pwd -P)" == "$(cd "$other_checkout" && pwd -P)" ]] || return 1
 }
 
-test_worker_termination_kills_checkout_deletion_descendant_after_leader_exit() {
-  local source request evidence checkout_dir fake_bin real_rm marker child_ready child_pid_file worker_pid status output_file start end child_pid child_stat
-  make_source_repo source interrupted-checkout-deletion
-  reset_worker_home
-  evidence="$tmp_root/evidence-interrupted-checkout-deletion"
-  request="$tmp_root/interrupted-checkout-deletion.json"
-  checkout_dir="$tmp_root/worker-home/checkouts/run-$(basename "$evidence")"
-  fake_bin="$tmp_root/fake-bin-interrupted-checkout-deletion"
-  marker="$tmp_root/interrupted-checkout-deletion.started"
-  child_ready="$tmp_root/interrupted-checkout-deletion.child-ready"
-  child_pid_file="$tmp_root/interrupted-checkout-deletion.pid"
-  output_file="$tmp_root/interrupted-checkout-deletion.out"
-  real_rm="$(command -v rm)"
-  mkdir -p "$checkout_dir" "$fake_bin"
-  printf 'old checkout\n' >"$checkout_dir/marker"
-  cat >"$fake_bin/rm" <<SCRIPT
-#!/usr/bin/env bash
-if [[ "\${*: -1}" == "$checkout_dir" ]]; then
-  # The group leader exits on TERM, while this descendant deliberately
-  # survives it. Cleanup must continue tracking the process group and KILL the
-  # descendant before restoring the stack or releasing locks.
-  (
-    trap '' TERM
-    : >"$child_ready"
-    while :; do sleep 1; done
-  ) &
-  descendant_pid=\$!
-  printf '%s\n' "\$descendant_pid" >"$child_pid_file"
-  # Do not publish fixture readiness until the descendant confirms that its
-  # TERM disposition is installed. Otherwise the worker signal can race the
-  # trap setup and let this regression test pass without exercising KILL.
-  while [[ ! -e "$child_ready" ]]; do sleep 0.01; done
-  : >"$marker"
-  trap 'exit 0' TERM
-  wait "\$descendant_pid"
-fi
-exec "$real_rm" "\$@"
-SCRIPT
-  chmod +x "$fake_bin/rm"
-  write_request "$request" "$source" "$evidence" HEAD "" 0 60
-
-  env PATH="$fake_bin:$PATH" VALIDATION_WORKER_HOME="$tmp_root/worker-home" \
-    VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TERMINATION_GRACE_SECONDS=1 \
-    "$repo_root/scripts/validation-worker.sh" run --request "$request" >"$output_file" 2>&1 &
-  worker_pid=$!
-  for _ in {1..200}; do
-    [[ -f "$marker" ]] && break
-    kill -0 "$worker_pid" 2>/dev/null || break
-    sleep 0.05
-  done
-  [[ -f "$marker" ]] || return 1
-
-  start="$(date +%s)"
-  kill -TERM "$worker_pid"
-  set +e
-  wait "$worker_pid"
-  status=$?
-  set -e
-  end="$(date +%s)"
-
-  [[ "$status" -eq 143 ]] || return 1
-  [[ $((end - start)) -lt 4 ]] || return 1
-  child_pid="$(cat "$child_pid_file")"
-  child_stat="$(ps -o stat= -p "$child_pid" 2>/dev/null || true)"
-  [[ -z "$child_stat" || "$child_stat" == Z* ]] || {
-    printf 'TERM-resistant checkout descendant still active with status %s\n' "$child_stat" >&2
-    return 1
-  }
-  [[ ! -e "$tmp_root/worker-home/locks/validation-slot.lock" ]] || return 1
-  assert_json_equals "$evidence/result.json" .category interrupted
-}
-
-test_worker_termination_during_fetch_is_bounded() {
-  local source request evidence fake_bin real_git marker child_pid_file worker_pid status output_file start end
-  make_source_repo source interrupted-fetch
-  reset_worker_home
-  evidence="$tmp_root/evidence-interrupted-fetch"
-  request="$tmp_root/interrupted-fetch.json"
-  fake_bin="$tmp_root/fake-bin-interrupted-fetch"
-  marker="$tmp_root/interrupted-fetch.started"
-  child_pid_file="$tmp_root/interrupted-fetch.pid"
-  output_file="$tmp_root/interrupted-fetch.out"
-  real_git="$(command -v git)"
-  mkdir -p "$fake_bin"
-  cat >"$fake_bin/git" <<SCRIPT
-#!/usr/bin/env bash
-if [[ " \$* " == *" fetch "* ]]; then
-  printf '%s\n' "\$\$" >"$child_pid_file"
-  : >"$marker"
-  trap '' TERM
-  while :; do sleep 1; done
-fi
-exec "$real_git" "\$@"
-SCRIPT
-  chmod +x "$fake_bin/git"
-  write_request "$request" "$source" "$evidence" HEAD "" 0 60
-
-  env PATH="$fake_bin:$PATH" VALIDATION_WORKER_HOME="$tmp_root/worker-home" \
-    VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TERMINATION_GRACE_SECONDS=1 \
-    "$repo_root/scripts/validation-worker.sh" run --request "$request" >"$output_file" 2>&1 &
-  worker_pid=$!
-  for _ in {1..200}; do
-    [[ -f "$marker" ]] && break
-    kill -0 "$worker_pid" 2>/dev/null || break
-    sleep 0.05
-  done
-  [[ -f "$marker" ]] || return 1
-
-  start="$(date +%s)"
-  kill -TERM "$worker_pid"
-  set +e
-  wait "$worker_pid"
-  status=$?
-  set -e
-  end="$(date +%s)"
-
-  [[ "$status" -eq 143 ]] || return 1
-  [[ $((end - start)) -lt 4 ]] || return 1
-  ! kill -0 "$(cat "$child_pid_file")" 2>/dev/null || return 1
-  [[ ! -e "$tmp_root/worker-home/locks/validation-slot.lock" ]] || return 1
-  assert_json_equals "$evidence/result.json" .category interrupted
-}
-
-test_worker_termination_during_submodule_preparation_is_bounded() {
-  local source request evidence fake_bin real_git marker child_pid_file worker_pid status output_file start end head
-  make_source_repo_with_submodule source interrupted-submodule
-  reset_worker_home
-  head="$(git -C "$source" rev-parse HEAD)"
-  evidence="$tmp_root/evidence-interrupted-submodule"
-  request="$tmp_root/interrupted-submodule.json"
-  fake_bin="$tmp_root/fake-bin-interrupted-submodule"
-  marker="$tmp_root/interrupted-submodule.started"
-  child_pid_file="$tmp_root/interrupted-submodule.pid"
-  output_file="$tmp_root/interrupted-submodule.out"
-  real_git="$(command -v git)"
-  mkdir -p "$fake_bin"
-  cat >"$fake_bin/git" <<SCRIPT
-#!/usr/bin/env bash
-if [[ " \$* " == *" submodule update "* ]]; then
-  printf '%s\n' "\$\$" >"$child_pid_file"
-  : >"$marker"
-  trap '' TERM
-  while :; do sleep 1; done
-fi
-exec "$real_git" "\$@"
-SCRIPT
-  chmod +x "$fake_bin/git"
-  write_request "$request" "$source" "$evidence" HEAD "$head" 0 60
-
-  env PATH="$fake_bin:$PATH" VALIDATION_WORKER_HOME="$tmp_root/worker-home" \
-    VALIDATION_WORKER_VALIDATE_DRY_RUN=1 VALIDATION_WORKER_TEST_FILE_SUBMODULE_ROOT="$tmp_root" \
-    VALIDATION_WORKER_TERMINATION_GRACE_SECONDS=1 \
-    "$repo_root/scripts/validation-worker.sh" run --request "$request" >"$output_file" 2>&1 &
-  worker_pid=$!
-  for _ in {1..200}; do
-    [[ -f "$marker" ]] && break
-    kill -0 "$worker_pid" 2>/dev/null || break
-    sleep 0.05
-  done
-  [[ -f "$marker" ]] || return 1
-
-  start="$(date +%s)"
-  kill -TERM "$worker_pid"
-  set +e
-  wait "$worker_pid"
-  status=$?
-  set -e
-  end="$(date +%s)"
-
-  [[ "$status" -eq 143 ]] || return 1
-  [[ $((end - start)) -lt 4 ]] || return 1
-  ! kill -0 "$(cat "$child_pid_file")" 2>/dev/null || return 1
-  [[ ! -e "$tmp_root/worker-home/locks/validation-slot.lock" ]] || return 1
-  assert_json_equals "$evidence/result.json" .category interrupted
-}
-
-test_worker_failed_termination_retains_stack_and_locks() {
-  local source request evidence stack other_checkout fake_bin real_ps pgid_file worker_pid status output_file rebound=0
-  make_source_repo source failed-termination-cleanup
-  reset_worker_home
-  evidence="$tmp_root/evidence-failed-termination-cleanup"
-  request="$tmp_root/failed-termination-cleanup.json"
-  stack="$tmp_root/failed-termination-cleanup-stack"
-  other_checkout="$tmp_root/failed-termination-cleanup-other-checkout"
-  fake_bin="$tmp_root/fake-bin-failed-termination-cleanup"
-  pgid_file="$tmp_root/failed-termination-cleanup.pgid"
-  output_file="$tmp_root/failed-termination-cleanup.out"
-  real_ps="$(command -v ps)"
-  mkdir -p "$stack" "$other_checkout" "$fake_bin"
-  printf 'ENV=development\n' >"$stack/.env"
-  ln -s "$other_checkout" "$stack/code"
-  write_request "$request" "$source" "$evidence" HEAD "" 0 60 "$stack" preflight
-
-  # Simulate a process group that remains observable after KILL. The initial
-  # lookup still uses the real ps so termination targets the actual setsid
-  # group; subsequent membership checks retain that pgid through both grace
-  # periods and exercise the cleanup-withheld failure path.
-  cat >"$fake_bin/ps" <<SCRIPT
-#!/usr/bin/env bash
-if [[ "\${1:-}" == "-eo" && "\${2:-}" == "pgid=,stat=" && -s "$pgid_file" ]]; then
-  printf '%s S\n' "\$(cat "$pgid_file")"
-  exit 0
-fi
-if [[ "\${1:-}" == "-o" && "\${2:-}" == "pgid=" ]]; then
-  output="\$("$real_ps" "\$@")"
-  printf '%s\n' "\$output"
-  printf '%s\n' "\$output" | tr -d ' ' >"$pgid_file"
-  exit 0
-fi
-exec "$real_ps" "\$@"
-SCRIPT
-  chmod +x "$fake_bin/ps"
-
-  env PATH="$fake_bin:$PATH" VALIDATION_WORKER_HOME="$tmp_root/worker-home" \
-    VALIDATION_WORKER_VALIDATE_DRY_RUN=1 \
-    VALIDATION_WORKER_TEST_IGNORE_TERM=1 \
-    VALIDATION_WORKER_TERMINATION_GRACE_SECONDS=1 \
-    "$repo_root/scripts/validation-worker.sh" run --request "$request" >"$output_file" 2>&1 &
-  worker_pid=$!
-
-  for _ in {1..200}; do
-    if [[ -L "$stack/code" && "$(readlink "$stack/code")" != "$other_checkout" ]]; then
-      rebound=1
-      break
-    fi
-    kill -0 "$worker_pid" 2>/dev/null || break
-    sleep 0.05
-  done
-  if [[ "$rebound" -ne 1 ]]; then
-    kill -KILL "$worker_pid" 2>/dev/null || true
-    wait "$worker_pid" 2>/dev/null || true
-    printf 'worker did not bind the validation stack before failed termination test\n' >&2
-    return 1
-  fi
-
-  kill -TERM "$worker_pid"
-  set +e
-  wait "$worker_pid"
-  status=$?
-  set -e
-
-  [[ "$status" -eq 1 ]] || {
-    printf 'expected failed termination status 1, got %s; output:\n' "$status" >&2
-    cat "$output_file" >&2
-    return 1
-  }
-  [[ "$(readlink "$stack/code")" != "$other_checkout" ]] || return 1
-  [[ -d "$stack/.validation-worker-code.lock" ]] || return 1
-  [[ -d "$tmp_root/worker-home/locks/validation-slot.lock" ]] || return 1
-  assert_json_equals "$evidence/result.json" .category child_termination_failed
-  assert_json_equals "$evidence/result.json" .exit_code 1
-}
-
-test_worker_termination_restores_stack_and_releases_locks() {
-  local source request evidence stack other_checkout worker_pid status output_file rebound=0
-  make_source_repo source interrupted-cleanup
-  reset_worker_home
-  evidence="$tmp_root/evidence-interrupted-cleanup"
-  request="$tmp_root/interrupted-cleanup.json"
-  stack="$tmp_root/interrupted-cleanup-stack"
-  other_checkout="$tmp_root/interrupted-cleanup-other-checkout"
-  output_file="$tmp_root/interrupted-cleanup.out"
-  mkdir -p "$stack" "$other_checkout"
-  printf 'ENV=development\n' >"$stack/.env"
-  ln -s "$other_checkout" "$stack/code"
-  write_request "$request" "$source" "$evidence" HEAD "" 0 60 "$stack" preflight
-
-  env VALIDATION_WORKER_HOME="$tmp_root/worker-home" \
-    VALIDATION_WORKER_VALIDATE_DRY_RUN=1 \
-    VALIDATION_WORKER_TEST_IGNORE_TERM=1 \
-    VALIDATION_WORKER_TERMINATION_GRACE_SECONDS=1 \
-    "$repo_root/scripts/validation-worker.sh" run --request "$request" >"$output_file" 2>&1 &
-  worker_pid=$!
-
-  for _ in {1..200}; do
-    if [[ -L "$stack/code" && "$(readlink "$stack/code")" != "$other_checkout" ]]; then
-      rebound=1
-      break
-    fi
-    kill -0 "$worker_pid" 2>/dev/null || break
-    sleep 0.05
-  done
-  if [[ "$rebound" -ne 1 ]]; then
-    kill -TERM "$worker_pid" 2>/dev/null || true
-    wait "$worker_pid" 2>/dev/null || true
-    printf 'worker did not bind the validation stack before interruption\n' >&2
-    return 1
-  fi
-
-  kill -TERM "$worker_pid"
-  set +e
-  wait "$worker_pid"
-  status=$?
-  set -e
-
-  [[ "$status" -eq 143 ]] || {
-    printf 'expected interrupted worker status 143, got %s; output:\n' "$status" >&2
-    cat "$output_file" >&2
-    return 1
-  }
-  [[ "$(readlink "$stack/code")" == "$other_checkout" ]] || return 1
-  [[ ! -e "$stack/.validation-worker-code.lock" ]] || return 1
-  [[ ! -e "$tmp_root/worker-home/locks/validation-slot.lock" ]] || return 1
-  assert_json_equals "$evidence/stack-binding.json" .restore_status restored
-  assert_json_equals "$evidence/result.json" .category interrupted
-  assert_json_equals "$evidence/result.json" .exit_code 143
-}
-
-test_current_afk_wrapper_forwards_termination_and_retains_evidence() {
-  local source evidence stack wrapper_pid status output_file validation_started rebound=0
-  make_afk_contract_repo source wrapper-interruption
-  reset_worker_home
-  evidence="$tmp_root/current-afk-interrupted-evidence"
-  stack="$tmp_root/operator-home/Projects/bump-eqemu/bump-akk-stack-validation"
-  output_file="$tmp_root/current-afk-interrupted.out"
-  validation_started="$tmp_root/current-afk-validation.started"
-
-  env HOME="$tmp_root/operator-home" VALIDATION_WORKER_HOME="$tmp_root/worker-home" \
-    VALIDATION_WORKER_TEST_SLEEP=30 VALIDATION_WORKER_TEST_STARTED_MARKER="$validation_started" \
-    VALIDATION_AFK_EVIDENCE_DIR="$evidence" \
-    "$source/scripts/validate-afk" >"$output_file" 2>&1 &
-  wrapper_pid=$!
-
-  for _ in {1..200}; do
-    if [[ -L "$stack/code" && -f "$validation_started" ]]; then
-      rebound=1
-      break
-    fi
-    kill -0 "$wrapper_pid" 2>/dev/null || break
-    sleep 0.05
-  done
-  if [[ "$rebound" -ne 1 ]]; then
-    kill -TERM "$wrapper_pid" 2>/dev/null || true
-    wait "$wrapper_pid" 2>/dev/null || true
-    return 1
-  fi
-
-  kill -TERM "$wrapper_pid"
-  set +e
-  wait "$wrapper_pid"
-  status=$?
-  set -e
-
-  [[ "$status" -eq 143 ]] || return 1
-  [[ ! -e "$stack/code" ]] || return 1
-  [[ ! -e "$stack/.validation-worker-code.lock" ]] || return 1
-  [[ ! -e "$tmp_root/worker-home/locks/validation-slot.lock" ]] || return 1
-  [[ -f "$evidence/result.json" ]] || return 1
-  assert_json_equals "$evidence/result.json" .category interrupted
-  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "inconclusive,not_run,not_run"
-  [[ -z "$(find "$tmp_root/worker-home/requests" -type f -print -quit)" ]] || return 1
-}
-
 test_akkstack_dir_real_code_directory_fails_fast() {
-  local source request evidence status output stack head
+  local source request evidence status output stack
   make_source_repo source
   reset_worker_home
   evidence="$tmp_root/evidence-env-real-code"
@@ -1442,14 +832,12 @@ test_akkstack_dir_real_code_directory_fails_fast() {
   stack="$tmp_root/env-real-code-stack"
   mkdir -p "$stack/code"
   printf 'ENV=development\n' >"$stack/.env"
-  head="$(git -C "$source" rev-parse HEAD)"
-  write_request "$request" "$source" "$evidence" HEAD "$head" 0 10 "" tier1-tier3-harness
+  write_request "$request" "$source" "$evidence" HEAD "" 0 10
 
   capture_run status output env VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 AKKSTACK_DIR="$stack" "$repo_root/scripts/validation-worker.sh" run --request "$request"
 
   [[ "$status" -eq 1 ]] || return 1
   assert_json_equals "$evidence/result.json" .category stack_binding_failed
-  assert_combined_checks_not_run "$evidence" "$head"
   assert_json_equals "$evidence/stack-binding.json" .previous_kind directory
   [[ -d "$stack/code" && ! -L "$stack/code" ]] || return 1
 }
@@ -1464,7 +852,6 @@ test_current_afk_command_validates_exact_head_without_arguments() {
   capture_run status output env HOME="$tmp_root/operator-home" \
     VALIDATION_WORKER_HOME="$tmp_root/worker-home" \
     VALIDATION_WORKER_VALIDATE_DRY_RUN=1 \
-    VALIDATION_WORKER_AFK_MODE=1 \
     VALIDATION_AFK_EVIDENCE_DIR="$evidence" \
     "$source/scripts/validate-afk"
 
@@ -1473,15 +860,94 @@ test_current_afk_command_validates_exact_head_without_arguments() {
   assert_contains "$output" "Validation evidence: $evidence"
   assert_json_equals "$evidence/request.json" .commit "$head"
   assert_json_equals "$evidence/request.json" .ref "$head"
-  assert_json_equals "$evidence/request.json" .profile tier1-tier3-harness
+  assert_json_equals "$evidence/request.json" .profile tier1-migration-tier3
   assert_json_equals "$evidence/request.json" .stack.role validation
   assert_json_equals "$evidence/result.json" .actual_checkout_commit "$head"
   assert_json_equals "$evidence/result.json" .status passed
-  assert_json_equals "$evidence/result.json" '.checks | map(.log_path) | join(",")' "logs/tier1-build-and-unit-tests.log,logs/tier3-zone-harness.log,logs/actor-queue-runtime.log"
-  assert_contains "$(cat "$evidence/logs/tier1-build-and-unit-tests.log")" "fake validate: --stack validation tier1"
-  assert_contains "$(cat "$evidence/logs/tier3-zone-harness.log")" "fake validate: --stack validation tier3-harness"
-  assert_contains "$(cat "$evidence/logs/actor-queue-runtime.log")" "fake validate: --stack validation actor-queue-tier3"
-  assert_json_equals "$evidence/result.json" '.checks | map(.scenario) | join(",")' "tier1-build-and-unit-tests,canonical-zone-harness,actor-events-runtime"
+  assert_contains "$(cat "$(dirname "$evidence")/worker/logs/tier1-build-and-unit-tests.log")" "fake validate: --stack validation tier1"
+  assert_contains "$(cat "$(dirname "$evidence")/worker/logs/database-migration-rehearsal.log")" "fake validate: --stack validation migration-rehearsal"
+  assert_contains "$(cat "$(dirname "$evidence")/worker/logs/tier3-zone-harness.log")" "fake validate: --stack validation tier3-harness"
+}
+
+test_current_afk_command_prepares_own_manifest_from_candidate() {
+  local source evidence worker_home status output head generation
+  make_afk_contract_repo source current-command-preparation
+  worker_home="$tmp_root/worker-home-preparation"
+  for generation in first second; do
+    if [[ "$generation" == second ]]; then
+      sed -i 's/generation:"first"/generation:"second"/' "$source/scripts/prepare-migration-rehearsal-fixture.sh"
+      git -C "$source" add scripts/prepare-migration-rehearsal-fixture.sh
+      git -C "$source" commit -m 'change candidate preparation' >/dev/null 2>&1
+    fi
+    evidence="$tmp_root/current-afk-preparation-$generation"
+    head="$(git -C "$source" rev-parse HEAD)"
+    capture_run status output env HOME="$tmp_root/operator-home" \
+      VALIDATION_WORKER_HOME="$worker_home" \
+      MIGRATION_REHEARSAL_MANIFEST=/obsolete/shared/manifest.json \
+      VALIDATION_WORKER_TEST_EXPECT_MIGRATION_MANIFEST="$evidence/prepared-fixture/migration-rehearsal-manifest.json" \
+      VALIDATION_AFK_EVIDENCE_DIR="$evidence" "$source/scripts/validate-afk"
+    [[ "$status" -eq 0 ]] || return 1
+    assert_json_equals "$evidence/result.json" .status passed
+    assert_json_equals "$evidence/prepared-fixture/migration-rehearsal-manifest.json" .prepared_by "$head"
+    assert_json_equals "$evidence/prepared-fixture/migration-rehearsal-manifest.json" .generation "$generation"
+  done
+}
+
+test_current_afk_command_stops_when_preparation_fails() {
+  local source evidence status output mode
+  make_afk_contract_repo source current-command-preparation-failure
+  for mode in missing invalid preparer; do
+    evidence="$tmp_root/preparation-failure-$mode"
+    case "$mode" in
+      missing) rm -f "$MIGRATION_REHEARSAL_BASELINE_CONFIG" ;;
+      invalid) printf '{}' >"$MIGRATION_REHEARSAL_BASELINE_CONFIG" ;;
+      preparer) jq -n --arg directory "$tmp_root" '{directory:$directory}' >"$MIGRATION_REHEARSAL_BASELINE_CONFIG" ;;
+    esac
+    capture_run status output env HOME="$tmp_root/operator-home" \
+      VALIDATION_WORKER_HOME="$tmp_root/worker-home-preparation-failure" \
+      VALIDATION_WORKER_TEST_PREPARE_EXIT=23 \
+      VALIDATION_AFK_EVIDENCE_DIR="$evidence" "$source/scripts/validate-afk"
+    [[ "$status" -ne 0 ]] || return 1
+    assert_json_equals "$evidence/result.json" .category fixture_preparation_failed
+    assert_json_equals "$evidence/public-summary.json" .step fixture_preparation
+    [[ ! -f "$evidence/afk-checks.json" ]] || return 1
+    [[ ! -e "$evidence/stack-binding.json" ]] || return 1
+    [[ -s "$evidence/logs/fixture-preparation.log" || "$mode" == preparer ]] || return 1
+  done
+}
+
+test_current_afk_command_classifies_missing_migration_fixture() {
+  local source evidence status output
+  make_afk_contract_repo source current-command-missing-migration
+  evidence="$tmp_root/current-afk-missing-migration-evidence"
+
+  capture_run status output env HOME="$tmp_root/operator-home" \
+    VALIDATION_WORKER_HOME="$tmp_root/worker-home-current-missing-migration" \
+    VALIDATION_WORKER_TEST_MIGRATION_EXIT_CODE=125 \
+    VALIDATION_AFK_EVIDENCE_DIR="$evidence" \
+    "$source/scripts/validate-afk"
+
+  [[ "$status" -eq 2 ]] || return 1
+  assert_json_equals "$evidence/result.json" .category prerequisite_unavailable
+  assert_json_equals "$evidence/afk-checks.json" .status inconclusive
+  assert_json_equals "$evidence/afk-checks.json" '.checks | map(.status) | join(",")' "passed,inconclusive,not_run"
+}
+
+test_public_summary_failure_preserves_validation_exit_status() {
+  local source evidence status output
+  make_afk_contract_repo source broken-summary
+  printf 'raise RuntimeError("summary failed")\n' >"$source/scripts/public-fixture-summary.py"
+  git -C "$source" add scripts/public-fixture-summary.py
+  git -C "$source" commit -m 'break optional summary' >/dev/null 2>&1
+  evidence="$tmp_root/broken-summary-evidence"
+  capture_run status output env HOME="$tmp_root/operator-home" \
+    VALIDATION_WORKER_HOME="$tmp_root/worker-broken-summary" \
+    VALIDATION_WORKER_TEST_PREPARE_EXIT=23 \
+    VALIDATION_AFK_EVIDENCE_DIR="$evidence" "$source/scripts/validate-afk"
+  [[ "$status" -eq 23 ]] || return 1
+  assert_json_equals "$evidence/result.json" .exit_code 23
+  [[ ! -e "$evidence/public-summary.json" ]] || return 1
+  [[ -s "$evidence/logs/public-summary.log" ]] || return 1
 }
 
 test_current_afk_command_rejects_arguments() {
@@ -1492,34 +958,19 @@ test_current_afk_command_rejects_arguments() {
 }
 
 test_current_afk_command_returns_nonzero_for_failure_and_missing_stack() {
-  local source evidence status output stack head
+  local source evidence status output stack
   make_afk_contract_repo source current-command-failure
-  head="$(git -C "$source" rev-parse HEAD)"
   stack="$tmp_root/operator-home/Projects/bump-eqemu/bump-akk-stack-validation"
 
   evidence="$tmp_root/current-afk-failed-evidence"
   capture_run status output env HOME="$tmp_root/operator-home" \
     VALIDATION_WORKER_HOME="$tmp_root/worker-home-current-failed" \
     VALIDATION_WORKER_VALIDATE_DRY_RUN=1 \
-    VALIDATION_WORKER_AFK_MODE=1 \
     VALIDATION_WORKER_TEST_FAIL_TIER1=1 \
     VALIDATION_AFK_EVIDENCE_DIR="$evidence" \
     "$source/scripts/validate-afk"
   [[ "$status" -eq 1 ]] || return 1
   assert_json_equals "$evidence/result.json" .category validation_failed
-  assert_json_equals "$evidence/result.json" '.checks[0].log_path' logs/tier1-build-and-unit-tests.log
-
-  evidence="$tmp_root/current-afk-timeout-evidence"
-  capture_run status output env HOME="$tmp_root/operator-home" \
-    VALIDATION_WORKER_HOME="$tmp_root/worker-home-current-timeout" \
-    VALIDATION_WORKER_VALIDATE_DRY_RUN=1 \
-    VALIDATION_WORKER_AFK_MODE=1 \
-    VALIDATION_WORKER_TEST_TIER1_EXIT_CODE=124 \
-    VALIDATION_AFK_EVIDENCE_DIR="$evidence" \
-    "$source/scripts/validate-afk"
-  [[ "$status" -eq 1 ]] || return 1
-  assert_json_equals "$evidence/result.json" .category timeout
-  assert_json_equals "$evidence/result.json" '.checks[0].log_path' logs/tier1-build-and-unit-tests.log
 
   rm -rf "$stack"
   evidence="$tmp_root/current-afk-missing-stack-evidence"
@@ -1530,10 +981,6 @@ test_current_afk_command_returns_nonzero_for_failure_and_missing_stack() {
     "$source/scripts/validate-afk"
   [[ "$status" -ne 0 ]] || return 1
   assert_json_equals "$evidence/result.json" .category invalid_request
-  assert_json_equals "$evidence/result.json" '.checks | map(.scenario) | join(",")' "tier1-build-and-unit-tests,canonical-zone-harness,actor-events-runtime"
-  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "not_run,not_run,not_run"
-  assert_json_equals "$evidence/result.json" '.checks | map(.candidate_commit) | unique | join(",")' "$head"
-  [[ -f "$evidence/afk-checks.json" ]] || return 1
 }
 
 test_afk_contract_passes_with_stable_checks() {
@@ -1552,7 +999,7 @@ test_afk_contract_passes_with_stable_checks() {
   assert_json_equals "$evidence/result.json" .schema_version 1
   assert_json_equals "$evidence/result.json" .candidate_sha "$head"
   assert_json_equals "$evidence/result.json" .status passed
-  assert_json_equals "$evidence/result.json" '.checks | map(.name) | join(",")' "tier1-build-and-unit-tests,tier3-zone-harness,actor-queue-runtime"
+  assert_json_equals "$evidence/result.json" '.checks | map(.name) | join(",")' "tier1-build-and-unit-tests,isolated-database-migration-rehearsal,tier3-zone-harness"
   assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,passed,passed"
 }
 
@@ -1568,15 +1015,15 @@ test_afk_contract_binds_tier1_tier3_evidence_to_the_candidate() {
   capture_run status output env HOME="$tmp_root/operator-home" VALIDATION_WORKER_HOME="$tmp_root/worker-home-afk-tier1-tier3" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 "$source/scripts/validation-worker.sh" run --request "$request"
 
   [[ "$status" -eq 0 ]] || return 1
-  assert_json_equals "$evidence/worker-request.json" .profile tier1-tier3-harness
-  assert_json_equals "$evidence/worker/result.json" .profile tier1-tier3-harness
+  assert_json_equals "$evidence/worker-request.json" .profile tier1-migration-tier3
+  assert_json_equals "$evidence/worker/result.json" .profile tier1-migration-tier3
   assert_json_equals "$evidence/worker/result.json" .actual_checkout_commit "$head"
   assert_json_equals "$evidence/result.json" .candidate_sha "$head"
-  assert_json_equals "$evidence/result.json" '.checks | map(.name) | join(",")' "tier1-build-and-unit-tests,tier3-zone-harness,actor-queue-runtime"
+  assert_json_equals "$evidence/result.json" '.checks | map(.name) | join(",")' "tier1-build-and-unit-tests,isolated-database-migration-rehearsal,tier3-zone-harness"
   assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,passed,passed"
   [[ -f "$evidence/worker/logs/tier1-build-and-unit-tests.log" ]] || return 1
+  [[ -f "$evidence/worker/logs/database-migration-rehearsal.log" ]] || return 1
   [[ -f "$evidence/worker/logs/tier3-zone-harness.log" ]] || return 1
-  [[ -f "$evidence/worker/logs/actor-queue-runtime.log" ]] || return 1
 }
 
 test_afk_contract_is_independent_of_the_trusted_harness_location() {
@@ -1610,6 +1057,8 @@ test_afk_contract_is_independent_of_the_trusted_harness_location() {
   worker_request="$evidence/worker-request.json"
   mkdir -p "$harness_root/scripts/lib" "$stack" "$evidence"
   cp "$candidate_checkout/scripts/validation-worker.sh" "$harness_root/scripts/validation-worker.sh"
+  cp "$candidate_checkout/scripts/validation-lifetime.py" "$harness_root/scripts/validation-lifetime.py"
+  cp "$candidate_checkout/scripts/public-fixture-summary.py" "$harness_root/scripts/public-fixture-summary.py"
   cp "$candidate_checkout/scripts/validate.sh" "$harness_root/scripts/validate.sh"
   cp "$candidate_checkout/scripts/check-akkstack-contract.sh" "$harness_root/scripts/check-akkstack-contract.sh"
   cp "$candidate_checkout/scripts/lib/akkstack-routing.sh" "$harness_root/scripts/lib/akkstack-routing.sh"
@@ -1623,14 +1072,14 @@ test_afk_contract_is_independent_of_the_trusted_harness_location() {
   assert_json_equals "$worker_request" .repo "$canonical_repo"
   assert_json_equals "$worker_request" .ref "$head"
   assert_json_equals "$worker_request" .commit "$head"
-  assert_json_equals "$worker_request" .profile tier1-tier3-harness
+  assert_json_equals "$worker_request" .profile tier1-migration-tier3
   assert_json_equals "$worker_request" .stack.role validation
   assert_json_equals "$worker_request" .stack.path "$stack"
   if grep -Fq "$candidate_checkout" "$worker_request" || grep -Fq "$harness_root" "$worker_request"; then
     printf 'nested request exposed the Candidate checkout or trusted-harness path\n' >&2
     return 1
   fi
-  assert_json_equals "$evidence/result.json" '.checks | map(.name) | join(",")' "tier1-build-and-unit-tests,tier3-zone-harness,actor-queue-runtime"
+  assert_json_equals "$evidence/result.json" '.checks | map(.name) | join(",")' "tier1-build-and-unit-tests,isolated-database-migration-rehearsal,tier3-zone-harness"
 }
 
 test_afk_contract_rejects_tier1_and_stops() {
@@ -1665,8 +1114,7 @@ test_afk_contract_reports_missing_prerequisite_as_inconclusive() {
 
   [[ "$status" -eq 2 ]] || return 1
   assert_json_equals "$evidence/result.json" .status inconclusive
-  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "not_run,not_run,not_run"
-  assert_json_equals "$evidence/result.json" '.checks | map(.candidate_commit) | unique | join(",")' "$head"
+  assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "inconclusive,not_run,not_run"
 }
 
 test_afk_contract_maps_timeout_and_missing_command_to_inconclusive() {
@@ -1706,6 +1154,9 @@ test_afk_contract_maps_timeout_infrastructure_failure_to_inconclusive() {
 test_afk_contract_fetches_a_self_contained_checkout_from_a_linked_worktree() {
   local source linked_root linked_worktree request evidence status output head
   make_source_repo_with_submodule source afk-linked
+  install_fake_preparer "$source"
+  cp "$repo_root/scripts/validation-lifetime.py" "$source/scripts/validation-lifetime.py"
+  git -C "$source" add scripts/validation-lifetime.py
   cp "$repo_root/scripts/validation-worker.sh" "$source/scripts/validation-worker.sh"
   chmod +x "$source/scripts/validation-worker.sh"
   git -C "$source" add scripts/validation-worker.sh
@@ -1741,22 +1192,24 @@ test_afk_contract_treats_nonzero_inner_exit_after_passed_checks_as_inconclusive(
   real_rm="$(command -v rm)"
   mkdir "$evidence" "$fake_bin"
   write_afk_request "$request" "$head" "$evidence"
-  cat >"$fake_bin/rm" <<SCRIPT
-#!/usr/bin/env bash
-if [[ " \$* " == *".validation-worker-code.lock"* ]]; then
-  exit 1
+  cat >>"$source/scripts/validate.sh" <<'SCRIPT'
+if [[ " $* " == *" tier3-harness"* ]]; then
+  ln -sfn /operator-replacement "$AKKSTACK_DIR/code"
 fi
-exec "$real_rm" "\$@"
 SCRIPT
-  chmod +x "$fake_bin/rm"
+  git -C "$source" add scripts/validate.sh
+  git -C "$source" commit -m 'inject binding ownership conflict' >/dev/null 2>&1
+  configure_afk_host "$source"
+  head="$(git -C "$source" rev-parse HEAD)"
+  write_afk_request "$request" "$head" "$evidence"
 
   capture_run status output env HOME="$tmp_root/operator-home" PATH="$fake_bin:$PATH" VALIDATION_WORKER_HOME="$tmp_root/worker-home" VALIDATION_WORKER_VALIDATE_DRY_RUN=1 "$source/scripts/validation-worker.sh" run --request "$request"
 
   [[ "$status" -eq 2 ]] || return 1
-  assert_json_equals "$evidence/worker/afk-checks.json" .status inconclusive
-  assert_json_equals "$evidence/worker/result.json" .category cleanup_failed
+  assert_json_equals "$evidence/worker/afk-checks.json" .status passed
   assert_json_equals "$evidence/result.json" .status inconclusive
   assert_json_equals "$evidence/result.json" '.checks | map(.status) | join(",")' "passed,passed,inconclusive"
+  rm -rf "$tmp_root/operator-home/Projects/bump-eqemu/bump-akk-stack-validation/.validation-worker-code.lock"
 }
 
 test_afk_contract_rejects_unapproved_submodule_transports_before_initialization() {
@@ -1899,38 +1352,26 @@ run_test "invalid request writes structured evidence" test_invalid_request_write
 run_test "fake repo fetch checkout writes evidence" test_fetch_checkout_and_evidence
 run_test "fetched checkout initializes submodules before validation" test_fetch_checkout_initializes_submodules_before_validation
 run_test "submodule timeout is categorized" test_submodule_timeout_is_categorized
-run_test "stack lock is not held during submodule initialization" test_stack_lock_is_not_held_during_submodule_initialization
+run_test "stack busy prevents submodule initialization" test_stack_busy_prevents_submodule_initialization
 run_test "commit mismatch is categorized" test_commit_mismatch
 run_test "fetch failure is categorized" test_fetch_failure
 run_test "local-checkout request still works" test_local_checkout_request_works
 run_test "local-checkout request rejects a drifting submodule" test_local_checkout_rejects_drifting_submodule
 run_test "lock contention is worker_busy" test_lock_contention
 run_test "validation timeout is categorized" test_timeout
-run_test "normal completion kills surviving command descendants" test_normal_completion_kills_surviving_command_descendants
-run_test "normal completion kills a descendant that starts a new session" test_normal_completion_kills_setsid_descendant
-run_test "actor timeout still dispatches cleanup" test_actor_timeout_still_dispatches_cleanup
-run_test "interrupted actor container stop uses a short deadline" test_interrupted_actor_container_stop_uses_short_deadline
-run_test "actor container stop failure retains lock and skips database cleanup" test_actor_container_stop_failure_retains_lock_and_skips_database_cleanup
-run_test "actor cleanup is dispatched and failure is propagated" test_actor_cleanup_is_dispatched_and_failure_is_propagated
-run_test "validation timeout kills a TERM-resistant child" test_timeout_kills_a_term_resistant_validation_child
 run_test "tier3 harness failure is categorized with logs" test_tier3_harness_failure_is_categorized_with_logs
-run_test "combined AFK profile runs Tier 1, canonical harness, and actor queue" test_tier1_tier3_harness_profile_runs_tier1_before_tier3
-run_test "combined AFK dry run does not require runtime completion markers" test_combined_profile_dry_run_does_not_require_runtime_markers
-run_test "combined AFK profile rejects zero-exit actor queue without completion proof" test_combined_profile_rejects_a_zero_exit_without_runtime_proof
-run_test "combined AFK profile propagates actor queue failure" test_combined_profile_propagates_actor_queue_failure
+run_test "tier1 plus tier3 harness profile runs tier1 before tier3" test_tier1_tier3_harness_profile_runs_tier1_before_tier3
 run_test "tier1 plus tier3 harness profile uses one timeout budget" test_tier1_tier3_harness_profile_uses_one_timeout_budget
 run_test "tier1 plus tier3 harness profile stops after tier1 failure and releases lock" test_tier1_tier3_harness_profile_stops_after_tier1_failure_and_releases_lock
 run_test "validation worker binds requested validation stack to worker checkout" test_validation_worker_binds_requested_validation_stack_to_worker_checkout
 run_test "validation worker binds validation stack from AKKSTACK_DIR" test_validation_worker_binds_stack_from_akkstack_dir_environment
 run_test "stack lock blocks distinct worker homes on same stack" test_stack_lock_blocks_distinct_worker_homes_on_same_stack
-run_test "worker termination kills a checkout descendant after its leader exits" test_worker_termination_kills_checkout_deletion_descendant_after_leader_exit
-run_test "worker termination during fetch is bounded" test_worker_termination_during_fetch_is_bounded
-run_test "worker termination during submodule preparation is bounded" test_worker_termination_during_submodule_preparation_is_bounded
-run_test "failed worker termination retains stack and locks" test_worker_failed_termination_retains_stack_and_locks
-run_test "worker termination restores stack and releases locks" test_worker_termination_restores_stack_and_releases_locks
-run_test "current AFK wrapper forwards termination and retains evidence" test_current_afk_wrapper_forwards_termination_and_retains_evidence
 run_test "AKKSTACK_DIR real code directory fails fast" test_akkstack_dir_real_code_directory_fails_fast
 run_test "current AFK command validates exact HEAD without arguments" test_current_afk_command_validates_exact_head_without_arguments
+run_test "current AFK command prepares its own manifest from the Candidate" test_current_afk_command_prepares_own_manifest_from_candidate
+run_test "current AFK command stops before checks when preparation fails" test_current_afk_command_stops_when_preparation_fails
+run_test "current AFK command classifies a missing migration fixture" test_current_afk_command_classifies_missing_migration_fixture
+run_test "summary failure preserves validation exit status" test_public_summary_failure_preserves_validation_exit_status
 run_test "current AFK command rejects arguments" test_current_afk_command_rejects_arguments
 run_test "current AFK command returns nonzero for failure and missing stack" test_current_afk_command_returns_nonzero_for_failure_and_missing_stack
 run_test "AFK contract reports stable passing checks" test_afk_contract_passes_with_stable_checks

@@ -692,7 +692,12 @@ ZONE_HARNESS_CONTAINER
   # example mysqladmin's readiness status) so successful wrapper stdout remains
   # exactly the host-published machine-readable result.
   compose_status=0
-  "${harness_compose[@]}" run --rm --no-deps -T \
+  owned_container_args=()
+  if [[ -n "${VALIDATION_WORKER_LIFETIME_TOKEN:-}" ]]; then
+    owned_container_args=(--label "org.eqemu.validation=$VALIDATION_WORKER_LIFETIME_TOKEN")
+    : >"$VALIDATION_WORKER_DOCKER_MARKER"
+  fi
+  "${harness_compose[@]}" run "${owned_container_args[@]}" --rm --no-deps -T \
     -e ZONE_HARNESS_PORT="$port" \
     -e ZONE_HARNESS_LOG_FILE=/tmp/zone-harness-result/zone_harness.out \
     -e BOT_LOOT_RESULT_FILE=/tmp/zone-harness-result/result.json \
@@ -707,7 +712,4 @@ ZONE_HARNESS_CONTAINER
   fi
   [[ -s "$result_file" ]] || die "Bot Loot Request scenario produced no structured result"
   cat "$result_file"
-  # Keep stdout as the structured scenario result. The AFK worker captures both
-  # streams and requires this exact end-to-end completion evidence in its log.
-  printf '[PASS] canonical-zone-harness\n' >&2
 )

@@ -37,7 +37,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cctype>
 #include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
@@ -164,52 +163,6 @@ private:
 	std::vector<uint32_t> actor_ids_;
 };
 
-std::string ActorValidationOwnerPrefix() {
-	std::string token = std::getenv("ACTOR_QUEUE_VALIDATION_TOKEN") ? std::getenv("ACTOR_QUEUE_VALIDATION_TOKEN") : "";
-	token.erase(std::remove_if(token.begin(), token.end(), [](unsigned char c) { return !std::isalnum(c); }), token.end());
-	if (token.empty()) {
-		token = std::to_string(BuildRunNonce());
-	}
-	return "ActorownerRuntime" + token.substr(0, 40);
-}
-
-bool CleanupActorValidationOwners(const std::string& owner_prefix, std::string* failure_reason, size_t* owner_count) {
-	auto owners = database.QueryDatabase(fmt::format(
-		"SELECT id FROM character_data WHERE name LIKE '{}%' AND last_name = '{}' AND (deleted_at IS NULL OR deleted_at <= 0)",
-		Strings::Escape(owner_prefix), Strings::Escape(std::string(EQ::Actor::ReservedOwners::kReservedOwnerLastNameMarker))));
-	if (!owners.Success()) {
-		*failure_reason = "reserved_owner_discovery_failed";
-		return false;
-	}
-
-	std::vector<uint32_t> owner_ids;
-	for (auto row : owners) {
-		if (row[0]) {
-			owner_ids.push_back(static_cast<uint32_t>(strtoul(row[0], nullptr, 10)));
-		}
-	}
-	*owner_count = owner_ids.size();
-	for (const auto owner_id : owner_ids) {
-		auto profiles = database.QueryDatabase(
-			fmt::format("SELECT actor_id FROM actor_profiles WHERE owner_character_id = {}", owner_id));
-		if (!profiles.Success()) {
-			*failure_reason = "actor_profile_discovery_failed";
-			return false;
-		}
-		ActorEventPersistenceCleanup cleanup;
-		cleanup.reserved_owner_character_id = owner_id;
-		for (auto row : profiles) {
-			if (row[0]) {
-				cleanup.TrackActorId(static_cast<uint32_t>(strtoul(row[0], nullptr, 10)));
-			}
-		}
-		if (!cleanup.Cleanup(failure_reason)) {
-			return false;
-		}
-	}
-	return true;
-}
-
 class BlockingPersistenceSink final : public EQ::ZoneHarness::ActorEventPersistenceSink {
 public:
 	void PersistSpeechEmitted(Mob*, const EQ::ZoneHarness::ActorEvent&) override {
@@ -329,17 +282,6 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 	}
 
 	EQEmuLogSys::Instance()->SilenceConsoleLogging();
-	const auto owner_prefix = ActorValidationOwnerPrefix();
-	if (cmd["--cleanup-only"]) {
-		std::string failure_reason;
-		size_t owner_count = 0;
-		if (!CleanupActorValidationOwners(owner_prefix, &failure_reason, &owner_count)) {
-			std::cerr << "[CLEANUP-FAIL] actor-events-runtime: " << failure_reason << "\n";
-			std::exit(1);
-		}
-		std::cout << "[PASS] actor-events-cleanup owners=" << owner_count << "\n";
-		return;
-	}
 
 	try {
 		ExpectRecorderShutdownWaitsForInFlightCallbacks();
@@ -357,7 +299,7 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 		EQ::ZoneHarness::ActorEventRecorder::RegisterActiveRecorder(&recorder);
 
 		ActorEventPersistenceCleanup cleanup;
-		const auto reserved_owner = EQ::Actor::ReservedOwners::Provision(database, owner_prefix);
+		const auto reserved_owner = EQ::Actor::ReservedOwners::Provision(database, "ActorownerRuntime" + std::to_string(run_nonce));
 		Expect(reserved_owner.character_id > 0,
 			   "reserved owner provisioning should succeed for runtime actor event persistence");
 		cleanup.reserved_owner_character_id = reserved_owner.character_id;

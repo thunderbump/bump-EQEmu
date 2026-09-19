@@ -10,7 +10,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
 worker_home="${VALIDATION_WORKER_HOME:-$repo_root/.validation-worker}"
 stack_path="${AKKSTACK_DIR:-$HOME/Projects/bump-eqemu/bump-akk-stack-validation}"
-timeout_seconds="${VALIDATION_AFK_TIMEOUT_SECONDS:-2600}"
+timeout_seconds="${VALIDATION_AFK_TIMEOUT_SECONDS:-5400}"
 
 if [[ ! "$timeout_seconds" =~ ^[0-9]+$ || "$timeout_seconds" -eq 0 ]]; then
   printf 'error: VALIDATION_AFK_TIMEOUT_SECONDS must be a positive integer\n' >&2
@@ -31,25 +31,10 @@ fi
 
 mkdir -p "$worker_home/requests"
 request_path="$(mktemp "$worker_home/requests/$run_token.XXXXXX.json")"
-worker_pid=
 cleanup() {
   rm -f "$request_path"
 }
-forward_signal() {
-  local signal="$1" exit_code="$2"
-  trap - INT TERM
-  if [[ -n "$worker_pid" ]]; then
-    kill -"$signal" "$worker_pid" 2>/dev/null || true
-    set +e
-    wait "$worker_pid"
-    set -e
-    worker_pid=
-  fi
-  exit "$exit_code"
-}
 trap cleanup EXIT
-trap 'forward_signal INT 130' INT
-trap 'forward_signal TERM 143' TERM
 
 jq -n \
   --arg project bump-eqemu \
@@ -65,7 +50,7 @@ jq -n \
     repo:$repo,
     ref:$ref,
     commit:$commit,
-    profile:"tier1-tier3-harness",
+    profile:"tier1-migration-tier3",
     run_id:$run_id,
     evidence_dir:$evidence_dir,
     timeout_seconds:$timeout_seconds,
@@ -73,19 +58,25 @@ jq -n \
     stack:{role:"validation", path:$stack_path}
   }' >"$request_path"
 
-printf 'Validating committed Candidate %s with Tier 1, Tier 3 Zone Harness, and durable actor queue proof.\n' "$candidate_sha"
+printf 'Validating committed Candidate %s with Tier 1, isolated migration rehearsal, and Tier 3 Zone Harness.\n' "$candidate_sha"
 printf 'Validation stack: %s\n' "$stack_path"
 printf 'Validation evidence: %s\n' "$evidence_dir"
 
-# This entry point is the committed-Candidate gate, never a worker preview or
-# the legacy AFK adapter. Do not let ambient worker-only settings alter its
-# validation execution, evidence paths, or timeout semantics.
-env -u VALIDATION_WORKER_VALIDATE_DRY_RUN -u VALIDATION_WORKER_AFK_MODE \
+# This entry point is the committed-Candidate gate, never a worker preview.
+# Do not allow an operator's ambient worker-only setting to skip validation.
+# Keep the caller attached until the worker has finished its bounded cleanup.
+worker_pid=
+forward_signal() {
+  [[ -z "$worker_pid" ]] || kill -TERM "$worker_pid" 2>/dev/null || true
+}
+trap forward_signal TERM INT
+env -u VALIDATION_WORKER_VALIDATE_DRY_RUN -u VALIDATION_WORKER_LIFETIME_TOKEN -u VALIDATION_WORKER_LIFETIME_PARENT VALIDATION_WORKER_AFK_MODE=1 \
   "$script_dir/validation-worker.sh" run --request "$request_path" &
 worker_pid=$!
 set +e
-wait "$worker_pid"
-worker_status=$?
-set -e
-worker_pid=
+while true; do
+  wait "$worker_pid"
+  worker_status=$?
+  kill -0 "$worker_pid" 2>/dev/null || break
+done
 exit "$worker_status"

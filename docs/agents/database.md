@@ -1,6 +1,6 @@
 # Database changes and release procedure
 
-These are required delivery rules. Snapshot-based migration validation is planned, not an existing command. Until it lands, follow the [current backup gate and worker contract](../testing/process.md#backup-gate) and report missing upgrade evidence explicitly. Never assume the shared validation database is disposable.
+These are required delivery rules. Snapshot-based migration validation is available through the repository-owned [`migration-rehearsal` profile](../testing/database-migration-rehearsal.md). Its explicitly selected, checksummed captured baseline remains an operator-provided prerequisite. The no-argument AFK gate prepares per-run inputs automatically from that baseline. Never assume the shared validation database is disposable.
 
 ## When implementing schema or saved-data changes
 

@@ -9,6 +9,16 @@ akkstack_init_routing "$repo_root" validation "$@"
 stack_dir="$AKKSTACK_STACK_DIR"
 compose_files=(docker-compose.yml docker-compose.dev.yml)
 compose=(docker-compose)
+owned_container_args=()
+timeout_args=()
+if [[ -n "${VALIDATION_WORKER_LIFETIME_TOKEN:-}" ]]; then
+  timeout_args=(--foreground)
+  owned_container_args=(--label "org.eqemu.validation=$VALIDATION_WORKER_LIFETIME_TOKEN")
+fi
+mark_owned_docker() {
+  [[ -z "${VALIDATION_WORKER_DOCKER_MARKER:-}" ]] || : >"$VALIDATION_WORKER_DOCKER_MARKER"
+}
+
 for compose_file in "${compose_files[@]}"; do
   compose+=(-f "$compose_file")
 done
@@ -32,10 +42,8 @@ Commands:
   tier3-harness   Run the canonical Zone Harness smoke.
   actor-queue-tier3
                   Run the DB-mutating durable actor queue integration scenario.
-  actor-queue-stop
-                  Stop and remove the current validation actor container.
-  actor-queue-cleanup
-                  Remove actor queue rows owned by the current validation token.
+  migration-rehearsal
+                  Rehearse upgrade and rollback from a known isolated snapshot.
   safe            Run preflight, tier1, and tier2-readonly.
 
 The safe command intentionally does not run DB-mutating Tier 2 checks or Tier 3
@@ -59,6 +67,9 @@ validation_action() {
     tier2-readonly)
       printf '%s\n' "would run preflight, start or verify MariaDB with canonical Compose (--no-recreate), and run tests:npc-handins and tests:npc-handins-multiquest as separate zone CLI processes in a single one-off eqemu-server container"
       ;;
+    migration-rehearsal)
+      printf '%s\n' "would rehearse Candidate database upgrade, idempotence, scenarios, and old-build rollback in a disposable database"
+      ;;
     safe)
       printf '%s\n' "would run preflight, tier1, and tier2-readonly"
       ;;
@@ -72,7 +83,8 @@ run_preflight() {
 run_tier1() {
   (
     cd "$stack_dir"
-    "${compose[@]}" run --rm --no-deps --entrypoint bash eqemu-server -lc \
+    mark_owned_docker
+    "${compose[@]}" run "${owned_container_args[@]}" --rm --no-deps --entrypoint bash eqemu-server -lc \
       'cd ~/code && cmake --preset linux-debug && cmake --build build --parallel && ./build/bin/tests'
   )
 }
@@ -87,7 +99,8 @@ run_mariadb() {
 run_tier2_readonly_zone_tests() {
   (
     cd "$stack_dir"
-    "${compose[@]}" run --rm --no-deps --entrypoint bash eqemu-server -lc \
+    mark_owned_docker
+    "${compose[@]}" run "${owned_container_args[@]}" --rm --no-deps --entrypoint bash eqemu-server -lc \
       'set -euo pipefail
 runtime=/tmp/zone-cli-validation-runtime
 ~/code/scripts/lib/prepare-zone-cli-runtime.sh "$runtime"
@@ -102,84 +115,39 @@ run_tier2_readonly() {
   run_tier2_readonly_zone_tests
 }
 
-require_actor_container_name() {
-  [[ -n "${ACTOR_QUEUE_VALIDATION_CONTAINER:-}" ]] || {
-    printf 'error: ACTOR_QUEUE_VALIDATION_CONTAINER is required\n' >&2
+run_migration_rehearsal() {
+  local args=(--stack "$AKKSTACK_STACK_ROLE")
+  [[ "$AKKSTACK_DRY_RUN" -eq 0 ]] || args+=(--dry-run)
+  if [[ "$AKKSTACK_DRY_RUN" -eq 1 ]]; then
+    "$repo_root/scripts/rehearse-database-migration.sh" "${args[@]}"
+    return
+  fi
+
+  local deadline="${MIGRATION_REHEARSAL_TIMEOUT_SECONDS:-5400}"
+  [[ "$deadline" =~ ^[1-9][0-9]*$ ]] || {
+    printf 'error: MIGRATION_REHEARSAL_TIMEOUT_SECONDS must be a positive integer\n' >&2
     return 2
   }
-  [[ "$ACTOR_QUEUE_VALIDATION_CONTAINER" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || {
-    printf 'error: invalid ACTOR_QUEUE_VALIDATION_CONTAINER\n' >&2
-    return 2
-  }
+  command -v timeout >/dev/null || { printf 'error: timeout is required\n' >&2; return 125; }
+  # This deadline covers image setup, import, updates, scenarios and recovery.
+  # TERM lets the rehearsal's EXIT trap remove its owned Docker resources.
+  timeout "${timeout_args[@]}" --signal=TERM --kill-after=30s "${deadline}s" \
+    "$repo_root/scripts/rehearse-database-migration.sh" "${args[@]}"
 }
 
 run_actor_queue_tier3() {
-  require_actor_container_name
   run_preflight
   run_mariadb
   (
     cd "$stack_dir"
-    "${compose[@]}" run --name "$ACTOR_QUEUE_VALIDATION_CONTAINER" --rm --no-deps -e ACTOR_QUEUE_VALIDATION_TOKEN --entrypoint bash eqemu-server -lc \
+    mark_owned_docker
+    "${compose[@]}" run "${owned_container_args[@]}" --rm --no-deps --entrypoint bash eqemu-server -lc \
       'set -euo pipefail
 test -x ~/code/build/bin/zone || { printf "error: actor-queue-tier3 requires a prior Tier 1 build; missing executable ~/code/build/bin/zone\n" >&2; exit 2; }
 runtime=/tmp/actor-queue-tier3-runtime
 ~/code/scripts/lib/prepare-zone-cli-runtime.sh "$runtime"
 cd "$runtime"
 ~/code/build/bin/zone tests:actor-events'
-  )
-}
-
-run_actor_queue_stop() {
-  local stabilization_seconds="${ACTOR_QUEUE_STOP_STABILIZATION_SECONDS:-2}"
-  local absent_since_ns= now_ns= stabilization_ns
-  require_actor_container_name
-  [[ "$stabilization_seconds" =~ ^[0-9]+$ && "$stabilization_seconds" -gt 0 ]] || {
-    printf 'error: ACTOR_QUEUE_STOP_STABILIZATION_SECONDS must be a positive integer\n' >&2
-    return 2
-  }
-  stabilization_ns=$(( stabilization_seconds * 1000000000 ))
-
-  # The Compose client is a local process, but its one-off container belongs to
-  # the Docker daemon and can survive client termination. An accepted create
-  # request may also finish after the client and the first inspect are gone.
-  # Require a continuous absence window, restarting it whenever the named
-  # container appears, before database cleanup or shared-lock release.
-  while :; do
-    if docker container inspect "$ACTOR_QUEUE_VALIDATION_CONTAINER" >/dev/null 2>&1; then
-      absent_since_ns=
-      docker container rm --force "$ACTOR_QUEUE_VALIDATION_CONTAINER" >/dev/null 2>&1 || true
-    else
-      # Distinguish confirmed absence from an unreachable daemon.
-      docker info >/dev/null
-      now_ns="$(date +%s%N)"
-      if [[ -z "$absent_since_ns" ]]; then
-        absent_since_ns="$now_ns"
-      elif [[ $(( now_ns - absent_since_ns )) -ge "$stabilization_ns" ]]; then
-        break
-      fi
-    fi
-    sleep 0.1
-  done
-
-  docker info >/dev/null
-  if docker container inspect "$ACTOR_QUEUE_VALIDATION_CONTAINER" >/dev/null 2>&1; then
-    printf 'error: actor validation container remains present: %s\n' "$ACTOR_QUEUE_VALIDATION_CONTAINER" >&2
-    return 1
-  fi
-}
-
-run_actor_queue_cleanup() {
-  require_actor_container_name
-  run_preflight
-  run_mariadb
-  (
-    cd "$stack_dir"
-    "${compose[@]}" run --name "$ACTOR_QUEUE_VALIDATION_CONTAINER" --rm --no-deps -e ACTOR_QUEUE_VALIDATION_TOKEN --entrypoint bash eqemu-server -lc \
-      'set -euo pipefail
-runtime=/tmp/actor-queue-tier3-runtime
-~/code/scripts/lib/prepare-zone-cli-runtime.sh "$runtime"
-cd "$runtime"
-~/code/build/bin/zone tests:actor-events --cleanup-only'
   )
 }
 
@@ -206,7 +174,7 @@ fi
 command="${AKKSTACK_REMAINING_ARGS[0]}"
 
 case "$command" in
-  preflight|tier1|tier2-readonly|tier3-harness|actor-queue-tier3|actor-queue-stop|actor-queue-cleanup|safe)
+  preflight|tier1|tier2-readonly|tier3-harness|actor-queue-tier3|migration-rehearsal|safe)
     ;;
   *)
     usage >&2
@@ -218,19 +186,13 @@ if [[ "$command" == "tier3-harness" ]]; then
   run_tier3_harness
   exit 0
 fi
+if [[ "$command" == "migration-rehearsal" ]]; then
+  run_migration_rehearsal
+  exit 0
+fi
 
 if [[ "$AKKSTACK_DRY_RUN" -eq 1 && "$command" == "actor-queue-tier3" ]]; then
   akkstack_print_dry_run "would run tests:actor-events as a database-mutating runtime fixture; scenario-owned rows are cleaned up" "${compose_files[@]}"
-  exit 0
-fi
-
-if [[ "$AKKSTACK_DRY_RUN" -eq 1 && "$command" == "actor-queue-stop" ]]; then
-  akkstack_print_dry_run "would stop and remove the named actor validation container" "${compose_files[@]}"
-  exit 0
-fi
-
-if [[ "$AKKSTACK_DRY_RUN" -eq 1 && "$command" == "actor-queue-cleanup" ]]; then
-  akkstack_print_dry_run "would run tests:actor-events --cleanup-only for the validation token" "${compose_files[@]}"
   exit 0
 fi
 
@@ -260,11 +222,8 @@ case "$command" in
   actor-queue-tier3)
     run_actor_queue_tier3
     ;;
-  actor-queue-stop)
-    run_actor_queue_stop
-    ;;
-  actor-queue-cleanup)
-    run_actor_queue_cleanup
+  migration-rehearsal)
+    run_migration_rehearsal
     ;;
   safe)
     run_preflight

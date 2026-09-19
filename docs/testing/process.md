@@ -7,10 +7,10 @@ Pipeline agents should start with the concise [validation instructions](../agent
 and the worker own test semantics. New world behavior requires an automated scenario through production gameplay
 paths, including bounded outcomes and fixture cleanup. Manual play judges feel and remaining client-specific behavior.
 
-The accepted next database step is isolated snapshot-based upgrade and restore rehearsal. It is not yet a worker
-profile. The shared validation database remains persistent until an explicit isolation profile provides a separate
-target. Schema-changing work needs data-transition proof as well as the existing backup gate; a green general
-harness run alone does not establish migration safety.
+Isolated snapshot-based upgrade and restore rehearsal is provided by the
+[`migration-rehearsal` profile](database-migration-rehearsal.md). The shared validation database remains persistent;
+the profile creates and cleans a reserved, uniquely named database in the same MariaDB process. Schema-changing
+work needs this data-transition proof; a green general harness run alone does not establish migration safety.
 
 The **current AFK repository check** is the no-argument command:
 
@@ -18,47 +18,29 @@ The **current AFK repository check** is the no-argument command:
 ./scripts/validate-afk
 ```
 
-Run it from the committed Candidate checkout. It resolves that checkout's exact `HEAD`, asks the repository-owned Validation Worker to fetch that commit into worker-owned storage (including recursive submodule initialization), binds the separate validation AkkStack, and runs Tier 1 once followed by the canonical Tier 3 Zone Harness and durable actor queue runtime proof under one 2600-second budget. It never selects the gameplay stack. The command prints its evidence directory; by default evidence and the isolated checkout live below ignored `.validation-worker/`. `VALIDATION_WORKER_HOME`, `VALIDATION_AFK_EVIDENCE_DIR`, `VALIDATION_AFK_TIMEOUT_SECONDS`, and `AKKSTACK_DIR` are operator overrides when the standard local paths are unsuitable. Missing prerequisites, lock contention, timeouts, deterministic failures, and an unrun required scenario all return nonzero; success is returned only after all three registered checks pass.
+Run it from the committed Candidate checkout. It resolves that checkout's exact `HEAD`, asks the repository-owned Validation Worker to fetch that commit into worker-owned storage (including recursive submodule initialization), binds the separate validation AkkStack, prepares Candidate-specific migration inputs from the configured captured baseline, and runs Tier 1, isolated migration rehearsal, and the canonical Tier 3 Zone Harness under one 5400-second budget. Preparation writes to `prepared-fixture/` under the private evidence directory, leaves the baseline unchanged, and stops the gate before tests if it fails. See [baseline configuration](database-migration-rehearsal.md). It never selects the gameplay stack. The command prints its evidence directory; by default evidence and the isolated checkout live below ignored `.validation-worker/`. `VALIDATION_WORKER_HOME`, `VALIDATION_AFK_EVIDENCE_DIR`, `VALIDATION_AFK_TIMEOUT_SECONDS`, and `AKKSTACK_DIR` are operator overrides when the standard local paths are unsuitable. Missing prerequisites, lock contention, timeouts, and deterministic failures all return nonzero; success is returned only after Tier 1, the migration rehearsal, and Tier 3 all pass.
 
 The tracked `afk.toml` is a **retained legacy contract** for the older request-driven AFK adapter. Its `validation.command` expects AFK to provide a request rather than being the current Run Preparer's no-argument repository check. Do not use `afk.toml` to infer the current invocation.
 
 ADR 0006 also defines the lower-level portable automation contract: automation may call `scripts/validation-worker.sh run --request <request.json>` with a fetchable repo/ref or commit and an evidence directory. For local diagnostics, the same worker also accepts a local-checkout request path instead of a fetch source. Fetch requests clone into worker-owned storage, local-checkout requests validate the named checkout in place, and both paths acquire an exclusive validation slot, delegate to the project validation profile, and write mechanical evidence (`request.json`, `result.json`, and logs). Requests may include `stack.role: "validation"` and `stack.path` to select a validation AkkStack checkout; when present, the worker binds that stack's `code` symlink to the active checkout under the same exclusive lock and writes `stack-binding.json`. Direct path-based wrapper usage such as `scripts/validate.sh` remains supported for local diagnostics and narrowing failures, but it is not the portable automation contract because it assumes the caller can see the local checkout, AkkStack path, and Docker host.
 
-Signal cleanup restores the prior stack binding and releases the validation-slot and stack locks only after the worker proves the tracked command tree has exited. This proof is also required after a command leader returns normally; process-group membership plus an inherited command token detect descendants that create a new session, and survivors are terminated before cleanup. Actor runtime and cleanup containers have an explicit per-run name because Docker-daemon-owned processes are outside that local tree. The worker force-removes the named container and verifies both daemon reachability and container absence before database cleanup or lock release. If descendants remain observable after TERM/KILL and the final bounded grace period, `result.json` reports `child_termination_failed`; inability to prove container absence reports `actor_container_termination_failed`. The worker intentionally leaves the current binding and both lock directories in place so no subsequent validation can race surviving work. An operator must confirm that all descendants and the named container have exited before restoring the binding recorded in `stack-binding.json` and removing those locks.
-
 Bootstrap from zero is a separate setup task. Do not fold `make install`, environment generation, data downloads, or first-time database setup into every validation pass.
 
-Use `scripts/validation-worker.sh profiles --json` to discover the portable AFK-facing profiles and their rough mutation, timeout, and locking guidance. Today that discovery surface exposes `preflight`, `safe`, `tier3-harness`, `actor-queue-tier3`, and `tier1-tier3-harness`.
+Use `scripts/validation-worker.sh profiles --json` to discover the portable AFK-facing profiles and their rough mutation, timeout, and locking guidance. The discovery surface includes `migration-rehearsal` and the conservative combined `tier1-migration-tier3` profile in addition to the ordinary profiles.
 
 `actor-queue-tier3` is the target-owned durable Autonomous Actor queue proof. After a Tier 1 build, it runs
 `zone tests:actor-events` against the persistent validation database. The scenario provisions a reserved owner,
-Actor Profiles, Actor Status, queue rows, and Actor Events. Its checked scope guard removes those scenario-owned rows
-and reserved-owner fixture before emitting PASS. The worker also reserves part of the same request deadline for a
-separate token-scoped cleanup invocation while the stack binding and locks remain held, so timeout and interruption
-do not depend on C++ stack unwinding. Both actor invocations use the same explicit per-run container name; the worker
-proves the runtime container absent before cleanup and proves the cleanup container absent before releasing locks.
-Database cleanup failure is retained as `cleanup_failed` evidence in `actor-queue-cleanup.log`; inability to prove
-container removal is retained as `actor_container_termination_failed` in `actor-queue-stop.log` and withholds shared
-resource cleanup. It is therefore classified `database-mutating/runtime-fixture`, not read-only.
+Actor Profiles, Actor Status, queue rows, and Actor Events; its scope guard removes those scenario-owned rows and
+reserved-owner fixture on exit. It is therefore classified `database-mutating/runtime-fixture`, not read-only.
 The scenario uses the ordinary `stand` verb, which is independent of gameplay rule settings, and emits its detailed
 assertion failure or `[PASS] actor-events-runtime` to the worker validation log while the worker supplies structured
 `request.json` and `result.json` evidence.
 
 Both the current `scripts/validate-afk` repository check and the retained legacy AFK adapter pin every AFK Candidate
-to the conservative combined `tier1-tier3-harness` profile. Neither entry point receives a trusted base commit or
-change classification, so the profile always dispatches Tier 1 once, `tier3-harness`, and `actor-queue-tier3` in
-that order while holding one worker/stack lock and sharing one timeout budget. Other automation may continue to
-request `safe` when Tier 3 is not required; that profile remains preflight, Tier 1, and read-mostly Tier 2.
-
-Required checks are registered in the small `AFK_CHECK_PLAN` table in `scripts/validation-worker.sh`. Runtime rows
-must provide a stable `scenario`, the production validation `profile` that dispatches it, a dedicated `log_file`,
-and an exact `[PASS] <scenario>` `completion_marker` emitted only after the scenario's assertions complete.
-They also define deterministic-failure and inconclusive messages. Add subsequent actor runtime proofs
-to that table rather than duplicating orchestration in an external pipeline. A zero profile exit without its
-registered marker is a deterministic failure, so a no-op or internally skipped runtime cannot pass. `result.json`
-records every row's scenario, profile, status, expected completion marker, Candidate commit, and relative log path.
-All rows begin as `not_run`, and the combined gate can report `passed` only after each row is changed to `passed`.
-This is the scenario registration and exact-Candidate evidence convention for subsequent actor work.
+to `tier1-migration-tier3`. Neither entry point receives a trusted base commit or change classification, so this is
+the conservative schema-work gate. Missing snapshot fixtures are an explicit nonzero/inconclusive prerequisite,
+never a skipped pass. Other automation may explicitly request lighter profiles when its trusted selection mechanism
+establishes that schema and saved data are unaffected.
 
 Submodule expectations are part of the worker contract. Fetch requests run `git submodule update --init --recursive` before validation. Local-checkout requests continue to work for diagnostics, but the worker treats missing or drifting submodules as request failures instead of mutating the caller-owned checkout.
 
@@ -634,9 +616,73 @@ may need the one-off container to be stopped after validation.
 
 - Common utility or isolated logic: Tier 1.
 - Database-backed game logic with an existing CLI hook: Tier 1 plus targeted Tier 2.
-- Schema or saved-data migration work: backup gate, Tier 1, targeted database assertions and affected runtime scenarios. Follow [database instructions](../agents/database.md) for deployed-version upgrade and restore evidence; isolated snapshot tooling is still planned.
+- Schema or saved-data migration work: Tier 1 plus the [isolated migration rehearsal](database-migration-rehearsal.md), including targeted data assertions and affected runtime scenarios. The persistent shared database remains outside the rehearsal target.
 - Runtime gameplay behavior covered by a harness scenario: Tier 1 plus Tier 3.
 - Runtime process, config, startup, or integration behavior: Tier 1 plus Tier 4.
 - Client-visible behavior or packet flow: Tier 1 plus Tier 4 and Tier 5.
 
 Escalate only as far as the touched area requires.
+
+### Validation lifetime and timeout recovery
+
+The worker now owns one process group and both validation leases for the whole
+request, including checkout preparation. This holds the stack slot longer during
+fetch, but gives timeout handling one owner. `timeout_seconds` bounds checkout,
+fixture preparation and checks together. Cleanup has separate bounded time for
+stopping children and removing owned Docker resources; it can finish after that
+deadline. A timeout or cleanup failure never becomes a pass.
+
+The Python `validation-lifetime.py` supervisor uses inherited `flock` descriptors.
+A killed supervisor cannot free a slot while its child processes still hold it.
+Nested repository deadlines stay in that process group. AFK gives fixture commands
+60 seconds after TERM before forcing termination; inference retains its existing
+grace. `validate-afk` waits for worker cleanup before returning.
+
+Each run writes `lifetime.json` in private evidence and matching `owner.json`
+records in the worker and stack lock directories. Only one-off containers and
+disposable rehearsal containers, volumes and networks receive the random
+`org.eqemu.validation` ownership label. Cleanup checks that exact label and never
+stops the shared MariaDB service. It restores the stack code symlink only when
+its current target still matches the recorded binding. Cleanup failure retains
+the lease records and fails the run.
+
+A later invocation can recover abandoned records once both leases are available.
+To recover without starting new validation, use the original request and worker
+home:
+
+```sh
+VALIDATION_WORKER_HOME=/path/to/worker ./scripts/validation-worker.sh recover --request /path/to/evidence/request.json
+```
+
+Recovery preserves test results and logs and writes `recovery.json`. Live children,
+unknown legacy locks, inconsistent records, unavailable Docker, or an independently
+changed code binding cause refusal. A hard-killed supervisor with live children
+still requires those children to finish or an operator to inspect and stop them;
+recovery does not kill an unverified process. Old unlabelled Docker resources and
+legacy locks require manual inspection. Never delete locks merely because they
+are old.
+
+
+## Actor proof in the disposable gate
+
+The default AFK check executes `zone tests:actor-events` through the prepared
+migration fixture. Every scenario command must exit zero and the invocation must
+emit `[PASS] actor-events-runtime`. The rehearsal result records
+`actor_runtime.scenario` and `actor_runtime.status` beside `candidate_commit`.
+The actor proof runs once; it does not add a second shared-database profile.
+`actor-queue-tier3` remains a legacy manual shared-database profile, outside this
+gate's disposal guarantees.
+
+Docker creation and start are separate operations. Before a create request, the
+rehearsal writes `docker-creation-pending` under private worker evidence, or its
+own evidence when run standalone. Only a successful creation reply clears it.
+If creation is unconfirmed, cleanup retains the environment, stack binding and
+worker lease records. The error identifies the journal. An operator must resolve
+the outstanding daemon request before clearing the journal and invoking worker
+recovery. Waiting for a quiet interval is not confirmation. No automatic recovery
+clears this uncertainty. Confirmed containers are removed before their data volume
+and network, then the supervisor restores the binding and releases the leases.
+
+Regression commands include `python3 tests/shell/validation-lifetime-test.py`,
+`python3 tests/shell/migration-disposable-test.py`, and the opt-in, networkless
+Docker proof `EQEMU_TEST_REAL_DOCKER=1 python3 tests/shell/validation-container-test.py`.
