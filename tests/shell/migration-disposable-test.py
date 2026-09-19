@@ -51,7 +51,12 @@ if a[0] == 'create':
  (root/'container').write_text(a[a.index('--name')+1])
  sys.exit(23 if os.environ.get('CREATE_REPLY_LOST') else 0)
 if a[0] == 'start': sys.exit(23)
+if a[:2] == ['container','ls']:
+ name=(root/'container').read_text()
+ if os.environ.get('RUNTIME_INSPECT_FAIL'): print(name.removesuffix('-db')+'-runtime')
+ print(name); sys.exit(0)
 if a[0] == 'inspect':
+ if os.environ.get('RUNTIME_INSPECT_FAIL') and a[-1].endswith('-runtime'): sys.exit(1)
  if a[-1] == (root/'container').read_text(): print((root/'owner').read_text()); sys.exit(0)
  sys.exit(1)
 if a[:2] in (['network','rm'], ['volume','rm']) or a[0] == 'rm': sys.exit(0)
@@ -99,6 +104,13 @@ sys.exit(98)
             self.assertEqual(evidence['status'], 'failed')
             self.assertFalse(evidence['source']['build_identity_attested'])
             self.assertFalse(evidence['candidate']['artifact_identity_attested'])
+
+            (root/'calls').unlink()
+            result=subprocess.run(command,env={**env,'RUNTIME_INSPECT_FAIL':'1'},capture_output=True,text=True)
+            self.assertEqual(result.returncode,1,result.stderr)
+            calls=[json.loads(line) for line in (root/'calls').read_text().splitlines()]
+            self.assertFalse(any(c[0]=='rm' or c[:2] in (['network','rm'],['volume','rm']) for c in calls))
+            self.assertEqual(json.loads((root/'evidence/result.json').read_text())['failure_step'],'cleanup')
 
             # Accepted creation with a lost reply must not be treated as absence.
             (root/'calls').unlink()

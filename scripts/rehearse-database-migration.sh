@@ -187,7 +187,7 @@ run_runtime() {
     # cannot complete Docker's five-second stop sequence.
     deadline=(timeout "${worker_timeout_args[@]}" --signal=TERM --kill-after=10s "${MIGRATION_REHEARSAL_SCENARIO_TIMEOUT_SECONDS:-300}s")
   fi
-  create_owned create --name "$runtime_container" --label "$owner_label" "${worker_label[@]}" \
+  create_owned create --name "$runtime_container" --label "$owner_label" --label org.eqemu.validation.role=runtime "${worker_label[@]}" \
     --network "$network" --read-only --user 0:0 --init --ulimit core=0 --stop-timeout 5 \
     --tmpfs /tmp:rw,nosuid,size=256m --tmpfs /runtime:rw,nosuid,size=1g \
     --mount "type=bind,src=$repo_root,dst=/home/eqemu/code,readonly" \
@@ -232,11 +232,18 @@ cleanup() {
   # Before resource creation there is nothing to inspect; this keeps prerequisite
   # failures free of Docker operations as well as database restoration work.
   if [[ "$network_created" == 1 || "$volume_created" == 1 ]]; then
-    for container in "$runtime_container" "$db_container"; do
-      if [[ "$(docker inspect --format '{{ index .Config.Labels "org.eqemu.rehearsal" }}' "$container" 2>/dev/null)" == "$run_token" ]]; then
-        docker rm -f "$container" >>"$log" 2>&1 || { cleanup_status=1; break; }
-      fi
-    done
+    local containers container_owner
+    if containers="$(docker container ls --all --format '{{.Names}}')"; then
+      for container in "$runtime_container" "$db_container"; do
+        if grep -Fxq "$container" <<<"$containers"; then
+          container_owner="$(docker inspect --format '{{ index .Config.Labels "org.eqemu.rehearsal" }}' "$container")" || { cleanup_status=1; break; }
+          [[ "$container_owner" == "$run_token" ]] || { cleanup_status=1; break; }
+          docker rm -f "$container" >>"$log" 2>&1 || { cleanup_status=1; break; }
+        fi
+      done
+    else
+      cleanup_status=1
+    fi
   fi
   if [[ "$cleanup_status" == 0 && "$volume_created" == 1 ]]; then docker volume rm "$volume" >>"$log" 2>&1 || cleanup_status=1; fi
   if [[ "$cleanup_status" == 0 && "$network_created" == 1 ]]; then docker network rm "$network" >>"$log" 2>&1 || cleanup_status=1; fi
@@ -337,6 +344,7 @@ target_mysql <"$seed_sql" >>"$log" 2>&1
 failure_step=candidate_update
 run_candidate update
 failure_step=candidate_scenarios
+actor_runtime_status=failed
 run_candidate scenarios
 actor_runtime_status=passed
 failure_step=upgraded_assertions

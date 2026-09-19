@@ -913,7 +913,7 @@ test_prepare_migration_fixture_builds_reviewable_inputs_without_running_docker()
   assert_contains "$(cat "$prepared/migration-rehearsal-fixture/seed-old-format.sql")" 'fixture_character_1_id'
   assert_not_contains "$(cat "$prepared/migration-rehearsal-fixture/seed-old-format.sql")" "4294967001"
   assert_not_contains "$(cat "$prepared/migration-rehearsal-fixture/seed-old-format.sql")" "afk_migration_fixture_old_format"
-  assert_contains "$output" "Review it"
+  assert_contains "$output" "Prepared migration rehearsal fixture:"
 
   capture_run status output env PATH="$fake_bin:$PATH" \
     "$fixture_repo/scripts/prepare-migration-rehearsal-fixture.sh" --baseline-dir "$baseline" --output-dir "$tmp_root/invalid-version-output" --mariadb-version not-a-version

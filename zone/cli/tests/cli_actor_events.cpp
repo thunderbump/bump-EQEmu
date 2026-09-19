@@ -780,7 +780,8 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 		EQ::ZoneHarness::ActorEventRecorder::ClearActiveRecorder(&recorder);
 		fixture.Cleanup();
 		std::string cleanup_failure;
-		Expect(cleanup.Cleanup(&cleanup_failure), "actor event persistence cleanup should succeed: " + cleanup_failure);
+		const bool cleanup_succeeded = cleanup.Cleanup(&cleanup_failure);
+		Expect(cleanup_succeeded, "actor event persistence cleanup should succeed: " + cleanup_failure);
 		std::cout << "[PASS] actor-events-runtime\n";
 	} catch (const TestFailure& e) {
 		std::cerr << "[FAIL] " << e.what() << "\n";

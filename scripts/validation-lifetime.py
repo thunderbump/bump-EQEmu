@@ -57,11 +57,15 @@ def clean(owner):
     if (evidence / 'docker-owned').exists():
         for kind in ('container', 'volume', 'network'):
             ids = docker(deadline, kind, 'ls', *(['--all'] if kind == 'container' else []), '-q', '--filter', f'label={LABEL}={owner["token"]}').split()
+            owned = []
             for identity in ids:
                 obj = json.loads(docker(deadline, kind, 'inspect', identity))[0]
                 labels = obj.get('Config', {}).get('Labels', {}) if kind == 'container' else obj.get('Labels', {})
                 if (labels or {}).get(LABEL) != owner['token']:
                     raise RuntimeError('Docker ownership changed; refusing cleanup')
+                owned.append((labels.get('org.eqemu.validation.role') != 'runtime', identity))
+            # Remove actors before database containers, then their volume/network.
+            for _, identity in sorted(owned):
                 docker(deadline, kind, 'rm', *(['-f'] if kind == 'container' else []), identity)
     binding_path = evidence / 'stack-binding.json'
     if binding_path.exists():
