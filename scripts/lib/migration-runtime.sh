@@ -18,11 +18,7 @@ case "$1" in
     /home/eqemu/code/build/bin/world database:updates --skip-backup --force
     ;;
   scenarios)
-    # JSON strings may contain newlines; NUL framing preserves each array
-    # element as one shell command.
-    while IFS= read -r -d '' command; do
-      bash -lc "$command"
-    done < <(jq -j '.[] + "\u0000"' <<<"$MIGRATION_SCENARIOS_JSON")
+    /home/eqemu/code/scripts/lib/run-migration-scenarios.sh
     ;;
   recovery)
     [[ "$(sha256sum "$OLD_WORLD" | cut -d ' ' -f1)" == "$OLD_WORLD_SHA" ]]

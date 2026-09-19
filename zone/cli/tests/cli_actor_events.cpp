@@ -40,6 +40,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
+#include <exception>
 #include <future>
 #include <iostream>
 #include <memory>
@@ -100,27 +101,61 @@ int64_t CountPlayerEventLogRowsWithMarker(const std::string& marker) {
 class ActorEventPersistenceCleanup {
 public:
 	void TrackActorId(uint32_t actor_id) {
-		if (actor_id > 0) {
+		if (actor_id > 0 && std::find(actor_ids_.begin(), actor_ids_.end(), actor_id) == actor_ids_.end()) {
 			actor_ids_.push_back(actor_id);
 		}
 	}
 
 	uint32_t reserved_owner_character_id = 0;
 
-	~ActorEventPersistenceCleanup() {
-		for (auto actor_id : actor_ids_) {
-			ActorActionQueueRepository::DeleteByActorId(database, actor_id);
-			ActorEventsRepository::DeleteByActorId(database, actor_id);
-			ActorStatusRepository::DeleteOne(database, actor_id);
-		}
+	bool Cleanup(std::string* failure_reason = nullptr) {
+		bool ok = true;
+		std::string failures;
+		const auto remove = [&](const std::string& label, const std::string& statement) {
+			auto result = database.QueryDatabase(statement);
+			if (!result.Success()) {
+				ok = false;
+				failures += (failures.empty() ? std::string() : ",") + label;
+			}
+		};
 
+		for (auto actor_id : actor_ids_) {
+			remove("actor_action_queue", fmt::format("DELETE FROM actor_action_queue WHERE actor_id = {}", actor_id));
+			remove("actor_events", fmt::format("DELETE FROM actor_events WHERE actor_id = {}", actor_id));
+			remove("actor_status", fmt::format("DELETE FROM actor_status WHERE actor_id = {}", actor_id));
+		}
 		for (auto it = actor_ids_.rbegin(); it != actor_ids_.rend(); ++it) {
-			ActorProfilesRepository::DeleteOne(database, *it);
+			remove("actor_profiles", fmt::format("DELETE FROM actor_profiles WHERE actor_id = {}", *it));
 		}
 
 		if (reserved_owner_character_id > 0) {
-			std::string unused_reason;
-			EQ::Actor::ReservedOwners::Rollback(database, reserved_owner_character_id, &unused_reason);
+			auto owner_result = database.QueryDatabase(
+				fmt::format("SELECT COUNT(*) FROM character_data WHERE id = {}", reserved_owner_character_id));
+			if (!owner_result.Success() || owner_result.RowCount() != 1 || !owner_result.begin()[0]) {
+				ok = false;
+				failures += (failures.empty() ? std::string() : ",") + "reserved_owner_lookup";
+			} else if (ok && strtoull(owner_result.begin()[0], nullptr, 10) > 0) {
+				std::string rollback_reason;
+				if (!EQ::Actor::ReservedOwners::Rollback(database, reserved_owner_character_id, &rollback_reason)) {
+					ok = false;
+					failures += (failures.empty() ? std::string() : ",") + "reserved_owner:" + rollback_reason;
+				}
+			}
+		}
+		if (ok) {
+			actor_ids_.clear();
+			reserved_owner_character_id = 0;
+		}
+		if (failure_reason) {
+			*failure_reason = failures;
+		}
+		return ok;
+	}
+
+	~ActorEventPersistenceCleanup() {
+		std::string failure_reason;
+		if (!Cleanup(&failure_reason)) {
+			std::cerr << "[CLEANUP-FAIL] actor-events-runtime: " << failure_reason << "\n";
 		}
 	}
 
@@ -168,39 +203,72 @@ private:
 void ExpectRecorderShutdownWaitsForInFlightCallbacks() {
 	using namespace std::chrono_literals;
 
-	EQ::ZoneHarness::ActorEventRecorder recorder;
-	BlockingPersistenceSink blocking_sink;
-	recorder.SetPersistenceSink(&blocking_sink);
-	EQ::ZoneHarness::ActorEventRecorder::RegisterActiveRecorder(&recorder);
+	// Keep the objects alive in the timeout path. Detached workers let this proof
+	// report a bounded failure instead of blocking in thread::join or an async
+	// future destructor if recorder teardown regresses.
+	auto recorder = std::make_shared<EQ::ZoneHarness::ActorEventRecorder>();
+	auto blocking_sink = std::make_shared<BlockingPersistenceSink>();
+	recorder->SetPersistenceSink(blocking_sink.get());
+	EQ::ZoneHarness::ActorEventRecorder::RegisterActiveRecorder(recorder.get());
 
-	std::thread observe_thread(
-		[]() { EQ::ZoneHarness::ActorEventRecorder::ObserveSpeechEmitted(nullptr, "say", "teardown-sync", 200); });
+	std::promise<void> observe_done_promise;
+	auto observe_done = observe_done_promise.get_future();
+	std::thread([recorder, blocking_sink, done = std::move(observe_done_promise)]() mutable {
+		(void)blocking_sink;
+		try {
+			EQ::ZoneHarness::ActorEventRecorder::ObserveSpeechEmitted(nullptr, "say", "teardown-sync", 200);
+			done.set_value();
+		} catch (...) {
+			done.set_exception(std::current_exception());
+		}
+	}).detach();
 
-	const bool persist_started = blocking_sink.WaitUntilPersistStarted(1s);
+	const bool persist_started = blocking_sink->WaitUntilPersistStarted(1s);
 	if (!persist_started) {
-		observe_thread.join();
-		EQ::ZoneHarness::ActorEventRecorder::ClearActiveRecorder(&recorder);
-		recorder.SetPersistenceSink(nullptr);
-		Fail("blocking persistence sink should observe an in-flight speech callback");
+		// The observer may enter the sink immediately after the deadline. Always
+		// release it before starting teardown so neither worker can deadlock.
+		blocking_sink->AllowPersistToFinish();
 	}
 
-	auto clear_future = std::async(
-		std::launch::async, [&recorder]() { EQ::ZoneHarness::ActorEventRecorder::ClearActiveRecorder(&recorder); });
+	std::promise<void> clear_done_promise;
+	auto clear_done = clear_done_promise.get_future();
+	std::thread([recorder, blocking_sink, done = std::move(clear_done_promise)]() mutable {
+		(void)blocking_sink;
+		try {
+			EQ::ZoneHarness::ActorEventRecorder::ClearActiveRecorder(recorder.get());
+			done.set_value();
+		} catch (...) {
+			done.set_exception(std::current_exception());
+		}
+	}).detach();
 
-	const auto clear_status_while_blocked = clear_future.wait_for(100ms);
-	blocking_sink.AllowPersistToFinish();
-	const bool persist_finished = blocking_sink.WaitUntilPersistFinished(1s);
-	observe_thread.join();
-	const auto clear_status_after_release = clear_future.wait_for(1s);
-	clear_future.get();
-	recorder.SetPersistenceSink(nullptr);
+	const auto clear_status_while_blocked = clear_done.wait_for(100ms);
+	blocking_sink->AllowPersistToFinish();
+	const bool persist_finished = blocking_sink->WaitUntilPersistFinished(1s);
+	const auto observe_status_after_release = observe_done.wait_for(1s);
+	const auto clear_status_after_release = clear_done.wait_for(1s);
 
+	// get() is safe only after the corresponding deadline reports ready.
+	if (observe_status_after_release == std::future_status::ready) {
+		observe_done.get();
+	}
+	if (clear_status_after_release == std::future_status::ready) {
+		clear_done.get();
+	}
+	if (observe_status_after_release == std::future_status::ready &&
+		clear_status_after_release == std::future_status::ready) {
+		recorder->SetPersistenceSink(nullptr);
+	}
+
+	Expect(persist_started, "blocking persistence sink should observe an in-flight speech callback");
 	Expect(clear_status_while_blocked == std::future_status::timeout,
 		   "active recorder teardown should wait for in-flight callbacks before returning");
 	Expect(persist_finished, "blocking persistence sink should finish after release");
+	Expect(observe_status_after_release == std::future_status::ready,
+		   "in-flight speech callback should finish within the teardown deadline");
 	Expect(clear_status_after_release == std::future_status::ready,
 		   "active recorder teardown should finish once in-flight callbacks drain");
-	ExpectEqual(recorder.Since(0, 4).size(), static_cast<size_t>(1),
+	ExpectEqual(recorder->Since(0, 4).size(), static_cast<size_t>(1),
 				"blocked speech callback should still record one actor event before teardown completes");
 }
 
@@ -231,8 +299,7 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 		EQ::ZoneHarness::ActorEventRecorder::RegisterActiveRecorder(&recorder);
 
 		ActorEventPersistenceCleanup cleanup;
-		const auto reserved_owner =
-			EQ::Actor::ReservedOwners::Provision(database, fmt::format("ActorownerRuntime{}", run_nonce));
+		const auto reserved_owner = EQ::Actor::ReservedOwners::Provision(database, "ActorownerRuntime" + std::to_string(run_nonce));
 		Expect(reserved_owner.character_id > 0,
 			   "reserved owner provisioning should succeed for runtime actor event persistence");
 		cleanup.reserved_owner_character_id = reserved_owner.character_id;
@@ -711,6 +778,10 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 					"runtime actor event persistence should not write marker rows to player_event_logs");
 
 		EQ::ZoneHarness::ActorEventRecorder::ClearActiveRecorder(&recorder);
+		fixture.Cleanup();
+		std::string cleanup_failure;
+		const bool cleanup_succeeded = cleanup.Cleanup(&cleanup_failure);
+		Expect(cleanup_succeeded, "actor event persistence cleanup should succeed: " + cleanup_failure);
 		std::cout << "[PASS] actor-events-runtime\n";
 	} catch (const TestFailure& e) {
 		std::cerr << "[FAIL] " << e.what() << "\n";

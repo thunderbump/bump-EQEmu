@@ -355,6 +355,8 @@ assert contract == {
         "command": ["./scripts/validation-worker.sh", "run"],
         "trusted_files": [
             "scripts/validation-worker.sh",
+            "scripts/validation-lifetime.py",
+            "scripts/public-fixture-summary.py",
             "scripts/validate.sh",
             "scripts/rehearse-database-migration.sh",
             "scripts/check-akkstack-contract.sh",

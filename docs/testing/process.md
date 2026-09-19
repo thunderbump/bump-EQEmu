@@ -661,3 +661,28 @@ still requires those children to finish or an operator to inspect and stop them;
 recovery does not kill an unverified process. Old unlabelled Docker resources and
 legacy locks require manual inspection. Never delete locks merely because they
 are old.
+
+
+## Actor proof in the disposable gate
+
+The default AFK check executes `zone tests:actor-events` through the prepared
+migration fixture. Every scenario command must exit zero and the invocation must
+emit `[PASS] actor-events-runtime`. The rehearsal result records
+`actor_runtime.scenario` and `actor_runtime.status` beside `candidate_commit`.
+The actor proof runs once; it does not add a second shared-database profile.
+`actor-queue-tier3` remains a legacy manual shared-database profile, outside this
+gate's disposal guarantees.
+
+Docker creation and start are separate operations. Before a create request, the
+rehearsal writes `docker-creation-pending` under private worker evidence, or its
+own evidence when run standalone. Only a successful creation reply clears it.
+If creation is unconfirmed, cleanup retains the environment, stack binding and
+worker lease records. The error identifies the journal. An operator must resolve
+the outstanding daemon request before clearing the journal and invoking worker
+recovery. Waiting for a quiet interval is not confirmation. No automatic recovery
+clears this uncertainty. Confirmed containers are removed before their data volume
+and network, then the supervisor restores the binding and releases the leases.
+
+Regression commands include `python3 tests/shell/validation-lifetime-test.py`,
+`python3 tests/shell/migration-disposable-test.py`, and the opt-in, networkless
+Docker proof `EQEMU_TEST_REAL_DOCKER=1 python3 tests/shell/validation-container-test.py`.

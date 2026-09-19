@@ -19,3 +19,11 @@ Automated Bump EQEmu validation will use a portable **Validation Worker** contra
 - The current AFK Run Preparer invokes the repository's no-argument `scripts/validate-afk` command. It resolves the exact committed Candidate `HEAD` and delegates checkout preparation, validation-stack binding, locking, timeout handling, Tier 1 plus isolated migration rehearsal plus canonical Tier 3 execution, and evidence production to this worker.
 - The tracked `afk.toml` remains the legacy request-driven AFK contract; it is not the current no-argument invocation surface.
 - Both AFK entry points conservatively pin every Candidate to `tier1-migration-tier3` because they have no trusted base commit or schema-change classification. Lighter profiles remain available to automation with a trusted selection mechanism.
+
+
+## Actor proof and unconfirmed Docker creation
+
+The AFK gate now includes the actor proof in the disposable migration environment.
+It uses the existing lifetime supervisor rather than a second actor stop and SQL
+cleanup sequence. Unconfirmed Docker creation retains the environment and leases
+for operator resolution. See [the current actor proof and recovery contract](../testing/process.md#actor-proof-in-the-disposable-gate).

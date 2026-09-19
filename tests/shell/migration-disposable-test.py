@@ -46,11 +46,17 @@ a = sys.argv[1:]
 with (root/'calls').open('a') as f: f.write(json.dumps(a)+'\\n')
 if a[:2] == ['image','inspect']: sys.exit(0)
 if a[:2] in (['network','create'], ['volume','create']): sys.exit(0)
-if a[0] == 'run':
+if a[0] == 'create':
  (root/'owner').write_text(a[a.index('--label')+1].split('=',1)[1])
  (root/'container').write_text(a[a.index('--name')+1])
- sys.exit(23)
+ sys.exit(23 if os.environ.get('CREATE_REPLY_LOST') else 0)
+if a[0] == 'start': sys.exit(23)
+if a[:2] == ['container','ls']:
+ name=(root/'container').read_text()
+ if os.environ.get('RUNTIME_INSPECT_FAIL'): print(name.removesuffix('-db')+'-runtime')
+ print(name); sys.exit(0)
 if a[0] == 'inspect':
+ if os.environ.get('RUNTIME_INSPECT_FAIL') and a[-1].endswith('-runtime'): sys.exit(1)
  if a[-1] == (root/'container').read_text(): print((root/'owner').read_text()); sys.exit(0)
  sys.exit(1)
 if a[:2] in (['network','rm'], ['volume','rm']) or a[0] == 'rm': sys.exit(0)
@@ -86,7 +92,7 @@ sys.exit(98)
             calls = [json.loads(line) for line in (root/'calls').read_text().splitlines()]
             network = next(c for c in calls if c[:2] == ['network','create'])
             self.assertIn('--internal', network)
-            run = next(c for c in calls if c[0] == 'run')
+            run = next(c for c in calls if c[0] == 'create')
             self.assertNotIn('-p', run)
             self.assertTrue(any('type=volume' in x for x in run))
             self.assertFalse(any('type=bind' in x for x in run))
@@ -99,8 +105,39 @@ sys.exit(98)
             self.assertFalse(evidence['source']['build_identity_attested'])
             self.assertFalse(evidence['candidate']['artifact_identity_attested'])
 
+            (root/'calls').unlink()
+            result=subprocess.run(command,env={**env,'RUNTIME_INSPECT_FAIL':'1'},capture_output=True,text=True)
+            self.assertEqual(result.returncode,1,result.stderr)
+            calls=[json.loads(line) for line in (root/'calls').read_text().splitlines()]
+            self.assertFalse(any(c[0]=='rm' or c[:2] in (['network','rm'],['volume','rm']) for c in calls))
+            self.assertEqual(json.loads((root/'evidence/result.json').read_text())['failure_step'],'cleanup')
+
+            # Accepted creation with a lost reply must not be treated as absence.
+            (root/'calls').unlink()
+            result=subprocess.run(command,env={**env,'CREATE_REPLY_LOST':'1'},capture_output=True,text=True)
+            self.assertEqual(result.returncode,1,result.stderr)
+            self.assertTrue((root/'evidence/docker-creation-pending').exists())
+            calls=[json.loads(line) for line in (root/'calls').read_text().splitlines()]
+            self.assertFalse(any(c[0]=='rm' or c[:2] in (['network','rm'],['volume','rm']) for c in calls))
+            record=json.loads((root/'evidence/result.json').read_text())
+            self.assertEqual(record['failure_step'],'unconfirmed_docker_creation')
+
+    def test_scenarios_require_actor_completion_and_successful_exit(self):
+        runner=ROOT/'scripts/lib/run-migration-scenarios.sh'
+        for commands,expected in (
+            (["printf '[PASS] actor-events-runtime\\n'"],0),
+            (['true'],1),
+            (["printf '[PASS] actor-events-runtime\\n'; exit 7"],7),
+            (["printf '[PASS] actor-events-runtime\\n'", 'exit 8'],8),
+            (["printf 'first\\n'\n" + "printf '[PASS] actor-events-runtime\\n'"],0),
+        ):
+            with self.subTest(commands=commands):
+                result=subprocess.run([str(runner)],env={**os.environ,
+                    'MIGRATION_SCENARIOS_JSON':json.dumps(commands)},capture_output=True,text=True)
+                self.assertEqual(result.returncode,expected,result.stderr)
+
     def test_runtime_preserves_multiline_scenarios_and_checks_process_survival(self):
-        runtime = (ROOT / 'scripts/lib/migration-runtime.sh').read_text()
+        runtime = (ROOT / 'scripts/lib/migration-runtime.sh').read_text() + (ROOT / 'scripts/lib/run-migration-scenarios.sh').read_text()
         self.assertIn("read -r -d '' command", runtime)
         self.assertIn('.[] + "\\u0000"', runtime)
         self.assertIn('kill -0 "$world_pid"', runtime)

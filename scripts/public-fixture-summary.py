@@ -14,7 +14,7 @@ restored_version_schema_or_fixture_rows'''.split())
 STEPS = frozenset('''setup prerequisites restore_snapshot seed_old_format candidate_update
 candidate_scenarios upgraded_assertions candidate_target_versions idempotent_update
 idempotent_data_assertions rollback_restore restored_assertions old_build_recovery
-post_startup_restored_assertions cleanup'''.split())
+post_startup_restored_assertions cleanup unconfirmed_docker_creation'''.split())
 CHECKS = {'tier1-build-and-unit-tests': 'tier1',
           'isolated-database-migration-rehearsal': 'migration_rehearsal',
           'tier3-zone-harness': 'tier3'}

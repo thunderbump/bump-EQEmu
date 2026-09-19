@@ -128,12 +128,23 @@ if [[ -n "${VALIDATION_WORKER_LIFETIME_TOKEN:-}" ]]; then
   worker_label=(--label "org.eqemu.validation=$VALIDATION_WORKER_LIFETIME_TOKEN")
 fi
 
+# Persist uncertainty before contacting Docker. A killed create client does not
+# cancel a daemon request. Only a successful reply clears this journal.
+pending_creation="${VALIDATION_WORKER_DOCKER_PENDING:-$evidence_dir/docker-creation-pending}"
+create_owned() {
+  [[ ! -e "$pending_creation" ]] || { printf 'error: unconfirmed Docker creation: %s\n' "$pending_creation" >&2; return 125; }
+  printf '%s\n' "$run_token" >"$pending_creation"
+  docker "$@" || return $?
+  rm -- "$pending_creation"
+}
+
 network_created=0
 volume_created=0
 status=failed
 failure_step=setup
 assertion_result=""
 restore_ms=null
+actor_runtime_status=not_run
 candidate_versions=""
 snapshot_data_state=""
 shared_dir=""
@@ -176,7 +187,7 @@ run_runtime() {
     # cannot complete Docker's five-second stop sequence.
     deadline=(timeout "${worker_timeout_args[@]}" --signal=TERM --kill-after=10s "${MIGRATION_REHEARSAL_SCENARIO_TIMEOUT_SECONDS:-300}s")
   fi
-  "${deadline[@]}" docker run --rm --name "$runtime_container" --label "$owner_label" "${worker_label[@]}" \
+  create_owned create --name "$runtime_container" --label "$owner_label" --label org.eqemu.validation.role=runtime "${worker_label[@]}" \
     --network "$network" --read-only --user 0:0 --init --ulimit core=0 --stop-timeout 5 \
     --tmpfs /tmp:rw,nosuid,size=256m --tmpfs /runtime:rw,nosuid,size=1g \
     --mount "type=bind,src=$repo_root,dst=/home/eqemu/code,readonly" \
@@ -186,7 +197,9 @@ run_runtime() {
     --mount "type=bind,src=$lua_modules_dir,dst=/inputs/lua_modules,readonly" \
     -e "REHEARSAL_PASSWORD=$target_password" -e "MIGRATION_SCENARIOS_JSON=$scenarios_json" \
     -e "OLD_WORLD=$old_world_path" -e "OLD_WORLD_SHA=$old_world_sha" \
-    --entrypoint bash "$runtime_image" /home/eqemu/code/scripts/lib/migration-runtime.sh "$mode"
+    --entrypoint bash "$runtime_image" /home/eqemu/code/scripts/lib/migration-runtime.sh "$mode" >>"$log" 2>&1
+  "${deadline[@]}" docker start --attach "$runtime_container"
+  docker rm "$runtime_container" >>"$log" 2>&1
 }
 
 write_result() {
@@ -201,25 +214,39 @@ write_result() {
     --argjson build_identity_attested "$build_identity_attested" \
     --arg target_database "$target_db" --arg candidate_versions "$candidate_versions" --arg seed_sha "$seed_sha" \
     --arg upgraded_assert_sha "$upgraded_assert_sha" --arg restored_assert_sha "$restored_assert_sha" \
-    --argjson scenarios "$scenarios_json" --arg completed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson restore_ms "$restore_ms" \
-    '{schema_version:1,assertion_result:$assertion_result,run_id:$run_id,images:{database:$database_image,runtime:$runtime_image,database_id:$database_image_id,runtime_id:$runtime_image_id},status:$status,failure_step:(if $failure_step=="" then null else $failure_step end),candidate_commit:$candidate_commit,candidate:{source_commit:$candidate_commit,worktree_clean:$candidate_worktree_clean,artifact_identity_attested:false,world_sha256:$candidate_world_sha,zone_sha256:$candidate_zone_sha},snapshot:{id:$snapshot_id,sha256:$snapshot_sha256},source:{build:$source_build,build_identity_attested:$build_identity_attested,fixture_preparer_commit:$fixture_preparer_commit,world_binary_sha256:$old_world_sha,mariadb_version:$source_mariadb_version,database_versions:{server:$source_server_version,bots:$source_bots_version,custom:$source_custom_version}},resulting_database_versions:(if $candidate_versions=="" then null else ($candidate_versions|split(":")|map(tonumber)|{server:.[0],bots:.[1],custom:.[2]}) end),fixtures:{seed_sha256:$seed_sha,upgraded_assert_sha256:$upgraded_assert_sha,restored_assert_sha256:$restored_assert_sha},candidate_scenarios:$scenarios,target:{class:"isolated-disposable",database:$target_database},restore_elapsed_ms:$restore_ms,completed_at:$completed_at}' >"$result"
+    --arg actor_runtime_status "$actor_runtime_status" --argjson scenarios "$scenarios_json" --arg completed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson restore_ms "$restore_ms" \
+    '{schema_version:1,assertion_result:$assertion_result,run_id:$run_id,images:{database:$database_image,runtime:$runtime_image,database_id:$database_image_id,runtime_id:$runtime_image_id},status:$status,failure_step:(if $failure_step=="" then null else $failure_step end),candidate_commit:$candidate_commit,candidate:{source_commit:$candidate_commit,worktree_clean:$candidate_worktree_clean,artifact_identity_attested:false,world_sha256:$candidate_world_sha,zone_sha256:$candidate_zone_sha},snapshot:{id:$snapshot_id,sha256:$snapshot_sha256},source:{build:$source_build,build_identity_attested:$build_identity_attested,fixture_preparer_commit:$fixture_preparer_commit,world_binary_sha256:$old_world_sha,mariadb_version:$source_mariadb_version,database_versions:{server:$source_server_version,bots:$source_bots_version,custom:$source_custom_version}},resulting_database_versions:(if $candidate_versions=="" then null else ($candidate_versions|split(":")|map(tonumber)|{server:.[0],bots:.[1],custom:.[2]}) end),fixtures:{seed_sha256:$seed_sha,upgraded_assert_sha256:$upgraded_assert_sha,restored_assert_sha256:$restored_assert_sha},candidate_scenarios:$scenarios,actor_runtime:{scenario:"actor-events-runtime",status:$actor_runtime_status},target:{class:"isolated-disposable",database:$target_database},restore_elapsed_ms:$restore_ms,completed_at:$completed_at}' >"$result"
 }
 cleanup() {
   local main_status=$? cleanup_status=0 result_status=0
   trap - EXIT
   set +e
+  if [[ -e "$pending_creation" ]]; then
+    status=failed
+    failure_step=unconfirmed_docker_creation
+    printf 'error: unconfirmed Docker creation in %s; resources and worker leases retained; resolve daemon request before recovery\n' "$pending_creation" >&2
+    write_result
+    exit 1
+  fi
   # Names contain an unpredictable run UUID; label checks prevent deleting foreign resources.
   # Before resource creation there is nothing to inspect; this keeps prerequisite
   # failures free of Docker operations as well as database restoration work.
   if [[ "$network_created" == 1 || "$volume_created" == 1 ]]; then
-    for container in "$runtime_container" "$db_container"; do
-      if [[ "$(docker inspect --format '{{ index .Config.Labels "org.eqemu.rehearsal" }}' "$container" 2>/dev/null)" == "$run_token" ]]; then
-        docker rm -f "$container" >>"$log" 2>&1 || cleanup_status=1
-      fi
-    done
+    local containers container_owner
+    if containers="$(docker container ls --all --format '{{.Names}}')"; then
+      for container in "$runtime_container" "$db_container"; do
+        if grep -Fxq "$container" <<<"$containers"; then
+          container_owner="$(docker inspect --format '{{ index .Config.Labels "org.eqemu.rehearsal" }}' "$container")" || { cleanup_status=1; break; }
+          [[ "$container_owner" == "$run_token" ]] || { cleanup_status=1; break; }
+          docker rm -f "$container" >>"$log" 2>&1 || { cleanup_status=1; break; }
+        fi
+      done
+    else
+      cleanup_status=1
+    fi
   fi
-  if [[ "$volume_created" == 1 ]]; then docker volume rm "$volume" >>"$log" 2>&1 || cleanup_status=1; fi
-  if [[ "$network_created" == 1 ]]; then docker network rm "$network" >>"$log" 2>&1 || cleanup_status=1; fi
+  if [[ "$cleanup_status" == 0 && "$volume_created" == 1 ]]; then docker volume rm "$volume" >>"$log" 2>&1 || cleanup_status=1; fi
+  if [[ "$cleanup_status" == 0 && "$network_created" == 1 ]]; then docker network rm "$network" >>"$log" 2>&1 || cleanup_status=1; fi
   if [[ "$cleanup_status" -ne 0 ]]; then
     status=failed
     failure_step=cleanup
@@ -258,13 +285,14 @@ done
 db_image_id="$(docker image inspect --format '{{.Id}}' "$db_image")"
 runtime_image_id="$(docker image inspect --format '{{.Id}}' "$runtime_image")"
 [[ -z "${VALIDATION_WORKER_DOCKER_MARKER:-}" ]] || : >"$VALIDATION_WORKER_DOCKER_MARKER"
-docker network create --internal --label "$owner_label" "${worker_label[@]}" "$network" >>"$log"
+create_owned network create --internal --label "$owner_label" "${worker_label[@]}" "$network" >>"$log"
 network_created=1
-docker volume create --label "$owner_label" "${worker_label[@]}" "$volume" >>"$log"
+create_owned volume create --label "$owner_label" "${worker_label[@]}" "$volume" >>"$log"
 volume_created=1
-docker run -d --name "$db_container" --label "$owner_label" "${worker_label[@]}" --network "$network" --network-alias mariadb \
+create_owned create --name "$db_container" --label "$owner_label" "${worker_label[@]}" --network "$network" --network-alias mariadb \
   --mount "type=volume,src=$volume,dst=/var/lib/mysql" \
   -e "MYSQL_ROOT_PASSWORD=$target_password" -e MYSQL_ROOT_HOST=% -e MYSQL_DATABASE=peq "$db_image" >>"$log" 2>&1
+docker start "$db_container" >>"$log" 2>&1
 ready=0
 for attempt in {1..90}; do
   if target_query 'SELECT 1' >/dev/null 2>&1; then ready=1; break; fi
@@ -316,7 +344,9 @@ target_mysql <"$seed_sql" >>"$log" 2>&1
 failure_step=candidate_update
 run_candidate update
 failure_step=candidate_scenarios
+actor_runtime_status=failed
 run_candidate scenarios
+actor_runtime_status=passed
 failure_step=upgraded_assertions
 query_file_expect_ok "$upgraded_assert_sql"
 first_state="$(schema_fingerprint)"

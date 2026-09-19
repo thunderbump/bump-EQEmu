@@ -50,15 +50,22 @@ def docker(deadline, *args):
 def clean(owner):
     """Called only with both leases held and after all owned processes stop."""
     evidence = Path(owner['evidence'])
+    pending = evidence / 'docker-creation-pending'
+    if pending.exists():
+        raise RuntimeError(f'Unconfirmed Docker creation in {pending}; leases retained. Resolve the daemon request before removing this journal and retrying recovery.')
     deadline = time.monotonic() + 20
     if (evidence / 'docker-owned').exists():
         for kind in ('container', 'volume', 'network'):
             ids = docker(deadline, kind, 'ls', *(['--all'] if kind == 'container' else []), '-q', '--filter', f'label={LABEL}={owner["token"]}').split()
+            owned = []
             for identity in ids:
                 obj = json.loads(docker(deadline, kind, 'inspect', identity))[0]
                 labels = obj.get('Config', {}).get('Labels', {}) if kind == 'container' else obj.get('Labels', {})
                 if (labels or {}).get(LABEL) != owner['token']:
                     raise RuntimeError('Docker ownership changed; refusing cleanup')
+                owned.append((labels.get('org.eqemu.validation.role') != 'runtime', identity))
+            # Remove actors before database containers, then their volume/network.
+            for _, identity in sorted(owned):
                 docker(deadline, kind, 'rm', *(['-f'] if kind == 'container' else []), identity)
     binding_path = evidence / 'stack-binding.json'
     if binding_path.exists():
@@ -210,7 +217,7 @@ def main():
             pending = Path(tempfile.mkdtemp(prefix=lock.name + '.pending-', dir=lock.parent))
             save(pending / 'owner.json', owner)
             pending.rename(lock)
-        env = {**os.environ, 'VALIDATION_WORKER_LIFETIME_TOKEN': owner['token'], 'VALIDATION_WORKER_LIFETIME_PARENT': str(os.getpid()), 'VALIDATION_WORKER_DOCKER_MARKER': str(evidence / 'docker-owned')}
+        env = {**os.environ, 'VALIDATION_WORKER_LIFETIME_TOKEN': owner['token'], 'VALIDATION_WORKER_LIFETIME_PARENT': str(os.getpid()), 'VALIDATION_WORKER_DOCKER_MARKER': str(evidence / 'docker-owned'), 'VALIDATION_WORKER_DOCKER_PENDING': str(evidence / 'docker-creation-pending')}
         if interrupted:
             raise InterruptedError('Validation interrupted before launch.')
         category = 'launch_failed'

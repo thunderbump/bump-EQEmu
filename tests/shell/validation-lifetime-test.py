@@ -29,6 +29,8 @@ state = pathlib.Path(os.environ['DOCKER_STATE'])
 resources = json.loads(state.read_text())
 for kind in ('container', 'network', 'volume'):
     resources[kind+'-owned'] = dict(kind=kind, stopped=os.environ.get('STOPPED_CONTAINER')=='1', labels={'org.eqemu.validation': os.environ['VALIDATION_WORKER_LIFETIME_TOKEN']})
+resources['container-owned']['labels']['org.eqemu.validation.role']='runtime'
+resources['database-owned']=dict(kind='container',labels={'org.eqemu.validation':os.environ['VALIDATION_WORKER_LIFETIME_TOKEN']})
 state.write_text(json.dumps(resources))
 pathlib.Path(os.environ['VALIDATION_WORKER_DOCKER_MARKER']).touch()
 pathlib.Path(os.environ['MARKER']).write_text(str(os.getpid()))
@@ -64,7 +66,12 @@ elif action == 'inspect':
     labels=state[args[-1]]['labels']
     print(json.dumps([{'Config': {'Labels': labels}} if kind=='container' else {'Labels':labels}]))
 elif action == 'rm':
-    if kind=='volume' and 'container-owned' in state: raise SystemExit(1)
+    if args[-1]=='container-owned' and os.environ.get('RUNTIME_REMOVE_FAIL'): raise SystemExit(1)
+    if args[-1]=='database-owned' and 'container-owned' in state: raise SystemExit(1)
+    if kind=='volume' and ('container-owned' in state or 'database-owned' in state): raise SystemExit(1)
+    root=pathlib.Path(os.environ['MARKER']).parent
+    if not (root/'stack/.validation-worker-code.lock').exists(): raise SystemExit(1)
+    if os.readlink(root/'stack/code')==str(root/'source'): raise SystemExit(1)
     del state[args[-1]]; path.write_text(json.dumps(state))
 else: raise SystemExit(2)
 ''')
@@ -239,6 +246,42 @@ module.main()
                 self.assertEqual(result.returncode,0,result.stderr)
                 self.assert_clean()
         self.next_passes()
+
+    def test_failed_actor_removal_preserves_database_and_binding(self):
+        process,_,_=self.start(extra={'RUNTIME_REMOVE_FAIL':'1'});self.await_started()
+        binding=os.readlink(self.stack/'code')
+        os.killpg(process.pid,signal.SIGTERM)
+        self.assertEqual(process.wait(timeout=15),1)
+        resources=json.loads(self.state.read_text())
+        for name in ('container-owned','database-owned','volume-owned','network-owned'):
+            self.assertIn(name,resources)
+        self.assertEqual(os.readlink(self.stack/'code'),binding)
+        self.assertTrue((self.stack/'.validation-worker-code.lock').exists())
+        self.next_passes()
+
+    def test_unconfirmed_creation_keeps_binding_and_leases_after_delayed_daemon_create(self):
+        process,request,evidence=self.start();self.await_started()
+        pending=evidence/'docker-creation-pending'
+        pending.write_text('request accepted, no reply')
+        # Model a daemon request that materializes only after its client dies.
+        self.state.write_text(json.dumps(self.foreign))
+        binding=os.readlink(self.stack/'code')
+        os.killpg(process.pid,signal.SIGTERM)
+        self.assertEqual(process.wait(timeout=15),1)
+        self.assertIn('Unconfirmed Docker creation', (evidence/'result.json').read_text())
+        self.assertEqual(os.readlink(self.stack/'code'),binding)
+        self.assertTrue((self.stack/'.validation-worker-code.lock/owner.json').exists())
+        resources=dict(self.foreign)
+        token=json.loads((evidence/'lifetime.json').read_text())['token']
+        resources['container-owned']=dict(kind='container',labels={'org.eqemu.validation':token})
+        self.state.write_text(json.dumps(resources))
+        self.assertNotEqual(self.recover(request).returncode,0)
+        self.assertEqual(json.loads(self.state.read_text()),resources)
+        # Operator acknowledgment is allowed only after resolving the request.
+        pending.unlink()
+        recovered=self.recover(request)
+        self.assertEqual(recovered.returncode,0,recovered.stderr)
+        self.assert_clean();self.next_passes()
 
     def test_legacy_unowned_lock_is_never_deleted(self):
         lock=self.worker/'locks/validation-slot.lock';lock.mkdir(parents=True)

@@ -855,7 +855,7 @@ test_migration_rehearsal_dry_run_and_guards() {
   assert_contains "$rehearsal_source" 'server/plugins'
   assert_contains "$rehearsal_source" 'post_startup_data_state="$(representative_data_state)"'
   assert_contains "$rehearsal_source" 'failure_step=candidate_scenarios'
-  assert_contains "$rehearsal_source" 'timeout --signal=TERM --kill-after=10s'
+  assert_contains "$rehearsal_source" '--signal=TERM --kill-after=10s'
   assert_not_contains "$rehearsal_source" 'server/maps'
   runtime_source="$(cat "$fixture_repo/scripts/lib/migration-runtime.sh")"
   assert_contains "$runtime_source" 'mkdir -p logs shared maps quests'
@@ -865,9 +865,10 @@ test_migration_rehearsal_dry_run_and_guards() {
 }
 
 test_prepare_migration_fixture_builds_reviewable_inputs_without_running_docker() {
-  local fixture_repo fixture_parent baseline fake_bin marker snapshot_sha archive_sha evidence_source status output
+  local fixture_repo fixture_parent baseline prepared fake_bin marker snapshot_sha archive_sha evidence_source status output
   make_fixture fixture_repo fixture_parent
   baseline="$tmp_root/captured-baseline"
+  prepared="$tmp_root/prepared-fixture"
   fake_bin="$tmp_root/prepare-fake-bin"
   marker="$tmp_root/prepare-docker-called"
   mkdir -p "$baseline/archive/bin" "$fake_bin"
@@ -883,7 +884,7 @@ test_prepare_migration_fixture_builds_reviewable_inputs_without_running_docker()
   printf '#!/usr/bin/env bash\nprintf "%%s\\n" 0123456789abcdef0123456789abcdef01234567\n' >"$fake_bin/git"
   chmod +x "$fake_bin/docker" "$fake_bin/git"
 
-  capture_run status output env PATH="$fake_bin:$PATH" "$fixture_repo/scripts/prepare-migration-rehearsal-fixture.sh" --baseline-dir "$baseline"
+  capture_run status output env PATH="$fake_bin:$PATH" "$fixture_repo/scripts/prepare-migration-rehearsal-fixture.sh" --baseline-dir "$baseline" --output-dir "$prepared"
 
   [[ "$status" -eq 0 ]] || return 1
   [[ ! -e "$marker" ]] || return 1
@@ -895,29 +896,27 @@ test_prepare_migration_fixture_builds_reviewable_inputs_without_running_docker()
     .source.database_versions == {server:9328,bots:9055,custom:0} and
     .old_build.world_binary_container_path == "/opt/eqemu-old/bin/world" and
     .candidate_scenarios == ["/home/eqemu/code/build/bin/zone tests:actor-events"]
-  ' "$baseline/migration-rehearsal-manifest.json" >/dev/null || return 1
-  [[ ! -e "$baseline/migration-rehearsal-fixture/docker-compose.migration-rehearsal.yml" ]] || return 1
-  assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "currency_copper_total"
-  assert_not_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "FROM information_schema.check_constraints"
-  assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "DECLARE CONTINUE HANDLER FOR 4025"
-  assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "REPEAT('x', 16383)"
-  assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "REPEAT('x', 16382)"
-  assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "actor_events.event_json_constraint"
-  assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "CONCAT('failed:', @afk_failures)"
-  assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "critical_columns"
-  assert_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "fixture_currency"
-  assert_not_contains "$(cat "$baseline/migration-rehearsal-fixture/assert-upgraded.sql")" "chk_actor_events_event_json_bounded"
-  assert_contains "$(cat "$baseline/migration-rehearsal-fixture/seed-old-format.sql")" 'INSERT INTO `character_data`'
-  assert_contains "$(cat "$baseline/migration-rehearsal-fixture/seed-old-format.sql")" "reserved migration fixture identity collides"
-  assert_contains "$(cat "$baseline/migration-rehearsal-fixture/seed-old-format.sql")" 'fixture_character_1_id'
-  assert_not_contains "$(cat "$baseline/migration-rehearsal-fixture/seed-old-format.sql")" "4294967001"
-  assert_not_contains "$(cat "$baseline/migration-rehearsal-fixture/seed-old-format.sql")" "afk_migration_fixture_old_format"
-  assert_contains "$(cat "$baseline/migration-rehearsal.env")" "MIGRATION_REHEARSAL_MANIFEST="
-  [[ "$(cat "$baseline/migration-rehearsal.manifest-path")" == "$baseline/migration-rehearsal-manifest.json" ]] || return 1
-  assert_contains "$output" "Review it"
+  ' "$prepared/migration-rehearsal-manifest.json" >/dev/null || return 1
+  [[ ! -e "$prepared/migration-rehearsal-fixture/docker-compose.migration-rehearsal.yml" ]] || return 1
+  assert_contains "$(cat "$prepared/migration-rehearsal-fixture/assert-upgraded.sql")" "currency_copper_total"
+  assert_not_contains "$(cat "$prepared/migration-rehearsal-fixture/assert-upgraded.sql")" "FROM information_schema.check_constraints"
+  assert_contains "$(cat "$prepared/migration-rehearsal-fixture/assert-upgraded.sql")" "DECLARE CONTINUE HANDLER FOR 4025"
+  assert_contains "$(cat "$prepared/migration-rehearsal-fixture/assert-upgraded.sql")" "REPEAT('x', 16383)"
+  assert_contains "$(cat "$prepared/migration-rehearsal-fixture/assert-upgraded.sql")" "REPEAT('x', 16382)"
+  assert_contains "$(cat "$prepared/migration-rehearsal-fixture/assert-upgraded.sql")" "actor_events.event_json_constraint"
+  assert_contains "$(cat "$prepared/migration-rehearsal-fixture/assert-upgraded.sql")" "CONCAT('failed:', @afk_failures)"
+  assert_contains "$(cat "$prepared/migration-rehearsal-fixture/assert-upgraded.sql")" "critical_columns"
+  assert_contains "$(cat "$prepared/migration-rehearsal-fixture/assert-upgraded.sql")" "fixture_currency"
+  assert_not_contains "$(cat "$prepared/migration-rehearsal-fixture/assert-upgraded.sql")" "chk_actor_events_event_json_bounded"
+  assert_contains "$(cat "$prepared/migration-rehearsal-fixture/seed-old-format.sql")" 'INSERT INTO `character_data`'
+  assert_contains "$(cat "$prepared/migration-rehearsal-fixture/seed-old-format.sql")" "reserved migration fixture identity collides"
+  assert_contains "$(cat "$prepared/migration-rehearsal-fixture/seed-old-format.sql")" 'fixture_character_1_id'
+  assert_not_contains "$(cat "$prepared/migration-rehearsal-fixture/seed-old-format.sql")" "4294967001"
+  assert_not_contains "$(cat "$prepared/migration-rehearsal-fixture/seed-old-format.sql")" "afk_migration_fixture_old_format"
+  assert_contains "$output" "Prepared migration rehearsal fixture:"
 
   capture_run status output env PATH="$fake_bin:$PATH" \
-    "$fixture_repo/scripts/prepare-migration-rehearsal-fixture.sh" --baseline-dir "$baseline" --mariadb-version not-a-version
+    "$fixture_repo/scripts/prepare-migration-rehearsal-fixture.sh" --baseline-dir "$baseline" --output-dir "$tmp_root/invalid-version-output" --mariadb-version not-a-version
   [[ "$status" -eq 2 ]] || return 1
   assert_contains "$output" "MariaDB version must be a dotted numeric version"
 
@@ -926,7 +925,7 @@ test_prepare_migration_fixture_builds_reviewable_inputs_without_running_docker()
   # paths and capture metadata validation have succeeded.
   rm -f "$marker"
   capture_run status output env PATH="$fake_bin:$PATH" AKKSTACK_DIR="$fixture_parent/bump-akk-stack-validation" \
-    MIGRATION_REHEARSAL_MANIFEST="$baseline/migration-rehearsal-manifest.json" \
+    MIGRATION_REHEARSAL_MANIFEST="$prepared/migration-rehearsal-manifest.json" \
     MIGRATION_REHEARSAL_EVIDENCE_DIR="$baseline/prerequisite-evidence" \
     "$fixture_repo/scripts/rehearse-database-migration.sh" --stack validation
   [[ "$status" -eq 99 ]] || return 1
@@ -940,7 +939,7 @@ test_prepare_migration_fixture_builds_reviewable_inputs_without_running_docker()
   rm -f "$marker"
   rm -rf "$fixture_parent/bump-akk-stack-validation/server/quests/plugins"
   capture_run status output env PATH="$fake_bin:$PATH" AKKSTACK_DIR="$fixture_parent/bump-akk-stack-validation" \
-    MIGRATION_REHEARSAL_MANIFEST="$baseline/migration-rehearsal-manifest.json" \
+    MIGRATION_REHEARSAL_MANIFEST="$prepared/migration-rehearsal-manifest.json" \
     MIGRATION_REHEARSAL_EVIDENCE_DIR="$baseline/missing-assets-evidence" \
     "$fixture_repo/scripts/rehearse-database-migration.sh" --stack validation
   [[ "$status" -eq 125 ]] || return 1
@@ -950,9 +949,10 @@ test_prepare_migration_fixture_builds_reviewable_inputs_without_running_docker()
 }
 
 test_prepare_migration_fixture_rejects_unrecorded_checksums() {
-  local fixture_repo fixture_parent baseline snapshot_sha archive_sha status output
+  local fixture_repo fixture_parent baseline prepared snapshot_sha archive_sha status output
   make_fixture fixture_repo fixture_parent
   baseline="$tmp_root/mismatched-baseline"
+  prepared="$tmp_root/mismatched-output"
   mkdir -p "$baseline/archive"
   printf 'snapshot' | gzip >"$baseline/database.sql.gz"
   printf '#!/bin/sh\n' >"$baseline/archive/world"
@@ -963,11 +963,11 @@ test_prepare_migration_fixture_rejects_unrecorded_checksums() {
   jq -n --arg snapshot_sha "$snapshot_sha" --arg archive_sha "$archive_sha" \
     '{notes:($snapshot_sha + " " + $archive_sha),files:{"database.sql.gz":{sha256:"wrong"},"installed-binaries.tar.gz":{sha256:"wrong"}}}' >"$baseline/manifest.json"
 
-  capture_run status output "$fixture_repo/scripts/prepare-migration-rehearsal-fixture.sh" --baseline-dir "$baseline"
+  capture_run status output "$fixture_repo/scripts/prepare-migration-rehearsal-fixture.sh" --baseline-dir "$baseline" --output-dir "$prepared"
 
   [[ "$status" -eq 1 ]] || return 1
   assert_contains "$output" "database snapshot checksum does not match"
-  [[ ! -e "$baseline/migration-rehearsal-manifest.json" ]] || return 1
+  [[ ! -e "$prepared/migration-rehearsal-manifest.json" ]] || return 1
 }
 
 test_safe_dry_run_keeps_readonly_composition() {
