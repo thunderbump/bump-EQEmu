@@ -77,7 +77,10 @@ def clean(owner):
                     raise RuntimeError('stack code changed; refusing to overwrite it')
                 if kind == 'symlink':
                     temporary = code.with_name('.validation-restore-' + owner['token'])
-                    temporary.symlink_to(previous)
+                    if not os.path.lexists(temporary):
+                        temporary.symlink_to(previous)
+                    elif not temporary.is_symlink() or os.readlink(temporary) != previous:
+                        raise RuntimeError('restore temporary path changed; refusing overwrite')
                     temporary.replace(code)
                 elif kind == 'missing':
                     code.unlink()

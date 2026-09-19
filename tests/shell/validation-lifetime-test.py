@@ -197,10 +197,15 @@ else: raise SystemExit(2)
         self.assert_clean()
 
     def test_hard_kill_at_lease_publication_and_retirement_is_recoverable(self):
-        for point in ('publish', 'retire'):
+        for point in ('publish', 'retire', 'restore'):
             with self.subTest(point=point):
                 request,evidence=self.request(point)
                 evidence.mkdir()
+                checkout=self.source
+                if point=='restore':
+                    checkout=self.root/'candidate';checkout.mkdir()
+                    (self.stack/'code').unlink();(self.stack/'code').symlink_to(checkout)
+                    (evidence/'stack-binding.json').write_text(json.dumps(dict(restore_status='pending', code_path=str(self.stack/'code'),target=str(checkout),previous_target=str(self.source),previous_kind='symlink')))
                 script = r"""
 import importlib.util, os, pathlib, sys
 spec=importlib.util.spec_from_file_location('lifetime',sys.argv[1]);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
@@ -213,10 +218,16 @@ def crash(self,target):
         os._exit(99)
     return result
 pathlib.Path.rename=crash
+original_replace=pathlib.Path.replace
+def crash_restore(self,target):
+    if point=='restore' and self.name.startswith('.validation-restore-'):
+        os._exit(99)
+    return original_replace(self,target)
+pathlib.Path.replace=crash_restore
 sys.argv=['lifetime',*sys.argv[3:]]
 module.main()
 """
-                args=['python3','-c',script,str(ROOT/'scripts/validation-lifetime.py'),point,'--worker-home',str(self.worker),'--stack',str(self.stack),'--evidence',str(evidence),'--checkout',str(self.source),'--wait','0','--timeout','10','--','true']
+                args=['python3','-c',script,str(ROOT/'scripts/validation-lifetime.py'),point,'--worker-home',str(self.worker),'--stack',str(self.stack),'--evidence',str(evidence),'--checkout',str(checkout),'--wait','0','--timeout','10','--','true']
                 result=subprocess.run(args,env=self.env,capture_output=True,text=True,timeout=10)
                 self.assertEqual(result.returncode,99,result.stderr)
                 result=self.recover(request)
