@@ -84,6 +84,7 @@ ActorEventCaptureResult ActorEventRepositoryPersistenceSink::PersistSpeechEmitte
 		.channel = event.speech.channel,
 		.text = event.speech.text,
 		.audible_radius = event.speech.audible_radius,
+		.evidence_required_at_capture = true,
 	});
 }
 
@@ -181,29 +182,29 @@ ActorEventRepositoryPersistenceSink::PersistToRepository(
 
 	if (!event.identity_resolved) {
 		// Resolve once, then retain the binding with the event across insert
-		// retries. A clean first lookup can classify ordinary bots as not requiring
-		// actor evidence. After any lookup outage, absence/disablement is ambiguous
-		// and must be retained as a visible dead letter instead of acknowledged.
+		// retries. The lookup happens after capture, so absence or disablement can
+		// never prove that an accepted bot event was not required when captured.
+		// Preserve that uncertainty visibly instead of acknowledging the event as
+		// NotRequired (which would silently lose a profile deleted while queued).
 		auto profile_result = state->persistence_database.QueryDatabase(fmt::format(
 			"SELECT actor_id, owner_character_id, enabled FROM actor_profiles WHERE bot_id = {} LIMIT 1", event.bot_id));
 		if (!profile_result.Success()) {
-			event.identity_lookup_failed = true;
 			return PersistenceDisposition::Retry;
 		}
 		if (profile_result.RowCount() == 0) {
-			return event.identity_lookup_failed ? PersistenceDisposition::DeadLetter
-										: PersistenceDisposition::NotRequired;
+			return event.evidence_required_at_capture ? PersistenceDisposition::DeadLetter
+											 : PersistenceDisposition::NotRequired;
 		}
 		auto row = profile_result.begin();
 		if (!row[0] || !row[2]) {
-			event.identity_lookup_failed = true;
-			return PersistenceDisposition::Retry;
+			return event.evidence_required_at_capture ? PersistenceDisposition::DeadLetter
+											 : PersistenceDisposition::NotRequired;
 		}
 		event.actor_id = static_cast<uint32_t>(strtoul(row[0], nullptr, 10));
 		const bool enabled = strtoul(row[2], nullptr, 10) != 0;
 		if (!event.actor_id || !enabled) {
-			return event.identity_lookup_failed ? PersistenceDisposition::DeadLetter
-										: PersistenceDisposition::NotRequired;
+			return event.evidence_required_at_capture ? PersistenceDisposition::DeadLetter
+											 : PersistenceDisposition::NotRequired;
 		}
 		event.owner_character_id = row[1]
 			? std::optional<uint32_t>(static_cast<uint32_t>(strtoul(row[1], nullptr, 10)))

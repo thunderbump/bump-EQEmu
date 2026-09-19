@@ -566,6 +566,39 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 		ExpectEqual(payload["audible_radius"].asUInt(), 200u,
 					"persisted runtime actor event should keep say audible radius");
 
+		// Identity is resolved by the worker after capture. A disabled or missing
+		// first lookup therefore cannot prove that accepted evidence was optional;
+		// it must remain visible rather than being acknowledged as NotRequired.
+		auto disabled_after_capture_profile = inserted_profile;
+		disabled_after_capture_profile.enabled = false;
+		ActorProfilesRepository::UpsertBotBackedProfile(database, disabled_after_capture_profile);
+		const auto identity_metrics_before = persistence_sink.GetMetrics();
+		const auto unresolved_identity_marker = fmt::format("unresolved-identity-{}", run_nonce);
+		ExpectEqual(
+			persistence_sink.Enqueue({
+				.bot_id = actor_bot_id,
+				.entity_id = fixture.OwnedBot()->GetID(),
+				.zone_id = zone->GetZoneID(),
+				.instance_id = zone->GetInstanceID(),
+				.channel = "say",
+				.text = unresolved_identity_marker,
+				.audible_radius = 200,
+				.evidence_required_at_capture = true,
+			}),
+			EQ::ZoneHarness::ActorEventCaptureResult::Accepted,
+			"capture-time required evidence should enter the queue before identity lookup");
+		Expect(persistence_sink.FlushFor(std::chrono::seconds(2)),
+			   "an unresolved first identity lookup should leave the active queue");
+		const auto identity_metrics_after = persistence_sink.GetMetrics();
+		ExpectEqual(identity_metrics_after.dead_letter_records, identity_metrics_before.dead_letter_records + 1,
+					"disabled first lookup should visibly dead-letter capture-time required evidence");
+		ExpectEqual(identity_metrics_after.not_required_records, identity_metrics_before.not_required_records,
+					"disabled first lookup must not reclassify capture-time required evidence as optional");
+		const auto identity_dead_letters = persistence_sink.GetDeadLetters();
+		Expect(!identity_dead_letters.empty() && identity_dead_letters.back().text == unresolved_identity_marker,
+			   "identity dead letter should retain the original evidence payload");
+		ActorProfilesRepository::UpsertBotBackedProfile(database, inserted_profile);
+
 		const auto now = std::time(nullptr);
 		const auto status = ActorStatusRepository::UpsertOne(database, {
 																		   .actor_id = inserted_profile.actor_id,

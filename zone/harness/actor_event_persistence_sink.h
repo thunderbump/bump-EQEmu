@@ -54,8 +54,11 @@ public:
 		uint32_t audible_radius = 0;
 		uint32_t actor_id = 0;
 		std::optional<uint32_t> owner_character_id;
+		// A non-zero bot accepted from the zone-facing path is potentially an
+		// actor at capture time. Keep that requirement immutable: a later lookup
+		// may bind it, but may not reclassify accepted evidence as disposable.
+		bool evidence_required_at_capture = true;
 		bool identity_resolved = false;
-		bool identity_lookup_failed = false;
 	};
 
 	struct Metrics {
