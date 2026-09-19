@@ -132,6 +132,22 @@ SCRIPT
   git -C "$source_ref" commit -m 'add fake validate' >/dev/null 2>&1
 }
 
+install_fake_preparer() {
+  local source_ref="$1"
+  cat >"$source_ref/scripts/prepare-migration-rehearsal-fixture.sh" <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "${VALIDATION_WORKER_TEST_PREPARE_EXIT:-0}" == 0 ]] || exit "$VALIDATION_WORKER_TEST_PREPARE_EXIT"
+[[ "$1" == --baseline-dir && "$3" == --output-dir ]] || exit 92
+mkdir "$4"
+jq -n --arg head "$(git -C "$(dirname "$0")/.." rev-parse HEAD)" '{prepared_by:$head,generation:"first"}' >"$4/migration-rehearsal-manifest.json"
+SCRIPT
+  chmod +x "$source_ref/scripts/prepare-migration-rehearsal-fixture.sh"
+  git -C "$source_ref" add scripts/prepare-migration-rehearsal-fixture.sh
+  export MIGRATION_REHEARSAL_BASELINE_CONFIG="$tmp_root/baseline-config.json"
+  jq -n --arg directory "$tmp_root" '{directory:$directory}' >"$MIGRATION_REHEARSAL_BASELINE_CONFIG"
+}
+
 make_afk_contract_repo() {
   local -n source_ref="$1"
   local suffix="${2:-}" fixture_source
@@ -139,6 +155,7 @@ make_afk_contract_repo() {
   source_ref="$fixture_source"
   cp "$repo_root/scripts/validation-worker.sh" "$source_ref/scripts/validation-worker.sh"
   cp "$repo_root/scripts/validate-afk" "$source_ref/scripts/validate-afk"
+  install_fake_preparer "$source_ref"
   chmod +x "$source_ref/scripts/validation-worker.sh" "$source_ref/scripts/validate-afk"
   git -C "$source_ref" add scripts/validation-worker.sh scripts/validate-afk
   git -C "$source_ref" commit -m 'add validation worker entry points' >/dev/null 2>&1
@@ -846,38 +863,50 @@ test_current_afk_command_validates_exact_head_without_arguments() {
   assert_contains "$(cat "$(dirname "$evidence")/worker/logs/tier3-zone-harness.log")" "fake validate: --stack validation tier3-harness"
 }
 
-test_current_afk_command_loads_reviewed_manifest_selection() {
-  local source evidence worker_home manifest status output
-  make_afk_contract_repo source current-command-manifest-selection
-  worker_home="$tmp_root/worker-home-manifest-selection"
-  evidence="$tmp_root/current-afk-manifest-selection-evidence"
-  manifest="$tmp_root/reviewed-migration-manifest.json"
-  mkdir -p "$worker_home"
-  printf '%s\n' '{}' >"$manifest"
-  printf '%s\n' "$manifest" >"$worker_home/migration-rehearsal-manifest"
-
-  capture_run status output env HOME="$tmp_root/operator-home" \
-    VALIDATION_WORKER_HOME="$worker_home" \
-    VALIDATION_WORKER_VALIDATE_DRY_RUN=1 \
-    VALIDATION_WORKER_TEST_EXPECT_MIGRATION_MANIFEST="$manifest" \
-    VALIDATION_AFK_EVIDENCE_DIR="$evidence" \
-    "$source/scripts/validate-afk"
-
-  [[ "$status" -eq 0 ]] || return 1
-  assert_json_equals "$evidence/result.json" .status passed
+test_current_afk_command_prepares_own_manifest_from_candidate() {
+  local source evidence worker_home status output head generation
+  make_afk_contract_repo source current-command-preparation
+  worker_home="$tmp_root/worker-home-preparation"
+  for generation in first second; do
+    if [[ "$generation" == second ]]; then
+      sed -i 's/generation:"first"/generation:"second"/' "$source/scripts/prepare-migration-rehearsal-fixture.sh"
+      git -C "$source" add scripts/prepare-migration-rehearsal-fixture.sh
+      git -C "$source" commit -m 'change candidate preparation' >/dev/null 2>&1
+    fi
+    evidence="$tmp_root/current-afk-preparation-$generation"
+    head="$(git -C "$source" rev-parse HEAD)"
+    capture_run status output env HOME="$tmp_root/operator-home" \
+      VALIDATION_WORKER_HOME="$worker_home" \
+      MIGRATION_REHEARSAL_MANIFEST=/obsolete/shared/manifest.json \
+      VALIDATION_WORKER_TEST_EXPECT_MIGRATION_MANIFEST="$evidence/prepared-fixture/migration-rehearsal-manifest.json" \
+      VALIDATION_AFK_EVIDENCE_DIR="$evidence" "$source/scripts/validate-afk"
+    [[ "$status" -eq 0 ]] || return 1
+    assert_json_equals "$evidence/result.json" .status passed
+    assert_json_equals "$evidence/prepared-fixture/migration-rehearsal-manifest.json" .prepared_by "$head"
+    assert_json_equals "$evidence/prepared-fixture/migration-rehearsal-manifest.json" .generation "$generation"
+  done
 }
 
-test_current_afk_command_rejects_invalid_manifest_selection() {
-  local source worker_home status output
-  make_afk_contract_repo source current-command-invalid-manifest-selection
-  worker_home="$tmp_root/worker-home-invalid-manifest-selection"
-  mkdir -p "$worker_home"
-  printf '%s\n' relative/path >"$worker_home/migration-rehearsal-manifest"
-
-  capture_run status output env HOME="$tmp_root/operator-home" VALIDATION_WORKER_HOME="$worker_home" "$source/scripts/validate-afk"
-
-  [[ "$status" -eq 2 ]] || return 1
-  assert_contains "$output" "must contain one absolute readable manifest path"
+test_current_afk_command_stops_when_preparation_fails() {
+  local source evidence status output mode
+  make_afk_contract_repo source current-command-preparation-failure
+  for mode in missing invalid preparer; do
+    evidence="$tmp_root/preparation-failure-$mode"
+    case "$mode" in
+      missing) rm -f "$MIGRATION_REHEARSAL_BASELINE_CONFIG" ;;
+      invalid) printf '{}' >"$MIGRATION_REHEARSAL_BASELINE_CONFIG" ;;
+      preparer) jq -n --arg directory "$tmp_root" '{directory:$directory}' >"$MIGRATION_REHEARSAL_BASELINE_CONFIG" ;;
+    esac
+    capture_run status output env HOME="$tmp_root/operator-home" \
+      VALIDATION_WORKER_HOME="$tmp_root/worker-home-preparation-failure" \
+      VALIDATION_WORKER_TEST_PREPARE_EXIT=23 \
+      VALIDATION_AFK_EVIDENCE_DIR="$evidence" "$source/scripts/validate-afk"
+    [[ "$status" -ne 0 ]] || return 1
+    assert_json_equals "$evidence/result.json" .category fixture_preparation_failed
+    [[ ! -f "$evidence/afk-checks.json" ]] || return 1
+    [[ ! -e "$evidence/stack-binding.json" ]] || return 1
+    [[ -s "$evidence/logs/fixture-preparation.log" || "$mode" == preparer ]] || return 1
+  done
 }
 
 test_current_afk_command_classifies_missing_migration_fixture() {
@@ -1099,6 +1128,7 @@ test_afk_contract_maps_timeout_infrastructure_failure_to_inconclusive() {
 test_afk_contract_fetches_a_self_contained_checkout_from_a_linked_worktree() {
   local source linked_root linked_worktree request evidence status output head
   make_source_repo_with_submodule source afk-linked
+  install_fake_preparer "$source"
   cp "$repo_root/scripts/validation-worker.sh" "$source/scripts/validation-worker.sh"
   chmod +x "$source/scripts/validation-worker.sh"
   git -C "$source" add scripts/validation-worker.sh
@@ -1307,8 +1337,8 @@ run_test "validation worker binds validation stack from AKKSTACK_DIR" test_valid
 run_test "stack lock blocks distinct worker homes on same stack" test_stack_lock_blocks_distinct_worker_homes_on_same_stack
 run_test "AKKSTACK_DIR real code directory fails fast" test_akkstack_dir_real_code_directory_fails_fast
 run_test "current AFK command validates exact HEAD without arguments" test_current_afk_command_validates_exact_head_without_arguments
-run_test "current AFK command loads a reviewed migration manifest selection" test_current_afk_command_loads_reviewed_manifest_selection
-run_test "current AFK command rejects an invalid migration manifest selection" test_current_afk_command_rejects_invalid_manifest_selection
+run_test "current AFK command prepares its own manifest from the Candidate" test_current_afk_command_prepares_own_manifest_from_candidate
+run_test "current AFK command stops before checks when preparation fails" test_current_afk_command_stops_when_preparation_fails
 run_test "current AFK command classifies a missing migration fixture" test_current_afk_command_classifies_missing_migration_fixture
 run_test "current AFK command rejects arguments" test_current_afk_command_rejects_arguments
 run_test "current AFK command returns nonzero for failure and missing stack" test_current_afk_command_returns_nonzero_for_failure_and_missing_stack
