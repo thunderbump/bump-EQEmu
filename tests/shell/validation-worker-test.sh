@@ -1055,6 +1055,8 @@ test_afk_contract_is_independent_of_the_trusted_harness_location() {
   worker_request="$evidence/worker-request.json"
   mkdir -p "$harness_root/scripts/lib" "$stack" "$evidence"
   cp "$candidate_checkout/scripts/validation-worker.sh" "$harness_root/scripts/validation-worker.sh"
+  cp "$candidate_checkout/scripts/validation-lifetime.py" "$harness_root/scripts/validation-lifetime.py"
+  cp "$candidate_checkout/scripts/public-fixture-summary.py" "$harness_root/scripts/public-fixture-summary.py"
   cp "$candidate_checkout/scripts/validate.sh" "$harness_root/scripts/validate.sh"
   cp "$candidate_checkout/scripts/check-akkstack-contract.sh" "$harness_root/scripts/check-akkstack-contract.sh"
   cp "$candidate_checkout/scripts/lib/akkstack-routing.sh" "$harness_root/scripts/lib/akkstack-routing.sh"
