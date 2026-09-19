@@ -5173,7 +5173,7 @@ void Mob::Shout(const char *format, ...)
 		GENERIC_SHOUT, GetCleanName(), buf);
 }
 
-void Mob::Emote(const char *format, ...)
+bool Mob::Emote(const char *format, ...)
 {
 	char buf[1000];
 	va_list ap;
@@ -5185,12 +5185,13 @@ void Mob::Emote(const char *format, ...)
 	const auto evidence = EQ::ZoneHarness::ActorEventRecorder::ObserveSpeechEmitted(this, "emote", buf, 200);
 	if (evidence == EQ::ZoneHarness::ActorEventCaptureResult::Saturated ||
 		evidence == EQ::ZoneHarness::ActorEventCaptureResult::Stopped) {
-		return;
+		return false;
 	}
 	entity_list.MessageCloseString(
 		this, false, 200, 10,
 		GENERIC_EMOTE, GetCleanName(), buf
 	);
+	return true;
 }
 
 void Mob::QuestJournalledSay(Client *QuestInitiator, const char *str, Journal::Options &opts)

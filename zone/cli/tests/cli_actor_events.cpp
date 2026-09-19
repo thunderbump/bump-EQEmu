@@ -975,6 +975,7 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 		const auto overload_cursor = recorder.MaxEventID();
 		const auto retained_marker = fmt::format("retained-speech-{}", run_nonce);
 		const auto deferred_marker = fmt::format("deferred-speech-{}", run_nonce);
+		const auto deferred_emote_marker = fmt::format("deferred-emote-{}", run_nonce);
 		Expect(fixture.OwnedBot()->Say("%s", retained_marker.c_str()),
 			   "first production speech should reserve the bounded evidence slot");
 		{
@@ -984,8 +985,10 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 		}
 		Expect(!fixture.OwnedBot()->Say("%s", deferred_marker.c_str()),
 			   "production speech should visibly defer when required evidence is saturated");
+		Expect(!fixture.OwnedBot()->Emote("%s", deferred_emote_marker.c_str()),
+			   "production emote should visibly defer when required evidence is saturated");
 		ExpectEqual(recorder.Since(overload_cursor, 8).size(), static_cast<size_t>(1),
-					"deferred speech must not be reported as emitted");
+					"deferred speech and emote must not be reported as emitted");
 		{
 			std::lock_guard lock(blocked_mutex);
 			blocked_released = true;
@@ -997,8 +1000,17 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 			   "the deferred production speech should be accepted on retry");
 		Expect(blocked_sink.FlushFor(std::chrono::seconds(1)),
 			   "retried production speech evidence should flush");
-		ExpectEqual(recorder.Since(overload_cursor, 8).size(), static_cast<size_t>(2),
-					"recovery should record the deferred speech exactly once");
+		Expect(fixture.OwnedBot()->Emote("%s", deferred_emote_marker.c_str()),
+			   "the deferred production emote should be accepted on retry");
+		Expect(blocked_sink.FlushFor(std::chrono::seconds(1)),
+			   "retried production emote evidence should flush");
+		const auto recovered_events = recorder.Since(overload_cursor, 8);
+		ExpectEqual(recovered_events.size(), static_cast<size_t>(3),
+					"recovery should record each deferred action exactly once");
+		Expect(std::any_of(recovered_events.begin(), recovered_events.end(), [&](const auto& event) {
+			return event.type == "speech_emitted" && event.speech.channel == "emote" &&
+				   event.speech.text == deferred_emote_marker;
+		}), "recovery should retain the deferred production emote evidence");
 		recorder.SetPersistenceSink(&persistence_sink);
 
 		// The dialogue-window rendering branch must pass through the same

@@ -384,9 +384,9 @@ if payload.get("event_cursor_end", 0) <= payload.get("event_cursor_start", 0):
     fail("event cursor did not advance")
 
 action_kinds = [action.get("kind") for action in actions]
-if action_kinds[:2] != ["target", "say"]:
+if action_kinds[:3] != ["target", "say", "emote"]:
     fail("unexpected autonomous actor action order")
-if any(action.get("observed") is not True for action in actions[:2]):
+if any(action.get("observed") is not True for action in actions[:3]):
     fail("expected autonomous actor actions were not observed")
 
 nearby_names = {entity.get("entity", {}).get("name") for entity in perception.get("nearby_entities") or []}
@@ -411,6 +411,16 @@ speech_events = [
 ]
 if not speech_events:
     fail("speech_emitted event for actor say action was not observed")
+
+emote_events = [
+    event for event in events
+    if event.get("type") == "speech_emitted"
+    and event.get("actor", {}).get("entity_id") == actor.get("entity_id")
+    and event.get("speech", {}).get("channel") == "emote"
+    and event.get("speech", {}).get("text") == "is ready to begin the hunt."
+]
+if not emote_events:
+    fail("speech_emitted event for actor emote action was not observed")
 PY
 }
 

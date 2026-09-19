@@ -29,7 +29,7 @@ The harness-facing prototype uses four endpoints:
 The request/ack plus event observation loop is:
 
 1. Start an ephemeral session. The harness creates a synthetic owner, one owned bot actor, and bounded NPC targets in memory only.
-2. Submit one action request such as `{"kind":"target","detail":"primary_target"}` or `{"kind":"say","detail":"Harness autonomous actor ready."}`.
+2. Submit one action request such as `{"kind":"target","detail":"primary_target"}`, `{"kind":"say","detail":"Harness autonomous actor ready."}`, or `{"kind":"emote","detail":"is ready to begin the hunt."}`. Speech and emote requests remain queued for retry when required evidence capacity is saturated.
 3. Receive an immediate ack with:
    - `accepted`
    - `reason`

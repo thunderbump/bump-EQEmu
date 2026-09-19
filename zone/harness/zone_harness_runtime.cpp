@@ -318,18 +318,28 @@ bool HasTargetChangedEvent(const std::vector<ActorEvent> &events, uint16_t actor
 	);
 }
 
-bool HasSpeechEvent(const std::vector<ActorEvent> &events, uint16_t actor_id, const std::string &text)
+bool HasSpeechEvent(
+	const std::vector<ActorEvent> &events,
+	uint16_t actor_id,
+	const std::string &channel,
+	const std::string &text
+)
 {
 	return std::any_of(
 		events.begin(),
 		events.end(),
-		[actor_id, &text](const ActorEvent &event) {
+		[actor_id, &channel, &text](const ActorEvent &event) {
 			return event.type == "speech_emitted" &&
 				event.caster.entity_id == actor_id &&
-				event.speech.channel == "say" &&
+				event.speech.channel == channel &&
 				event.speech.text == text;
 		}
 	);
+}
+
+bool IsEvidenceCapacityDeferral(const std::string &reason)
+{
+	return reason == "say_deferred_evidence_capacity" || reason == "emote_deferred_evidence_capacity";
 }
 
 bool ExecuteAutonomousActorAction(Bot *actor, Mob *target, const std::string &kind, const std::string &detail, std::string &reason)
@@ -349,6 +359,12 @@ bool ExecuteAutonomousActorAction(Bot *actor, Mob *target, const std::string &ki
 	if (kind == "say") {
 		const bool emitted = actor->Say("%s", detail.c_str());
 		reason = emitted ? "say_emitted" : "say_deferred_evidence_capacity";
+		return emitted;
+	}
+
+	if (kind == "emote") {
+		const bool emitted = actor->Emote("%s", detail.c_str());
+		reason = emitted ? "emote_emitted" : "emote_deferred_evidence_capacity";
 		return emitted;
 	}
 
@@ -1909,6 +1925,7 @@ AutonomousActorLoopScenarioResult ZoneHarnessRuntime::RunAutonomousActorLoop(uin
 	result.actions = {
 		{.kind = "target", .detail = fixture.primary_target->GetCleanName()},
 		{.kind = "say", .detail = "Harness autonomous actor ready."},
+		{.kind = "emote", .detail = "is ready to begin the hunt."},
 	};
 
 	const uint16_t actor_id = fixture.actor->GetID();
@@ -1923,8 +1940,7 @@ AutonomousActorLoopScenarioResult ZoneHarnessRuntime::RunAutonomousActorLoop(uin
 		}
 
 		for (auto &action: result.actions) {
-			if (!action.accepted &&
-				(action.reason.empty() || action.reason == "say_deferred_evidence_capacity")) {
+			if (!action.accepted && (action.reason.empty() || IsEvidenceCapacityDeferral(action.reason))) {
 				action.accepted = ExecuteAutonomousActorAction(
 					fixture.actor,
 					fixture.primary_target,
@@ -1948,8 +1964,8 @@ AutonomousActorLoopScenarioResult ZoneHarnessRuntime::RunAutonomousActorLoop(uin
 					action.reason = "observed_target_changed";
 				}
 			}
-			else if (action.kind == "say" && !action.observed) {
-				action.observed = HasSpeechEvent(result.events, actor_id, action.detail);
+			else if ((action.kind == "say" || action.kind == "emote") && !action.observed) {
+				action.observed = HasSpeechEvent(result.events, actor_id, action.kind, action.detail);
 				if (action.observed) {
 					action.reason = "observed_speech_emitted";
 				}
@@ -1964,7 +1980,7 @@ AutonomousActorLoopScenarioResult ZoneHarnessRuntime::RunAutonomousActorLoop(uin
 			}
 		);
 		if (result.completed) {
-			result.reason = "observed_bounded_target_and_say_actions";
+			result.reason = "observed_bounded_target_say_and_emote_actions";
 			break;
 		}
 
@@ -2088,7 +2104,7 @@ AutonomousActorPrototypeActionAck ZoneHarnessRuntime::EnqueueAutonomousActorProt
 		return ack;
 	}
 
-	if (kind != "target" && kind != "say") {
+	if (kind != "target" && kind != "say" && kind != "emote") {
 		ack.reason = "unsupported_action_kind";
 		return ack;
 	}
@@ -2106,8 +2122,8 @@ AutonomousActorPrototypeActionAck ZoneHarnessRuntime::EnqueueAutonomousActorProt
 		}
 	}
 
-	if (kind == "say" && (detail.empty() || detail.size() > 120)) {
-		ack.reason = detail.empty() ? "say_detail_required" : "say_detail_too_long";
+	if ((kind == "say" || kind == "emote") && (detail.empty() || detail.size() > 120)) {
+		ack.reason = detail.empty() ? kind + "_detail_required" : kind + "_detail_too_long";
 		return ack;
 	}
 
@@ -2240,7 +2256,7 @@ void ZoneHarnessRuntime::ProcessAutonomousActorPrototypeActionLocked()
 		prototype.last_event_cursor = events.MaxEventID();
 		prototype.pending_actions.erase(prototype.pending_actions.begin());
 	}
-	else if (reason != "say_deferred_evidence_capacity") {
+	else if (!IsEvidenceCapacityDeferral(reason)) {
 		// Permanent/invalid actions do not block the bounded prototype queue.
 		prototype.pending_actions.erase(prototype.pending_actions.begin());
 	}

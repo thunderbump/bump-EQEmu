@@ -944,7 +944,9 @@ public:
 	void SayString(Client *to, uint32 type, uint32 string_id, const char *message3 = 0, const char *message4 = 0, const char *message5 = 0,
 		const char *message6 = 0, const char *message7 = 0, const char *message8 = 0, const char *message9 = 0);
 	void Shout(const char *format, ...);
-	void Emote(const char *format, ...);
+	// Returns false when required actor evidence is saturated or stopped and the
+	// emote was not emitted, allowing action queues to defer and retry it.
+	bool Emote(const char *format, ...);
 	void QuestJournalledSay(Client *QuestInitiator, const char *str, Journal::Options &opts);
 	const int GetItemStat(uint32 item_id, std::string identifier);
 
