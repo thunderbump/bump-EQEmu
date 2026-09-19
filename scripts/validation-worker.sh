@@ -13,6 +13,7 @@ Usage: scripts/validation-worker.sh <command> [options]
 Commands:
   profiles --json        List portable validation worker profiles.
   run --request <path>   Execute a validation worker request JSON.
+  recover --request <path> Recover abandoned leases without running validation.
   self-test              Run validation worker shell self-tests.
   -h, --help             Show this help.
 
@@ -448,49 +449,6 @@ validate_request() {
   fi
 }
 
-acquire_lock() {
-  local evidence_dir="$1" wait_seconds="$2" lock_dir="$worker_home/locks/$lock_name.lock" start now
-  mkdir -p "$worker_home/locks"
-  start="$(date +%s)"
-  while true; do
-    if mkdir "$lock_dir" 2>/dev/null; then
-      printf '%s acquired %s\n' "$(now_utc)" "$lock_dir" >>"$evidence_dir/logs/lock.log"
-      printf '%s' "$lock_dir"
-      return 0
-    fi
-    now="$(date +%s)"
-    if (( now - start >= wait_seconds )); then
-      printf '%s busy after %ss waiting for %s\n' "$(now_utc)" "$wait_seconds" "$lock_dir" >>"$evidence_dir/logs/lock.log"
-      return 1
-    fi
-    sleep 1
-  done
-}
-
-acquire_named_lock() {
-  local evidence_dir="$1" wait_seconds="$2" lock_dir="$3" label="$4" start now
-  start="$(date +%s)"
-  while true; do
-    if mkdir "$lock_dir" 2>/dev/null; then
-      printf '%s acquired %s lock %s\n' "$(now_utc)" "$label" "$lock_dir" >>"$evidence_dir/logs/lock.log"
-      printf '%s' "$lock_dir"
-      return 0
-    fi
-    now="$(date +%s)"
-    if (( now - start >= wait_seconds )); then
-      printf '%s busy after %ss waiting for %s lock %s\n' "$(now_utc)" "$wait_seconds" "$label" "$lock_dir" >>"$evidence_dir/logs/lock.log"
-      return 1
-    fi
-    sleep 1
-  done
-}
-
-release_lock() {
-  local lock_dir="${1:-}"
-  [[ -n "$lock_dir" ]] && rm -rf "$lock_dir"
-  return 0
-}
-
 resolve_path() {
   local path="$1"
   if command -v realpath >/dev/null 2>&1; then
@@ -520,7 +478,8 @@ write_stack_binding() {
     --arg message "$message" \
     --arg completed_at "$(now_utc)" \
     '{status:$status, role:$role, source:$source, stack_dir:$stack_dir, code_path:$code_path, target:$target, previous_kind:$previous_kind, previous_target:$previous_target, restore_status:$restore_status, message:$message, completed_at:$completed_at}' \
-    >"$evidence_dir/stack-binding.json"
+    >"$evidence_dir/stack-binding.json.tmp"
+  mv "$evidence_dir/stack-binding.json.tmp" "$evidence_dir/stack-binding.json"
 }
 
 bind_validation_stack() {
@@ -570,7 +529,6 @@ bind_validation_stack() {
     return 0
   fi
 
-  ln -sfn "$resolved_target" "$code_path"
   STACK_BINDING_STATUS=rebound
   STACK_BINDING_SOURCE="$source"
   STACK_BINDING_STACK_DIR="$stack_dir"
@@ -580,37 +538,14 @@ bind_validation_stack() {
   STACK_BINDING_PREVIOUS_TARGET="$previous_target"
   STACK_BINDING_RESTORE_NEEDED=1
   write_stack_binding "$evidence_dir" rebound validation "$source" "$stack_dir" "$code_path" "$resolved_target" "$previous_kind" "$previous_target" pending "stack code symlink rebound to worker checkout"
-}
-
-restore_validation_stack() {
-  local evidence_dir="$1" restore_status=not-needed
-
-  [[ -n "${STACK_BINDING_STATUS:-}" ]] || return 0
-
-  if [[ "${STACK_BINDING_RESTORE_NEEDED:-0}" == "1" ]]; then
-    case "$STACK_BINDING_PREVIOUS_KIND" in
-      symlink)
-        ln -sfn "$STACK_BINDING_PREVIOUS_TARGET" "$STACK_BINDING_CODE_PATH"
-        restore_status=restored
-        ;;
-      missing)
-        rm -f "$STACK_BINDING_CODE_PATH"
-        restore_status=removed
-        ;;
-      *)
-        restore_status=not-needed
-        ;;
-    esac
-  fi
-
-  write_stack_binding "$evidence_dir" "$STACK_BINDING_STATUS" validation "$STACK_BINDING_SOURCE" "$STACK_BINDING_STACK_DIR" "$STACK_BINDING_CODE_PATH" "$STACK_BINDING_TARGET" "$STACK_BINDING_PREVIOUS_KIND" "$STACK_BINDING_PREVIOUS_TARGET" "$restore_status" "stack code binding cleanup complete"
+  ln -sfn "$resolved_target" "$code_path"
 }
 
 verify_checkout_submodules() {
   local checkout_dir="$1" evidence_dir="$2" mode="$3" output status
 
   set +e
-  output="$(timeout "$timeout_seconds" git -C "$checkout_dir" submodule status --recursive 2>&1)"
+  output="$(timeout --foreground "$timeout_seconds" git -C "$checkout_dir" submodule status --recursive 2>&1)"
   status=$?
   set -e
   printf '%s\n' "$output" >>"$evidence_dir/logs/submodule.log"
@@ -703,7 +638,7 @@ run_isolated_submodule_update() {
   env -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT \
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 \
     GIT_TERMINAL_PROMPT=0 GIT_ASKPASS= SSH_ASKPASS= \
-    timeout "$timeout_seconds" git -C "$checkout_dir" "${transport_config[@]}" "${update_args[@]}" \
+    timeout --foreground "$timeout_seconds" git -C "$checkout_dir" "${transport_config[@]}" "${update_args[@]}" \
     >>"$evidence_dir/logs/submodule.log" 2>&1
   status=$?
   set -e
@@ -796,12 +731,12 @@ prepare_afk_fixture() {
   mariadb_version="$(jq -r '.mariadb_version // empty' "$config")"
   arguments=(--baseline-dir "$baseline" --output-dir "$evidence_dir/prepared-fixture")
   [[ -z "$mariadb_version" ]] || arguments+=(--mariadb-version "$mariadb_version")
-  timeout --kill-after=10 "$timeout_seconds" \
+  timeout --foreground --kill-after=10 "$timeout_seconds" \
     "$checkout_dir/scripts/prepare-migration-rehearsal-fixture.sh" "${arguments[@]}"
 }
 
 run_request() {
-  local request_path="$1" validation_status validation_step lock_dir stack_lock_dir stack_lock checkout_dir head_commit stack_path_source
+  local request_path="$1" validation_status validation_step checkout_dir head_commit stack_path_source
   local -a validation_steps=()
   local MIGRATION_REHEARSAL_MANIFEST="${MIGRATION_REHEARSAL_MANIFEST:-}"
   project= repo= ref= commit= profile= run_id= evidence_dir= timeout_seconds= lock_wait_seconds= stack_role= stack_path=
@@ -822,8 +757,10 @@ run_request() {
   fi
   rm -f /tmp/validation-worker-request-error.$$ 2>/dev/null || true
 
-  ensure_log_files "$evidence_dir"
-  copy_request_evidence "$request_path" "$evidence_dir" || true
+  if [[ "${VALIDATION_WORKER_RECOVER_ONLY:-0}" != 1 ]]; then
+    ensure_log_files "$evidence_dir"
+    copy_request_evidence "$request_path" "$evidence_dir" || true
+  fi
 
   if [[ -n "$stack_path" ]]; then
     stack_path_source=request.stack.path
@@ -841,11 +778,15 @@ run_request() {
     checkout_dir="$(resolve_path "$request_source_checkout_path")"
   fi
 
-  if ! lock_dir="$(acquire_lock "$evidence_dir" "$lock_wait_seconds")"; then
-    write_result "$evidence_dir" failed worker_busy 1 "exclusive validation slot is busy" "$checkout_dir" "" "$stack_path_source"
-    return 1
+  if [[ -z "${VALIDATION_WORKER_LIFETIME_TOKEN:-}" || "${VALIDATION_WORKER_LIFETIME_PARENT:-}" != "$PPID" ]]; then
+    [[ "${VALIDATION_WORKER_RECOVER_ONLY:-0}" == 1 ]] || write_result "$evidence_dir" failed interrupted 1 "Validation has not completed." "$checkout_dir" "" "$stack_path_source"
+    lifetime_args=()
+    [[ "${VALIDATION_WORKER_RECOVER_ONLY:-0}" != 1 ]] || lifetime_args+=(--recover)
+    exec python3 "$script_dir/validation-lifetime.py" \
+      --worker-home "$worker_home" --stack "$stack_path" --evidence "$evidence_dir" \
+      --checkout "$checkout_dir" --wait "$lock_wait_seconds" --timeout "$timeout_seconds" \
+      "${lifetime_args[@]}" -- "$script_dir/validation-worker.sh" run --request "$request_path"
   fi
-  trap 'restore_validation_stack "$evidence_dir"; release_lock "${stack_lock:-}"; release_lock "${lock_dir:-}"' RETURN
 
   if [[ "$request_source_type" == "fetch" ]]; then
     rm -rf "$checkout_dir"
@@ -876,13 +817,6 @@ run_request() {
     fi
   fi
 
-  if [[ -n "$stack_path" ]]; then
-    stack_lock_dir="$stack_path/.validation-worker-code.lock"
-    if ! stack_lock="$(acquire_named_lock "$evidence_dir" "$lock_wait_seconds" "$stack_lock_dir" stack)"; then
-      write_result "$evidence_dir" failed stack_busy 1 "validation stack is busy" "$checkout_dir" "$head_commit" "$stack_path_source"
-      return 1
-    fi
-  fi
 
   if ! bind_validation_stack "$evidence_dir" "$stack_path" "$checkout_dir" "$stack_path_source"; then
     write_result "$evidence_dir" failed stack_binding_failed 1 "failed to bind validation stack to worker checkout" "$checkout_dir" "$head_commit" "$stack_path_source"
@@ -908,11 +842,11 @@ run_request() {
 
     set +e
     if [[ -n "$stack_path" && -n "${STACK_BINDING_STATUS:-}" ]]; then
-      AKKSTACK_DIR="$stack_path" EXPECTED_EQEMU_CHECKOUT="$checkout_dir" MIGRATION_REHEARSAL_EVIDENCE_DIR="$evidence_dir/migration-rehearsal" timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
+      AKKSTACK_DIR="$stack_path" EXPECTED_EQEMU_CHECKOUT="$checkout_dir" MIGRATION_REHEARSAL_EVIDENCE_DIR="$evidence_dir/migration-rehearsal" timeout --foreground "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
     elif [[ -n "$stack_path" ]]; then
-      AKKSTACK_DIR="$stack_path" MIGRATION_REHEARSAL_EVIDENCE_DIR="$evidence_dir/migration-rehearsal" timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
+      AKKSTACK_DIR="$stack_path" MIGRATION_REHEARSAL_EVIDENCE_DIR="$evidence_dir/migration-rehearsal" timeout --foreground "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
     else
-      MIGRATION_REHEARSAL_EVIDENCE_DIR="$evidence_dir/migration-rehearsal" timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
+      MIGRATION_REHEARSAL_EVIDENCE_DIR="$evidence_dir/migration-rehearsal" timeout --foreground "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
     fi
     exit_code=$?
     set -e
@@ -1002,7 +936,8 @@ case "$1" in
     shift
     exec "$repo_root/tests/shell/validation-worker-test.sh" "$@"
     ;;
-  run)
+  run|recover)
+    [[ "$1" != recover ]] || export VALIDATION_WORKER_RECOVER_ONLY=1
     shift
     request_path=""
     while [[ "$#" -gt 0 ]]; do
