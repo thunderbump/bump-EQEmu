@@ -66,7 +66,8 @@ def clean(owner):
         if binding.get('restore_status') == 'pending':
             code = Path(owner['stack']) / 'code'
             target = owner['checkout']
-            if binding['code_path'] != str(code) or binding['target'] != target:
+            binding_code = Path(binding['code_path'])
+            if binding_code.name != 'code' or binding_code.parent.resolve() != code.parent or binding['target'] != target:
                 raise RuntimeError('stack binding ownership does not match lease')
             previous = binding['previous_target']
             kind = binding['previous_kind']

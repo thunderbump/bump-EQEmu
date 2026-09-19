@@ -126,6 +126,11 @@ else: raise SystemExit(2)
         self.assertEqual(json.loads((evidence/'result.json').read_text())['category'],'interrupted')
         self.assert_clean();self.next_passes()
 
+    def test_stack_path_alias_restores_the_same_owned_binding(self):
+        alias=self.root/'stack-alias';alias.symlink_to(self.stack,target_is_directory=True)
+        self.stack=alias
+        self.test_outer_term_cleans_then_next_run_passes()
+
     def test_deadline_kills_term_resistant_child(self):
         process,_,evidence=self.start(timeout=2,mode='resist');self.await_started()
         self.assertNotEqual(process.wait(timeout=15),0)
