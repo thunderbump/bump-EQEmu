@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/prepare-migration-rehearsal-fixture.sh --baseline-dir DIR [metadata options]
+Usage: scripts/prepare-migration-rehearsal-fixture.sh --baseline-dir DIR --output-dir DIR [metadata options]
 
-Prepare a captured baseline for scripts/validate-afk without copying its private
+Prepare inputs from a read-only captured baseline for scripts/validate-afk without copying its private
 artifacts into Git. DIR must contain manifest.json, database.sql.gz (or .zst or
 .sql), and installed-binaries.tar.gz. The capture manifest must contain the
 actual SHA-256 values of both archives.
@@ -23,12 +24,14 @@ when the capture uses another shape:
   --custom-version NUMBER
   --world-member ARCHIVE_PATH
 
-The command writes migration-rehearsal-manifest.json, fixture SQL and explicit selection files beneath DIR. It never configures
-or runs validation by itself.
+The output directory must not exist or overlap the baseline. It receives a copy
+of the snapshot, extracted binaries, fixture SQL and migration-rehearsal-manifest.json.
+The baseline is never modified. No shared selection files are written.
 EOF
 }
 
 baseline_dir=""
+output_dir=""
 snapshot_id=""
 source_build=""
 mariadb_version=""
@@ -38,6 +41,7 @@ custom_version=""
 world_member=""
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
+    --output-dir) output_dir="${2:-}"; shift 2 ;;
     --baseline-dir) baseline_dir="${2:-}"; shift 2 ;;
     --snapshot-id) snapshot_id="${2:-}"; shift 2 ;;
     --source-build) source_build="${2:-}"; shift 2 ;;
@@ -56,6 +60,11 @@ command -v jq >/dev/null || { printf 'error: jq is required\n' >&2; exit 125; }
 command -v python3 >/dev/null || { printf 'error: python3 is required\n' >&2; exit 125; }
 command -v sha256sum >/dev/null || { printf 'error: sha256sum is required\n' >&2; exit 125; }
 baseline_dir="$(realpath "$baseline_dir")"
+[[ -n "$output_dir" ]] || { printf 'error: --output-dir is required\n' >&2; exit 2; }
+output_dir="$(realpath -m "$output_dir")"
+case "$output_dir/" in "$baseline_dir/"*) printf 'error: output directory must not overlap baseline\n' >&2; exit 2 ;; esac
+case "$baseline_dir/" in "$output_dir/"*) printf 'error: output directory must not overlap baseline\n' >&2; exit 2 ;; esac
+[[ ! -e "$output_dir" ]] || { printf 'error: output directory already exists\n' >&2; exit 2; }
 capture_manifest="$baseline_dir/manifest.json"
 [[ -f "$capture_manifest" ]] || { printf 'error: captured baseline is missing manifest.json\n' >&2; exit 2; }
 
@@ -123,9 +132,12 @@ fi
   exit 2
 }
 
-fixture_dir="$baseline_dir/migration-rehearsal-fixture"
+# Reserve a new private output directory; never replace another run's evidence.
+mkdir -p "$(dirname "$output_dir")"
+mkdir "$output_dir"
+cp --reflink=auto "$snapshot" "$output_dir/$(basename "$snapshot")"
+fixture_dir="$output_dir/migration-rehearsal-fixture"
 extract_dir="$fixture_dir/old-build"
-rm -rf "$fixture_dir"
 mkdir -p "$extract_dir"
 python3 - "$binary_archive" "$extract_dir" <<'PY'
 from pathlib import Path
@@ -440,17 +452,17 @@ SQL
 sed -i "s/@SOURCE_DATABASE_VERSIONS@/$server_version:$bots_version:$custom_version/" \
   "$fixture_dir/assert-restored.sql"
 
-manifest_path="$baseline_dir/migration-rehearsal-manifest.json"
+manifest_path="$output_dir/migration-rehearsal-manifest.json"
 jq -n \
   --arg snapshot_id "$snapshot_id" --arg snapshot_file "$(basename "$snapshot")" --arg snapshot_sha "$snapshot_sha" \
   --arg source_build "$source_build" --arg mariadb_version "$mariadb_version" \
   --argjson server_version "$server_version" --argjson bots_version "$bots_version" --argjson custom_version "$custom_version" \
   --arg world_path "/opt/eqemu-old/$old_world_relative" --arg world_sha "$old_world_sha" \
+  --arg archive_sha "$archive_sha" \
+  --arg seed_sha "$(sha256sum "$fixture_dir/seed-old-format.sql" | awk '{print $1}')" \
+  --arg upgraded_sha "$(sha256sum "$fixture_dir/assert-upgraded.sql" | awk '{print $1}')" \
+  --arg restored_sha "$(sha256sum "$fixture_dir/assert-restored.sql" | awk '{print $1}')" \
   --arg capture_manifest_sha "$capture_manifest_sha" --arg preparer_commit "$preparer_commit" \
-  '{snapshot:{id:$snapshot_id,file:$snapshot_file,sha256:$snapshot_sha},source:{build:$source_build,build_identity_attested:false,mariadb_version:$mariadb_version,database_versions:{server:$server_version,bots:$bots_version,custom:$custom_version},capture_manifest_sha256:$capture_manifest_sha,fixture_preparer_commit:$preparer_commit},old_build:{world_binary_container_path:$world_path,world_binary_sha256:$world_sha,host_directory:"migration-rehearsal-fixture/old-build"},fixtures:{seed_sql:"migration-rehearsal-fixture/seed-old-format.sql",upgraded_assert_sql:"migration-rehearsal-fixture/assert-upgraded.sql",restored_assert_sql:"migration-rehearsal-fixture/assert-restored.sql"},candidate_scenarios:["/home/eqemu/code/build/bin/zone tests:actor-events"]}' >"$manifest_path"
+  '{snapshot:{id:$snapshot_id,file:$snapshot_file,sha256:$snapshot_sha},source:{build:$source_build,build_identity_attested:false,mariadb_version:$mariadb_version,database_versions:{server:$server_version,bots:$bots_version,custom:$custom_version},capture_manifest_sha256:$capture_manifest_sha,binary_archive_sha256:$archive_sha,fixture_preparer_commit:$preparer_commit},old_build:{world_binary_container_path:$world_path,world_binary_sha256:$world_sha,host_directory:"migration-rehearsal-fixture/old-build"},fixture_sha256:{seed_sql:$seed_sha,upgraded_assert_sql:$upgraded_sha,restored_assert_sql:$restored_sha},fixtures:{seed_sql:"migration-rehearsal-fixture/seed-old-format.sql",upgraded_assert_sql:"migration-rehearsal-fixture/assert-upgraded.sql",restored_assert_sql:"migration-rehearsal-fixture/assert-restored.sql"},candidate_scenarios:["/home/eqemu/code/build/bin/zone tests:actor-events"]}' >"$manifest_path"
 
-env_path="$baseline_dir/migration-rehearsal.env"
-selection_path="$baseline_dir/migration-rehearsal.manifest-path"
-printf 'export MIGRATION_REHEARSAL_MANIFEST=%q\n' "$manifest_path" >"$env_path"
-printf '%s\n' "$manifest_path" >"$selection_path"
-printf 'Prepared migration rehearsal fixture. Review it before enabling the generated selection file.\n'
+printf 'Prepared migration rehearsal fixture: %s\n' "$manifest_path"

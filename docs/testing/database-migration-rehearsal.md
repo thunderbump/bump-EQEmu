@@ -2,23 +2,33 @@
 
 `./scripts/validate.sh --stack validation migration-rehearsal` creates a fresh MariaDB container, volume and internal Docker network for each run. Candidate and archived-world processes join only that network, have no published ports, and use generated configuration with no login-server entries or automatic startup updates. No existing database credentials, database volumes or server configuration are loaded. Following the repository's zone-CLI routing convention, the validation stack supplies only its read-only generated shared-memory directory plus the selected `plugins` and `lua_modules` directories. This database-focused scenario does not boot a zone, so it uses empty temporary maps and quests directories rather than requiring or mounting the stack's full asset trees. The Candidate build and archived old build are read-only inputs. Runtime files live in container tmpfs. The run owns and cleans up its database container, runtime container, volume and network, retaining private logs and result evidence outside them. There is no shared-database compatibility mode.
 
-The dump and archived old binaries are operational artifacts and must remain outside Git. Prepare a captured baseline in place, inspect the generated SQL, and then explicitly enable it:
+The dump and archived old binaries remain outside Git. Select the captured baseline once in host-local configuration:
 
 ```sh
-./scripts/prepare-migration-rehearsal-fixture.sh --baseline-dir /path/to/captured-baseline
-# If capture metadata omitted MariaDB's version, add the version verified on the
-# source and validation servers: --mariadb-version X.Y.Z
-# Review the generated manifest, SQL and extracted binary hash.
-# For a worker-managed/relocated validation stack, mark that inspected stack once:
 mkdir -p "${VALIDATION_WORKER_HOME:-.validation-worker}"
-install -m 600 /path/to/captured-baseline/migration-rehearsal.manifest-path \
-  "${VALIDATION_WORKER_HOME:-.validation-worker}/migration-rehearsal-manifest"
+# Save this JSON as $VALIDATION_WORKER_HOME/migration-rehearsal-baseline.json:
+# {"directory":"/absolute/path/to/captured-baseline","mariadb_version":"10.5.4"}
 ./scripts/validate-afk
 ```
 
-Preparation requires `manifest.json`, one `database.sql` snapshot (optionally `.gz` or `.zst`), and `installed-binaries.tar.gz`. It compares each artifact with its exact declared checksum field, safely extracts exactly one executable named `world`, and writes the rehearsal manifest, fixture SQL and environment selection beneath the baseline. It neither starts Docker nor configures the gate. After review, installing the generated one-line selection file makes the ordinary no-argument AFK command load that absolute manifest path; an explicit `MIGRATION_REHEARSAL_MANIFEST` environment value takes precedence. If capture metadata uses an unrecognized shape, `--help` lists explicit metadata overrides; if the archive contains multiple `world` binaries, select one with `--world-member`. Keep all generated files with the access-controlled baseline and out of Git.
+`directory` is required and absolute. Optional `mariadb_version` supplies a verified version when the capture omitted it; otherwise the capture supplies the version. No other keys are accepted. `MIGRATION_REHEARSAL_BASELINE_CONFIG` can select another config file. This replaces the old `migration-rehearsal-manifest` selection file for the no-argument AFK gate. That gate also ignores an ambient `MIGRATION_REHEARSAL_MANIFEST` and always prepares its own inputs.
 
-For a focused run after inspection without installing the persistent worker selection, source the generated `migration-rehearsal.env` file and run `./scripts/validate.sh --stack validation migration-rehearsal`. `MIGRATION_REHEARSAL_TIMEOUT_SECONDS` sets the positive-integer whole-run deadline (5400 seconds by default), including image setup, snapshot import, updates, scenarios, and recovery. The portable worker inherits `MIGRATION_REHEARSAL_MANIFEST` and writes `migration-rehearsal/result.json` under exact-Candidate evidence. Snapshot identity and checksum, source build, source server/bot/custom database versions, MariaDB version, Candidate source commit, outcome, failure phase, isolated database name, and measured restore milliseconds are recorded. Candidate `world`/`zone` hashes and worktree cleanliness are recorded, while source-to-artifact identity remains conservatively unattested; Tier 1's immediately preceding exact-checkout build and the exercised runtime provide operational evidence without inventing embedded build provenance. Logs must not contain credentials. Missing fixture infrastructure exits nonzero; it is not a skipped pass.
+After acquiring the exact committed checkout and worker lock, the worker runs that checkout's preparer before stack binding and Tier 1. Preparation consumes the same validation time budget. It writes under `<evidence_dir>/prepared-fixture/`, passes the generated manifest directly to the checks, and retains `logs/fixture-preparation.log`. Preparation failure writes a nonzero `fixture_preparation_failed` result and runs no validation checks. No model waits for preparation or tests.
+
+Preparation requires `manifest.json`, one `database.sql` snapshot, optionally compressed as `.gz` or `.zst`, and `installed-binaries.tar.gz`. It verifies declared artifact checksums, copies the snapshot using copy-on-write where available, safely extracts the archived binaries, and generates SQL and a manifest. The baseline stays unchanged. Each output directory must be new and must not overlap the baseline. Outputs are private and stay with run evidence; no shared selection or environment files are written. The generated manifest records snapshot, capture-manifest, binary-archive and SQL hashes plus the preparer commit. Regeneration on every run deliberately avoids caching.
+
+For focused manual diagnosis, prepare into a fresh private directory and pass the manifest explicitly:
+
+```sh
+./scripts/prepare-migration-rehearsal-fixture.sh \
+  --baseline-dir /path/to/captured-baseline --output-dir /private/new-run/prepared-fixture
+MIGRATION_REHEARSAL_MANIFEST=/private/new-run/prepared-fixture/migration-rehearsal-manifest.json \
+  ./scripts/validate.sh --stack validation migration-rehearsal
+```
+
+`--help` lists metadata overrides for unusual capture formats, including `--world-member` for archives with multiple world binaries. Standalone worker profiles still accept an explicitly prepared manifest; automatic preparation belongs to the no-argument AFK gate.
+
+`MIGRATION_REHEARSAL_TIMEOUT_SECONDS` sets the positive-integer whole-run deadline (5400 seconds by default), including image setup, snapshot import, updates, scenarios, and recovery. The portable worker inherits `MIGRATION_REHEARSAL_MANIFEST` and writes `migration-rehearsal/result.json` under exact-Candidate evidence. Snapshot identity and checksum, source build, source server/bot/custom database versions, MariaDB version, Candidate source commit, outcome, failure phase, isolated database name, and measured restore milliseconds are recorded. Candidate `world`/`zone` hashes and worktree cleanliness are recorded, while source-to-artifact identity remains conservatively unattested; Tier 1's immediately preceding exact-checkout build and the exercised runtime provide operational evidence without inventing embedded build provenance. Logs must not contain credentials. Missing fixture infrastructure exits nonzero; it is not a skipped pass.
 
 ## Fixture contract
 
@@ -55,7 +65,7 @@ The manifest has this shape:
 }
 ```
 
-Snapshot, SQL fixture and old-build host directory paths are relative to and confined beneath the manifest directory. `old_build.world_binary_container_path` must be beneath `/opt/eqemu-old/`, the fixed read-only archive mount, and may not contain `.` or `..` path components. The fixture preparer commit must exactly equal the Candidate commit, so preparation must be rerun after repository changes. Fixture-provided Compose overrides are no longer used. The database image is `mariadb:<captured-version>` and the runtime image is `eqemulator/eqemu-server:v16-dev`; images are cached/pulled on the host before isolated execution. Database readiness is bounded at 90 seconds, candidate scenarios at 300 seconds by default, and old-world startup at 30 seconds. `MIGRATION_REHEARSAL_SCENARIO_TIMEOUT_SECONDS` may set another positive-integer scenario deadline. Timeout uses TERM followed by KILL and labelled-container cleanup, while `MIGRATION_REHEARSAL_TIMEOUT_SECONDS` bounds the entire focused run (and the worker has its own outer deadline). TERM/INT triggers cleanup; an uncatchable host/process failure can leave UUID-named, labelled resources for operator cleanup.
+Snapshot, SQL fixture and old-build host directory paths are relative to and confined beneath the manifest directory. `old_build.world_binary_container_path` must be beneath `/opt/eqemu-old/`, the fixed read-only archive mount, and may not contain `.` or `..` path components. The fixture preparer commit must exactly equal the Candidate commit, so the AFK gate prepares from each committed checkout; manual focused runs must regenerate after repository changes. Fixture-provided Compose overrides are no longer used. The database image is `mariadb:<captured-version>` and the runtime image is `eqemulator/eqemu-server:v16-dev`; images are cached/pulled on the host before isolated execution. Database readiness is bounded at 90 seconds, candidate scenarios at 300 seconds by default, and old-world startup at 30 seconds. `MIGRATION_REHEARSAL_SCENARIO_TIMEOUT_SECONDS` may set another positive-integer scenario deadline. Timeout uses TERM followed by KILL and labelled-container cleanup, while `MIGRATION_REHEARSAL_TIMEOUT_SECONDS` bounds the entire focused run (and the worker has its own outer deadline). TERM/INT triggers cleanup; an uncatchable host/process failure can leave UUID-named, labelled resources for operator cleanup.
 
 `source.build` is capture metadata, not an attestation that the installed binary was produced from that checkout. `source.build_identity_attested` remains false for this capture. The separately checked world-binary hash and successful database-backed startup establish exactly which archived binary recovered, without fabricating source-to-binary provenance.
 

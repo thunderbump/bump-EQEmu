@@ -11,15 +11,6 @@ repo_root="$(cd "$script_dir/.." && pwd)"
 worker_home="${VALIDATION_WORKER_HOME:-$repo_root/.validation-worker}"
 stack_path="${AKKSTACK_DIR:-$HOME/Projects/bump-eqemu/bump-akk-stack-validation}"
 timeout_seconds="${VALIDATION_AFK_TIMEOUT_SECONDS:-5400}"
-manifest_selection="$worker_home/migration-rehearsal-manifest"
-if [[ -z "${MIGRATION_REHEARSAL_MANIFEST:-}" && -f "$manifest_selection" ]]; then
-  mapfile -t selected_manifests <"$manifest_selection"
-  if [[ "${#selected_manifests[@]}" -ne 1 || -z "${selected_manifests[0]}" || "${selected_manifests[0]}" != /* || ! -r "${selected_manifests[0]}" ]]; then
-    printf 'error: %s must contain one absolute readable manifest path\n' "$manifest_selection" >&2
-    exit 2
-  fi
-  export MIGRATION_REHEARSAL_MANIFEST="${selected_manifests[0]}"
-fi
 
 if [[ ! "$timeout_seconds" =~ ^[0-9]+$ || "$timeout_seconds" -eq 0 ]]; then
   printf 'error: VALIDATION_AFK_TIMEOUT_SECONDS must be a positive integer\n' >&2

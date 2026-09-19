@@ -769,9 +769,31 @@ prepare_checkout() {
   return 0
 }
 
+# Read host selection once; all generated data belongs to this run's evidence.
+prepare_afk_fixture() {
+  local checkout_dir="$1" evidence_dir="$2" config baseline mariadb_version
+  local -a arguments
+  config="${MIGRATION_REHEARSAL_BASELINE_CONFIG:-$worker_home/migration-rehearsal-baseline.json}"
+  [[ -r "$config" ]] || {
+    printf 'error: select a captured baseline in %s\n' "$config" >&2
+    return 125
+  }
+  jq -e 'type == "object" and (keys - ["directory", "mariadb_version"] | length == 0)
+    and (.directory | type == "string" and startswith("/"))
+    and ((has("mariadb_version") | not) or (.mariadb_version | type == "string" and test("^[0-9]+([.][0-9]+){1,3}$")))' \
+    "$config" >/dev/null || { printf 'error: invalid baseline configuration\n' >&2; return 2; }
+  baseline="$(jq -r .directory "$config")"
+  mariadb_version="$(jq -r '.mariadb_version // empty' "$config")"
+  arguments=(--baseline-dir "$baseline" --output-dir "$evidence_dir/prepared-fixture")
+  [[ -z "$mariadb_version" ]] || arguments+=(--mariadb-version "$mariadb_version")
+  timeout --kill-after=10 "$timeout_seconds" \
+    "$checkout_dir/scripts/prepare-migration-rehearsal-fixture.sh" "${arguments[@]}"
+}
+
 run_request() {
   local request_path="$1" validation_status validation_step lock_dir stack_lock_dir stack_lock checkout_dir head_commit stack_path_source
   local -a validation_steps=()
+  local MIGRATION_REHEARSAL_MANIFEST="${MIGRATION_REHEARSAL_MANIFEST:-}"
   project= repo= ref= commit= profile= run_id= evidence_dir= timeout_seconds= lock_wait_seconds= stack_role= stack_path=
   request_source_type= request_source_repo= request_source_ref= request_source_commit= request_source_checkout_path=
   stack_path_source=
@@ -830,6 +852,19 @@ run_request() {
     return 1
   fi
 
+  validation_started_at_ns="$(date +%s%N)"
+  if [[ "$profile" == "tier1-migration-tier3" && "${VALIDATION_WORKER_AFK_MODE:-0}" == "1" ]]; then
+    if prepare_afk_fixture "$checkout_dir" "$evidence_dir" >"$evidence_dir/logs/fixture-preparation.log" 2>&1; then
+      export MIGRATION_REHEARSAL_MANIFEST="$evidence_dir/prepared-fixture/migration-rehearsal-manifest.json"
+    else
+      validation_status=$?
+      write_result "$evidence_dir" failed fixture_preparation_failed "$validation_status" \
+        "Fixture preparation failed; see logs/fixture-preparation.log. No validation checks ran." \
+        "$checkout_dir" "$head_commit" "$stack_path_source"
+      return "$validation_status"
+    fi
+  fi
+
   if [[ -n "$stack_path" ]]; then
     stack_lock_dir="$stack_path/.validation-worker-code.lock"
     if ! stack_lock="$(acquire_named_lock "$evidence_dir" "$lock_wait_seconds" "$stack_lock_dir" stack)"; then
@@ -848,7 +883,6 @@ run_request() {
     validation_cmd+=(--dry-run)
   fi
 
-  validation_started_at_ns="$(date +%s%N)"
   run_validation() {
     local profile_name="$1" log_path="${2:-$evidence_dir/logs/validation.log}"
     local exit_code elapsed_ns remaining_ns remaining_ms remaining_duration
