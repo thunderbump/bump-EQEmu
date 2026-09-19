@@ -4,7 +4,7 @@ AFK owns the work loop. Use the repository's checks and report their evidence; d
 
 ## Required proof
 
-- Run `./scripts/validate-afk` from the committed Candidate. It currently runs Tier 1 plus canonical Tier 3 against the separate validation stack. Uncommitted diagnostics are not final Candidate evidence.
+- Run `./scripts/validate-afk` from the committed Candidate. It currently runs Tier 1, the isolated migration rehearsal, and canonical Tier 3 using the validation stack for Tier 1/Tier 3 and a separate disposable database environment for migration rehearsal. The checksummed snapshot fixture must be selected with `MIGRATION_REHEARSAL_MANIFEST`; a missing fixture is inconclusive, not a pass. Uncommitted diagnostics are not final Candidate evidence.
 - The durable actor queue proof is currently a separate `actor-queue-tier3` worker profile. Actor queue/helper changes require it in addition to the default check until the combined gate lands. Use the worker request contract in the testing process; do not claim that a default pass ran this profile.
 - Each new world behavior ships with a registered automated scenario. Fixtures may create parties, NPCs and synthetic players, but the behavior under test must execute through production intent and ordinary gameplay. Observe outcomes; do not directly manufacture success.
 - Prove bounded success and relevant rejection, timeout, interruption or restart cases. Clean up scenario-owned state on success and failure. Retain scenario identity, assertions and failure diagnostics with the profile, status and exact Candidate commit.

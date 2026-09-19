@@ -24,7 +24,8 @@ Request JSON fields:
   checkout.path      Optional local-checkout request path. Also accepts local_checkout.path,
                      target_worktree_checkout, target_checkout_path, or repo.path without a ref.
   profile            Required validation profile: preflight, tier1, tier2-readonly,
-                     tier3-harness, actor-queue-tier3, tier1-tier3-harness, or safe.
+                     tier3-harness, actor-queue-tier3, migration-rehearsal,
+                     tier1-migration-tier3, tier1-tier3-harness, or safe.
   run_id             Required stable run identifier used for worker-owned checkout storage.
   evidence_dir       Required directory where request.json, result.json, and logs are written.
   timeout_seconds    Optional validation timeout in seconds. Defaults to 3600.
@@ -58,10 +59,13 @@ VALIDATION_PROFILES='[
   {"name":"tier2-readonly","portable":false},
   {"name":"tier3-harness","portable":true,"description":"Run the canonical Tier 3 Zone Harness smoke.","mutation_classification":"read-mostly/runtime-fixture","timeout_guidance":"Medium. Roughly 10-20 minutes including harness startup.","lock_guidance":"Takes the exclusive worker slot for the whole run. Also takes the stack binding lock when stack.path is used."},
   {"name":"actor-queue-tier3","portable":true,"steps":["tier1","actor-queue-tier3"],"description":"Build Tier 1, then run the durable Autonomous Actor queue executor integration proof.","mutation_classification":"database-mutating/runtime-fixture","timeout_guidance":"Longer. Give one shared budget that covers Tier 1 and the actor queue runtime.","lock_guidance":"Takes the exclusive worker and stack binding locks; mutates the validation database and cleans scenario-owned rows."},
+  {"name":"migration-rehearsal","portable":true,"description":"Upgrade and restore a known snapshot in a uniquely named disposable database.","mutation_classification":"isolated-schema-mutating","timeout_guidance":"Long. Budget for two imports, two updater runs, scenarios, and old-build recovery.","lock_guidance":"Takes the exclusive worker and stack binding locks; never targets the shared validation database."},
+  {"name":"tier1-migration-tier3","portable":true,"steps":["tier1","migration-rehearsal","tier3-harness"],"description":"Conservative schema-work gate: build, isolated migration rehearsal, then canonical Tier 3.","mutation_classification":"isolated-schema-mutating/runtime-fixture","timeout_guidance":"Long. Budget for build, snapshot restore rehearsal, and Tier 3.","lock_guidance":"Takes the exclusive worker and stack binding locks for the whole run."},
   {"name":"tier1-tier3-harness","portable":true,"steps":["tier1","tier3-harness"],"description":"Run Tier 1 first, then Tier 3 harness under one timeout budget.","mutation_classification":"read-mostly/runtime-fixture","timeout_guidance":"Longer. Give one shared budget that covers both Tier 1 and Tier 3.","lock_guidance":"Takes the exclusive worker slot for both tiers under one run. Also takes the stack binding lock when stack.path is used."}
 ]'
 AFK_CHECK_PLAN='[
   {"name":"tier1-build-and-unit-tests","profile":"tier1","log_path":"worker/logs/tier1-build-and-unit-tests.log","failure_status":"rejected","failure_message":"Tier 1 validation failed","inconclusive_message":"Tier 1 validation was inconclusive"},
+  {"name":"isolated-database-migration-rehearsal","profile":"migration-rehearsal","log_path":"worker/logs/database-migration-rehearsal.log","failure_status":"rejected","failure_message":"Database migration rehearsal failed","inconclusive_message":"Database migration rehearsal prerequisites were unavailable"},
   {"name":"tier3-zone-harness","profile":"tier3-harness","log_path":"worker/logs/tier3-zone-harness.log","failure_status":"rejected","failure_message":"Tier 3 Zone Harness validation failed","inconclusive_message":"Tier 3 Zone Harness validation was inconclusive"}
 ]'
 
@@ -251,10 +255,10 @@ run_afk_request() {
       repo:$repo,
       ref:$commit,
       commit:$commit,
-      profile:"tier1-tier3-harness",
+      profile:"tier1-migration-tier3",
       run_id:$run_id,
       evidence_dir:$evidence_dir,
-      timeout_seconds:2600,
+      timeout_seconds:5400,
       lock_wait_seconds:0,
       stack:{role:"validation", path:$stack_path}
     }' >"$worker_request"
@@ -859,11 +863,11 @@ run_request() {
 
     set +e
     if [[ -n "$stack_path" && -n "${STACK_BINDING_STATUS:-}" ]]; then
-      AKKSTACK_DIR="$stack_path" EXPECTED_EQEMU_CHECKOUT="$checkout_dir" timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
+      AKKSTACK_DIR="$stack_path" EXPECTED_EQEMU_CHECKOUT="$checkout_dir" MIGRATION_REHEARSAL_EVIDENCE_DIR="$evidence_dir/migration-rehearsal" timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
     elif [[ -n "$stack_path" ]]; then
-      AKKSTACK_DIR="$stack_path" timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
+      AKKSTACK_DIR="$stack_path" MIGRATION_REHEARSAL_EVIDENCE_DIR="$evidence_dir/migration-rehearsal" timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
     else
-      timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
+      MIGRATION_REHEARSAL_EVIDENCE_DIR="$evidence_dir/migration-rehearsal" timeout "$remaining_duration" "${validation_cmd[@]}" "$profile_name" >>"$log_path" 2>&1
     fi
     exit_code=$?
     set -e
@@ -871,7 +875,7 @@ run_request() {
     return "$exit_code"
   }
 
-  if [[ "$profile" == "tier1-tier3-harness" && "${VALIDATION_WORKER_AFK_MODE:-0}" == "1" ]]; then
+  if [[ "$profile" == "tier1-migration-tier3" && "${VALIDATION_WORKER_AFK_MODE:-0}" == "1" ]]; then
     local_checks_path="$evidence_dir/afk-checks.json"
     initialize_afk_check_statuses
     ensure_afk_check_logs "$(dirname "$evidence_dir")"
