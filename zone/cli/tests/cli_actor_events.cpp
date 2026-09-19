@@ -399,6 +399,51 @@ void ExpectBoundedPersistenceOverloadAndRecovery() {
 			  << " flush_ns=" << burst_complete.flush_nanoseconds + recovered.flush_nanoseconds << "\n";
 }
 
+void ExpectBoundedPersistenceShutdown() {
+	using namespace std::chrono_literals;
+	using PersistenceSink = EQ::ZoneHarness::ActorEventRepositoryPersistenceSink;
+
+	struct BlockingOperation {
+		std::mutex mutex;
+		std::condition_variable changed;
+		bool started = false;
+		bool release = false;
+		bool finished = false;
+	};
+	const auto operation = std::make_shared<BlockingOperation>();
+	std::chrono::steady_clock::time_point shutdown_started;
+	{
+		PersistenceSink sink(1, 512, [operation](const auto&) {
+			std::unique_lock lock(operation->mutex);
+			operation->started = true;
+			operation->changed.notify_all();
+			operation->changed.wait(lock, [&]() { return operation->release; });
+			operation->finished = true;
+			operation->changed.notify_all();
+			return false;
+		});
+		ExpectEqual(sink.Enqueue({.bot_id = 1, .text = "wedged-persistence"}),
+					EQ::ZoneHarness::ActorEventCaptureResult::Accepted,
+					"shutdown probe should enqueue required evidence");
+		{
+			std::unique_lock lock(operation->mutex);
+			Expect(operation->changed.wait_for(lock, 1s, [&]() { return operation->started; }),
+				   "shutdown probe should enter the wedged persistence operation");
+		}
+		shutdown_started = std::chrono::steady_clock::now();
+	}
+	const auto shutdown_elapsed = std::chrono::steady_clock::now() - shutdown_started;
+	Expect(shutdown_elapsed < 3s, "persistence sink destruction must honor its bounded final-flush deadline");
+
+	{
+		std::unique_lock lock(operation->mutex);
+		operation->release = true;
+		operation->changed.notify_all();
+		Expect(operation->changed.wait_for(lock, 1s, [&]() { return operation->finished; }),
+			   "detached persistence operation should finish safely after its owner is destroyed");
+	}
+}
+
 } // namespace
 
 void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::string& description) {
@@ -413,6 +458,7 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 	try {
 		ExpectRecorderShutdownWaitsForInFlightCallbacks();
 		ExpectBoundedPersistenceOverloadAndRecovery();
+		ExpectBoundedPersistenceShutdown();
 
 		const auto run_nonce = BuildRunNonce();
 

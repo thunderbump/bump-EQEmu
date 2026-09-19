@@ -13,12 +13,10 @@
 #include "zone/harness/actor_event_recorder.h"
 
 #include <chrono>
-#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
-#include <deque>
 #include <functional>
-#include <mutex>
+#include <memory>
 #include <string>
 #include <thread>
 
@@ -81,21 +79,14 @@ public:
 	Metrics GetMetrics() const;
 
 private:
+	struct WorkerState;
+
 	static size_t EventBytes(const PendingSpeechEvent& event);
-	bool PersistToRepository(const PendingSpeechEvent& event);
-	void Run();
+	static bool PersistToRepository(const std::shared_ptr<WorkerState>& state, const PendingSpeechEvent& event);
+	static void Run(const std::shared_ptr<WorkerState>& state);
 	void Stop();
 
-	const size_t max_records_;
-	const size_t max_bytes_;
-	PersistenceOperation persistence_operation_;
-	mutable std::mutex mutex_;
-	std::condition_variable work_available_;
-	std::condition_variable state_changed_;
-	std::deque<PendingSpeechEvent> queue_;
-	Metrics metrics_;
-	bool persistence_in_flight_ = false;
-	bool stop_requested_ = false;
+	std::shared_ptr<WorkerState> state_;
 	std::thread worker_;
 };
 

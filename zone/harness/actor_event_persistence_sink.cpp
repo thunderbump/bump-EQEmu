@@ -10,28 +10,56 @@
 
 #include "actor_event_persistence_sink.h"
 
+#include "common/database.h"
+#include "common/eqemu_config.h"
 #include "common/repositories/actor_events_repository.h"
 #include "zone/bot.h"
 #include "zone/zone.h"
-#include "zone/zonedb.h"
 
 #include <algorithm>
+#include <condition_variable>
 #include <cstdlib>
+#include <deque>
+#include <mutex>
 #include <optional>
 
 extern Zone* zone;
 
 namespace EQ::ZoneHarness {
 
+struct ActorEventRepositoryPersistenceSink::WorkerState {
+	WorkerState(size_t record_limit, size_t byte_limit, PersistenceOperation operation)
+		: max_records(std::max<size_t>(1, record_limit)), max_bytes(std::max<size_t>(1, byte_limit)),
+		  persistence_operation(std::move(operation)) {
+		// This connection belongs only to the evidence worker. Its deadlines both
+		// isolate the zone's shared connection and bound a wedged database call.
+		persistence_database.SetConnectionTimeouts(1, 1, 1);
+	}
+
+	const size_t max_records;
+	const size_t max_bytes;
+	PersistenceOperation persistence_operation;
+	Database persistence_database;
+	bool database_connection_initialized = false;
+	std::mutex mutex;
+	std::condition_variable work_available;
+	std::condition_variable state_changed;
+	std::deque<PendingSpeechEvent> queue;
+	Metrics metrics;
+	bool persistence_in_flight = false;
+	bool stop_requested = false;
+	bool worker_exited = false;
+};
+
 ActorEventRepositoryPersistenceSink::ActorEventRepositoryPersistenceSink(size_t max_records, size_t max_bytes,
-																		 PersistenceOperation persistence_operation)
-	: max_records_(std::max<size_t>(1, max_records)), max_bytes_(std::max<size_t>(1, max_bytes)),
-	  persistence_operation_(std::move(persistence_operation)), worker_([this]() { Run(); }) {
+														 PersistenceOperation persistence_operation)
+	: state_(std::make_shared<WorkerState>(max_records, max_bytes, std::move(persistence_operation))),
+	  worker_([state = state_]() { Run(state); }) {
 }
 
 ActorEventRepositoryPersistenceSink::~ActorEventRepositoryPersistenceSink() {
-	// Normal harness shutdown explicitly flushes. This short best effort keeps
-	// destruction bounded and leaves failures visible through FlushFor/Metrics.
+	// Preserve a bounded final drain attempt. Stop never waits indefinitely for
+	// an injected callback or client-library call that ignores its deadline.
 	FlushFor(std::chrono::seconds(2));
 	Stop();
 }
@@ -60,44 +88,60 @@ ActorEventCaptureResult ActorEventRepositoryPersistenceSink::PersistSpeechEmitte
 ActorEventCaptureResult ActorEventRepositoryPersistenceSink::Enqueue(PendingSpeechEvent event) {
 	const auto started_at = std::chrono::steady_clock::now();
 	const auto event_bytes = EventBytes(event);
-	std::lock_guard lock(mutex_);
-	metrics_.attempted_records++;
-	metrics_.attempted_bytes += event_bytes;
-
-	ActorEventCaptureResult result = ActorEventCaptureResult::Accepted;
-	if (stop_requested_) {
-		metrics_.stopped_records++;
-		result = ActorEventCaptureResult::Stopped;
-	} else if (queue_.size() >= max_records_ || event_bytes > max_bytes_ ||
-			   metrics_.queue_bytes > max_bytes_ - event_bytes) {
-		// The caller receives an explicit deferral signal. Never evict an older
-		// required event to make a new event appear successful.
-		metrics_.saturated_records++;
-		result = ActorEventCaptureResult::Saturated;
-	} else {
-		queue_.push_back(std::move(event));
-		metrics_.accepted_records++;
-		metrics_.accepted_bytes += event_bytes;
-		metrics_.queue_records = queue_.size();
-		metrics_.queue_bytes += event_bytes;
-		metrics_.queue_high_water_records = std::max(metrics_.queue_high_water_records, metrics_.queue_records);
-		metrics_.queue_high_water_bytes = std::max(metrics_.queue_high_water_bytes, metrics_.queue_bytes);
-		work_available_.notify_one();
+	const auto state = state_;
+	if (!state) {
+		return ActorEventCaptureResult::Stopped;
 	}
 
-	metrics_.capture_nanoseconds += static_cast<uint64_t>(
+	std::lock_guard lock(state->mutex);
+	state->metrics.attempted_records++;
+	state->metrics.attempted_bytes += event_bytes;
+
+	ActorEventCaptureResult result = ActorEventCaptureResult::Accepted;
+	if (state->stop_requested) {
+		state->metrics.stopped_records++;
+		result = ActorEventCaptureResult::Stopped;
+	} else if (state->queue.size() >= state->max_records || event_bytes > state->max_bytes ||
+			   state->metrics.queue_bytes > state->max_bytes - event_bytes) {
+		// The caller receives an explicit deferral signal. Never evict an older
+		// required event to make a new event appear successful.
+		state->metrics.saturated_records++;
+		result = ActorEventCaptureResult::Saturated;
+	} else {
+		state->queue.push_back(std::move(event));
+		state->metrics.accepted_records++;
+		state->metrics.accepted_bytes += event_bytes;
+		state->metrics.queue_records = state->queue.size();
+		state->metrics.queue_bytes += event_bytes;
+		state->metrics.queue_high_water_records =
+			std::max(state->metrics.queue_high_water_records, state->metrics.queue_records);
+		state->metrics.queue_high_water_bytes =
+			std::max(state->metrics.queue_high_water_bytes, state->metrics.queue_bytes);
+		state->work_available.notify_one();
+	}
+
+	state->metrics.capture_nanoseconds += static_cast<uint64_t>(
 		std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - started_at).count());
 	return result;
 }
 
 bool ActorEventRepositoryPersistenceSink::FlushFor(std::chrono::milliseconds timeout) {
-	std::unique_lock lock(mutex_);
-	return state_changed_.wait_for(lock, timeout, [this]() { return queue_.empty() && !persistence_in_flight_; });
+	const auto state = state_;
+	if (!state) {
+		return true;
+	}
+	std::unique_lock lock(state->mutex);
+	return state->state_changed.wait_for(
+		lock, timeout, [&]() { return state->queue.empty() && !state->persistence_in_flight; });
 }
 
 ActorEventRepositoryPersistenceSink::Metrics ActorEventRepositoryPersistenceSink::GetMetrics() const {
-	std::lock_guard lock(mutex_);
-	return metrics_;
+	const auto state = state_;
+	if (!state) {
+		return {};
+	}
+	std::lock_guard lock(state->mutex);
+	return state->metrics;
 }
 
 size_t ActorEventRepositoryPersistenceSink::EventBytes(const PendingSpeechEvent& event) {
@@ -106,11 +150,26 @@ size_t ActorEventRepositoryPersistenceSink::EventBytes(const PendingSpeechEvent&
 	return sizeof(PendingSpeechEvent) + event.channel.size() + event.text.size();
 }
 
-bool ActorEventRepositoryPersistenceSink::PersistToRepository(const PendingSpeechEvent& event) {
+bool ActorEventRepositoryPersistenceSink::PersistToRepository(
+	const std::shared_ptr<WorkerState>& state, const PendingSpeechEvent& event) {
+	if (!state->database_connection_initialized) {
+		state->database_connection_initialized = true;
+		const auto config = EQEmuConfig::get();
+		if (!config || !state->persistence_database.Connect(
+					   config->DatabaseHost,
+					   config->DatabaseUsername,
+					   config->DatabasePassword,
+					   config->DatabaseDB,
+					   config->DatabasePort,
+					   "actor-events")) {
+			return false;
+		}
+	}
+
 	// Keep "no actor profile" distinct from a failed lookup. Treating a failed
 	// lookup as absence would silently acknowledge required evidence while the
 	// store is unavailable.
-	auto profile_result = database.QueryDatabase(fmt::format(
+	auto profile_result = state->persistence_database.QueryDatabase(fmt::format(
 		"SELECT actor_id, owner_character_id, enabled FROM actor_profiles WHERE bot_id = {} LIMIT 1", event.bot_id));
 	if (!profile_result.Success()) {
 		return false;
@@ -132,7 +191,7 @@ bool ActorEventRepositoryPersistenceSink::PersistToRepository(const PendingSpeec
 		: std::nullopt;
 
 	return ActorEventsRepository::AppendObservedSpeechEmitted(
-			   database,
+			   state->persistence_database,
 			   {
 				   .actor_id = actor_id,
 				   .bot_id = event.bot_id,
@@ -147,63 +206,89 @@ bool ActorEventRepositoryPersistenceSink::PersistToRepository(const PendingSpeec
 			   .event_id != 0;
 }
 
-void ActorEventRepositoryPersistenceSink::Run() {
+void ActorEventRepositoryPersistenceSink::Run(const std::shared_ptr<WorkerState>& state) {
 	using namespace std::chrono_literals;
 	for (;;) {
 		PendingSpeechEvent event;
 		size_t event_bytes = 0;
 		{
-			std::unique_lock lock(mutex_);
-			work_available_.wait(lock, [this]() { return stop_requested_ || !queue_.empty(); });
-			if (stop_requested_) {
+			std::unique_lock lock(state->mutex);
+			state->work_available.wait(lock, [&]() { return state->stop_requested || !state->queue.empty(); });
+			if (state->stop_requested) {
+				state->worker_exited = true;
+				state->state_changed.notify_all();
 				return;
 			}
-			event = queue_.front();
+			event = state->queue.front();
 			event_bytes = EventBytes(event);
-			persistence_in_flight_ = true;
-			metrics_.persistence_attempts++;
+			state->persistence_in_flight = true;
+			state->metrics.persistence_attempts++;
 		}
 
 		const auto started_at = std::chrono::steady_clock::now();
-		const bool persisted = persistence_operation_ ? persistence_operation_(event) : PersistToRepository(event);
+		const bool persisted = state->persistence_operation ? state->persistence_operation(event)
+														  : PersistToRepository(state, event);
 		const auto elapsed = static_cast<uint64_t>(
 			std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - started_at)
 				.count());
 
-		std::unique_lock lock(mutex_);
-		metrics_.flush_nanoseconds += elapsed;
-		persistence_in_flight_ = false;
+		std::unique_lock lock(state->mutex);
+		state->metrics.flush_nanoseconds += elapsed;
+		state->persistence_in_flight = false;
+		if (state->stop_requested) {
+			state->worker_exited = true;
+			state->state_changed.notify_all();
+			return;
+		}
 		if (persisted) {
-			queue_.pop_front();
-			metrics_.persisted_records++;
-			metrics_.persisted_bytes += event_bytes;
-			metrics_.queue_records = queue_.size();
-			metrics_.queue_bytes -= event_bytes;
-			state_changed_.notify_all();
+			state->queue.pop_front();
+			state->metrics.persisted_records++;
+			state->metrics.persisted_bytes += event_bytes;
+			state->metrics.queue_records = state->queue.size();
+			state->metrics.queue_bytes -= event_bytes;
+			state->state_changed.notify_all();
 			continue;
 		}
 
-		metrics_.persistence_failures++;
-		state_changed_.notify_all();
+		state->metrics.persistence_failures++;
+		state->state_changed.notify_all();
 		// Retain the failed front record and retry it in order. A short bounded
 		// backoff prevents an unavailable store from consuming a zone CPU core.
-		work_available_.wait_for(lock, 25ms, [this]() { return stop_requested_; });
-		if (stop_requested_) {
+		state->work_available.wait_for(lock, 25ms, [&]() { return state->stop_requested; });
+		if (state->stop_requested) {
+			state->worker_exited = true;
+			state->state_changed.notify_all();
 			return;
 		}
 	}
 }
 
 void ActorEventRepositoryPersistenceSink::Stop() {
+	using namespace std::chrono_literals;
+	const auto state = state_;
+	if (!state) {
+		return;
+	}
+
+	bool worker_exited = false;
 	{
-		std::lock_guard lock(mutex_);
-		stop_requested_ = true;
-		work_available_.notify_all();
-		state_changed_.notify_all();
+		std::unique_lock lock(state->mutex);
+		state->stop_requested = true;
+		state->work_available.notify_all();
+		state->state_changed.notify_all();
+		worker_exited = state->state_changed.wait_for(lock, 100ms, [&]() { return state->worker_exited; });
 	}
+
 	if (worker_.joinable()) {
-		worker_.join();
+		if (worker_exited) {
+			worker_.join();
+		} else {
+			// The worker owns shared state, including its dedicated connection, so
+			// abandoning a non-cooperative operation cannot access this sink.
+			worker_.detach();
+		}
 	}
+	state_.reset();
 }
 
 } // namespace EQ::ZoneHarness

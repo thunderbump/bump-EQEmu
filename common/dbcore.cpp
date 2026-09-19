@@ -63,6 +63,14 @@ void DBcore::ping()
 	m_mutex->unlock();
 }
 
+void DBcore::SetConnectionTimeouts(uint32 connect_seconds, uint32 read_seconds, uint32 write_seconds)
+{
+	std::scoped_lock lock(*m_mutex);
+	connect_timeout_seconds = connect_seconds;
+	read_timeout_seconds = read_seconds;
+	write_timeout_seconds = write_seconds;
+}
+
 MySQLRequestResult DBcore::QueryDatabase(const std::string& query, bool retryOnFailureOnce)
 {
 	auto r = QueryDatabase(query.c_str(), query.length(), retryOnFailureOnce);
@@ -241,6 +249,16 @@ bool DBcore::Open(uint32 *errnum, char *errbuf)
 	otherwise DB update calls would say 0 rows affected when the value already equalled
 	what the function was tring to set it to, therefore the function would think it failed
 	*/
+	if (connect_timeout_seconds) {
+		mysql_options(mysql, MYSQL_OPT_CONNECT_TIMEOUT, &connect_timeout_seconds);
+	}
+	if (read_timeout_seconds) {
+		mysql_options(mysql, MYSQL_OPT_READ_TIMEOUT, &read_timeout_seconds);
+	}
+	if (write_timeout_seconds) {
+		mysql_options(mysql, MYSQL_OPT_WRITE_TIMEOUT, &write_timeout_seconds);
+	}
+
 	uint32 flags = CLIENT_FOUND_ROWS;
 	if (pCompress) {
 		flags |= CLIENT_COMPRESS;
