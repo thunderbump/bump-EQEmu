@@ -34,6 +34,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <iostream>
 #include <limits>
 #include <memory>
 #include <sstream>
@@ -2148,6 +2149,12 @@ void ZoneHarnessRuntime::Shutdown()
 	std::lock_guard lock(mutex);
 	shutdown_requested = true;
 	ActorEventRecorder::ClearActiveRecorder(&events);
+	if (!actor_event_persistence_sink.FlushFor(std::chrono::seconds(2))) {
+		const auto metrics = actor_event_persistence_sink.GetMetrics();
+		std::cerr << "[ACTOR-EVIDENCE-FAIL] shutdown retained_records=" << metrics.queue_records
+				  << " retained_bytes=" << metrics.queue_bytes
+				  << " persistence_failures=" << metrics.persistence_failures << "\n";
+	}
 	events.SetPersistenceSink(nullptr);
 	StopAutonomousActorPrototypeSessionLocked();
 

@@ -36,6 +36,7 @@
 #include "zone/zonedb.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -165,13 +166,14 @@ private:
 
 class BlockingPersistenceSink final : public EQ::ZoneHarness::ActorEventPersistenceSink {
 public:
-	void PersistSpeechEmitted(Mob*, const EQ::ZoneHarness::ActorEvent&) override {
+	EQ::ZoneHarness::ActorEventCaptureResult PersistSpeechEmitted(Mob*, const EQ::ZoneHarness::ActorEvent&) override {
 		std::unique_lock lock(mutex_);
 		persist_started_ = true;
 		persist_started_cv_.notify_all();
 		release_persist_cv_.wait(lock, [this]() { return allow_persist_to_finish_; });
 		persist_finished_ = true;
 		persist_finished_cv_.notify_all();
+		return EQ::ZoneHarness::ActorEventCaptureResult::Accepted;
 	}
 
 	bool WaitUntilPersistStarted(std::chrono::milliseconds timeout) {
@@ -272,6 +274,108 @@ void ExpectRecorderShutdownWaitsForInFlightCallbacks() {
 				"blocked speech callback should still record one actor event before teardown completes");
 }
 
+void ExpectBoundedPersistenceOverloadAndRecovery() {
+	using namespace std::chrono_literals;
+	using EQ::ZoneHarness::ActorEventCaptureResult;
+	using PersistenceSink = EQ::ZoneHarness::ActorEventRepositoryPersistenceSink;
+
+	const auto pending = [](uint32_t sequence) {
+		return PersistenceSink::PendingSpeechEvent{
+			.bot_id = sequence,
+			.entity_id = sequence,
+			.zone_id = 2,
+			.instance_id = 0,
+			.channel = "say",
+			.text = fmt::format("bounded-event-{}", sequence),
+			.audible_radius = 200,
+		};
+	};
+
+	std::mutex slow_mutex;
+	std::condition_variable slow_started_cv;
+	std::condition_variable slow_release_cv;
+	bool slow_started = false;
+	bool slow_released = false;
+	std::vector<uint32_t> persisted_order;
+	PersistenceSink burst_sink(3, 512, [&](const PersistenceSink::PendingSpeechEvent& event) {
+		std::unique_lock lock(slow_mutex);
+		if (!slow_started) {
+			slow_started = true;
+			slow_started_cv.notify_all();
+			if (!slow_release_cv.wait_for(lock, 1s, [&]() { return slow_released; })) {
+				return false;
+			}
+		}
+		persisted_order.push_back(event.bot_id);
+		return true;
+	});
+
+	const auto capture_started = std::chrono::steady_clock::now();
+	ExpectEqual(burst_sink.Enqueue(pending(1)), ActorEventCaptureResult::Accepted,
+				"normal evidence capture should enter the bounded queue");
+	const auto capture_elapsed = std::chrono::steady_clock::now() - capture_started;
+	{
+		std::unique_lock lock(slow_mutex);
+		Expect(slow_started_cv.wait_for(lock, 1s, [&]() { return slow_started; }),
+			   "slow persistence probe should begin flushing");
+	}
+	ExpectEqual(burst_sink.Enqueue(pending(2)), ActorEventCaptureResult::Accepted,
+				"burst evidence should use remaining bounded capacity");
+	ExpectEqual(burst_sink.Enqueue(pending(3)), ActorEventCaptureResult::Accepted,
+				"burst evidence should fill the bounded capacity");
+	ExpectEqual(burst_sink.Enqueue(pending(4)), ActorEventCaptureResult::Saturated,
+				"saturation must visibly defer new consequential evidence instead of evicting required proof");
+	const auto saturated = burst_sink.GetMetrics();
+	ExpectEqual(saturated.queue_records, uint64_t(3), "slow persistence must retain at most the configured records");
+	Expect(saturated.queue_bytes <= 512, "slow persistence must retain at most the configured bytes");
+	ExpectEqual(saturated.saturated_records, uint64_t(1), "overload should be counted explicitly");
+	Expect(capture_elapsed < 100ms, "capture should not wait for slow persistence on the zone-facing path");
+	{
+		std::lock_guard lock(slow_mutex);
+		slow_released = true;
+		slow_release_cv.notify_all();
+	}
+	Expect(burst_sink.FlushFor(1s), "slow persistence should drain after it recovers");
+	const auto burst_complete = burst_sink.GetMetrics();
+	ExpectEqual(persisted_order, std::vector<uint32_t>({1, 2, 3}),
+				"recovery should flush retained required evidence in capture order");
+
+	std::atomic<bool> persistence_available{false};
+	PersistenceSink unavailable_sink(
+		2, 512, [&](const PersistenceSink::PendingSpeechEvent&) { return persistence_available.load(); });
+	ExpectEqual(unavailable_sink.Enqueue(pending(10)), ActorEventCaptureResult::Accepted,
+				"unavailable persistence should retain the first event");
+	ExpectEqual(unavailable_sink.Enqueue(pending(11)), ActorEventCaptureResult::Accepted,
+				"unavailable persistence should retain bounded recovery work");
+	std::this_thread::sleep_for(75ms);
+	ExpectEqual(unavailable_sink.Enqueue(pending(12)), ActorEventCaptureResult::Saturated,
+				"unavailable persistence should reject rather than grow without bound");
+	Expect(!unavailable_sink.FlushFor(75ms), "unavailable persistence must not claim a successful flush");
+	const auto unavailable = unavailable_sink.GetMetrics();
+	Expect(unavailable.persistence_failures > 0, "persistence failures should be counted");
+	ExpectEqual(unavailable.queue_records, uint64_t(2), "failed writes should remain queued for recovery");
+	Expect(unavailable.queue_bytes <= 512, "failed writes should remain within the byte bound");
+	persistence_available.store(true);
+	Expect(unavailable_sink.FlushFor(1s), "retained evidence should flush after persistence recovery");
+	const auto recovered = unavailable_sink.GetMetrics();
+	ExpectEqual(recovered.persisted_records, uint64_t(2), "recovery should retain and persist both accepted events");
+	ExpectEqual(recovered.queue_records, uint64_t(0), "recovery should empty the queue");
+
+	std::cout << "[METRIC] actor-evidence attempted_records="
+			  << burst_complete.attempted_records + recovered.attempted_records
+			  << " attempted_bytes=" << burst_complete.attempted_bytes + recovered.attempted_bytes
+			  << " accepted_records=" << burst_complete.accepted_records + recovered.accepted_records
+			  << " persisted_records=" << burst_complete.persisted_records + recovered.persisted_records
+			  << " queue_high_water_records="
+			  << std::max(burst_complete.queue_high_water_records, recovered.queue_high_water_records)
+			  << " queue_high_water_bytes="
+			  << std::max(burst_complete.queue_high_water_bytes, recovered.queue_high_water_bytes)
+			  << " saturation=" << burst_complete.saturated_records + recovered.saturated_records
+			  << " failures=" << burst_complete.persistence_failures + recovered.persistence_failures
+			  << " capture_ns=" << burst_complete.capture_nanoseconds + recovered.capture_nanoseconds
+			  << " flush_ns=" << burst_complete.flush_nanoseconds + recovered.flush_nanoseconds << "\n";
+}
+
 } // namespace
 
 void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::string& description) {
@@ -285,6 +389,7 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 
 	try {
 		ExpectRecorderShutdownWaitsForInFlightCallbacks();
+		ExpectBoundedPersistenceOverloadAndRecovery();
 
 		const auto run_nonce = BuildRunNonce();
 
@@ -337,6 +442,8 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 
 		const auto speech_marker = fmt::format("runtime-actor-events-{}", run_nonce);
 		fixture.OwnedBot()->Say("%s", speech_marker.c_str());
+		Expect(persistence_sink.FlushFor(std::chrono::seconds(2)),
+			   "runtime actor evidence should flush outside the speech callback");
 
 		const auto observed_events = recorder.Since(0, 8);
 		ExpectEqual(observed_events.size(), static_cast<size_t>(1),
@@ -778,6 +885,9 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 					"runtime actor event persistence should not write marker rows to player_event_logs");
 
 		EQ::ZoneHarness::ActorEventRecorder::ClearActiveRecorder(&recorder);
+		Expect(persistence_sink.FlushFor(std::chrono::seconds(2)),
+			   "runtime actor evidence queue should be empty before fixture cleanup");
+		recorder.SetPersistenceSink(nullptr);
 		fixture.Cleanup();
 		std::string cleanup_failure;
 		const bool cleanup_succeeded = cleanup.Cleanup(&cleanup_failure);
