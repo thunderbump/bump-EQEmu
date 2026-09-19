@@ -26,6 +26,7 @@
 #include "common/repositories/actor_profiles_repository.h"
 #include "common/repositories/actor_status_repository.h"
 #include "common/repositories/player_event_logs_repository.h"
+#include "common/rulesys.h"
 #include "common/strings.h"
 #include "zone/bot.h"
 #include "zone/actor_action_executor.h"
@@ -55,6 +56,28 @@ namespace {
 class TestFailure final : public std::runtime_error {
 public:
 	using std::runtime_error::runtime_error;
+};
+
+class ScopedRuleOverride {
+public:
+	ScopedRuleOverride(const std::string& rule_name, const std::string& rule_value) : rule_name_(rule_name) {
+		if (RuleManager::Instance()->GetRule(rule_name_, original_value_)) {
+			changed_ = RuleManager::Instance()->SetRule(rule_name_, rule_value, nullptr, false, false);
+		}
+	}
+
+	~ScopedRuleOverride() {
+		if (changed_) {
+			RuleManager::Instance()->SetRule(rule_name_, original_value_, nullptr, false, false);
+		}
+	}
+
+	bool Changed() const { return changed_; }
+
+private:
+	std::string rule_name_;
+	std::string original_value_;
+	bool changed_ = false;
 };
 
 [[noreturn]] void Fail(const std::string& message) {
@@ -880,6 +903,74 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 					std::string("completed"), "duplicate application probe should complete");
 		ExpectEqual(duplicate_applications, static_cast<decltype(duplicate_applications)>(1),
 					"retrying a completed action must not apply its gameplay effect twice");
+
+		// Exercise saturation through the production Mob::Say API, not just the
+		// queue primitive. The false result is what keeps an autonomous action
+		// pending until evidence capacity recovers.
+		std::mutex blocked_mutex;
+		std::condition_variable blocked_started_cv;
+		std::condition_variable blocked_release_cv;
+		bool blocked_started = false;
+		bool blocked_released = false;
+		EQ::ZoneHarness::ActorEventRepositoryPersistenceSink blocked_sink(
+			1, 512, [&](const auto&) {
+				std::unique_lock lock(blocked_mutex);
+				if (!blocked_started) {
+					blocked_started = true;
+					blocked_started_cv.notify_all();
+					if (!blocked_release_cv.wait_for(
+							lock, std::chrono::seconds(1), [&]() { return blocked_released; })) {
+						return false;
+					}
+				}
+				return true;
+			});
+		recorder.SetPersistenceSink(&blocked_sink);
+		const auto overload_cursor = recorder.MaxEventID();
+		const auto retained_marker = fmt::format("retained-speech-{}", run_nonce);
+		const auto deferred_marker = fmt::format("deferred-speech-{}", run_nonce);
+		Expect(fixture.OwnedBot()->Say("%s", retained_marker.c_str()),
+			   "first production speech should reserve the bounded evidence slot");
+		{
+			std::unique_lock lock(blocked_mutex);
+			Expect(blocked_started_cv.wait_for(lock, std::chrono::seconds(1), [&]() { return blocked_started; }),
+				   "production speech evidence should begin the blocked flush");
+		}
+		Expect(!fixture.OwnedBot()->Say("%s", deferred_marker.c_str()),
+			   "production speech should visibly defer when required evidence is saturated");
+		ExpectEqual(recorder.Since(overload_cursor, 8).size(), static_cast<size_t>(1),
+					"deferred speech must not be reported as emitted");
+		{
+			std::lock_guard lock(blocked_mutex);
+			blocked_released = true;
+			blocked_release_cv.notify_all();
+		}
+		Expect(blocked_sink.FlushFor(std::chrono::seconds(1)),
+			   "retained production speech evidence should flush after recovery");
+		Expect(fixture.OwnedBot()->Say("%s", deferred_marker.c_str()),
+			   "the deferred production speech should be accepted on retry");
+		Expect(blocked_sink.FlushFor(std::chrono::seconds(1)),
+			   "retried production speech evidence should flush");
+		ExpectEqual(recorder.Since(overload_cursor, 8).size(), static_cast<size_t>(2),
+					"recovery should record the deferred speech exactly once");
+		recorder.SetPersistenceSink(&persistence_sink);
+
+		// The dialogue-window rendering branch must pass through the same
+		// evidence gate and persist the same speech payload.
+		const auto dialogue_marker = fmt::format("dialogue-speech-{}", run_nonce);
+		{
+			ScopedRuleOverride dialogue_rule("Chat:QuestDialogueUsesDialogueWindow", "true");
+			Expect(dialogue_rule.Changed(), "dialogue-window rule override should apply");
+			Expect(fixture.OwnedBot()->Say("%s", dialogue_marker.c_str()),
+				   "dialogue-window speech should reserve required evidence before rendering");
+		}
+		Expect(persistence_sink.FlushFor(std::chrono::seconds(2)),
+			   "dialogue-window speech evidence should flush");
+		const auto dialogue_events = ActorEventsRepository::ReadCursor(
+			database, inserted_profile.actor_id, persisted_events[0].event_id, 32);
+		Expect(std::any_of(dialogue_events.begin(), dialogue_events.end(), [&](const auto& event) {
+			return ParseJson(event.event_json)["text"].asString() == dialogue_marker;
+		}), "dialogue-window speech should persist through the production evidence path");
 
 		ExpectEqual(CountPlayerEventLogRowsWithMarker(speech_marker), int64_t(0),
 					"runtime actor event persistence should not write marker rows to player_event_logs");

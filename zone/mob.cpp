@@ -5032,7 +5032,7 @@ uint32 Mob::IsEliteMaterialItem(uint8 material_slot) const
 }
 
 // works just like a printf
-void Mob::Say(const char *format, ...)
+bool Mob::Say(const char *format, ...)
 {
 	char    buf[1000];
 	va_list ap;
@@ -5058,6 +5058,12 @@ void Mob::Say(const char *format, ...)
 	int16 distance = 200;
 
 	if (RuleB(Chat, QuestDialogueUsesDialogueWindow)) {
+		const auto evidence = EQ::ZoneHarness::ActorEventRecorder::ObserveSpeechEmitted(talker, "say", buf, distance);
+		if (evidence == EQ::ZoneHarness::ActorEventCaptureResult::Saturated ||
+			evidence == EQ::ZoneHarness::ActorEventCaptureResult::Stopped) {
+			return false;
+		}
+
 		for (auto &e : talker->GetCloseMobList(distance)) {
 			Mob *mob = e.second;
 			if (!mob) {
@@ -5072,18 +5078,18 @@ void Mob::Say(const char *format, ...)
 			if (client->GetTarget() && client->GetTarget()->IsMob() && client->GetTarget()->CastToMob() == talker) {
 				std::string window_markdown = buf;
 				DialogueWindow::Render(client, window_markdown);
-				}
 			}
-
-			return;
 		}
+
+		return true;
+	}
 	else if (RuleB(Chat, AutoInjectSaylinksToSay)) {
 		std::string new_message = EQ::SayLinkEngine::InjectSaylinksIfNotExist(buf);
 		const auto evidence =
 			EQ::ZoneHarness::ActorEventRecorder::ObserveSpeechEmitted(talker, "say", new_message, distance);
 		if (evidence == EQ::ZoneHarness::ActorEventCaptureResult::Saturated ||
 			evidence == EQ::ZoneHarness::ActorEventCaptureResult::Stopped) {
-			return;
+			return false;
 		}
 		entity_list.MessageCloseString(
 			talker, false, distance, Chat::NPCQuestSay,
@@ -5094,13 +5100,15 @@ void Mob::Say(const char *format, ...)
 		const auto evidence = EQ::ZoneHarness::ActorEventRecorder::ObserveSpeechEmitted(talker, "say", buf, distance);
 		if (evidence == EQ::ZoneHarness::ActorEventCaptureResult::Saturated ||
 			evidence == EQ::ZoneHarness::ActorEventCaptureResult::Stopped) {
-			return;
+			return false;
 		}
 		entity_list.MessageCloseString(
 			talker, false, distance, Chat::NPCQuestSay,
 			GENERIC_SAY, GetCleanName(), buf
 		);
 	}
+
+	return true;
 }
 
 //

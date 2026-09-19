@@ -347,9 +347,9 @@ bool ExecuteAutonomousActorAction(Bot *actor, Mob *target, const std::string &ki
 	}
 
 	if (kind == "say") {
-		actor->Say("%s", detail.c_str());
-		reason = "say_emitted";
-		return true;
+		const bool emitted = actor->Say("%s", detail.c_str());
+		reason = emitted ? "say_emitted" : "say_deferred_evidence_capacity";
+		return emitted;
 	}
 
 	reason = "unsupported_action_kind";
@@ -1923,7 +1923,8 @@ AutonomousActorLoopScenarioResult ZoneHarnessRuntime::RunAutonomousActorLoop(uin
 		}
 
 		for (auto &action: result.actions) {
-			if (!action.accepted && action.reason.empty()) {
+			if (!action.accepted &&
+				(action.reason.empty() || action.reason == "say_deferred_evidence_capacity")) {
 				action.accepted = ExecuteAutonomousActorAction(
 					fixture.actor,
 					fixture.primary_target,
@@ -2237,9 +2238,12 @@ void ZoneHarnessRuntime::ProcessAutonomousActorPrototypeActionLocked()
 	);
 	if (accepted) {
 		prototype.last_event_cursor = events.MaxEventID();
+		prototype.pending_actions.erase(prototype.pending_actions.begin());
 	}
-
-	prototype.pending_actions.erase(prototype.pending_actions.begin());
+	else if (reason != "say_deferred_evidence_capacity") {
+		// Permanent/invalid actions do not block the bounded prototype queue.
+		prototype.pending_actions.erase(prototype.pending_actions.begin());
+	}
 }
 
 RuntimeSnapshot ZoneHarnessRuntime::RuntimeLocked() const
