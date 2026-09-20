@@ -107,16 +107,16 @@ size_t ActorEventRepositoryPersistenceSink::EventBytes(const PendingSpeechEvent&
 }
 
 bool ActorEventRepositoryPersistenceSink::PersistToRepository(const PendingSpeechEvent& event) {
-	// Keep "no actor profile" distinct from a failed lookup. Treating a failed
-	// lookup as absence would silently acknowledge required evidence while the
-	// store is unavailable.
+	// Admission already accepted this evidence. A missing or disabled profile
+	// must retain the record for retry, never acknowledge a write that did not
+	// happen. The bounded queue supplies backpressure until persistence recovers.
 	auto profile_result = database.QueryDatabase(fmt::format(
 		"SELECT actor_id, owner_character_id, enabled FROM actor_profiles WHERE bot_id = {} LIMIT 1", event.bot_id));
 	if (!profile_result.Success()) {
 		return false;
 	}
 	if (profile_result.RowCount() == 0) {
-		return true;
+		return false;
 	}
 	auto row = profile_result.begin();
 	if (!row[0] || !row[2]) {
@@ -125,7 +125,7 @@ bool ActorEventRepositoryPersistenceSink::PersistToRepository(const PendingSpeec
 	const auto actor_id = static_cast<uint32_t>(strtoul(row[0], nullptr, 10));
 	const bool enabled = strtoul(row[2], nullptr, 10) != 0;
 	if (!actor_id || !enabled) {
-		return true;
+		return false;
 	}
 	const auto owner_character_id = row[1]
 		? std::optional<uint32_t>(static_cast<uint32_t>(strtoul(row[1], nullptr, 10)))

@@ -483,6 +483,77 @@ void ExpectBoundedPersistenceOverloadAndRecovery() {
 			  << " flush_ns=" << burst_complete.flush_nanoseconds + recovered.flush_nanoseconds << "\n";
 }
 
+
+// Hold the worker before its real repository lookup, then change the profile.
+// The retry cases inject one unavailable-store result before that lookup.
+void ExpectProfileChangesRetainAcceptedEvidence(
+	const ActorProfilesRepository::ActorProfileRecord& profile
+) {
+	using namespace std::chrono_literals;
+	using Sink = EQ::ZoneHarness::ActorEventRepositoryPersistenceSink;
+	using EQ::ZoneHarness::ActorEventCaptureResult;
+
+	for (const bool retry : {false, true}) {
+		for (const bool deleted : {false, true}) {
+			std::promise<void> reached;
+			auto reached_future = reached.get_future();
+			std::promise<void> release;
+			auto release_future = release.get_future().share();
+			std::atomic<unsigned> attempts{0};
+			Sink sink(1, 1024, [&](const auto& event) {
+				const auto attempt = attempts.fetch_add(1);
+				if (retry && attempt == 0) {
+					return false;
+				}
+				if (attempt == (retry ? 1u : 0u)) {
+					reached.set_value();
+					if (release_future.wait_for(2s) != std::future_status::ready) {
+						return false;
+					}
+				}
+				return Sink::PersistToRepository(event);
+			});
+			const auto marker = fmt::format("profile-retention-{}-{}-{}", profile.actor_id, retry, deleted);
+			Sink::PendingSpeechEvent event{
+				.bot_id = *profile.bot_id,
+				.channel = "say",
+				.text = marker,
+			};
+			Expect(sink.Enqueue(event) == ActorEventCaptureResult::Accepted,
+				   "profile lifecycle probe must admit evidence before changing the profile");
+			Expect(reached_future.wait_for(2s) == std::future_status::ready,
+				   "worker must reach the controlled first lookup or retry");
+			const auto changed = database.QueryDatabase(deleted
+				? fmt::format("DELETE FROM actor_profiles WHERE actor_id = {}", profile.actor_id)
+				: fmt::format("UPDATE actor_profiles SET enabled = 0 WHERE actor_id = {}", profile.actor_id));
+			Expect(changed.Success(), "profile lifecycle mutation must succeed");
+			release.set_value();
+			Expect(!sink.FlushFor(100ms), "missing/disabled profile must not acknowledge accepted evidence");
+			const auto retained = sink.GetMetrics();
+			ExpectEqual(retained.queue_records, uint64_t(1), "accepted payload must remain queued");
+			ExpectEqual(retained.persisted_records, uint64_t(0), "unwritten payload must not count as persisted");
+			Expect(retained.persistence_failures > (retry ? 1u : 0u),
+				   "real repository lookup must record a failure after the profile change");
+			Expect(sink.Enqueue(event) == ActorEventCaptureResult::Saturated,
+				   "retained evidence must keep the bounded queue full rather than being evicted");
+			Expect(sink.GetMetrics().queue_bytes <= 1024, "profile failure must preserve the byte bound");
+
+			const auto restored = ActorProfilesRepository::UpsertBotBackedProfile(database, profile);
+			ExpectEqual(restored.actor_id, profile.actor_id, "recovery must restore the same actor identity");
+			Expect(sink.FlushFor(2s), "retained evidence must persist when its profile recovers");
+			const auto rows = ActorEventsRepository::ReadCursor(database, profile.actor_id, 0, 32);
+			const auto matches = std::count_if(rows.begin(), rows.end(), [&](const auto& row) {
+				return ParseJson(row.event_json)["text"].asString() == marker;
+			});
+			ExpectEqual(matches, decltype(matches)(1), "recovery must store the original payload exactly once");
+			ExpectEqual(sink.GetMetrics().persisted_records, uint64_t(1), "only the recovered write counts");
+			ExpectEqual(sink.GetMetrics().queue_records, uint64_t(0), "recovery must release queue capacity");
+			Expect(database.QueryDatabase(fmt::format("DELETE FROM actor_events WHERE actor_id = {}", profile.actor_id)).Success(),
+				   "lifecycle probe must remove its persisted rows before the next case");
+		}
+	}
+}
+
 } // namespace
 
 void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::string& description) {
@@ -547,6 +618,7 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 		const auto inserted_profile = ActorProfilesRepository::UpsertBotBackedProfile(database, profile);
 		Expect(inserted_profile.actor_id > 0, "actor profile insert should allocate an actor_id");
 		cleanup.TrackActorId(inserted_profile.actor_id);
+		ExpectProfileChangesRetainAcceptedEvidence(inserted_profile);
 
 		const auto speech_marker = fmt::format("runtime-actor-events-{}", run_nonce);
 		fixture.OwnedBot()->Say("%s", speech_marker.c_str());

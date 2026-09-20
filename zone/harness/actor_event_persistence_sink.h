@@ -80,9 +80,11 @@ public:
 	bool FlushFor(std::chrono::milliseconds timeout);
 	Metrics GetMetrics() const;
 
+	// Default adapter; injected operations can wrap it to control worker timing.
+	static bool PersistToRepository(const PendingSpeechEvent& event);
+
 private:
 	static size_t EventBytes(const PendingSpeechEvent& event);
-	bool PersistToRepository(const PendingSpeechEvent& event);
 	void Run();
 	void Stop();
 
