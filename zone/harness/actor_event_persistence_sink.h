@@ -23,6 +23,7 @@
 #include <thread>
 
 class Mob;
+class Database;
 
 namespace EQ::ZoneHarness {
 
@@ -79,6 +80,10 @@ public:
 	ActorEventCaptureResult Enqueue(PendingSpeechEvent event);
 	bool FlushFor(std::chrono::milliseconds timeout);
 	Metrics GetMetrics() const;
+
+	// Per-thread connection used only by persistence, including injected adapter wrappers.
+	// Returns null on connection failure; socket/connect timeouts apply to this connection.
+	static Database* RepositoryConnection();
 
 	// Default adapter; injected operations can wrap it to control worker timing.
 	static bool PersistToRepository(const PendingSpeechEvent& event);

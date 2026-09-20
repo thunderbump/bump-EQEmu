@@ -13,11 +13,13 @@
 #include "common/repositories/actor_events_repository.h"
 #include "zone/bot.h"
 #include "zone/zone.h"
-#include "zone/zonedb.h"
+#include "common/database.h"
+#include "common/eqemu_config.h"
 
 #include <algorithm>
 #include <cstdlib>
 #include <optional>
+#include <memory>
 
 extern Zone* zone;
 
@@ -106,11 +108,28 @@ size_t ActorEventRepositoryPersistenceSink::EventBytes(const PendingSpeechEvent&
 	return sizeof(PendingSpeechEvent) + event.channel.size() + event.text.size();
 }
 
+Database* ActorEventRepositoryPersistenceSink::RepositoryConnection() {
+	thread_local Database connection;
+	if (connection.GetStatus() != DBcore::Connected) {
+		const auto* config = EQEmuConfig::get();
+		connection.SetConnectionTimeouts(1, 1, 1);
+		if (!config || !connection.Connect(config->DatabaseHost, config->DatabaseUsername,
+				config->DatabasePassword, config->DatabaseDB, config->DatabasePort, "actor-events")) {
+			return nullptr;
+		}
+	}
+	return &connection;
+}
+
 bool ActorEventRepositoryPersistenceSink::PersistToRepository(const PendingSpeechEvent& event) {
+	auto* connection = RepositoryConnection();
+	if (!connection) {
+		return false;
+	}
 	// Admission already accepted this evidence. A missing or disabled profile
 	// must retain the record for retry, never acknowledge a write that did not
 	// happen. The bounded queue supplies backpressure until persistence recovers.
-	auto profile_result = database.QueryDatabase(fmt::format(
+	auto profile_result = connection->QueryDatabase(fmt::format(
 		"SELECT actor_id, owner_character_id, enabled FROM actor_profiles WHERE bot_id = {} LIMIT 1", event.bot_id));
 	if (!profile_result.Success()) {
 		return false;
@@ -132,7 +151,7 @@ bool ActorEventRepositoryPersistenceSink::PersistToRepository(const PendingSpeec
 		: std::nullopt;
 
 	return ActorEventsRepository::AppendObservedSpeechEmitted(
-			   database,
+			   *connection,
 			   {
 				   .actor_id = actor_id,
 				   .bot_id = event.bot_id,

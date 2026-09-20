@@ -583,6 +583,61 @@ void ExpectFallbackRepliesRetryInOrder(
 	FallbackDialogue::ResetDialogueCooldowns();
 }
 
+// Exercise the same connection factory used by the real persistence adapter.
+void ExpectPersistenceConnectionIsolated(
+	const ActorProfilesRepository::ActorProfileRecord& profile
+) {
+	using namespace std::chrono_literals;
+	using Sink = EQ::ZoneHarness::ActorEventRepositoryPersistenceSink;
+	const auto zone_id_result = database.QueryDatabase("SELECT CONNECTION_ID()");
+	Expect(zone_id_result.Success() && zone_id_result.RowCount() == 1, "zone connection must be available");
+	const auto zone_connection_id = std::stoull(zone_id_result.begin()[0]);
+	std::promise<uint64_t> connection_id;
+	auto connection_future = connection_id.get_future();
+	std::atomic<bool> first{true};
+	std::atomic<bool> slow_query_failed{false};
+	Sink sink(1, 1024, [&](const auto& event) {
+		if (first.exchange(false)) {
+			auto* connection = Sink::RepositoryConnection();
+			if (!connection) {
+				connection_id.set_value(0);
+				return false;
+			}
+			const auto id = connection->QueryDatabase("SELECT CONNECTION_ID()");
+			connection_id.set_value(id.Success() && id.RowCount() == 1 ? std::stoull(id.begin()[0]) : 0);
+			// A five-second server wait must hit the dedicated client's read deadline.
+			slow_query_failed = !connection->QueryDatabase(std::string("SELECT SLEEP(5)"), false).Success();
+		}
+		return Sink::PersistToRepository(event);
+	});
+	const auto marker = fmt::format("isolated-persistence-{}", profile.actor_id);
+	Expect(sink.Enqueue({.bot_id = *profile.bot_id, .channel = "say", .text = marker}) ==
+		EQ::ZoneHarness::ActorEventCaptureResult::Accepted, "isolation probe must enqueue");
+	Expect(connection_future.wait_for(2s) == std::future_status::ready, "worker must connect promptly");
+	const auto worker_id = connection_future.get();
+	Expect(worker_id != 0 && worker_id != zone_connection_id, "persistence must own a separate server connection");
+	bool observed_sleep = false;
+	const auto observation_deadline = std::chrono::steady_clock::now() + 2s;
+	while (!observed_sleep && std::chrono::steady_clock::now() < observation_deadline) {
+		const auto active = database.QueryDatabase(fmt::format(
+			"SELECT COUNT(*) FROM information_schema.PROCESSLIST WHERE ID = {} AND INFO LIKE 'SELECT SLEEP%'", worker_id));
+		Expect(active.Success() && active.RowCount() == 1, "zone must inspect worker activity independently");
+		observed_sleep = std::stoull(active.begin()[0]) == 1;
+		if (!observed_sleep) { std::this_thread::sleep_for(5ms); }
+	}
+	Expect(observed_sleep, "probe must observe a slow production persistence connection");
+	const auto started = std::chrono::steady_clock::now();
+	Expect(database.QueryDatabase("SELECT 1").Success(), "zone query must succeed during persistence I/O");
+	Expect(std::chrono::steady_clock::now() - started < 500ms, "slow persistence must not hold the zone query mutex");
+	Expect(sink.FlushFor(4s), "persistence must reconnect and recover after its read deadline");
+	Expect(slow_query_failed, "slow query must time out rather than waiting its full server duration");
+	const auto rows = ActorEventsRepository::ReadCursor(database, profile.actor_id, 0, 32);
+	ExpectEqual(rows.size(), size_t(1), "isolated worker must persist exactly one event");
+	ExpectEqual(ParseJson(rows[0].event_json)["text"].asString(), marker, "isolated persistence must preserve payload");
+	Expect(database.QueryDatabase(fmt::format("DELETE FROM actor_events WHERE actor_id = {}", profile.actor_id)).Success(),
+		   "isolation probe must clean its row");
+}
+
 // Hold the worker before its real repository lookup, then change the profile.
 // The retry cases inject one unavailable-store result before that lookup.
 void ExpectProfileChangesRetainAcceptedEvidence(
@@ -718,6 +773,7 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 		const auto inserted_profile = ActorProfilesRepository::UpsertBotBackedProfile(database, profile);
 		Expect(inserted_profile.actor_id > 0, "actor profile insert should allocate an actor_id");
 		cleanup.TrackActorId(inserted_profile.actor_id);
+		ExpectPersistenceConnectionIsolated(inserted_profile);
 		ExpectProfileChangesRetainAcceptedEvidence(inserted_profile);
 
 		const auto speech_marker = fmt::format("runtime-actor-events-{}", run_nonce);
