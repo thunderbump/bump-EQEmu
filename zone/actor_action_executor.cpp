@@ -423,7 +423,7 @@ void ActorActionExecutor::ProcessOne() {
 		if (std::find(hunt_party_bots.begin(), hunt_party_bots.end(), bot) == hunt_party_bots.end()) {
 			hunt_party_bots.push_front(bot);
 		}
-		if (std::any_of(hunt_party_bots.begin(), hunt_party_bots.end(), [](const Bot* party_bot) {
+		if (std::any_of(hunt_party_bots.begin(), hunt_party_bots.end(), [](Bot* party_bot) {
 				return !party_bot || party_bot->HasDied() || party_bot->GetHP() <= 0 || party_bot->IsEngaged();
 			})) {
 			reject("actor_not_ready");
