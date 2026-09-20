@@ -1174,11 +1174,14 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 	} restore_combat{fixture.OwnedBot(), fixture.OwnedBot()->GetStopMeleeLevel(), frame_time};
 	fixture.OwnedBot()->SetStopMeleeLevel(255);
 	const auto target_id = kill_target->GetID();
-	const auto succeeded = enqueue("success", valid_body, std::time(nullptr) + 15);
-	executor.ProcessOne();
+	time_t success_clock = now;
+	const auto succeeded = enqueue("success", valid_body, success_clock + 15);
+	ActorActionExecutor success_executor(
+		database, zone->GetZoneID(), zone->GetInstanceID(), zone->GetZoneServerId(), [&]() { return success_clock; });
+	success_executor.ProcessOne();
 	auto previous_tick = std::chrono::steady_clock::now();
-	for (uint32_t tick = 0; tick < 300 &&
-		ActorActionQueueRepository::FindOne(database, succeeded.action_id).state == "claimed"; ++tick) {
+	const auto combat_deadline = previous_tick + std::chrono::seconds(15);
+	while (std::chrono::steady_clock::now() < combat_deadline && entity_list.GetCorpseByID(target_id) == nullptr) {
 		const auto current_tick = std::chrono::steady_clock::now();
 		frame_time = std::chrono::duration<double>(current_tick - previous_tick).count();
 		previous_tick = current_tick;
@@ -1186,9 +1189,16 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 		entity_list.Process();
 		entity_list.MobProcess();
 		Expect(zone->Process(), "hunt combat tick must keep its zone alive");
-		executor.ProcessOne();
 		std::this_thread::sleep_for(std::chrono::milliseconds(20));
 	}
+	Expect(entity_list.GetCorpseByID(target_id) != nullptr,
+		"ordinary Bot combat must kill the selected target within the bounded harness window");
+	ExpectEqual(ActorActionQueueRepository::FindOne(database, succeeded.action_id).state, std::string("claimed"),
+		"authoritative death should remain retained until the executor processes it");
+	// Process after the durable deadline to prove that the observed in-deadline
+	// death time, rather than delayed executor time, governs terminalization.
+	success_clock += 16;
+	success_executor.ProcessOne();
 	const auto terminal = ActorActionQueueRepository::FindOne(database, succeeded.action_id);
 	ExpectEqual(terminal.state, std::string("completed"),
 		"ordinary Bot combat should authoritatively complete the bounded hunt: state=" + terminal.state +

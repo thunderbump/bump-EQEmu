@@ -105,7 +105,7 @@ struct ActorActionExecutor::HuntEngagement {
 	uint32_t target_npc_type_id = 0;
 	std::vector<uint16_t> party_bot_entity_ids;
 	bool target_attack_flag_added = false;
-	bool death_observed = false;
+	std::optional<time_t> death_observed_at;
 	uint16_t killer_entity_id = 0;
 };
 
@@ -171,11 +171,18 @@ void ActorActionExecutor::ObserveNpcDeath(uint16_t entity_id, uint32_t npc_type_
 		return;
 	}
 	for (auto* executor : active_executors) {
-		if (executor && executor->hunt_engagement_ && executor->hunt_engagement_->target_entity_id == entity_id &&
-			executor->hunt_engagement_->target_npc_type_id == npc_type_id &&
-			(!executor->hunt_engagement_->action.expires_at.has_value() ||
-			 *executor->hunt_engagement_->action.expires_at > std::time(nullptr))) {
-			executor->hunt_engagement_->death_observed = true;
+		if (!executor || !executor->hunt_engagement_ || executor->hunt_engagement_->target_entity_id != entity_id ||
+			executor->hunt_engagement_->target_npc_type_id != npc_type_id) {
+			continue;
+		}
+		const auto observed_at = executor->clock_();
+		if (executor->hunt_engagement_->action.expires_at.has_value() &&
+			*executor->hunt_engagement_->action.expires_at <= observed_at) {
+			continue;
+		}
+		if (!executor->hunt_engagement_->death_observed_at.has_value() ||
+			observed_at < *executor->hunt_engagement_->death_observed_at) {
+			executor->hunt_engagement_->death_observed_at = observed_at;
 			executor->hunt_engagement_->killer_entity_id = killer_entity_id;
 		}
 	}
@@ -201,8 +208,9 @@ void ActorActionExecutor::ProcessHuntEngagement(time_t now) {
 		return;
 	}
 
+	const bool death_observed = engagement.death_observed_at.has_value();
 	std::string failure_reason;
-	if (!engagement.death_observed && engagement.action.expires_at.has_value() &&
+	if (!death_observed && engagement.action.expires_at.has_value() &&
 		*engagement.action.expires_at <= now) {
 		const auto expired = ActorActionQueueRepository::ExpireDue(database_, now, engagement.action.actor_id) > 0;
 		// Stop gameplay at the deadline even when persistence is temporarily
@@ -215,9 +223,9 @@ void ActorActionExecutor::ProcessHuntEngagement(time_t now) {
 	}
 
 	auto* target = entity_list.GetNPCByID(engagement.target_entity_id);
-	if (!engagement.death_observed && (!target || target->GetNPCTypeID() != engagement.target_npc_type_id)) {
+	if (!death_observed && (!target || target->GetNPCTypeID() != engagement.target_npc_type_id)) {
 		failure_reason = "hunt_target_lost";
-	} else if (!engagement.death_observed && target && !target->HasDied() && target->GetHP() > 0) {
+	} else if (!death_observed && target && !target->HasDied() && target->GetHP() > 0) {
 		bool selected_target_combat_active = false;
 		for (const auto bot_id : engagement.party_bot_entity_ids) {
 			auto* member = entity_list.GetMob(bot_id);
@@ -239,7 +247,7 @@ void ActorActionExecutor::ProcessHuntEngagement(time_t now) {
 			return;
 		}
 		failure_reason = "hunt_combat_ended";
-	} else if (!engagement.death_observed) {
+	} else if (!death_observed) {
 		// A zero-HP target is not success until NPC::Death reports its authoritative completion.
 		return;
 	}
@@ -255,12 +263,16 @@ void ActorActionExecutor::ProcessHuntEngagement(time_t now) {
 		result["killer_entity_id"] = engagement.killer_entity_id;
 		Json::StreamWriterBuilder writer;
 		writer["indentation"] = "";
+		// Completion is governed by the authoritative death time, not by a later
+		// executor retry. An in-deadline kill remains success across zone delay or
+		// a transient persistence outage after NPC::Death has reported it.
+		const auto completed_at = *engagement.death_observed_at;
 		const auto completed = ActorActionQueueRepository::MarkCompleted(
-			database_, {engagement.action.action_id, Json::writeString(writer, result), now});
+			database_, {engagement.action.action_id, Json::writeString(writer, result), completed_at});
 		outcome_persisted =
 			completed.has_value() && completed->state == "completed" &&
 			AppendOutcome(database_, engagement.action, &engagement.profile, &engagement.status, "hunt_succeeded",
-						  "selected_target_death", now, nullptr, engagement.target_entity_id,
+						  "selected_target_death", completed_at, nullptr, engagement.target_entity_id,
 						  engagement.target_npc_type_id, engagement.killer_entity_id);
 	} else {
 		const auto failed =
