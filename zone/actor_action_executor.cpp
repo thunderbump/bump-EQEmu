@@ -128,19 +128,31 @@ void ActorActionExecutor::CancelHuntCombat() {
 		return;
 	}
 	const auto target_id = hunt_engagement_->target_entity_id;
+	auto* target = entity_list.GetMob(target_id);
+	auto remove_hunt_aggro = [target, target_id](Mob* attacker) {
+		if (!attacker) {
+			return;
+		}
+		if (target) {
+			attacker->RemoveFromHateList(target);
+			attacker->RemoveFromRampageList(target);
+			target->RemoveFromHateList(attacker);
+			target->RemoveFromRampageList(attacker);
+		}
+		if (attacker->GetTarget() && attacker->GetTarget()->GetID() == target_id) {
+			attacker->SetTarget(nullptr);
+		}
+	};
 	for (const auto bot_id : hunt_engagement_->party_bot_entity_ids) {
 		auto* party_member = entity_list.GetMob(bot_id);
 		auto* party_bot = party_member && party_member->IsBot() ? party_member->CastToBot() : nullptr;
 		if (!party_bot) {
 			continue;
 		}
-		auto* target = entity_list.GetMob(target_id);
-		if (target) {
-			party_bot->RemoveFromHateList(target);
-		}
-		if (party_bot->GetTarget() && party_bot->GetTarget()->GetID() == target_id) {
-			party_bot->SetTarget(nullptr);
-		}
+		remove_hunt_aggro(party_bot);
+		// Bot::SetOwnerTarget can enlist a controllable pet in the same ordinary
+		// combat. Remove only this hunt target so unrelated pet hate is retained.
+		remove_hunt_aggro(party_bot->GetPet());
 		auto* bot_owner = party_bot->GetBotOwner();
 		auto* command_source = party_bot->GetCommandTargetSource(
 			bot_owner && bot_owner->IsClient() ? bot_owner->CastToClient() : nullptr);
@@ -417,14 +429,21 @@ void ActorActionExecutor::ProcessOne() {
 			reject("illegal_hunt_request");
 			return;
 		}
-		if (auto* group = bot->GetGroup()) {
-			group->GetBotList(hunt_party_bots);
+		auto* hunt_group = bot->GetGroup();
+		if (!hunt_group) {
+			reject("actor_not_ready");
+			return;
 		}
-		if (std::find(hunt_party_bots.begin(), hunt_party_bots.end(), bot) == hunt_party_bots.end()) {
-			hunt_party_bots.push_front(bot);
-		}
-		if (std::any_of(hunt_party_bots.begin(), hunt_party_bots.end(), [](Bot* party_bot) {
-				return !party_bot || party_bot->HasDied() || party_bot->GetHP() <= 0 || party_bot->IsEngaged();
+		hunt_group->GetBotList(hunt_party_bots);
+		const auto actor_member = std::find(hunt_party_bots.begin(), hunt_party_bots.end(), bot);
+		const bool owned_materialized_party = actor_member != hunt_party_bots.end() && hunt_party_bots.size() >= 2 &&
+			std::all_of(hunt_party_bots.begin(), hunt_party_bots.end(), [&](Bot* party_bot) {
+				return party_bot && party_bot->GetGroup() == hunt_group &&
+					party_bot->GetBotOwnerCharacterID() == *profile->owner_character_id;
+			});
+		if (!owned_materialized_party ||
+			std::any_of(hunt_party_bots.begin(), hunt_party_bots.end(), [](Bot* party_bot) {
+				return party_bot->HasDied() || party_bot->GetHP() <= 0 || party_bot->IsEngaged();
 			})) {
 			reject("actor_not_ready");
 			return;

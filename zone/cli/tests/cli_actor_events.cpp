@@ -38,6 +38,7 @@
 #include "zone/harness/actor_event_persistence_sink.h"
 #include "zone/harness/actor_event_recorder.h"
 #include "zone/harness/owned_bot_actor_fixture.h"
+#include "zone/groups.h"
 #include "zone/npc.h"
 #include "zone/zone.h"
 #include "zone/zonedb.h"
@@ -958,6 +959,17 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 		std::optional<std::string>("illegal_hunt_request"),
 		"hunt requests without a finite deadline must be visibly rejected");
 
+	auto* removed_follower = fixture.FollowerBots().front();
+	Expect(fixture.ActorGroup()->DelMember(removed_follower),
+		"party-shape fixture must temporarily remove its only follower");
+	const auto followerless = enqueue("followerless", valid_body);
+	executor.ProcessOne();
+	ExpectEqual(ActorActionQueueRepository::FindOne(database, followerless.action_id).failure_reason,
+		std::optional<std::string>("actor_not_ready"),
+		"a grouped Actor without a materialized Bot follower must not hunt solo");
+	Expect(fixture.ActorGroup()->AddMember(removed_follower),
+		"party-shape fixture must restore its follower for subsequent cases");
+
 	auto* busy_target = fixture.AddHostileNPC({
 		.name = "HarnessFollowerBusyTarget", .position = glm::vec4(-2080.0f, 400.0f, -3.0f, 0.0f),
 	});
@@ -1059,22 +1071,51 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 	ActorActionExecutor timeout_executor(database, zone->GetZoneID(), zone->GetInstanceID(), zone->GetZoneServerId(),
 		[&]() { return hunt_clock; });
 	timeout_executor.ProcessOne();
+	// Model the bidirectional hate ordinary combat establishes, including the
+	// controllable-pet path used by Bot::SetOwnerTarget.
+	auto* hunt_pet = fixture.AddHostileNPC({
+		.name = "HarnessHuntBotPet", .position = glm::vec4(-2078.0f, 400.0f, -3.0f, 0.0f),
+	});
+	auto* unrelated_pet_target = fixture.AddHostileNPC({
+		.name = "HarnessUnrelatedPetTarget", .position = glm::vec4(-2076.0f, 400.0f, -3.0f, 0.0f),
+	});
+	Expect(hunt_pet && unrelated_pet_target, "hunt cleanup pet fixtures should materialize");
+	fixture.OwnedBot()->SetPet(hunt_pet);
+	hunt_pet->AddToHateList(timeout_target, 1);
+	hunt_pet->AddToHateList(unrelated_pet_target, 1);
+	timeout_target->AddToHateList(hunt_pet, 1);
+	for (auto* party_bot : fixture.FollowerBots()) {
+		party_bot->AddToHateList(timeout_target, 1);
+		timeout_target->AddToHateList(party_bot, 1);
+	}
+	fixture.OwnedBot()->AddToHateList(timeout_target, 1);
+	timeout_target->AddToHateList(fixture.OwnedBot(), 1);
+
 	hunt_clock += 2;
 	timeout_executor.ProcessOne();
 	ExpectEqual(ActorActionQueueRepository::FindOne(database, timed.action_id).state, std::string("expired"),
 		"a hunt exceeding its deadline must expire without a forced result");
 	Expect(fixture.OwnedBot()->GetTarget() != timeout_target && !fixture.OwnedBot()->GetAttackFlag() &&
-		!fixture.OwnedBot()->CheckAggro(timeout_target),
-		"expiry must cancel the Actor leader's selected-target combat intent");
+		!fixture.OwnedBot()->CheckAggro(timeout_target) &&
+		!timeout_target->CheckAggro(fixture.OwnedBot()),
+		"expiry must cancel both sides of the Actor leader's selected-target combat intent");
 	for (auto* follower : fixture.FollowerBots()) {
 		Expect(follower->GetTarget() != timeout_target && !follower->GetAttackFlag() &&
-			!follower->CheckAggro(timeout_target),
-			"expiry must cancel each follower's selected-target combat intent");
+			!follower->CheckAggro(timeout_target) && !timeout_target->CheckAggro(follower),
+			"expiry must cancel both sides of each follower's selected-target combat intent");
 	}
+	Expect(!hunt_pet->CheckAggro(timeout_target) && !timeout_target->CheckAggro(hunt_pet) &&
+		hunt_pet->GetTarget() != timeout_target,
+		"expiry must cancel a Bot pet's selected-target combat intent in both directions");
+	Expect(hunt_pet->CheckAggro(unrelated_pet_target),
+		"hunt cleanup must retain a pet's unrelated combat state");
 	const auto retained_attack_flags = timeout_target->GetBotAttackFlags();
 	Expect(std::find(retained_attack_flags.begin(), retained_attack_flags.end(), *profile.owner_character_id) ==
 		retained_attack_flags.end(), "expiry must remove the hunt's target authorization");
+	fixture.OwnedBot()->SetPet(nullptr);
 	fixture.RemoveMob(timeout_target);
+	fixture.RemoveMob(hunt_pet);
+	fixture.RemoveMob(unrelated_pet_target);
 	clear_combat();
 
 	auto* kill_target = fixture.AddHostileNPC({
