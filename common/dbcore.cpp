@@ -106,7 +106,7 @@ MySQLRequestResult DBcore::QueryDatabase(const char *query, uint32 querylen, boo
 	if (mysql_real_query(mysql, query, querylen) != 0) {
 		unsigned int errorNumber = mysql_errno(mysql);
 
-		if (errorNumber == CR_SERVER_GONE_ERROR) {
+		if (errorNumber == CR_SERVER_GONE_ERROR || errorNumber == CR_SERVER_LOST) {
 			pStatus = Error;
 		}
 

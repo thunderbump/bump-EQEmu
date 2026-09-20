@@ -855,6 +855,13 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 		EQ::ZoneHarness::ActorEventRepositoryPersistenceSink persistence_sink;
 		recorder.SetPersistenceSink(&persistence_sink);
 		EQ::ZoneHarness::ActorEventRecorder::RegisterActiveRecorder(&recorder);
+		struct ClearRecorderOnExit {
+			EQ::ZoneHarness::ActorEventRecorder& recorder;
+			~ClearRecorderOnExit() {
+				EQ::ZoneHarness::ActorEventRecorder::ClearActiveRecorder(&recorder);
+				recorder.SetPersistenceSink(nullptr);
+			}
+		} clear_recorder{recorder};
 
 		ActorEventPersistenceCleanup cleanup;
 		const auto reserved_owner = EQ::Actor::ReservedOwners::Provision(database, "ActorownerRuntime" + std::to_string(run_nonce));
