@@ -3,9 +3,13 @@
 #include <cstdint>
 #include <ctime>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 
+class Bot;
+class Mob;
+class NPC;
 class ZoneDatabase;
 
 class ActorActionExecutor {
@@ -16,9 +20,13 @@ public:
 	ActorActionExecutor(
 		ZoneDatabase& database, uint32_t zone_id, uint32_t instance_id, uint32_t zone_server_id,
 		Clock clock = []() { return std::time(nullptr); }, GameplayEventWatermarkReader watermark_reader = {});
+	~ActorActionExecutor();
 	void ProcessOne();
+	static void ObserveNpcDeath(NPC* npc, Mob* killer);
 
 private:
+	struct HuntEngagement;
+	void ProcessHuntEngagement(time_t now);
 	ZoneDatabase& database_;
 	uint32_t zone_id_;
 	uint32_t instance_id_;
@@ -26,4 +34,5 @@ private:
 	Clock clock_;
 	GameplayEventWatermarkReader watermark_reader_;
 	uint32_t candidate_offset_ = 0;
+	std::unique_ptr<HuntEngagement> hunt_engagement_;
 };

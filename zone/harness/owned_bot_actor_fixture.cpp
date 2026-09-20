@@ -340,7 +340,7 @@ Bot *OwnedBotActorFixture::AddOwnedGroupBot(const OwnedBotActorConfig &config, c
 
 NPC *OwnedBotActorFixture::AddHostileNPC(const HostileNpcConfig &config)
 {
-	auto *npc_type = content_db.LoadNPCTypesData(754008);
+	auto *npc_type = content_db.LoadNPCTypesData(config.npc_type_id);
 	if (!npc_type) {
 		failure_reason = "npc_type_unavailable";
 		return nullptr;
@@ -351,6 +351,32 @@ NPC *OwnedBotActorFixture::AddHostileNPC(const HostileNpcConfig &config)
 	entity_list.AddNPC(hostile, false, true);
 	RememberMob(hostile);
 	return hostile;
+}
+
+Client *OwnedBotActorFixture::AddSyntheticPlayer(
+	const std::string &name, uint32_t character_id, uint8_t level, const glm::vec4 &position)
+{
+	auto *player = CreateSyntheticOwnerClient(name, character_id, level);
+	if (player) {
+		player->GMMove(position.x, position.y, position.z, position.w);
+	}
+	return player;
+}
+
+void OwnedBotActorFixture::MoveParty(const glm::vec4 &position)
+{
+	if (owner) {
+		owner->GMMove(position.x, position.y, position.z, position.w);
+	}
+	if (bot) {
+		bot->GMMove(position.x + 2.0f, position.y, position.z, position.w);
+	}
+	for (size_t index = 0; index < followers.size(); ++index) {
+		if (followers[index]) {
+			followers[index]->GMMove(
+				position.x + 4.0f + static_cast<float>(index * 2), position.y + 2.0f, position.z, position.w);
+		}
+	}
 }
 
 void OwnedBotActorFixture::PrimeOwnedBotEngagement(bool set_actor_target)

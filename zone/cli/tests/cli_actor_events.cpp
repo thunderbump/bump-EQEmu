@@ -37,6 +37,7 @@
 #include "zone/harness/actor_event_persistence_sink.h"
 #include "zone/harness/actor_event_recorder.h"
 #include "zone/harness/owned_bot_actor_fixture.h"
+#include "zone/npc.h"
 #include "zone/zone.h"
 #include "zone/zonedb.h"
 
@@ -884,6 +885,152 @@ void ExpectProfileChangesRetainAcceptedEvidence(
 	}
 }
 
+void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
+	const ActorProfilesRepository::ActorProfileRecord& profile, uint32_t run_nonce) {
+	fixture.MoveParty(glm::vec4(-2100.0f, 400.0f, -3.0f, 0.0f));
+	// Isolate scenario-owned candidates without changing production selection.
+	// Restore the zone population even when an assertion throws.
+	struct ScopedNaturalCandidateMask {
+		std::vector<uint16_t> candidate_ids;
+		~ScopedNaturalCandidateMask() {
+			for (auto candidate_id : candidate_ids) {
+				if (auto* candidate = entity_list.GetNPCByID(candidate_id)) candidate->SetTargetable(true);
+			}
+		}
+	} natural_candidate_mask;
+	for (const auto& [id, candidate] : entity_list.GetNPCList()) {
+		if (candidate && (candidate->GetNPCTypeID() == 33005 || candidate->GetNPCTypeID() == 33160 ||
+			candidate->GetNPCTypeID() == 33024)) {
+			candidate->SetTargetable(false);
+			natural_candidate_mask.candidate_ids.push_back(id);
+		}
+	}
+	const auto now = std::time(nullptr);
+	ActorStatusRepository::UpsertOne(database, {
+		.actor_id = profile.actor_id, .zone_id = zone->GetZoneID(), .instance_id = zone->GetInstanceID(),
+		.entity_id = fixture.OwnedBot()->GetID(), .state = "active", .heartbeat_at = now,
+	});
+
+	Json::StreamWriterBuilder writer;
+	writer["indentation"] = "";
+	Json::Value valid_body;
+	valid_body["area"] = "misty-local-v1";
+	const auto enqueue = [&](const std::string& suffix, const Json::Value& body,
+		std::optional<time_t> expires_at = std::nullopt) {
+		return ActorActionQueueRepository::Enqueue(database, {
+			.actor_id = profile.actor_id, .source = "actor-hunt-runtime-test",
+			.action_type = "hunt_one_allowlisted_target", .action_json = Json::writeString(writer, body),
+			.idempotency_key = fmt::format("hunt-{}-{}", suffix, run_nonce), .expires_at = expires_at,
+			.created_at = now,
+		});
+	};
+	const auto clear_combat = [&]() {
+		fixture.OwnedBot()->WipeHateList();
+		fixture.OwnedBot()->SetTarget(nullptr);
+		for (auto* follower : fixture.FollowerBots()) {
+			follower->WipeHateList();
+			follower->SetTarget(nullptr);
+		}
+	};
+
+	ActorActionExecutor executor(database, zone->GetZoneID(), zone->GetInstanceID(), zone->GetZoneServerId());
+	Json::Value illegal_body;
+	illegal_body["area"] = "unbounded-caller-area";
+	const auto illegal = enqueue("illegal", illegal_body);
+	executor.ProcessOne();
+	ExpectEqual(ActorActionQueueRepository::FindOne(database, illegal.action_id).failure_reason,
+		std::optional<std::string>("illegal_hunt_request"), "unapproved hunt areas must be visibly rejected");
+
+	auto* non_allowlisted = fixture.AddHostileNPC({
+		.name = "HarnessNonAllowlistedTarget", .position = glm::vec4(-2080.0f, 400.0f, -3.0f, 0.0f),
+	});
+	Expect(non_allowlisted, "non-allowlisted hunt fixture should create an NPC");
+	const auto non_allowlisted_action = enqueue("non-allowlisted", valid_body);
+	executor.ProcessOne();
+	ExpectEqual(ActorActionQueueRepository::FindOne(database, non_allowlisted_action.action_id).failure_reason,
+		std::optional<std::string>("no_eligible_hunt_target"), "non-allowlisted NPC types must not be selected");
+	fixture.RemoveMob(non_allowlisted);
+
+	auto* claimed = fixture.AddHostileNPC({
+		.name = "HarnessClaimedLargeRat", .position = glm::vec4(-2080.0f, 400.0f, -3.0f, 0.0f),
+		.npc_type_id = 33005,
+	});
+	auto* contender = fixture.AddSyntheticPlayer("HarnessHuntContender", profile.owner_character_id.value() + 1000000,
+		3, glm::vec4(-2082.0f, 400.0f, -3.0f, 0.0f));
+	Expect(claimed && contender, "player-contention hunt fixtures should materialize");
+	claimed->AddToHateList(contender, 100, 1, false);
+	const auto contended = enqueue("contended", valid_body);
+	executor.ProcessOne();
+	ExpectEqual(ActorActionQueueRepository::FindOne(database, contended.action_id).failure_reason,
+		std::optional<std::string>("target_claimed_by_player"), "a synthetic player's target must not be engaged");
+	Expect(fixture.OwnedBot()->GetTarget() != claimed, "contention must not mutate the Actor leader's target");
+	fixture.RemoveMob(claimed);
+	fixture.RemoveMob(contender);
+
+	auto* lost = fixture.AddHostileNPC({
+		.name = "HarnessLostLargeRat", .position = glm::vec4(-2080.0f, 400.0f, -3.0f, 0.0f),
+		.npc_type_id = 33005,
+	});
+	Expect(lost, "lost-target fixture should create an allowlisted NPC");
+	const auto lost_action = enqueue("lost", valid_body);
+	executor.ProcessOne();
+	ExpectEqual(ActorActionQueueRepository::FindOne(database, lost_action.action_id).state, std::string("claimed"),
+		"accepted hunts should remain claimed during Committed Engagement");
+	fixture.RemoveMob(lost);
+	executor.ProcessOne();
+	ExpectEqual(ActorActionQueueRepository::FindOne(database, lost_action.action_id).failure_reason,
+		std::optional<std::string>("hunt_target_lost"), "lost targets need a visible bounded outcome");
+	clear_combat();
+
+	auto* timeout_target = fixture.AddHostileNPC({
+		.name = "HarnessTimeoutLargeRat", .position = glm::vec4(-2080.0f, 400.0f, -3.0f, 0.0f),
+		.npc_type_id = 33005,
+	});
+	Expect(timeout_target, "timeout fixture should create an allowlisted NPC");
+	time_t hunt_clock = now;
+	const auto timed = enqueue("timeout", valid_body, hunt_clock + 1);
+	ActorActionExecutor timeout_executor(database, zone->GetZoneID(), zone->GetInstanceID(), zone->GetZoneServerId(),
+		[&]() { return hunt_clock; });
+	timeout_executor.ProcessOne();
+	hunt_clock += 2;
+	timeout_executor.ProcessOne();
+	ExpectEqual(ActorActionQueueRepository::FindOne(database, timed.action_id).state, std::string("expired"),
+		"a hunt exceeding its deadline must expire without a forced result");
+	fixture.RemoveMob(timeout_target);
+	clear_combat();
+
+	auto* kill_target = fixture.AddHostileNPC({
+		.name = "HarnessAllowlistedLargeRat", .position = glm::vec4(-2080.0f, 400.0f, -3.0f, 0.0f),
+		.npc_type_id = 33005,
+	});
+	Expect(kill_target, "success fixture should create an allowlisted NPC");
+	const auto target_id = kill_target->GetID();
+	const auto succeeded = enqueue("success", valid_body, std::time(nullptr) + 15);
+	executor.ProcessOne();
+	for (uint32_t tick = 0; tick < 300 &&
+		ActorActionQueueRepository::FindOne(database, succeeded.action_id).state == "claimed"; ++tick) {
+		entity_list.Process();
+		entity_list.MobProcess();
+		executor.ProcessOne();
+		std::this_thread::sleep_for(std::chrono::milliseconds(20));
+	}
+	const auto terminal = ActorActionQueueRepository::FindOne(database, succeeded.action_id);
+	ExpectEqual(terminal.state, std::string("completed"),
+		"ordinary Bot combat should authoritatively complete the bounded hunt");
+	const auto result = ParseJson(terminal.result_json.value_or("{}"));
+	ExpectEqual(result["outcome"].asString(), std::string("succeeded"),
+		"only selected-target death should satisfy the hunt");
+	ExpectEqual(result["target_entity_id"].asUInt(), static_cast<unsigned>(target_id),
+		"hunt success must correlate the selected target");
+	const auto events = ActorEventsRepository::ReadCursor(database, profile.actor_id, 0, 1000);
+	Expect(std::any_of(events.begin(), events.end(), [&](const auto& event) {
+		if (event.event_type != "hunt_succeeded") return false;
+		const auto payload = ParseJson(event.event_json);
+		return payload["action_id"].asUInt64() == succeeded.action_id &&
+			payload["target_entity_id"].asUInt() == target_id;
+	}), "durable authoritative death evidence must correlate action and selected target");
+}
+
 } // namespace
 
 void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::string& description) {
@@ -902,7 +1049,7 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 
 		const auto run_nonce = BuildRunNonce();
 
-		Zone::Bootup(ZoneID("qrg"), 0, false);
+		Zone::Bootup(ZoneID("misty"), 0, false);
 		zone->StopShutdownTimer();
 		entity_list.Process();
 		entity_list.MobProcess();
@@ -925,11 +1072,12 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 			   "reserved owner provisioning should succeed for runtime actor event persistence");
 		cleanup.reserved_owner_character_id = reserved_owner.character_id;
 		EQ::ZoneHarness::OwnedBotActorFixture fixture;
-		Expect(fixture.SetUpOwnedBotSolo({
+		Expect(fixture.SetUpOwnedBotParty({
 				   .owner_name = reserved_owner.name,
 				   .owner_character_id = reserved_owner.character_id,
+				   .follower_count = 1,
 			   }),
-			   "owned bot harness fixture should boot");
+			   "owned bot Actor-led Party harness fixture should boot");
 		Expect(fixture.OwnedBot() != nullptr, "owned bot harness fixture should create a bot actor");
 
 		const auto next_free_bot_id = [&](uint32_t salt) -> uint32_t {
@@ -1848,6 +1996,7 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 			return ParseJson(event.event_json)["text"].asString() == dialogue_marker;
 		}), "dialogue-window speech should persist through the production evidence path");
 
+		ExpectAllowlistedMistyHunt(fixture, inserted_profile, run_nonce);
 
 		ExpectEqual(CountPlayerEventLogRowsWithMarker(speech_marker), int64_t(0),
 					"runtime actor event persistence should not write marker rows to player_event_logs");

@@ -23,6 +23,7 @@
 #include "common/rulesys.h"
 #include "common/spdat.h"
 #include "common/strings.h"
+#include "zone/actor_action_executor.h"
 #include "zone/bot.h"
 #include "zone/fastmath.h"
 #include "zone/lua_parser.h"
@@ -2990,6 +2991,8 @@ bool NPC::Death(Mob* killer_mob, int64 damage, uint16 spell, EQ::skills::SkillTy
 	}
 
 	std::vector<std::any> args = { corpse };
+
+	ActorActionExecutor::ObserveNpcDeath(this, killer_mob);
 
 	parse->EventMercNPC(EVENT_DEATH_COMPLETE, this, owner_or_self,
 		[&]() {

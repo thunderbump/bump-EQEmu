@@ -45,6 +45,7 @@ struct OwnedBotActorConfig {
 struct HostileNpcConfig {
 	std::string name;
 	glm::vec4 position;
+	uint32_t npc_type_id = 754008;
 };
 
 struct OwnedBotActorFixtureNames {
@@ -91,6 +92,9 @@ public:
 	Bot *AddOwnedGroupBot(const OwnedBotActorConfig &config, const glm::vec4 &position);
 	bool SetUpOwnedBotParty(const OwnedBotPartyConfig &config = {});
 	NPC *AddHostileNPC(const HostileNpcConfig &config);
+	Client *AddSyntheticPlayer(const std::string &name, uint32_t character_id, uint8_t level,
+		const glm::vec4 &position);
+	void MoveParty(const glm::vec4 &position);
 	void PrimeOwnedBotEngagement(bool set_actor_target);
 	void EngageHostileWithOwnerGroup(NPC *hostile, int32_t owner_hate = 25, int32_t bot_hate = 25);
 	void EngageHostileWithGroupMember(NPC *hostile, Mob *member, int32_t hate = 25);
