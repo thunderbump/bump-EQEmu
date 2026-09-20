@@ -1192,6 +1192,47 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 			"DELETE FROM actor_events WHERE event_id = {}", admission_trigger.event_id)).Success(),
 			"admission-race trigger should clean up");
 
+		// A decision admitted for this zone must not become executable merely because
+		// the actor's current binding makes the destination zone eligible to claim it.
+		const auto moved_after_admission_trigger = ActorEventsRepository::AppendEvent(database, {
+			.actor_id = inserted_profile.actor_id, .event_type = "test_helper_move_after_admission",
+			.event_json = R"json({"sequence":4})json", .created_at = now,
+		});
+		Expect(moved_after_admission_trigger.event_id != 0, "move-after-admission trigger should persist");
+		ActorHelper moved_after_admission_helper(database, {.state_directory = helper_state.Path(),
+			.actor_id = inserted_profile.actor_id, .zone_id = zone->GetZoneID(),
+			.instance_id = zone->GetInstanceID()});
+		ExpectEqual(moved_after_admission_helper.RunCycle(now).enqueued, size_t(1),
+			"helper should admit work against the source-zone binding");
+		fixture.OwnedBot()->Sit();
+		Expect(database.QueryDatabase(fmt::format(
+			"UPDATE actor_status SET zone_id = {} WHERE actor_id = {}", zone->GetZoneID() + 1,
+			inserted_profile.actor_id)).Success(), "actor should move after helper admission");
+		ActorActionExecutor moved_destination_executor(
+			database, zone->GetZoneID() + 1, zone->GetInstanceID(), zone->GetZoneServerId());
+		moved_destination_executor.ProcessOne();
+		auto moved_after_admission_action = database.QueryDatabase(fmt::format(
+			"SELECT action_id, state, failure_reason FROM actor_action_queue WHERE actor_id = {} "
+			"AND source = 'actor-helper' AND state = 'failed'", inserted_profile.actor_id));
+		Expect(moved_after_admission_action.Success() && moved_after_admission_action.RowCount() == 1 &&
+			moved_after_admission_action.begin()[0] && moved_after_admission_action.begin()[1] &&
+			moved_after_admission_action.begin()[2] &&
+			std::string(moved_after_admission_action.begin()[2]) == "actor_binding_changed",
+			"destination executor should reject the helper's source-zone binding");
+		Expect(fixture.OwnedBot()->IsSitting(), "a moved helper decision must not apply in the destination zone");
+		Expect(database.QueryDatabase(fmt::format(
+			"UPDATE actor_status SET zone_id = {} WHERE actor_id = {}", zone->GetZoneID(),
+			inserted_profile.actor_id)).Success(), "move-after-admission actor binding should be restored");
+		Expect(database.QueryDatabase(fmt::format(
+			"DELETE FROM actor_events WHERE actor_id = {} AND (event_id = {} OR "
+			"(event_type = 'action_rejected' AND JSON_UNQUOTE(JSON_EXTRACT(event_json, '$.action_id')) = '{}'))",
+			inserted_profile.actor_id, moved_after_admission_trigger.event_id,
+			moved_after_admission_action.begin()[0])).Success(),
+			"move-after-admission events should clean up");
+		Expect(database.QueryDatabase(fmt::format(
+			"DELETE FROM actor_action_queue WHERE action_id = {}", moved_after_admission_action.begin()[0])).Success(),
+			"move-after-admission action should clean up");
+
 		// Bounded discovery rotates rather than permanently selecting the lowest IDs.
 		ScopedTestDirectory fair_helper_state(
 			std::filesystem::temp_directory_path() / fmt::format("eqemu-actor-helper-fair-{}", run_nonce));
@@ -1248,6 +1289,14 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 		ExpectEqual(fair_metadata["decision"]["inputs"]["event_type"].asString(),
 			std::string("test_fair_discovery"),
 			"helper metadata should retain the event type used by the policy");
+		ExpectEqual(fair_metadata["expected_binding"]["actor_id"].asUInt(), fair_target_actor_id,
+			"helper metadata should retain the admitted actor binding");
+		ExpectEqual(fair_metadata["expected_binding"]["zone_id"].asUInt(), zone->GetZoneID(),
+			"helper metadata should retain the admitted zone binding");
+		ExpectEqual(fair_metadata["expected_binding"]["instance_id"].asUInt(), zone->GetInstanceID(),
+			"helper metadata should retain the admitted instance binding");
+		ExpectEqual(fair_metadata["expected_binding"]["entity_id"].asUInt(), 60002u,
+			"helper metadata should retain the admitted entity binding");
 		Expect(database.QueryDatabase(fmt::format(
 			"DELETE FROM actor_action_queue WHERE actor_id = {} AND source = 'actor-helper'", fair_target_actor_id)).Success(),
 			"fair-discovery request should clean up");
@@ -1262,9 +1311,26 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 			"AND JSON_UNQUOTE(JSON_EXTRACT(event_json, '$.action_id')) = '{}'",
 			inserted_profile.actor_id, helper_action.begin()[0])).Success(),
 			"helper outcome fixture should clean up before cursor assertions");
+		std::filesystem::remove(helper_state.Path() /
+			(std::to_string(inserted_profile.actor_id) + ".cursor"));
+		ActorHelper retained_outcome_helper(database, {.state_directory = helper_state.Path(),
+			.actor_id = inserted_profile.actor_id, .zone_id = zone->GetZoneID(),
+			.instance_id = zone->GetInstanceID()});
+		const auto retained_outcome_recovery = retained_outcome_helper.RunCycle(now);
+		ExpectEqual(retained_outcome_recovery.retained_outcome_losses, size_t(1),
+			"terminal queue state should recover progress after its correlated outcome is pruned");
+		ExpectEqual(retained_outcome_recovery.enqueued, size_t(0),
+			"retained-outcome recovery must not recreate an already completed effect");
+		ExpectEqual(helper_action_count(), uint64_t(1),
+			"retained-outcome recovery must preserve the single idempotent queue row");
 		Expect(database.QueryDatabase(fmt::format(
 			"DELETE FROM actor_action_queue WHERE actor_id = {} AND source = 'actor-helper'",
 			inserted_profile.actor_id)).Success(), "helper queue fixture should clean up before cursor assertions");
+		ActorHelper restarted_retained_outcome_helper(database, {.state_directory = helper_state.Path(),
+			.actor_id = inserted_profile.actor_id, .zone_id = zone->GetZoneID(),
+			.instance_id = zone->GetInstanceID()});
+		ExpectEqual(restarted_retained_outcome_helper.RunCycle(now).enqueued, size_t(0),
+			"retained-outcome recovery should durably suppress the completed effect after restart");
 		for (int index = 0; index < 3; ++index) {
 			Expect(ActorEventsRepository::AppendEvent(database, {
 				.actor_id = inserted_profile.actor_id,

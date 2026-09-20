@@ -27,8 +27,11 @@ public:
 		size_t busy = 0;
 		size_t cursor_gaps = 0;
 		size_t retained_event_losses = 0;
+		size_t retained_outcome_losses = 0;
 		size_t state_persistence_errors = 0;
-		bool DidWork() const { return enqueued != 0 || outcomes_observed != 0; }
+		bool DidWork() const {
+			return enqueued != 0 || outcomes_observed != 0 || retained_outcome_losses != 0;
+		}
 		bool Fatal() const { return state_persistence_errors != 0; }
 	};
 

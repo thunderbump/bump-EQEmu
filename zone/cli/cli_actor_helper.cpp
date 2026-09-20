@@ -61,6 +61,7 @@ void ZoneCLI::ActorHelperRun(int, char**, argh::parser& cmd, std::string& descri
 				  << " outcomes=" << result.outcomes_observed << " busy=" << result.busy
 				  << " cursor_gaps=" << result.cursor_gaps
 				  << " retained_event_losses=" << result.retained_event_losses
+				  << " retained_outcome_losses=" << result.retained_outcome_losses
 				  << " state_persistence_errors=" << result.state_persistence_errors << "\n";
 		std::cout.flush();
 		if (result.Fatal()) {
@@ -68,7 +69,8 @@ void ZoneCLI::ActorHelperRun(int, char**, argh::parser& cmd, std::string& descri
 			std::exit(1);
 		}
 		++cycle;
-		if (cmd[{"--exit-after-outcome"}] && result.outcomes_observed != 0) {
+		if (cmd[{"--exit-after-outcome"}] &&
+			(result.outcomes_observed != 0 || result.retained_outcome_losses != 0)) {
 			break;
 		}
 		if (max_cycles != 0 && cycle >= max_cycles) {

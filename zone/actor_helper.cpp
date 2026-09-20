@@ -150,34 +150,43 @@ LIMIT {}
 		// Completion is the commit point for the cursor. Keeping it behind while an
 		// action is pending makes a killed helper recreate the same idempotency key.
 		auto terminals = database_.QueryDatabase(fmt::format(R"SQL(
-SELECT q.source_metadata_json
-FROM actor_action_queue q
-WHERE q.actor_id = {} AND q.source = 'actor-helper' AND q.state IN ('completed', 'failed')
-  AND EXISTS (
+SELECT q.source_metadata_json, EXISTS (
     SELECT 1 FROM actor_events e WHERE e.actor_id = q.actor_id
       AND e.event_type IN ('action_completed', 'action_rejected')
       AND JSON_UNQUOTE(JSON_EXTRACT(e.event_json, '$.action_id')) = CAST(q.action_id AS CHAR)
-  )
+  ) AS outcome_retained
+FROM actor_action_queue q
+WHERE q.actor_id = {} AND q.source = 'actor-helper' AND q.state IN ('completed', 'failed')
 ORDER BY q.action_id DESC LIMIT 16
 )SQL", actor.actor_id));
 		uint64_t completed_cursor = cursor;
+		bool completed_outcome_retained = true;
 		if (terminals.Success()) {
 			for (auto row = terminals.begin(); row != terminals.end(); ++row) {
 				if (row[0]) {
 					const auto trigger = JsonUInt64(row[0], "trigger_event_id");
-					if (trigger.has_value()) {
-						completed_cursor = std::max(completed_cursor, *trigger);
+					if (trigger.has_value() && *trigger > completed_cursor) {
+						completed_cursor = *trigger;
+						completed_outcome_retained = row[1] && strtoull(row[1], nullptr, 10) != 0;
 					}
 				}
 			}
 		}
 		if (completed_cursor > cursor) {
+			// The terminal queue row is the durable commit record. Its correlated
+			// lifecycle event is observable evidence, but may legitimately age out
+			// while the helper is stopped; do not strand the original trigger when it
+			// does. Record that recovery separately from a retained observation.
 			if (!StoreCursor(actor.actor_id, completed_cursor)) {
 				++result.state_persistence_errors;
 				return result;
 			}
 			cursor = completed_cursor;
-			++result.outcomes_observed;
+			if (completed_outcome_retained) {
+				++result.outcomes_observed;
+			} else {
+				++result.retained_outcome_losses;
+			}
 		}
 
 		const auto latest = ActorEventsRepository::LatestGameplayEventId(database_, actor.actor_id);
@@ -249,7 +258,6 @@ ORDER BY q.action_id DESC LIMIT 16
 		Json::Value action(Json::objectValue);
 		Json::StreamWriterBuilder writer;
 		writer["indentation"] = "";
-		const auto metadata_json = Json::writeString(writer, metadata);
 		const auto action_json = Json::writeString(writer, action);
 		const auto idempotency_key = fmt::format("actor-helper:stand:{}:{}", actor.actor_id, trigger->event_id);
 
@@ -263,7 +271,8 @@ ORDER BY q.action_id DESC LIMIT 16
 		// this validation and queue admission in one transaction also preserves the
 		// per-actor serialization contract.
 		auto actor_lock = database_.QueryDatabase(fmt::format(R"SQL(
-SELECT p.actor_id
+SELECT p.actor_id, p.bot_id, p.owner_character_id, s.zone_id,
+       COALESCE(s.instance_id, 0), s.entity_id
 FROM actor_profiles p
 JOIN actor_status s ON s.actor_id = p.actor_id
 WHERE p.actor_id = {}
@@ -277,6 +286,28 @@ FOR UPDATE
 			database_.TransactionRollback();
 			continue;
 		}
+		auto locked = actor_lock.begin();
+		if (!locked[1] || !locked[2] || !locked[3] || !locked[4] || !locked[5]) {
+			database_.TransactionRollback();
+			continue;
+		}
+		// Preserve the exact durable binding used for admission. The executor must
+		// reject this decision if a later move makes another zone eligible to claim
+		// it; validating only that destination's current binding would apply stale
+		// work in the wrong zone.
+		metadata["expected_binding"]["actor_id"] = actor.actor_id;
+		metadata["expected_binding"]["bot_id"] =
+			static_cast<Json::UInt>(strtoul(locked[1], nullptr, 10));
+		metadata["expected_binding"]["owner_character_id"] =
+			static_cast<Json::UInt>(strtoul(locked[2], nullptr, 10));
+		metadata["expected_binding"]["zone_id"] =
+			static_cast<Json::UInt>(strtoul(locked[3], nullptr, 10));
+		metadata["expected_binding"]["instance_id"] =
+			static_cast<Json::UInt>(strtoul(locked[4], nullptr, 10));
+		metadata["expected_binding"]["entity_id"] =
+			static_cast<Json::UInt>(strtoul(locked[5], nullptr, 10));
+		const auto metadata_json = Json::writeString(writer, metadata);
+
 		ActorActionQueueRepository::ExpireDue(database_, now, actor.actor_id);
 		auto active = database_.QueryDatabase(fmt::format(
 			"SELECT COUNT(*) FROM actor_action_queue WHERE actor_id = {} AND source = 'actor-helper' "
