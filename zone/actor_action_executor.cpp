@@ -293,7 +293,14 @@ void ActorActionExecutor::ProcessHuntEngagement(time_t now) {
 void ActorActionExecutor::ProcessOne() {
 	const auto now = clock_();
 	ProcessHuntEngagement(now);
-	ActorActionQueueRepository::ExpireDue(database_, now);
+	// An authoritative in-deadline death may still be claimed while its atomic
+	// completion/outcome transaction retries. Expire unrelated work, but do not
+	// let the generic sweep destroy the retained success evidence.
+	const auto completion_retry_action_id =
+		hunt_engagement_ && hunt_engagement_->death_observed_at.has_value()
+			? std::optional<uint64_t>(hunt_engagement_->action.action_id)
+			: std::nullopt;
+	ActorActionQueueRepository::ExpireDue(database_, now, std::nullopt, completion_retry_action_id);
 	if (hunt_engagement_) {
 		return;
 	}

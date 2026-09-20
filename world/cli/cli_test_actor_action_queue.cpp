@@ -796,14 +796,25 @@ void WorldserverCLI::TestActorActionQueue(int argc, char **argv, argh::parser &c
 		Expect(!fail_pending_action.has_value(), "failure should reject non-claimed actions");
 
 		ExpectEqual(
-			ActorActionQueueRepository::ExpireDue(database, expire_sweep_at),
-			2,
-			"expiry sweep should expire stale pending and stale claimed actions"
+			ActorActionQueueRepository::ExpireDue(
+				database, expire_sweep_at, std::nullopt, actor_c_expiring_claim.action_id),
+			1,
+			"expiry sweep should expire stale work other than an explicitly retained action"
 		);
 
 		const auto expired_pending = ActorActionQueueRepository::FindByActionId(database, actor_a_stale_pending.action_id);
 		Expect(expired_pending.has_value(), "expired pending action should still be queryable");
 		ExpectEqual(expired_pending->state, std::string("expired"), "expiry sweep should expire pending rows");
+
+		const auto retained_claimed = ActorActionQueueRepository::FindByActionId(database, actor_c_expiring_claim.action_id);
+		Expect(retained_claimed.has_value(), "excluded claimed action should still be queryable");
+		ExpectEqual(retained_claimed->state, std::string("claimed"),
+			"expiry sweep should retain an explicitly excluded completion retry");
+		ExpectEqual(
+			ActorActionQueueRepository::ExpireDue(database, expire_sweep_at),
+			1,
+			"a later unfiltered sweep should expire the retained stale action"
+		);
 
 		const auto expired_claimed = ActorActionQueueRepository::FindByActionId(database, actor_c_expiring_claim.action_id);
 		Expect(expired_claimed.has_value(), "expired claimed action should still be queryable");

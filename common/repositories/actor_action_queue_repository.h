@@ -323,7 +323,10 @@ ORDER BY COALESCE(q.not_before, FROM_UNIXTIME(0)), q.action_id LIMIT 1
 		return claimed.action_id ? std::optional<ActorActionRecord>(claimed) : std::nullopt;
 	}
 
-	static int ExpireDue(Database &db, time_t now, std::optional<uint32_t> actor_id = std::nullopt)
+	// A caller retaining authoritative terminal evidence may exclude that one
+	// action while its atomic terminalization retries; all other due work still expires.
+	static int ExpireDue(Database &db, time_t now, std::optional<uint32_t> actor_id = std::nullopt,
+		std::optional<uint64_t> excluded_action_id = std::nullopt)
 	{
 		if (now <= 0) {
 			now = std::time(nullptr);
@@ -331,6 +334,9 @@ ORDER BY COALESCE(q.not_before, FROM_UNIXTIME(0)), q.action_id LIMIT 1
 
 		const auto actor_filter = actor_id.has_value()
 			? fmt::format(" AND actor_id = {}", *actor_id)
+			: "";
+		const auto action_filter = excluded_action_id.has_value()
+			? fmt::format(" AND action_id <> {}", *excluded_action_id)
 			: "";
 
 		auto results = db.QueryDatabase(
@@ -343,6 +349,7 @@ SET
 	updated_at = FROM_UNIXTIME({})
 WHERE state IN ('pending', 'claimed')
   {}
+  {}
   AND expires_at IS NOT NULL
   AND expires_at <= FROM_UNIXTIME({})
 )SQL",
@@ -350,6 +357,7 @@ WHERE state IN ('pending', 'claimed')
 				now,
 				now,
 				actor_filter,
+				action_filter,
 				now
 			)
 		);
