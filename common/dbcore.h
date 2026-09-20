@@ -40,7 +40,7 @@ public:
 
 	DBcore();
 	~DBcore();
-	eStatus GetStatus() { return pStatus; }
+	eStatus GetStatus() { return connection_owner ? connection_owner->GetStatus() : pStatus; }
 	MySQLRequestResult QueryDatabase(const char *query, uint32 querylen, bool retryOnFailureOnce = true);
 	MySQLRequestResult QueryDatabase(const std::string& query, bool retryOnFailureOnce = true);
 	MySQLRequestResult QueryDatabaseMulti(const std::string &query);
@@ -59,11 +59,9 @@ public:
 
 	bool DoesTableExist(const std::string& table_name);
 
-	void SetMySQL(const DBcore& o)
-	{
-		mysql      = o.mysql;
-		mysqlOwner = false;
-	}
+	// Borrow the owner's operations, not a raw handle that reconnect can replace.
+	// The owner must outlive this wrapper, as with the previous borrowed-handle API.
+	void SetMySQL(DBcore& owner);
 	void SetMutex(const std::shared_ptr<Mutex>& mutex);
 
 	// only safe on connections shared with other threads if results buffered
@@ -88,7 +86,7 @@ private:
 	bool Open(uint32 *errnum = nullptr, char *errbuf = nullptr);
 
 	MYSQL*  mysql = nullptr;
-	bool    mysqlOwner = true;
+	DBcore* connection_owner = nullptr;
 	eStatus pStatus = Closed;
 
 	std::shared_ptr<Mutex> m_mutex;

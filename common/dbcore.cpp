@@ -25,6 +25,7 @@
 #include "common/types.h"
 
 #include "mysqld_error.h"
+#include <stdexcept>
 
 #ifdef _EQDEBUG
 #define DEBUG_MYSQL_QUERIES 0
@@ -40,19 +41,22 @@ DBcore::DBcore()
 
 DBcore::~DBcore()
 {
-	/**
-	 * This prevents us from doing a double free in multi-tenancy setups where we
-	 * are re-using the default database connection pointer when we dont have an
-	 * external configuration setup ex: (content_database)
-	 */
-	if (mysqlOwner) {
-		mysql_close(mysql);
-	}
+	if (mysql) { mysql_close(mysql); }
+}
+
+void DBcore::SetMySQL(DBcore& owner)
+{
+	DBcore* root = &owner;
+	while (root->connection_owner) { root = root->connection_owner; }
+	if (root == this) { throw std::invalid_argument("cannot borrow own database connection"); }
+	if (mysql) { mysql_close(mysql); mysql = nullptr; }
+	connection_owner = root;
 }
 
 // Sends the MySQL server a keepalive
 void DBcore::ping()
 {
+	if (connection_owner) { connection_owner->ping(); return; }
 	if (!m_mutex->try_lock())
 	{
 		// well, if's it's locked, someone's using it. If someone's using it, it doesnt need a keepalive
@@ -65,6 +69,7 @@ void DBcore::ping()
 
 void DBcore::SetConnectionTimeouts(uint32 connect_seconds, uint32 read_seconds, uint32 write_seconds)
 {
+	if (connection_owner) { connection_owner->SetConnectionTimeouts(connect_seconds, read_seconds, write_seconds); return; }
 	std::scoped_lock lock(*m_mutex);
 	connect_timeout_seconds = connect_seconds;
 	read_timeout_seconds = read_seconds;
@@ -86,6 +91,7 @@ bool DBcore::DoesTableExist(const std::string& table_name)
 
 MySQLRequestResult DBcore::QueryDatabase(const char *query, uint32 querylen, bool retryOnFailureOnce)
 {
+	if (connection_owner) { return connection_owner->QueryDatabase(query, querylen, retryOnFailureOnce); }
 	BenchTimer timer;
 	timer.reset();
 
@@ -197,6 +203,7 @@ void DBcore::TransactionRollback()
 
 uint32 DBcore::DoEscapeString(char *tobuf, const char *frombuf, uint32 fromlen)
 {
+	if (connection_owner) { return connection_owner->DoEscapeString(tobuf, frombuf, fromlen); }
 //	No good reason to lock the DB, we only need it in the first place to check char encoding.
 //	LockMutex lock(&MDatabase);
 	return mysql_real_escape_string(mysql, tobuf, frombuf, fromlen);
@@ -214,6 +221,7 @@ bool DBcore::Open(
 	bool iSSL
 )
 {
+	if (connection_owner) { return connection_owner->Open(iHost, iUser, iPassword, iDatabase, iPort, errnum, errbuf, iCompress, iSSL); }
 	std::scoped_lock lock(*m_mutex);
 
 	m_host = iHost;
@@ -238,7 +246,7 @@ bool DBcore::Open(uint32 *errnum, char *errbuf)
 		return true;
 	}
 	if (GetStatus() == Error) {
-		mysql_close(mysql);
+		if (mysql) { mysql_close(mysql); }
 		mysql = mysql_init(nullptr); // mysql_close freed the previously allocated handle.
 	}
 	if (!mysql || m_host.empty()) {
@@ -295,16 +303,19 @@ bool DBcore::Open(uint32 *errnum, char *errbuf)
 
 const std::string &DBcore::GetOriginHost() const
 {
+	if (connection_owner) { return connection_owner->GetOriginHost(); }
 	return origin_host;
 }
 
 void DBcore::SetOriginHost(const std::string& originHost)
 {
+	if (connection_owner) { connection_owner->SetOriginHost(originHost); return; }
 	DBcore::origin_host = originHost;
 }
 
 std::string DBcore::Escape(const std::string& s)
 {
+	if (connection_owner) { return connection_owner->Escape(s); }
 	const std::size_t s_len = s.length();
 	std::vector<char> temp((s_len * 2) + 1, '\0');
 	mysql_real_escape_string(mysql, temp.data(), s.c_str(), s_len);
@@ -322,6 +333,7 @@ void DBcore::SetMutex(const std::shared_ptr<Mutex>& mutex)
 // this was built and maintained for database migrations only
 MySQLRequestResult DBcore::QueryDatabaseMulti(const std::string &query)
 {
+	if (connection_owner) { return connection_owner->QueryDatabaseMulti(query); }
 	SetMultiStatementsOn();
 
 	BenchTimer timer;
@@ -450,5 +462,6 @@ MySQLRequestResult DBcore::QueryDatabaseMulti(const std::string &query)
 
 mysql::PreparedStmt DBcore::Prepare(std::string query)
 {
+	if (connection_owner) { return connection_owner->Prepare(std::move(query)); }
 	return mysql::PreparedStmt(*mysql, std::move(query), *m_mutex);
 }

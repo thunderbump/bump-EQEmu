@@ -20,6 +20,7 @@
 
 #include "common/actor_reserved_owners.h"
 #include "common/eqemu_logsys.h"
+#include "common/eqemu_config.h"
 #include "common/json/json.h"
 #include "common/repositories/actor_action_queue_repository.h"
 #include "common/repositories/actor_events_repository.h"
@@ -667,6 +668,35 @@ void ExpectShutdownRetainsRecoverablePayloads() {
 #endif
 }
 
+// Only terminate a test-owned connection in the disposable scenario database.
+void ExpectBorrowedConnectionReconnects() {
+	const auto* config = EQEmuConfig::get();
+	Expect(config != nullptr, "reconnect probe needs database configuration");
+	Database owner;
+	owner.SetConnectionTimeouts(1, 1, 1);
+	Expect(owner.Connect(config->DatabaseHost, config->DatabaseUsername, config->DatabasePassword,
+		config->DatabaseDB, config->DatabasePort, "borrowed-reconnect-probe"), "probe owner must connect");
+	{
+		Database borrower;
+		borrower.SetMySQL(owner);
+		for (const bool via_borrower : {true, false}) {
+			auto before = owner.QueryDatabase("SELECT CONNECTION_ID()");
+			Expect(before.Success() && before.RowCount() == 1, "probe owner needs connection id");
+			const auto old_id = std::stoull(before.begin()[0]);
+			Expect(database.QueryDatabase(fmt::format("KILL CONNECTION {}", old_id)).Success(),
+				"probe must disconnect only its test-owned connection");
+			auto recovered = (via_borrower ? borrower : owner).QueryDatabase("SELECT CONNECTION_ID()");
+			Expect(recovered.Success() && recovered.RowCount() == 1, "owner and borrower must recover a lost connection");
+			const auto new_id = std::stoull(recovered.begin()[0]);
+			Expect(new_id != old_id, "recovery must establish a new connection");
+			auto shared = (via_borrower ? owner : borrower).QueryDatabase("SELECT CONNECTION_ID()");
+			Expect(shared.Success() && shared.RowCount() == 1 && std::stoull(shared.begin()[0]) == new_id,
+				"both wrappers must use the same recovered owner connection");
+		}
+	}
+	Expect(owner.QueryDatabase("SELECT 1").Success(), "borrower destruction must preserve owner connection");
+}
+
 // Exercise the same connection factory used by the real persistence adapter.
 void ExpectPersistenceConnectionIsolated(
 	const ActorProfilesRepository::ActorProfileRecord& profile
@@ -864,6 +894,7 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 		const auto inserted_profile = ActorProfilesRepository::UpsertBotBackedProfile(database, profile);
 		Expect(inserted_profile.actor_id > 0, "actor profile insert should allocate an actor_id");
 		cleanup.TrackActorId(inserted_profile.actor_id);
+		ExpectBorrowedConnectionReconnects();
 		ExpectPersistenceConnectionIsolated(inserted_profile);
 		ExpectProfileChangesRetainAcceptedEvidence(inserted_profile);
 
