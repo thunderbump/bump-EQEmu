@@ -29,6 +29,8 @@
 #include "common/rulesys.h"
 #include "common/strings.h"
 #include "zone/bot.h"
+#include "zone/client.h"
+#include "zone/fallback_dialogue_runtime.h"
 #include "zone/actor_action_executor.h"
 #include "zone/harness/actor_event_persistence_sink.h"
 #include "zone/harness/actor_event_recorder.h"
@@ -484,6 +486,96 @@ void ExpectBoundedPersistenceOverloadAndRecovery() {
 }
 
 
+// Use the normal delayed-reply processor and Mob emission paths, with only
+// provider completion and evidence capacity controlled by the scenario.
+void ExpectFallbackRepliesRetryInOrder(
+	EQ::ZoneHarness::OwnedBotActorFixture& fixture,
+	EQ::ZoneHarness::ActorEventRecorder& recorder,
+	EQ::ZoneHarness::ActorEventPersistenceSink* original_sink
+) {
+	using EQ::ZoneHarness::ActorEventCaptureResult;
+	FallbackDialogue::ResetDialogueCooldowns();
+	FallbackDialogue::TestDelayedDialogueProvider provider;
+	FallbackDialogue::FallbackDialogueSettings settings;
+	settings.immediate.enabled = true;
+	settings.immediate.cooldown_seconds = 0;
+	settings.current_interaction.imported_game_rule_say_range = RuleI(Range, Say);
+	FallbackDialogue::DelayedDialogueQueue queue(provider, settings);
+	ZoneFallbackDialogueRuntime::DelayedDialogueDelivery delivery;
+	ConfigurablePersistenceSink sink;
+	recorder.SetPersistenceSink(&sink);
+	fixture.OwnerTargets(fixture.OwnedBot());
+	const auto enqueue = [&](const std::string& response) {
+		const auto queued = queue.HandleTargetedSay({
+			.speaker_id = fixture.Owner()->GetID(),
+			.target_id = fixture.OwnedBot()->GetID(),
+			.message = "hello",
+			.target_type = FallbackDialogue::TargetType::Bot,
+		}, {
+			.current_message = "hello",
+			.speaker = {.name = fixture.Owner()->GetCleanName()},
+			.target = {.name = fixture.OwnedBot()->GetCleanName()},
+		});
+		Expect(queued.handled, "fallback probe must queue an eligible interaction");
+		Expect(provider.CompleteNextSuccess(response), "fallback provider must complete the queued request");
+	};
+
+	for (const auto& response : {std::string("First reply."), std::string("*nods quietly*")}) {
+		recorder.Drain();
+		sink.attempted_texts.clear();
+		sink.result = ActorEventCaptureResult::Saturated;
+		enqueue(response);
+		enqueue("Later reply.");
+		delivery.Process(queue);
+		delivery.Process(queue);
+		ExpectEqual(sink.attempted_texts.size(), size_t(2), "each blocked tick must attempt only the retained reply");
+		ExpectEqual(sink.attempted_texts[0], sink.attempted_texts[1], "retry must keep the same reply ahead of later replies");
+		Expect(recorder.Since(0, 8).empty(), "deferred fallback must not be recorded as emitted");
+		sink.result = ActorEventCaptureResult::Accepted;
+		delivery.Process(queue);
+		delivery.Process(queue);
+		const auto events = recorder.Since(0, 8);
+		ExpectEqual(events.size(), size_t(2), "recovery must deliver both replies exactly once");
+		ExpectEqual(events[0].speech.text, sink.attempted_texts[0], "recovered reply must retain its text and order");
+		ExpectEqual(events[1].speech.text, std::string("Later reply."), "later reply must follow the deferred reply");
+	}
+
+	recorder.Drain();
+	sink.result = ActorEventCaptureResult::Saturated;
+	enqueue("Stale reply.");
+	delivery.Process(queue);
+	fixture.OwnerTargets(nullptr);
+	sink.result = ActorEventCaptureResult::Accepted;
+	delivery.Process(queue);
+	Expect(recorder.Since(0, 8).empty(), "a deferred reply must be discarded if the speaker changes target");
+	fixture.OwnerTargets(fixture.OwnedBot());
+	delivery.Process(queue);
+	Expect(recorder.Since(0, 8).empty(), "discarded stale replies must not reappear");
+
+	sink.result = ActorEventCaptureResult::Saturated;
+	enqueue("Out of range reply.");
+	delivery.Process(queue);
+	sink.result = ActorEventCaptureResult::Accepted;
+	{
+		ScopedRuleOverride range("Range:Say", "1");
+		Expect(range.Changed(), "range override must apply for the stale delivery probe");
+		delivery.Process(queue);
+	}
+	delivery.Process(queue);
+	Expect(recorder.Since(0, 8).empty(), "out-of-range replies must not reappear after range recovers");
+
+	for (size_t i = 0; i < 10; ++i) {
+		enqueue("Bounded reply.");
+	}
+	delivery.Process(queue);
+	ExpectEqual(recorder.Since(0, 32).size(), size_t(8), "a tick must deliver at most eight ready replies");
+	delivery.Process(queue);
+	ExpectEqual(recorder.Since(0, 32).size(), size_t(10), "later ticks must deliver the remaining replies");
+	recorder.Drain();
+	recorder.SetPersistenceSink(original_sink);
+	FallbackDialogue::ResetDialogueCooldowns();
+}
+
 // Hold the worker before its real repository lookup, then change the profile.
 // The retry cases inject one unavailable-store result before that lookup.
 void ExpectProfileChangesRetainAcceptedEvidence(
@@ -608,6 +700,7 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 		const auto actor_bot_id = next_free_bot_id(0);
 		fixture.AssignBotID(fixture.OwnedBot(), actor_bot_id);
 		ExpectSpeechDefersAndRetriesThroughProductionPath(fixture.OwnedBot(), recorder, &persistence_sink);
+		ExpectFallbackRepliesRetryInOrder(fixture, recorder, &persistence_sink);
 
 		ActorProfilesRepository::ActorProfileRecord profile{};
 		profile.actor_type = "autonomous_actor";

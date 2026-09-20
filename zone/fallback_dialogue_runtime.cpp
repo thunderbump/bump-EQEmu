@@ -196,17 +196,18 @@ FallbackDialogue::PublicGameplayContextInput BuildZoneFallbackDialoguePublicGame
 	};
 }
 
-void DeliverFallbackDialogueResult(Mob *target, const FallbackDialogue::TargetedSayResult &result)
+bool DeliverFallbackDialogueResult(Mob *target, const FallbackDialogue::TargetedSayResult &result)
 {
 	if (!target || !result.handled) {
-		return;
+		return true;
 	}
 
 	if (result.output_type == FallbackDialogue::OutputType::Say) {
-		target->Say("%s", result.message.c_str());
+		return target->Say("%s", result.message.c_str());
 	} else if (result.output_type == FallbackDialogue::OutputType::Emote) {
-		target->Emote("%s", result.message.c_str());
+		return target->Emote("%s", result.message.c_str());
 	}
+	return true;
 }
 
 }
@@ -238,18 +239,40 @@ void HandleTargetedSay(
 	FallbackDialogue::LogDiagnostic(result);
 }
 
-void ProcessReadyDelayedDialogue()
+void DelayedDialogueDelivery::Process(FallbackDialogue::DelayedDialogueQueue& queue)
 {
-	FallbackDialogue::TargetedSayResult result;
-	while (ZoneFallbackDialogueQueue().PopReadyResult(CurrentFallbackDialogueInteraction, result)) {
-		auto *target = entity_list.GetMob(static_cast<uint16>(result.target_id));
-		if (!target) {
-			continue;
+	// Do not pop another reply while the front reply is waiting for evidence capacity.
+	constexpr size_t max_results_per_tick = 8;
+	for (size_t processed = 0; processed < max_results_per_tick; ++processed) {
+		if (!deferred_) {
+			FallbackDialogue::TargetedSayResult result;
+			if (!queue.PopReadyResult(CurrentFallbackDialogueInteraction, result)) {
+				return;
+			}
+			deferred_ = std::move(result);
 		}
 
-		DeliverFallbackDialogueResult(target, result);
-		FallbackDialogue::LogDiagnostic(result);
+		auto* speaker = entity_list.GetMob(static_cast<uint16>(deferred_->speaker_id));
+		auto* target = entity_list.GetMob(static_cast<uint16>(deferred_->target_id));
+		if (!speaker || !target || speaker->GetTarget() != target ||
+			DistanceNoZ(speaker->GetPosition(), target->GetPosition()) > RuleI(Range, Say)) {
+			deferred_->debug_reason = "delayed_dialogue_dropped_stale_before_delivery";
+			FallbackDialogue::LogDiagnostic(*deferred_);
+			deferred_.reset();
+			continue;
+		}
+		if (!DeliverFallbackDialogueResult(target, *deferred_)) {
+			return;
+		}
+		FallbackDialogue::LogDiagnostic(*deferred_);
+		deferred_.reset();
 	}
+}
+
+void ProcessReadyDelayedDialogue()
+{
+	static DelayedDialogueDelivery delivery;
+	delivery.Process(ZoneFallbackDialogueQueue());
 }
 
 }
