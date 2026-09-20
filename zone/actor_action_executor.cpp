@@ -109,13 +109,20 @@ bool AppendOutcome(ZoneDatabase& database, const ActorActionQueueRepository::Act
 } // namespace
 
 struct ActorActionExecutor::HuntEngagement {
+	struct PartyBotIdentity {
+		uint16_t entity_id = 0;
+		uint32_t bot_id = 0;
+		uint32_t owner_character_id = 0;
+		uint64_t runtime_instance_id = 0;
+	};
+
 	ActorActionQueueRepository::ActorActionRecord action;
 	ActorProfilesRepository::ActorProfileRecord profile;
 	ActorStatusRepository::ActorStatusRecord status;
 	uint16_t target_entity_id = 0;
 	uint32_t target_npc_type_id = 0;
 	uint64_t target_runtime_instance_id = 0;
-	std::vector<uint16_t> party_bot_entity_ids;
+	std::vector<PartyBotIdentity> party_bots;
 	bool target_attack_flag_added = false;
 	std::optional<time_t> death_observed_at;
 	uint16_t killer_entity_id = 0;
@@ -159,10 +166,12 @@ void ActorActionExecutor::CancelHuntCombat() {
 			attacker->SetTarget(nullptr);
 		}
 	};
-	for (const auto bot_id : hunt_engagement_->party_bot_entity_ids) {
-		auto* party_member = entity_list.GetMob(bot_id);
+	for (const auto& identity : hunt_engagement_->party_bots) {
+		auto* party_member = entity_list.GetMob(identity.entity_id);
 		auto* party_bot = party_member && party_member->IsBot() ? party_member->CastToBot() : nullptr;
-		if (!party_bot) {
+		if (!party_bot || party_bot->GetBotID() != identity.bot_id ||
+			party_bot->GetBotOwnerCharacterID() != identity.owner_character_id ||
+			party_bot->GetRuntimeInstanceID() != identity.runtime_instance_id) {
 			continue;
 		}
 		remove_hunt_aggro(party_bot);
@@ -244,10 +253,12 @@ void ActorActionExecutor::ProcessHuntEngagement(time_t now) {
 		failure_reason = "hunt_target_lost";
 	} else if (!death_observed && target && !target->HasDied() && target->GetHP() > 0) {
 		bool selected_target_combat_active = false;
-		for (const auto bot_id : engagement.party_bot_entity_ids) {
-			auto* member = entity_list.GetMob(bot_id);
+		for (const auto& identity : engagement.party_bots) {
+			auto* member = entity_list.GetMob(identity.entity_id);
 			auto* party_bot = member && member->IsBot() ? member->CastToBot() : nullptr;
-			if (!party_bot) {
+			if (!party_bot || party_bot->GetBotID() != identity.bot_id ||
+				party_bot->GetBotOwnerCharacterID() != identity.owner_character_id ||
+				party_bot->GetRuntimeInstanceID() != identity.runtime_instance_id) {
 				continue;
 			}
 			auto* bot_owner = party_bot->GetBotOwner();
@@ -577,13 +588,26 @@ void ActorActionExecutor::ProcessOne() {
 			return;
 		}
 
+		// The transaction can finish after the bounded request expires. Do not
+		// install combat intent merely because engagement evidence committed.
+		const auto combat_started_at = clock_();
+		if (action->expires_at.has_value() && *action->expires_at <= combat_started_at) {
+			ActorActionQueueRepository::ExpireDue(database_, combat_started_at, action->actor_id);
+			return;
+		}
+
 		const auto attack_flags = hunt_target->GetBotAttackFlags();
 		const bool target_attack_flag_added =
 			std::find(attack_flags.begin(), attack_flags.end(), *profile->owner_character_id) == attack_flags.end();
-		std::vector<uint16_t> party_bot_entity_ids;
-		party_bot_entity_ids.reserve(hunt_party_bots.size());
+		std::vector<HuntEngagement::PartyBotIdentity> party_bots;
+		party_bots.reserve(hunt_party_bots.size());
 		for (auto* party_bot : hunt_party_bots) {
-			party_bot_entity_ids.push_back(party_bot->GetID());
+			party_bots.push_back({
+				.entity_id = party_bot->GetID(),
+				.bot_id = party_bot->GetBotID(),
+				.owner_character_id = party_bot->GetBotOwnerCharacterID(),
+				.runtime_instance_id = party_bot->GetRuntimeInstanceID(),
+			});
 		}
 		hunt_engagement_ = std::make_unique<HuntEngagement>(HuntEngagement{
 			.action = *action,
@@ -592,7 +616,7 @@ void ActorActionExecutor::ProcessOne() {
 			.target_entity_id = hunt_target->GetID(),
 			.target_npc_type_id = hunt_target->GetNPCTypeID(),
 			.target_runtime_instance_id = hunt_target->GetRuntimeInstanceID(),
-			.party_bot_entity_ids = std::move(party_bot_entity_ids),
+			.party_bots = std::move(party_bots),
 			.target_attack_flag_added = target_attack_flag_added,
 		});
 
