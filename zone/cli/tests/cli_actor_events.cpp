@@ -503,6 +503,11 @@ void ExpectFallbackRepliesRetryInOrder(
 	FallbackDialogue::DelayedDialogueQueue queue(provider, settings);
 	ZoneFallbackDialogueRuntime::DelayedDialogueDelivery delivery;
 	ConfigurablePersistenceSink sink;
+	struct RestorePersistenceSink {
+		EQ::ZoneHarness::ActorEventRecorder& recorder;
+		EQ::ZoneHarness::ActorEventPersistenceSink* original;
+		~RestorePersistenceSink() { recorder.SetPersistenceSink(original); }
+	} restore_sink{recorder, original_sink};
 	recorder.SetPersistenceSink(&sink);
 	fixture.OwnerTargets(fixture.OwnedBot());
 	const auto enqueue = [&](const std::string& response) {
