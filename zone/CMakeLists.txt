@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 set(zone_sources
 	actor_action_executor.cpp
+	actor_helper.cpp
     aa.cpp
     aa_ability.cpp
     aggro.cpp
@@ -20,6 +21,7 @@ set(zone_sources
     botspellsai.cpp
     cheat_manager.cpp
     cli/cli_benchmark_databuckets.cpp
+    cli/cli_actor_helper.cpp
     cli/cli_sidecar_serve_http.cpp
     cli/tests/cli_actor_events.cpp
     cli/tests/cli_reserved_actor_owner.cpp

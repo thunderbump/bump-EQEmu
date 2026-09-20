@@ -33,6 +33,7 @@
 #include "zone/client.h"
 #include "zone/fallback_dialogue_runtime.h"
 #include "zone/actor_action_executor.h"
+#include "zone/actor_helper.h"
 #include "zone/harness/actor_event_persistence_sink.h"
 #include "zone/harness/actor_event_recorder.h"
 #include "zone/harness/owned_bot_actor_fixture.h"
@@ -50,7 +51,10 @@
 #include <filesystem>
 #include <fstream>
 #ifndef _WIN32
+#include <signal.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #endif
 #include <iostream>
@@ -83,6 +87,58 @@ template <typename T> void ExpectEqual(const T& actual, const T& expected, const
 		Fail(message);
 	}
 }
+
+class ScopedTestDirectory {
+public:
+	explicit ScopedTestDirectory(std::filesystem::path path) : path_(std::move(path)) {
+		std::filesystem::remove_all(path_);
+		std::filesystem::create_directories(path_);
+	}
+	~ScopedTestDirectory() { std::filesystem::remove_all(path_); }
+	const std::filesystem::path& Path() const { return path_; }
+private:
+	std::filesystem::path path_;
+};
+
+#ifndef _WIN32
+pid_t SpawnActorHelper(uint32_t actor_id, const std::filesystem::path& state_directory, uint32_t max_cycles = 200,
+					   uint32_t poll_ms = 20, bool enabled = true) {
+	const auto actor = std::to_string(actor_id);
+	const auto cycles = std::to_string(max_cycles);
+	const auto poll = std::to_string(poll_ms);
+	const auto zone_id = std::to_string(zone->GetZoneID());
+	const auto instance_id = std::to_string(zone->GetInstanceID());
+	const auto state = state_directory.string();
+	const auto child = fork();
+	if (child == 0) {
+		if (enabled) {
+			execl("/proc/self/exe", "zone", "actor-helper:run", "--enabled", "--actor-id", actor.c_str(),
+				  "--zone-id", zone_id.c_str(), "--instance-id", instance_id.c_str(), "--state-dir", state.c_str(),
+				  "--max-cycles", cycles.c_str(), "--poll-ms", poll.c_str(), "--exit-after-outcome",
+				  static_cast<char*>(nullptr));
+		} else {
+			execl("/proc/self/exe", "zone", "actor-helper:run", "--actor-id", actor.c_str(),
+				  "--state-dir", state.c_str(), static_cast<char*>(nullptr));
+		}
+		std::_Exit(127);
+	}
+	return child;
+}
+
+bool WaitForChild(pid_t child, std::chrono::milliseconds timeout, int* status = nullptr) {
+	const auto deadline = std::chrono::steady_clock::now() + timeout;
+	int local_status = 0;
+	while (std::chrono::steady_clock::now() < deadline) {
+		const auto result = waitpid(child, &local_status, WNOHANG);
+		if (result == child) {
+			if (status) *status = local_status;
+			return true;
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));
+	}
+	return false;
+}
+#endif
 
 uint32_t BuildRunNonce() {
 	const auto now = static_cast<uint64_t>(std::chrono::system_clock::now().time_since_epoch().count());
@@ -954,6 +1010,112 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 																	   });
 		Expect(status.actor_id == inserted_profile.actor_id, "actor status should persist for queue execution");
 
+#ifndef _WIN32
+		// Launch the production helper executable beside the harness zone. Kill it
+		// with its request pending, then restart it to prove durable idempotency and
+		// correlated outcome observation through the real zone executor.
+		ScopedTestDirectory helper_state(
+			std::filesystem::temp_directory_path() / fmt::format("eqemu-actor-helper-{}", run_nonce));
+		const auto helper_action_count = [&]() -> uint64_t {
+			auto rows = database.QueryDatabase(fmt::format(
+				"SELECT COUNT(*) FROM actor_action_queue WHERE actor_id = {} AND source = 'actor-helper'",
+				inserted_profile.actor_id));
+			Expect(rows.Success() && rows.RowCount() == 1 && rows.begin()[0],
+				   "helper action count should be readable");
+			return strtoull(rows.begin()[0], nullptr, 10);
+		};
+		const auto wait_for_helper_action = [&]() {
+			const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+			while (std::chrono::steady_clock::now() < deadline) {
+				if (helper_action_count() == 1) return true;
+				std::this_thread::sleep_for(std::chrono::milliseconds(20));
+			}
+			return false;
+		};
+		const auto disabled_helper = SpawnActorHelper(inserted_profile.actor_id, helper_state.Path(), 1, 10, false);
+		int disabled_status = 0;
+		Expect(disabled_helper > 0 && WaitForChild(disabled_helper, std::chrono::seconds(10), &disabled_status) &&
+			   WIFEXITED(disabled_status) && WEXITSTATUS(disabled_status) == 0,
+			   "helper should remain disabled unless explicitly enabled");
+		ExpectEqual(helper_action_count(), uint64_t(0), "disabled helper must not enqueue work");
+
+		const auto first_helper = SpawnActorHelper(inserted_profile.actor_id, helper_state.Path());
+		Expect(first_helper > 0, "real actor helper should launch");
+		Expect(wait_for_helper_action(), "helper should discover the fresh actor and queue one bounded action");
+		kill(first_helper, SIGTERM);
+		int first_status = 0;
+		Expect(WaitForChild(first_helper, std::chrono::seconds(2), &first_status),
+			   "killed helper should terminate within the scenario deadline");
+		ExpectEqual(helper_action_count(), uint64_t(1), "pending helper work should survive process restart");
+
+		const auto restarted_helper = SpawnActorHelper(inserted_profile.actor_id, helper_state.Path());
+		Expect(restarted_helper > 0, "actor helper should restart with work pending");
+		ActorActionExecutor helper_executor(database, zone->GetZoneID(), zone->GetInstanceID(), zone->GetZoneServerId());
+		helper_executor.ProcessOne();
+		int restarted_status = 0;
+		Expect(WaitForChild(restarted_helper, std::chrono::seconds(10), &restarted_status),
+			   "restarted helper should observe the correlated zone outcome");
+		Expect(WIFEXITED(restarted_status) && WEXITSTATUS(restarted_status) == 0,
+			   "restarted helper should exit successfully after observing the outcome");
+		ExpectEqual(helper_action_count(), uint64_t(1), "restart must not duplicate the queued action or its effect");
+		auto helper_action = database.QueryDatabase(fmt::format(
+			"SELECT action_id, state FROM actor_action_queue WHERE actor_id = {} AND source = 'actor-helper'",
+			inserted_profile.actor_id));
+		Expect(helper_action.Success() && helper_action.RowCount() == 1 && helper_action.begin()[0] &&
+			   helper_action.begin()[1] && std::string(helper_action.begin()[1]) == "completed",
+			   "zone executor should complete the helper's production action");
+		Expect(ActorEventsRepository::HasActionOutcome(database, inserted_profile.actor_id,
+			strtoull(helper_action.begin()[0], nullptr, 10)),
+			"helper action should have one correlated zone outcome");
+
+		const auto idle_started = std::chrono::steady_clock::now();
+		const auto idle_helper = SpawnActorHelper(inserted_profile.actor_id, helper_state.Path(), 2, 50);
+		int idle_status = 0;
+		Expect(WaitForChild(idle_helper, std::chrono::seconds(10), &idle_status),
+			   "no-work helper should stop at its configured cycle bound");
+		Expect(std::chrono::steady_clock::now() - idle_started >= std::chrono::milliseconds(50),
+			   "no-work helper cycles should back off instead of spinning");
+		ExpectEqual(helper_action_count(), uint64_t(1), "no-work polling must not queue a duplicate action");
+
+		// Exercise bounded cursor catch-up and retained-event loss recovery without
+		// manufacturing a gameplay success; the helper only submits through the queue.
+		for (int index = 0; index < 3; ++index) {
+			Expect(ActorEventsRepository::AppendEvent(database, {
+				.actor_id = inserted_profile.actor_id,
+				.event_type = "test_gameplay_delta",
+				.event_json = fmt::format("{{\"sequence\":{}}}", index),
+				.created_at = now,
+			}).event_id != 0, "cursor-gap fixture event should persist");
+		}
+		ActorHelper bounded_helper(database, {.state_directory = helper_state.Path(),
+			.actor_id = inserted_profile.actor_id, .zone_id = zone->GetZoneID(),
+			.instance_id = zone->GetInstanceID(), .event_limit = 2});
+		const auto gap = bounded_helper.RunCycle(now);
+		ExpectEqual(gap.cursor_gaps, size_t(1), "helper should report and boundedly catch up a cursor gap");
+		ExpectEqual(gap.enqueued, size_t(0), "helper must not decide from a partial cursor page");
+		auto cursor_input = std::ifstream(helper_state.Path() / (std::to_string(inserted_profile.actor_id) + ".cursor"));
+		uint64_t gap_cursor = 0;
+		cursor_input >> gap_cursor;
+		Expect(gap_cursor != 0, "cursor-gap catch-up should durably advance its cursor");
+		Expect(database.QueryDatabase(fmt::format(
+			"DELETE FROM actor_events WHERE actor_id = {} AND event_id = {}", inserted_profile.actor_id, gap_cursor)).Success(),
+			"retained-event-loss fixture should remove the saved cursor event");
+		const auto retained_loss = bounded_helper.RunCycle(now);
+		ExpectEqual(retained_loss.retained_event_losses, size_t(1),
+			"helper should explicitly resynchronize when its retained cursor event is lost");
+		Expect(database.QueryDatabase(fmt::format(
+			"DELETE FROM actor_events WHERE actor_id = {} AND event_type = 'test_gameplay_delta'",
+			inserted_profile.actor_id)).Success(), "cursor fixture events should clean up before queue assertions");
+		Expect(database.QueryDatabase(fmt::format(
+			"DELETE FROM actor_events WHERE actor_id = {} AND event_type IN ('action_completed','action_rejected') "
+			"AND JSON_UNQUOTE(JSON_EXTRACT(event_json, '$.action_id')) = '{}'",
+			inserted_profile.actor_id, helper_action.begin()[0])).Success(),
+			"helper outcome fixture should clean up before executor assertions");
+		Expect(database.QueryDatabase(fmt::format(
+			"DELETE FROM actor_action_queue WHERE actor_id = {} AND source = 'actor-helper'",
+			inserted_profile.actor_id)).Success(), "helper queue fixture should clean up before executor assertions");
+#endif
+
 		const auto enqueue = [&](const std::string& type, const Json::Value& body, const std::string& key,
 								 std::optional<time_t> expires_at = std::nullopt) {
 			Json::StreamWriterBuilder writer;
@@ -1039,6 +1201,18 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 		const auto disabled_actor = enqueue_ineligible(disabled_bot, false, zone->GetZoneID(), "disabled-actor", now);
 		const auto stale_actor = enqueue_ineligible(stale_bot, true, zone->GetZoneID(), "stale-actor", now - 31);
 		const auto moved_actor = enqueue_ineligible(moved_bot, true, zone->GetZoneID() + 1, "moved-actor", now);
+		ScopedTestDirectory ineligible_helper_state(
+			std::filesystem::temp_directory_path() / fmt::format("eqemu-actor-helper-ineligible-{}", run_nonce));
+		for (const auto actor_id : {disabled_actor.actor_id, stale_actor.actor_id, moved_actor.actor_id}) {
+			ActorHelper ineligible_helper(database, {
+				.state_directory = ineligible_helper_state.Path(), .actor_id = actor_id,
+				.zone_id = zone->GetZoneID(), .instance_id = zone->GetInstanceID()});
+			const auto ineligible = ineligible_helper.RunCycle(now);
+			ExpectEqual(ineligible.discovered, size_t(0),
+				"helper discovery must skip disabled, stale, and moved actors");
+			ExpectEqual(ineligible.enqueued, size_t(0),
+				"ineligible actor discovery must not submit helper work");
+		}
 		ActorProfilesRepository::ActorProfileRecord stale_profile{};
 		stale_profile.actor_type = "autonomous_actor";
 		stale_profile.actor_substrate = "bot";
