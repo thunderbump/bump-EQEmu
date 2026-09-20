@@ -618,7 +618,7 @@ void ExpectShutdownRetainsRecoverablePayloads() {
 			gate->entered.set_value();
 			gate->released.wait_for(5s);
 			gate->finished.set_value();
-			return false;
+			return true; // A late success must not invalidate the uncertain recovery receipt.
 		});
 		Expect(sink.Enqueue({.bot_id = 42, .channel = "say", .text = "in-flight payload"}) ==
 			EQ::ZoneHarness::ActorEventCaptureResult::Accepted, "shutdown probe must admit first payload");
@@ -676,21 +676,24 @@ void ExpectPersistenceConnectionIsolated(
 	auto zone_id_result = database.QueryDatabase("SELECT CONNECTION_ID()");
 	Expect(zone_id_result.Success() && zone_id_result.RowCount() == 1, "zone connection must be available");
 	const auto zone_connection_id = std::stoull(zone_id_result.begin()[0]);
-	std::promise<uint64_t> connection_id;
-	auto connection_future = connection_id.get_future();
-	std::atomic<bool> first{true};
-	std::atomic<bool> slow_query_failed{false};
-	Sink sink(1, 1024, [&](const auto& event) {
-		if (first.exchange(false)) {
+	struct Probe {
+		std::promise<uint64_t> connection_id;
+		std::atomic<bool> first{true};
+		std::atomic<bool> slow_query_failed{false};
+	};
+	auto probe = std::make_shared<Probe>();
+	auto connection_future = probe->connection_id.get_future();
+	Sink sink(1, 1024, [probe](const auto& event) {
+		if (probe->first.exchange(false)) {
 			auto* connection = Sink::RepositoryConnection();
 			if (!connection) {
-				connection_id.set_value(0);
+				probe->connection_id.set_value(0);
 				return false;
 			}
 			auto id = connection->QueryDatabase("SELECT CONNECTION_ID()");
-			connection_id.set_value(id.Success() && id.RowCount() == 1 ? std::stoull(id.begin()[0]) : 0);
+			probe->connection_id.set_value(id.Success() && id.RowCount() == 1 ? std::stoull(id.begin()[0]) : 0);
 			// A five-second server wait must hit the dedicated client's read deadline.
-			slow_query_failed = !connection->QueryDatabase(std::string("SELECT SLEEP(5)"), false).Success();
+			probe->slow_query_failed = !connection->QueryDatabase(std::string("SELECT SLEEP(5)"), false).Success();
 		}
 		return Sink::PersistToRepository(event);
 	});
@@ -714,7 +717,7 @@ void ExpectPersistenceConnectionIsolated(
 	Expect(database.QueryDatabase("SELECT 1").Success(), "zone query must succeed during persistence I/O");
 	Expect(std::chrono::steady_clock::now() - started < 500ms, "slow persistence must not hold the zone query mutex");
 	Expect(sink.FlushFor(4s), "persistence must reconnect and recover after its read deadline");
-	Expect(slow_query_failed, "slow query must time out rather than waiting its full server duration");
+	Expect(probe->slow_query_failed, "slow query must time out rather than waiting its full server duration");
 	const auto rows = ActorEventsRepository::ReadCursor(database, profile.actor_id, 0, 32);
 	ExpectEqual(rows.size(), size_t(1), "isolated worker must persist exactly one event");
 	ExpectEqual(ParseJson(rows[0].event_json)["text"].asString(), marker, "isolated persistence must preserve payload");
@@ -733,19 +736,22 @@ void ExpectProfileChangesRetainAcceptedEvidence(
 
 	for (const bool retry : {false, true}) {
 		for (const bool deleted : {false, true}) {
-			std::promise<void> reached;
-			auto reached_future = reached.get_future();
-			std::promise<void> release;
-			auto release_future = release.get_future().share();
-			std::atomic<unsigned> attempts{0};
-			Sink sink(1, 1024, [&](const auto& event) {
-				const auto attempt = attempts.fetch_add(1);
+			struct LookupGate {
+				std::promise<void> reached;
+				std::promise<void> release;
+				std::shared_future<void> released = release.get_future().share();
+				std::atomic<unsigned> attempts{0};
+			};
+			auto gate = std::make_shared<LookupGate>();
+			auto reached_future = gate->reached.get_future();
+			Sink sink(1, 1024, [gate, retry](const auto& event) {
+				const auto attempt = gate->attempts.fetch_add(1);
 				if (retry && attempt == 0) {
 					return false;
 				}
 				if (attempt == (retry ? 1u : 0u)) {
-					reached.set_value();
-					if (release_future.wait_for(2s) != std::future_status::ready) {
+					gate->reached.set_value();
+					if (gate->released.wait_for(2s) != std::future_status::ready) {
 						return false;
 					}
 				}
@@ -765,7 +771,7 @@ void ExpectProfileChangesRetainAcceptedEvidence(
 				? fmt::format("DELETE FROM actor_profiles WHERE actor_id = {}", profile.actor_id)
 				: fmt::format("UPDATE actor_profiles SET enabled = 0 WHERE actor_id = {}", profile.actor_id));
 			Expect(changed.Success(), "profile lifecycle mutation must succeed");
-			release.set_value();
+			gate->release.set_value();
 			Expect(!sink.FlushFor(100ms), "missing/disabled profile must not acknowledge accepted evidence");
 			const auto retained = sink.GetMetrics();
 			ExpectEqual(retained.queue_records, uint64_t(1), "accepted payload must remain queued");
