@@ -589,7 +589,7 @@ void ExpectPersistenceConnectionIsolated(
 ) {
 	using namespace std::chrono_literals;
 	using Sink = EQ::ZoneHarness::ActorEventRepositoryPersistenceSink;
-	const auto zone_id_result = database.QueryDatabase("SELECT CONNECTION_ID()");
+	auto zone_id_result = database.QueryDatabase("SELECT CONNECTION_ID()");
 	Expect(zone_id_result.Success() && zone_id_result.RowCount() == 1, "zone connection must be available");
 	const auto zone_connection_id = std::stoull(zone_id_result.begin()[0]);
 	std::promise<uint64_t> connection_id;
@@ -603,7 +603,7 @@ void ExpectPersistenceConnectionIsolated(
 				connection_id.set_value(0);
 				return false;
 			}
-			const auto id = connection->QueryDatabase("SELECT CONNECTION_ID()");
+			auto id = connection->QueryDatabase("SELECT CONNECTION_ID()");
 			connection_id.set_value(id.Success() && id.RowCount() == 1 ? std::stoull(id.begin()[0]) : 0);
 			// A five-second server wait must hit the dedicated client's read deadline.
 			slow_query_failed = !connection->QueryDatabase(std::string("SELECT SLEEP(5)"), false).Success();
@@ -619,7 +619,7 @@ void ExpectPersistenceConnectionIsolated(
 	bool observed_sleep = false;
 	const auto observation_deadline = std::chrono::steady_clock::now() + 2s;
 	while (!observed_sleep && std::chrono::steady_clock::now() < observation_deadline) {
-		const auto active = database.QueryDatabase(fmt::format(
+		auto active = database.QueryDatabase(fmt::format(
 			"SELECT COUNT(*) FROM information_schema.PROCESSLIST WHERE ID = {} AND INFO LIKE 'SELECT SLEEP%'", worker_id));
 		Expect(active.Success() && active.RowCount() == 1, "zone must inspect worker activity independently");
 		observed_sleep = std::stoull(active.begin()[0]) == 1;
