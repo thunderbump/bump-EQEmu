@@ -282,7 +282,7 @@ void ActorEventRecorder::ObserveTargetChanged(Mob *actor, Mob *previous_target, 
 	}
 }
 
-void ActorEventRecorder::ObserveSpeechEmitted(
+ActorEventCaptureResult ActorEventRecorder::ObserveSpeechEmitted(
 	Mob *actor,
 	const std::string &channel,
 	const std::string &text,
@@ -291,8 +291,9 @@ void ActorEventRecorder::ObserveSpeechEmitted(
 {
 	auto recorder_lease = AcquireActiveRecorderCallbackLease();
 	if (auto *recorder = recorder_lease.Get()) {
-		recorder->RecordSpeechEmitted(actor, channel, text, audible_radius);
+		return recorder->RecordSpeechEmitted(actor, channel, text, audible_radius);
 	}
+	return ActorEventCaptureResult::NotRequired;
 }
 
 void ActorEventRecorder::SetPersistenceSink(ActorEventPersistenceSink *sink)
@@ -341,7 +342,7 @@ void ActorEventRecorder::RecordTargetChanged(Mob *actor, Mob *previous_target, M
 	}
 }
 
-void ActorEventRecorder::RecordSpeechEmitted(
+ActorEventCaptureResult ActorEventRecorder::RecordSpeechEmitted(
 	Mob *actor,
 	const std::string &channel,
 	const std::string &text,
@@ -364,16 +365,22 @@ void ActorEventRecorder::RecordSpeechEmitted(
 	{
 		std::lock_guard lock(state_mutex);
 		event.id = next_sequence++;
+		sink = persistence_sink;
+	}
+
+	const auto capture_result = sink ? sink->PersistSpeechEmitted(actor, event) : ActorEventCaptureResult::NotRequired;
+	if (capture_result == ActorEventCaptureResult::Saturated || capture_result == ActorEventCaptureResult::Stopped) {
+		return capture_result;
+	}
+
+	{
+		std::lock_guard lock(state_mutex);
 		events.push_back(event);
 		if (events.size() > max_events) {
 			events.erase(events.begin(), events.begin() + static_cast<std::ptrdiff_t>(events.size() - max_events));
 		}
-		sink = persistence_sink;
 	}
-
-	if (sink) {
-		sink->PersistSpeechEmitted(actor, event);
-	}
+	return capture_result;
 }
 
 void ActorEventRecorder::RecordSpellCastStarted(

@@ -20,14 +20,18 @@
 
 #include "common/actor_reserved_owners.h"
 #include "common/eqemu_logsys.h"
+#include "common/eqemu_config.h"
 #include "common/json/json.h"
 #include "common/repositories/actor_action_queue_repository.h"
 #include "common/repositories/actor_events_repository.h"
 #include "common/repositories/actor_profiles_repository.h"
 #include "common/repositories/actor_status_repository.h"
 #include "common/repositories/player_event_logs_repository.h"
+#include "common/rulesys.h"
 #include "common/strings.h"
 #include "zone/bot.h"
+#include "zone/client.h"
+#include "zone/fallback_dialogue_runtime.h"
 #include "zone/actor_action_executor.h"
 #include "zone/harness/actor_event_persistence_sink.h"
 #include "zone/harness/actor_event_recorder.h"
@@ -36,14 +40,22 @@
 #include "zone/zonedb.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
 #include <future>
+#include <filesystem>
+#include <fstream>
+#ifndef _WIN32
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -163,15 +175,53 @@ private:
 	std::vector<uint32_t> actor_ids_;
 };
 
+class ConfigurablePersistenceSink final : public EQ::ZoneHarness::ActorEventPersistenceSink {
+public:
+	EQ::ZoneHarness::ActorEventCaptureResult PersistSpeechEmitted(
+		Mob*,
+		const EQ::ZoneHarness::ActorEvent& event
+	) override {
+		attempted_texts.push_back(event.speech.text);
+		return result;
+	}
+
+	EQ::ZoneHarness::ActorEventCaptureResult result =
+		EQ::ZoneHarness::ActorEventCaptureResult::Saturated;
+	std::vector<std::string> attempted_texts;
+};
+
+class ScopedRuleOverride {
+public:
+	ScopedRuleOverride(const std::string& name, const std::string& value) : name_(name) {
+		if (RuleManager::Instance()->GetRule(name_, original_)) {
+			changed_ = RuleManager::Instance()->SetRule(name_, value, nullptr, false, false);
+		}
+	}
+
+	~ScopedRuleOverride() {
+		if (changed_) {
+			RuleManager::Instance()->SetRule(name_, original_, nullptr, false, false);
+		}
+	}
+
+	bool Changed() const { return changed_; }
+
+private:
+	std::string name_;
+	std::string original_;
+	bool changed_ = false;
+};
+
 class BlockingPersistenceSink final : public EQ::ZoneHarness::ActorEventPersistenceSink {
 public:
-	void PersistSpeechEmitted(Mob*, const EQ::ZoneHarness::ActorEvent&) override {
+	EQ::ZoneHarness::ActorEventCaptureResult PersistSpeechEmitted(Mob*, const EQ::ZoneHarness::ActorEvent&) override {
 		std::unique_lock lock(mutex_);
 		persist_started_ = true;
 		persist_started_cv_.notify_all();
 		release_persist_cv_.wait(lock, [this]() { return allow_persist_to_finish_; });
 		persist_finished_ = true;
 		persist_finished_cv_.notify_all();
+		return EQ::ZoneHarness::ActorEventCaptureResult::Accepted;
 	}
 
 	bool WaitUntilPersistStarted(std::chrono::milliseconds timeout) {
@@ -272,6 +322,512 @@ void ExpectRecorderShutdownWaitsForInFlightCallbacks() {
 				"blocked speech callback should still record one actor event before teardown completes");
 }
 
+void ExpectSpeechDefersAndRetriesThroughProductionPath(
+	Bot* actor,
+	EQ::ZoneHarness::ActorEventRecorder& recorder,
+	EQ::ZoneHarness::ActorEventPersistenceSink* original_sink
+) {
+	using EQ::ZoneHarness::ActorEventCaptureResult;
+
+	ConfigurablePersistenceSink controlled_sink;
+	recorder.SetPersistenceSink(&controlled_sink);
+	ScopedRuleOverride saylink_rule("Chat:AutoInjectSaylinksToSay", "false");
+
+	{
+		ScopedRuleOverride dialogue_rule("Chat:QuestDialogueUsesDialogueWindow", "false");
+		const auto cursor = recorder.MaxEventID();
+		Expect(!actor->Say("%s", "deferred-normal-speech"),
+			   "normal speech should report evidence saturation to its queued caller");
+		Expect(recorder.Since(cursor, 4).empty(),
+			   "saturated normal speech must not be recorded as emitted");
+
+		controlled_sink.result = ActorEventCaptureResult::Accepted;
+		Expect(actor->Say("%s", "deferred-normal-speech"),
+			   "normal speech should succeed when evidence capacity recovers");
+		const auto recovered = recorder.Since(cursor, 4);
+		ExpectEqual(recovered.size(), static_cast<size_t>(1),
+					"retried normal speech should produce exactly one emitted event");
+	}
+
+	{
+		ScopedRuleOverride dialogue_rule("Chat:QuestDialogueUsesDialogueWindow", "true");
+		controlled_sink.result = ActorEventCaptureResult::Saturated;
+		const auto cursor = recorder.MaxEventID();
+		Expect(!actor->Say("%s", "deferred-dialogue-window-speech"),
+			   "dialogue-window speech should defer before rendering when evidence is saturated");
+		Expect(recorder.Since(cursor, 4).empty(),
+			   "saturated dialogue-window speech must not bypass required evidence");
+
+		controlled_sink.result = ActorEventCaptureResult::Accepted;
+		Expect(actor->Say("%s", "deferred-dialogue-window-speech"),
+			   "dialogue-window speech should retry after evidence capacity recovers");
+		const auto recovered = recorder.Since(cursor, 4);
+		ExpectEqual(recovered.size(), static_cast<size_t>(1),
+					"retried dialogue-window speech should produce exactly one emitted event");
+		ExpectEqual(recovered[0].speech.text, std::string("deferred-dialogue-window-speech"),
+					"dialogue-window evidence should preserve the rendered speech text");
+	}
+
+	{
+		controlled_sink.result = ActorEventCaptureResult::Saturated;
+		const auto cursor = recorder.MaxEventID();
+		Expect(!actor->Emote("%s", "deferred-emote"),
+			   "emotes should report evidence saturation before emission");
+		Expect(recorder.Since(cursor, 4).empty(), "saturated emotes must not be recorded as emitted");
+
+		controlled_sink.result = ActorEventCaptureResult::Accepted;
+		Expect(actor->Emote("%s", "deferred-emote"), "emotes should retry after evidence capacity recovers");
+		const auto recovered = recorder.Since(cursor, 4);
+		ExpectEqual(recovered.size(), static_cast<size_t>(1),
+					"retried emotes should produce exactly one emitted event");
+		ExpectEqual(recovered[0].speech.channel, std::string("emote"),
+					"retried emote evidence should preserve its channel");
+	}
+
+	ExpectEqual(controlled_sink.attempted_texts.size(), static_cast<size_t>(6),
+				"speech and emote paths should capture before each deferred or emitted action");
+	recorder.Drain();
+	recorder.SetPersistenceSink(original_sink);
+}
+
+void ExpectBoundedPersistenceOverloadAndRecovery() {
+	using namespace std::chrono_literals;
+	using EQ::ZoneHarness::ActorEventCaptureResult;
+	using PersistenceSink = EQ::ZoneHarness::ActorEventRepositoryPersistenceSink;
+
+	const auto pending = [](uint32_t sequence) {
+		return PersistenceSink::PendingSpeechEvent{
+			.bot_id = sequence,
+			.entity_id = sequence,
+			.zone_id = 2,
+			.instance_id = 0,
+			.channel = "say",
+			.text = fmt::format("bounded-event-{}", sequence),
+			.audible_radius = 200,
+		};
+	};
+
+	std::mutex slow_mutex;
+	std::condition_variable slow_started_cv;
+	std::condition_variable slow_release_cv;
+	bool slow_started = false;
+	bool slow_released = false;
+	std::vector<uint32_t> persisted_order;
+	PersistenceSink burst_sink(3, 512, [&](const PersistenceSink::PendingSpeechEvent& event) {
+		std::unique_lock lock(slow_mutex);
+		if (!slow_started) {
+			slow_started = true;
+			slow_started_cv.notify_all();
+			if (!slow_release_cv.wait_for(lock, 1s, [&]() { return slow_released; })) {
+				return false;
+			}
+		}
+		persisted_order.push_back(event.bot_id);
+		return true;
+	});
+
+	const auto capture_started = std::chrono::steady_clock::now();
+	ExpectEqual(burst_sink.Enqueue(pending(1)), ActorEventCaptureResult::Accepted,
+				"normal evidence capture should enter the bounded queue");
+	const auto capture_elapsed = std::chrono::steady_clock::now() - capture_started;
+	{
+		std::unique_lock lock(slow_mutex);
+		Expect(slow_started_cv.wait_for(lock, 1s, [&]() { return slow_started; }),
+			   "slow persistence probe should begin flushing");
+	}
+	ExpectEqual(burst_sink.Enqueue(pending(2)), ActorEventCaptureResult::Accepted,
+				"burst evidence should use remaining bounded capacity");
+	ExpectEqual(burst_sink.Enqueue(pending(3)), ActorEventCaptureResult::Accepted,
+				"burst evidence should fill the bounded capacity");
+	ExpectEqual(burst_sink.Enqueue(pending(4)), ActorEventCaptureResult::Saturated,
+				"saturation must visibly defer new consequential evidence instead of evicting required proof");
+	const auto saturated = burst_sink.GetMetrics();
+	ExpectEqual(saturated.queue_records, uint64_t(3), "slow persistence must retain at most the configured records");
+	Expect(saturated.queue_bytes <= 512, "slow persistence must retain at most the configured bytes");
+	ExpectEqual(saturated.saturated_records, uint64_t(1), "overload should be counted explicitly");
+	Expect(capture_elapsed < 100ms, "capture should not wait for slow persistence on the zone-facing path");
+	{
+		std::lock_guard lock(slow_mutex);
+		slow_released = true;
+		slow_release_cv.notify_all();
+	}
+	Expect(burst_sink.FlushFor(1s), "slow persistence should drain after it recovers");
+	const auto burst_complete = burst_sink.GetMetrics();
+	ExpectEqual(persisted_order, std::vector<uint32_t>({1, 2, 3}),
+				"recovery should flush retained required evidence in capture order");
+
+	std::atomic<bool> persistence_available{false};
+	PersistenceSink unavailable_sink(
+		2, 512, [&](const PersistenceSink::PendingSpeechEvent&) { return persistence_available.load(); });
+	ExpectEqual(unavailable_sink.Enqueue(pending(10)), ActorEventCaptureResult::Accepted,
+				"unavailable persistence should retain the first event");
+	ExpectEqual(unavailable_sink.Enqueue(pending(11)), ActorEventCaptureResult::Accepted,
+				"unavailable persistence should retain bounded recovery work");
+	std::this_thread::sleep_for(75ms);
+	ExpectEqual(unavailable_sink.Enqueue(pending(12)), ActorEventCaptureResult::Saturated,
+				"unavailable persistence should reject rather than grow without bound");
+	Expect(!unavailable_sink.FlushFor(75ms), "unavailable persistence must not claim a successful flush");
+	const auto unavailable = unavailable_sink.GetMetrics();
+	Expect(unavailable.persistence_failures > 0, "persistence failures should be counted");
+	ExpectEqual(unavailable.queue_records, uint64_t(2), "failed writes should remain queued for recovery");
+	Expect(unavailable.queue_bytes <= 512, "failed writes should remain within the byte bound");
+	persistence_available.store(true);
+	Expect(unavailable_sink.FlushFor(1s), "retained evidence should flush after persistence recovery");
+	const auto recovered = unavailable_sink.GetMetrics();
+	ExpectEqual(recovered.persisted_records, uint64_t(2), "recovery should retain and persist both accepted events");
+	ExpectEqual(recovered.queue_records, uint64_t(0), "recovery should empty the queue");
+
+	std::cout << "[METRIC] actor-evidence attempted_records="
+			  << burst_complete.attempted_records + recovered.attempted_records
+			  << " attempted_bytes=" << burst_complete.attempted_bytes + recovered.attempted_bytes
+			  << " accepted_records=" << burst_complete.accepted_records + recovered.accepted_records
+			  << " persisted_records=" << burst_complete.persisted_records + recovered.persisted_records
+			  << " queue_high_water_records="
+			  << std::max(burst_complete.queue_high_water_records, recovered.queue_high_water_records)
+			  << " queue_high_water_bytes="
+			  << std::max(burst_complete.queue_high_water_bytes, recovered.queue_high_water_bytes)
+			  << " saturation=" << burst_complete.saturated_records + recovered.saturated_records
+			  << " failures=" << burst_complete.persistence_failures + recovered.persistence_failures
+			  << " capture_ns=" << burst_complete.capture_nanoseconds + recovered.capture_nanoseconds
+			  << " flush_ns=" << burst_complete.flush_nanoseconds + recovered.flush_nanoseconds << "\n";
+}
+
+
+// Use the normal delayed-reply processor and Mob emission paths, with only
+// provider completion and evidence capacity controlled by the scenario.
+void ExpectFallbackRepliesRetryInOrder(
+	EQ::ZoneHarness::OwnedBotActorFixture& fixture,
+	EQ::ZoneHarness::ActorEventRecorder& recorder,
+	EQ::ZoneHarness::ActorEventPersistenceSink* original_sink
+) {
+	using EQ::ZoneHarness::ActorEventCaptureResult;
+	FallbackDialogue::ResetDialogueCooldowns();
+	FallbackDialogue::TestDelayedDialogueProvider provider;
+	FallbackDialogue::FallbackDialogueSettings settings;
+	settings.immediate.enabled = true;
+	settings.immediate.cooldown_seconds = 0;
+	settings.current_interaction.imported_game_rule_say_range = RuleI(Range, Say);
+	FallbackDialogue::DelayedDialogueQueue queue(provider, settings);
+	ZoneFallbackDialogueRuntime::DelayedDialogueDelivery delivery;
+	ConfigurablePersistenceSink sink;
+	struct RestorePersistenceSink {
+		EQ::ZoneHarness::ActorEventRecorder& recorder;
+		EQ::ZoneHarness::ActorEventPersistenceSink* original;
+		~RestorePersistenceSink() { recorder.SetPersistenceSink(original); }
+	} restore_sink{recorder, original_sink};
+	recorder.SetPersistenceSink(&sink);
+	fixture.OwnerTargets(fixture.OwnedBot());
+	const auto enqueue = [&](const std::string& response) {
+		const auto queued = queue.HandleTargetedSay({
+			.speaker_id = fixture.Owner()->GetID(),
+			.target_id = fixture.OwnedBot()->GetID(),
+			.message = "hello",
+			.target_type = FallbackDialogue::TargetType::Bot,
+		}, {
+			.current_message = "hello",
+			.speaker = {.name = fixture.Owner()->GetCleanName()},
+			.target = {.name = fixture.OwnedBot()->GetCleanName()},
+		});
+		Expect(queued.handled, "fallback probe must queue an eligible interaction");
+		Expect(provider.CompleteNextSuccess(response), "fallback provider must complete the queued request");
+	};
+
+	for (const auto& response : {std::string("First reply."), std::string("*nods quietly*")}) {
+		recorder.Drain();
+		sink.attempted_texts.clear();
+		sink.result = ActorEventCaptureResult::Saturated;
+		enqueue(response);
+		enqueue("Later reply.");
+		delivery.Process(queue);
+		delivery.Process(queue);
+		ExpectEqual(sink.attempted_texts.size(), size_t(2), "each blocked tick must attempt only the retained reply");
+		ExpectEqual(sink.attempted_texts[0], sink.attempted_texts[1], "retry must keep the same reply ahead of later replies");
+		Expect(recorder.Since(0, 8).empty(), "deferred fallback must not be recorded as emitted");
+		sink.result = ActorEventCaptureResult::Accepted;
+		delivery.Process(queue);
+		delivery.Process(queue);
+		const auto events = recorder.Since(0, 8);
+		ExpectEqual(events.size(), size_t(2), "recovery must deliver both replies exactly once");
+		ExpectEqual(events[0].speech.text, sink.attempted_texts[0], "recovered reply must retain its text and order");
+		ExpectEqual(events[1].speech.text, std::string("Later reply."), "later reply must follow the deferred reply");
+	}
+
+	recorder.Drain();
+	sink.result = ActorEventCaptureResult::Saturated;
+	enqueue("Stale reply.");
+	delivery.Process(queue);
+	fixture.OwnerTargets(nullptr);
+	recorder.Drain(); // Exclude the setup target-change event from delivery observations.
+	sink.result = ActorEventCaptureResult::Accepted;
+	delivery.Process(queue);
+	Expect(recorder.Since(0, 8).empty(), "a deferred reply must be discarded if the speaker changes target");
+	fixture.OwnerTargets(fixture.OwnedBot());
+	recorder.Drain();
+	delivery.Process(queue);
+	Expect(recorder.Since(0, 8).empty(), "discarded stale replies must not reappear");
+
+	sink.result = ActorEventCaptureResult::Saturated;
+	enqueue("Out of range reply.");
+	delivery.Process(queue);
+	sink.result = ActorEventCaptureResult::Accepted;
+	{
+		ScopedRuleOverride range("Range:Say", "1");
+		Expect(range.Changed(), "range override must apply for the stale delivery probe");
+		delivery.Process(queue);
+	}
+	delivery.Process(queue);
+	Expect(recorder.Since(0, 8).empty(), "out-of-range replies must not reappear after range recovers");
+
+	for (size_t i = 0; i < 10; ++i) {
+		enqueue("Bounded reply.");
+	}
+	delivery.Process(queue);
+	ExpectEqual(recorder.Since(0, 32).size(), size_t(8), "a tick must deliver at most eight ready replies");
+	delivery.Process(queue);
+	ExpectEqual(recorder.Since(0, 32).size(), size_t(10), "later ticks must deliver the remaining replies");
+	recorder.Drain();
+	recorder.SetPersistenceSink(original_sink);
+	FallbackDialogue::ResetDialogueCooldowns();
+}
+
+// A non-cooperative persistence operation must not own the sink's lifetime.
+void ExpectShutdownRetainsRecoverablePayloads() {
+#ifndef _WIN32
+	using namespace std::chrono_literals;
+	using Sink = EQ::ZoneHarness::ActorEventRepositoryPersistenceSink;
+	std::string pattern = (std::filesystem::temp_directory_path() / "actor-recovery-test-XXXXXX").string();
+	std::vector<char> name(pattern.begin(), pattern.end());
+	name.push_back(0);
+	Expect(mkdtemp(name.data()) != nullptr, "recovery test must create a private directory");
+	const std::filesystem::path directory(name.data());
+	struct CleanupDirectory {
+		std::filesystem::path path;
+		~CleanupDirectory() { std::error_code error; std::filesystem::remove_all(path, error); }
+	} cleanup{directory};
+	struct Gate {
+		std::promise<void> entered;
+		std::promise<void> release;
+		std::shared_future<void> released = release.get_future().share();
+		std::promise<void> finished;
+	};
+	auto gate = std::make_shared<Gate>();
+	auto entered = gate->entered.get_future();
+	auto finished = gate->finished.get_future();
+	Sink::ShutdownResult result;
+	{
+		Sink sink(2, 1024, [gate](const auto&) {
+			gate->entered.set_value();
+			gate->released.wait_for(5s);
+			gate->finished.set_value();
+			return true; // A late success must not invalidate the uncertain recovery receipt.
+		});
+		Expect(sink.Enqueue({.bot_id = 42, .channel = "say", .text = "in-flight payload"}) ==
+			EQ::ZoneHarness::ActorEventCaptureResult::Accepted, "shutdown probe must admit first payload");
+		Expect(entered.wait_for(2s) == std::future_status::ready, "shutdown probe must block inside persistence");
+		Expect(sink.Enqueue({.bot_id = 43, .channel = "emote", .text = "queued payload"}) ==
+			EQ::ZoneHarness::ActorEventCaptureResult::Accepted, "shutdown probe must admit queued payload");
+		const auto started = std::chrono::steady_clock::now();
+		result = sink.ShutdownFor(50ms, directory.string());
+		Expect(std::chrono::steady_clock::now() - started < 500ms, "shutdown must not wait for the blocked callback");
+		Expect(!result.drained && !result.worker_stopped, "shutdown must report incomplete persistence");
+		Expect(result.in_flight_outcome_unknown, "in-flight write must be marked uncertain");
+		ExpectEqual(result.retained_records, size_t(2), "shutdown must retain both accepted records");
+		Expect(result.error.empty() && !result.recovery_path.empty(), "shutdown must publish a recovery path");
+		Expect(sink.Enqueue({.text = "late"}) == EQ::ZoneHarness::ActorEventCaptureResult::Stopped,
+			"shutdown must stop admission");
+		ExpectEqual(sink.ShutdownFor(1ms, directory.string()).recovery_path, result.recovery_path,
+			"repeated shutdown must return the same recovery file");
+	}
+	std::ifstream input(result.recovery_path);
+	const std::string saved((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+	const auto document = ParseJson(saved);
+	ExpectEqual(document["records"].size(), Json::ArrayIndex(2), "payloads must remain readable after sink destruction");
+	ExpectEqual(document["records"][0]["text"].asString(), std::string("in-flight payload"), "recovery must retain in-flight text");
+	ExpectEqual(document["records"][1]["text"].asString(), std::string("queued payload"), "recovery must retain queued text");
+	Expect(!document["automatic_replay_safe"].asBool(), "recovery must not permit blind replay of uncertain writes");
+	struct stat permissions{};
+	Expect(stat(result.recovery_path.c_str(), &permissions) == 0 && (permissions.st_mode & 0777) == 0600,
+		"recovery file must be private to its owner");
+	gate->release.set_value();
+	Expect(finished.wait_for(2s) == std::future_status::ready, "detached operation must be able to finish safely");
+
+	// A local filesystem failure must be explicit and retryable before destruction.
+	const auto blocked_path = directory / "not-a-directory";
+	{ std::ofstream file(blocked_path); file << "occupied"; }
+	Sink unavailable(1, 1024, [](const auto&) { return false; });
+	Expect(unavailable.Enqueue({.bot_id = 44, .channel = "say", .text = "retry-file"}) ==
+		EQ::ZoneHarness::ActorEventCaptureResult::Accepted, "file failure probe must admit evidence");
+	const auto failed = unavailable.ShutdownFor(20ms, blocked_path.string());
+	Expect(!failed.error.empty() && !failed.drained, "file failure must not claim successful recovery");
+	const auto recovered = unavailable.ShutdownFor(100ms, directory.string());
+	Expect(recovered.error.empty() && !recovered.recovery_path.empty(), "file publication must retry without repeating persistence");
+
+	Sink empty;
+	const auto drained = empty.ShutdownFor(100ms, directory.string());
+	Expect(drained.drained && drained.recovery_path.empty() && drained.error.empty(), "empty shutdown must need no recovery file");
+#endif
+}
+
+// Only terminate a test-owned connection in the disposable scenario database.
+void ExpectBorrowedConnectionReconnects() {
+	const auto* config = EQEmuConfig::get();
+	Expect(config != nullptr, "reconnect probe needs database configuration");
+	Database owner;
+	owner.SetConnectionTimeouts(1, 1, 1);
+	Expect(owner.Connect(config->DatabaseHost, config->DatabaseUsername, config->DatabasePassword,
+		config->DatabaseDB, config->DatabasePort, "borrowed-reconnect-probe"), "probe owner must connect");
+	{
+		Database borrower;
+		borrower.SetMySQL(owner);
+		for (const bool via_borrower : {true, false}) {
+			auto before = owner.QueryDatabase("SELECT CONNECTION_ID()");
+			Expect(before.Success() && before.RowCount() == 1, "probe owner needs connection id");
+			const auto old_id = std::stoull(before.begin()[0]);
+			Expect(database.QueryDatabase(fmt::format("KILL CONNECTION {}", old_id)).Success(),
+				"probe must disconnect only its test-owned connection");
+			auto recovered = (via_borrower ? borrower : owner).QueryDatabase("SELECT CONNECTION_ID()");
+			Expect(recovered.Success() && recovered.RowCount() == 1, "owner and borrower must recover a lost connection");
+			const auto new_id = std::stoull(recovered.begin()[0]);
+			Expect(new_id != old_id, "recovery must establish a new connection");
+			auto shared = (via_borrower ? owner : borrower).QueryDatabase("SELECT CONNECTION_ID()");
+			Expect(shared.Success() && shared.RowCount() == 1 && std::stoull(shared.begin()[0]) == new_id,
+				"both wrappers must use the same recovered owner connection");
+		}
+	}
+	Expect(owner.QueryDatabase("SELECT 1").Success(), "borrower destruction must preserve owner connection");
+}
+
+// Exercise the same connection factory used by the real persistence adapter.
+void ExpectPersistenceConnectionIsolated(
+	const ActorProfilesRepository::ActorProfileRecord& profile
+) {
+	using namespace std::chrono_literals;
+	using Sink = EQ::ZoneHarness::ActorEventRepositoryPersistenceSink;
+	auto zone_id_result = database.QueryDatabase("SELECT CONNECTION_ID()");
+	Expect(zone_id_result.Success() && zone_id_result.RowCount() == 1, "zone connection must be available");
+	const auto zone_connection_id = std::stoull(zone_id_result.begin()[0]);
+	struct Probe {
+		std::promise<uint64_t> connection_id;
+		std::atomic<bool> first{true};
+		std::atomic<bool> slow_query_failed{false};
+	};
+	auto probe = std::make_shared<Probe>();
+	auto connection_future = probe->connection_id.get_future();
+	Sink sink(1, 1024, [probe](const auto& event) {
+		if (probe->first.exchange(false)) {
+			auto* connection = Sink::RepositoryConnection();
+			if (!connection) {
+				probe->connection_id.set_value(0);
+				return false;
+			}
+			auto id = connection->QueryDatabase("SELECT CONNECTION_ID()");
+			probe->connection_id.set_value(id.Success() && id.RowCount() == 1 ? std::stoull(id.begin()[0]) : 0);
+			// A five-second server wait must hit the dedicated client's read deadline.
+			probe->slow_query_failed = !connection->QueryDatabase(std::string("SELECT SLEEP(5)"), false).Success();
+		}
+		return Sink::PersistToRepository(event);
+	});
+	const auto marker = fmt::format("isolated-persistence-{}", profile.actor_id);
+	Expect(sink.Enqueue({.bot_id = *profile.bot_id, .channel = "say", .text = marker}) ==
+		EQ::ZoneHarness::ActorEventCaptureResult::Accepted, "isolation probe must enqueue");
+	Expect(connection_future.wait_for(2s) == std::future_status::ready, "worker must connect promptly");
+	const auto worker_id = connection_future.get();
+	Expect(worker_id != 0 && worker_id != zone_connection_id, "persistence must own a separate server connection");
+	bool observed_sleep = false;
+	const auto observation_deadline = std::chrono::steady_clock::now() + 2s;
+	while (!observed_sleep && std::chrono::steady_clock::now() < observation_deadline) {
+		auto active = database.QueryDatabase(fmt::format(
+			"SELECT COUNT(*) FROM information_schema.PROCESSLIST WHERE ID = {} AND INFO LIKE 'SELECT SLEEP%'", worker_id));
+		Expect(active.Success() && active.RowCount() == 1, "zone must inspect worker activity independently");
+		observed_sleep = std::stoull(active.begin()[0]) == 1;
+		if (!observed_sleep) { std::this_thread::sleep_for(5ms); }
+	}
+	Expect(observed_sleep, "probe must observe a slow production persistence connection");
+	const auto started = std::chrono::steady_clock::now();
+	Expect(database.QueryDatabase("SELECT 1").Success(), "zone query must succeed during persistence I/O");
+	Expect(std::chrono::steady_clock::now() - started < 500ms, "slow persistence must not hold the zone query mutex");
+	Expect(sink.FlushFor(4s), "persistence must reconnect and recover after its read deadline");
+	Expect(probe->slow_query_failed, "slow query must time out rather than waiting its full server duration");
+	const auto rows = ActorEventsRepository::ReadCursor(database, profile.actor_id, 0, 32);
+	ExpectEqual(rows.size(), size_t(1), "isolated worker must persist exactly one event");
+	ExpectEqual(ParseJson(rows[0].event_json)["text"].asString(), marker, "isolated persistence must preserve payload");
+	Expect(database.QueryDatabase(fmt::format("DELETE FROM actor_events WHERE actor_id = {}", profile.actor_id)).Success(),
+		   "isolation probe must clean its row");
+}
+
+// Hold the worker before its real repository lookup, then change the profile.
+// The retry cases inject one unavailable-store result before that lookup.
+void ExpectProfileChangesRetainAcceptedEvidence(
+	const ActorProfilesRepository::ActorProfileRecord& profile
+) {
+	using namespace std::chrono_literals;
+	using Sink = EQ::ZoneHarness::ActorEventRepositoryPersistenceSink;
+	using EQ::ZoneHarness::ActorEventCaptureResult;
+
+	for (const bool retry : {false, true}) {
+		for (const bool deleted : {false, true}) {
+			struct LookupGate {
+				std::promise<void> reached;
+				std::promise<void> release;
+				std::shared_future<void> released = release.get_future().share();
+				std::atomic<unsigned> attempts{0};
+			};
+			auto gate = std::make_shared<LookupGate>();
+			auto reached_future = gate->reached.get_future();
+			Sink sink(1, 1024, [gate, retry](const auto& event) {
+				const auto attempt = gate->attempts.fetch_add(1);
+				if (retry && attempt == 0) {
+					return false;
+				}
+				if (attempt == (retry ? 1u : 0u)) {
+					gate->reached.set_value();
+					if (gate->released.wait_for(2s) != std::future_status::ready) {
+						return false;
+					}
+				}
+				return Sink::PersistToRepository(event);
+			});
+			const auto marker = fmt::format("profile-retention-{}-{}-{}", profile.actor_id, retry, deleted);
+			Sink::PendingSpeechEvent event{
+				.bot_id = *profile.bot_id,
+				.channel = "say",
+				.text = marker,
+			};
+			Expect(sink.Enqueue(event) == ActorEventCaptureResult::Accepted,
+				   "profile lifecycle probe must admit evidence before changing the profile");
+			Expect(reached_future.wait_for(2s) == std::future_status::ready,
+				   "worker must reach the controlled first lookup or retry");
+			const auto changed = database.QueryDatabase(deleted
+				? fmt::format("DELETE FROM actor_profiles WHERE actor_id = {}", profile.actor_id)
+				: fmt::format("UPDATE actor_profiles SET enabled = 0 WHERE actor_id = {}", profile.actor_id));
+			Expect(changed.Success(), "profile lifecycle mutation must succeed");
+			gate->release.set_value();
+			Expect(!sink.FlushFor(100ms), "missing/disabled profile must not acknowledge accepted evidence");
+			const auto retained = sink.GetMetrics();
+			ExpectEqual(retained.queue_records, uint64_t(1), "accepted payload must remain queued");
+			ExpectEqual(retained.persisted_records, uint64_t(0), "unwritten payload must not count as persisted");
+			Expect(retained.persistence_failures > (retry ? 1u : 0u),
+				   "real repository lookup must record a failure after the profile change");
+			Expect(sink.Enqueue(event) == ActorEventCaptureResult::Saturated,
+				   "retained evidence must keep the bounded queue full rather than being evicted");
+			Expect(sink.GetMetrics().queue_bytes <= 1024, "profile failure must preserve the byte bound");
+
+			const auto restored = ActorProfilesRepository::UpsertBotBackedProfile(database, profile);
+			ExpectEqual(restored.actor_id, profile.actor_id, "recovery must restore the same actor identity");
+			Expect(sink.FlushFor(2s), "retained evidence must persist when its profile recovers");
+			const auto rows = ActorEventsRepository::ReadCursor(database, profile.actor_id, 0, 32);
+			const auto matches = std::count_if(rows.begin(), rows.end(), [&](const auto& row) {
+				return ParseJson(row.event_json)["text"].asString() == marker;
+			});
+			ExpectEqual(matches, decltype(matches)(1), "recovery must store the original payload exactly once");
+			ExpectEqual(sink.GetMetrics().persisted_records, uint64_t(1), "only the recovered write counts");
+			ExpectEqual(sink.GetMetrics().queue_records, uint64_t(0), "recovery must release queue capacity");
+			Expect(database.QueryDatabase(fmt::format("DELETE FROM actor_events WHERE actor_id = {}", profile.actor_id)).Success(),
+				   "lifecycle probe must remove its persisted rows before the next case");
+		}
+	}
+}
+
 } // namespace
 
 void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::string& description) {
@@ -285,6 +841,8 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 
 	try {
 		ExpectRecorderShutdownWaitsForInFlightCallbacks();
+		ExpectBoundedPersistenceOverloadAndRecovery();
+		ExpectShutdownRetainsRecoverablePayloads();
 
 		const auto run_nonce = BuildRunNonce();
 
@@ -297,6 +855,13 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 		EQ::ZoneHarness::ActorEventRepositoryPersistenceSink persistence_sink;
 		recorder.SetPersistenceSink(&persistence_sink);
 		EQ::ZoneHarness::ActorEventRecorder::RegisterActiveRecorder(&recorder);
+		struct ClearRecorderOnExit {
+			EQ::ZoneHarness::ActorEventRecorder& recorder;
+			~ClearRecorderOnExit() {
+				EQ::ZoneHarness::ActorEventRecorder::ClearActiveRecorder(&recorder);
+				recorder.SetPersistenceSink(nullptr);
+			}
+		} clear_recorder{recorder};
 
 		ActorEventPersistenceCleanup cleanup;
 		const auto reserved_owner = EQ::Actor::ReservedOwners::Provision(database, "ActorownerRuntime" + std::to_string(run_nonce));
@@ -324,6 +889,8 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 
 		const auto actor_bot_id = next_free_bot_id(0);
 		fixture.AssignBotID(fixture.OwnedBot(), actor_bot_id);
+		ExpectSpeechDefersAndRetriesThroughProductionPath(fixture.OwnedBot(), recorder, &persistence_sink);
+		ExpectFallbackRepliesRetryInOrder(fixture, recorder, &persistence_sink);
 
 		ActorProfilesRepository::ActorProfileRecord profile{};
 		profile.actor_type = "autonomous_actor";
@@ -334,9 +901,14 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 		const auto inserted_profile = ActorProfilesRepository::UpsertBotBackedProfile(database, profile);
 		Expect(inserted_profile.actor_id > 0, "actor profile insert should allocate an actor_id");
 		cleanup.TrackActorId(inserted_profile.actor_id);
+		ExpectBorrowedConnectionReconnects();
+		ExpectPersistenceConnectionIsolated(inserted_profile);
+		ExpectProfileChangesRetainAcceptedEvidence(inserted_profile);
 
 		const auto speech_marker = fmt::format("runtime-actor-events-{}", run_nonce);
 		fixture.OwnedBot()->Say("%s", speech_marker.c_str());
+		Expect(persistence_sink.FlushFor(std::chrono::seconds(2)),
+			   "runtime actor evidence should flush outside the speech callback");
 
 		const auto observed_events = recorder.Since(0, 8);
 		ExpectEqual(observed_events.size(), static_cast<size_t>(1),
@@ -774,10 +1346,82 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 		ExpectEqual(duplicate_applications, static_cast<decltype(duplicate_applications)>(1),
 					"retrying a completed action must not apply its gameplay effect twice");
 
+		// Exercise saturation through the production Mob::Say API, not just the
+		// queue primitive. The false result is what keeps an autonomous action
+		// pending until evidence capacity recovers.
+		std::mutex blocked_mutex;
+		std::condition_variable blocked_started_cv;
+		std::condition_variable blocked_release_cv;
+		bool blocked_started = false;
+		bool blocked_released = false;
+		EQ::ZoneHarness::ActorEventRepositoryPersistenceSink blocked_sink(
+			1, 512, [&](const auto&) {
+				std::unique_lock lock(blocked_mutex);
+				if (!blocked_started) {
+					blocked_started = true;
+					blocked_started_cv.notify_all();
+					if (!blocked_release_cv.wait_for(
+							lock, std::chrono::seconds(1), [&]() { return blocked_released; })) {
+						return false;
+					}
+				}
+				return true;
+			});
+		recorder.SetPersistenceSink(&blocked_sink);
+		const auto overload_cursor = recorder.MaxEventID();
+		const auto retained_marker = fmt::format("retained-speech-{}", run_nonce);
+		const auto deferred_marker = fmt::format("deferred-speech-{}", run_nonce);
+		Expect(fixture.OwnedBot()->Say("%s", retained_marker.c_str()),
+			   "first production speech should reserve the bounded evidence slot");
+		{
+			std::unique_lock lock(blocked_mutex);
+			Expect(blocked_started_cv.wait_for(lock, std::chrono::seconds(1), [&]() { return blocked_started; }),
+				   "production speech evidence should begin the blocked flush");
+		}
+		Expect(!fixture.OwnedBot()->Say("%s", deferred_marker.c_str()),
+			   "production speech should visibly defer when required evidence is saturated");
+		ExpectEqual(recorder.Since(overload_cursor, 8).size(), static_cast<size_t>(1),
+					"deferred speech must not be reported as emitted");
+		{
+			std::lock_guard lock(blocked_mutex);
+			blocked_released = true;
+			blocked_release_cv.notify_all();
+		}
+		Expect(blocked_sink.FlushFor(std::chrono::seconds(1)),
+			   "retained production speech evidence should flush after recovery");
+		Expect(fixture.OwnedBot()->Say("%s", deferred_marker.c_str()),
+			   "the deferred production speech should be accepted on retry");
+		Expect(blocked_sink.FlushFor(std::chrono::seconds(1)),
+			   "retried production speech evidence should flush");
+		ExpectEqual(recorder.Since(overload_cursor, 8).size(), static_cast<size_t>(2),
+					"recovery should record the deferred speech exactly once");
+		recorder.SetPersistenceSink(&persistence_sink);
+
+		// The dialogue-window rendering branch must pass through the same
+		// evidence gate and persist the same speech payload.
+		const auto dialogue_marker = fmt::format("dialogue-speech-{}", run_nonce);
+		{
+			ScopedRuleOverride dialogue_rule("Chat:QuestDialogueUsesDialogueWindow", "true");
+			Expect(dialogue_rule.Changed(), "dialogue-window rule override should apply");
+			Expect(fixture.OwnedBot()->Say("%s", dialogue_marker.c_str()),
+				   "dialogue-window speech should reserve required evidence before rendering");
+		}
+		Expect(persistence_sink.FlushFor(std::chrono::seconds(2)),
+			   "dialogue-window speech evidence should flush");
+		const auto dialogue_events = ActorEventsRepository::ReadCursor(
+			database, inserted_profile.actor_id, persisted_events[0].event_id, 32);
+		Expect(std::any_of(dialogue_events.begin(), dialogue_events.end(), [&](const auto& event) {
+			return ParseJson(event.event_json)["text"].asString() == dialogue_marker;
+		}), "dialogue-window speech should persist through the production evidence path");
+
+
 		ExpectEqual(CountPlayerEventLogRowsWithMarker(speech_marker), int64_t(0),
 					"runtime actor event persistence should not write marker rows to player_event_logs");
 
 		EQ::ZoneHarness::ActorEventRecorder::ClearActiveRecorder(&recorder);
+		Expect(persistence_sink.FlushFor(std::chrono::seconds(2)),
+			   "runtime actor evidence queue should be empty before fixture cleanup");
+		recorder.SetPersistenceSink(nullptr);
 		fixture.Cleanup();
 		std::string cleanup_failure;
 		const bool cleanup_succeeded = cleanup.Cleanup(&cleanup_failure);

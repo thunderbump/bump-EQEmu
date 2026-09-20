@@ -5031,8 +5031,9 @@ uint32 Mob::IsEliteMaterialItem(uint8 material_slot) const
 	return 0;
 }
 
-// works just like a printf
-void Mob::Say(const char *format, ...)
+// works just like a printf. Returns false when required actor evidence has no
+// capacity, so queued callers can retain and retry the consequential action.
+bool Mob::Say(const char *format, ...)
 {
 	char    buf[1000];
 	va_list ap;
@@ -5058,6 +5059,12 @@ void Mob::Say(const char *format, ...)
 	int16 distance = 200;
 
 	if (RuleB(Chat, QuestDialogueUsesDialogueWindow)) {
+		const auto evidence = EQ::ZoneHarness::ActorEventRecorder::ObserveSpeechEmitted(talker, "say", buf, distance);
+		if (evidence == EQ::ZoneHarness::ActorEventCaptureResult::Saturated ||
+			evidence == EQ::ZoneHarness::ActorEventCaptureResult::Stopped) {
+			return false;
+		}
+
 		for (auto &e : talker->GetCloseMobList(distance)) {
 			Mob *mob = e.second;
 			if (!mob) {
@@ -5075,23 +5082,34 @@ void Mob::Say(const char *format, ...)
 				}
 			}
 
-			return;
+			return true;
 		}
 	else if (RuleB(Chat, AutoInjectSaylinksToSay)) {
 		std::string new_message = EQ::SayLinkEngine::InjectSaylinksIfNotExist(buf);
+		const auto evidence =
+			EQ::ZoneHarness::ActorEventRecorder::ObserveSpeechEmitted(talker, "say", new_message, distance);
+		if (evidence == EQ::ZoneHarness::ActorEventCaptureResult::Saturated ||
+			evidence == EQ::ZoneHarness::ActorEventCaptureResult::Stopped) {
+			return false;
+		}
 		entity_list.MessageCloseString(
 			talker, false, distance, Chat::NPCQuestSay,
 			GENERIC_SAY, GetCleanName(), new_message.c_str()
 		);
-		EQ::ZoneHarness::ActorEventRecorder::ObserveSpeechEmitted(talker, "say", new_message, distance);
 	}
 	else {
+		const auto evidence = EQ::ZoneHarness::ActorEventRecorder::ObserveSpeechEmitted(talker, "say", buf, distance);
+		if (evidence == EQ::ZoneHarness::ActorEventCaptureResult::Saturated ||
+			evidence == EQ::ZoneHarness::ActorEventCaptureResult::Stopped) {
+			return false;
+		}
 		entity_list.MessageCloseString(
 			talker, false, distance, Chat::NPCQuestSay,
 			GENERIC_SAY, GetCleanName(), buf
 		);
-		EQ::ZoneHarness::ActorEventRecorder::ObserveSpeechEmitted(talker, "say", buf, distance);
 	}
+
+	return true;
 }
 
 //
@@ -5156,7 +5174,7 @@ void Mob::Shout(const char *format, ...)
 		GENERIC_SHOUT, GetCleanName(), buf);
 }
 
-void Mob::Emote(const char *format, ...)
+bool Mob::Emote(const char *format, ...)
 {
 	char buf[1000];
 	va_list ap;
@@ -5165,11 +5183,16 @@ void Mob::Emote(const char *format, ...)
 	vsnprintf(buf, 1000, format, ap);
 	va_end(ap);
 
+	const auto evidence = EQ::ZoneHarness::ActorEventRecorder::ObserveSpeechEmitted(this, "emote", buf, 200);
+	if (evidence == EQ::ZoneHarness::ActorEventCaptureResult::Saturated ||
+		evidence == EQ::ZoneHarness::ActorEventCaptureResult::Stopped) {
+		return false;
+	}
 	entity_list.MessageCloseString(
 		this, false, 200, 10,
 		GENERIC_EMOTE, GetCleanName(), buf
 	);
-	EQ::ZoneHarness::ActorEventRecorder::ObserveSpeechEmitted(this, "emote", buf, 200);
+	return true;
 }
 
 void Mob::QuestJournalledSay(Client *QuestInitiator, const char *str, Journal::Options &opts)

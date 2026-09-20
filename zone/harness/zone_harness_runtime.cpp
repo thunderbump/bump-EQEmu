@@ -34,6 +34,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <iostream>
 #include <limits>
 #include <memory>
 #include <sstream>
@@ -346,9 +347,9 @@ bool ExecuteAutonomousActorAction(Bot *actor, Mob *target, const std::string &ki
 	}
 
 	if (kind == "say") {
-		actor->Say("%s", detail.c_str());
-		reason = "say_emitted";
-		return true;
+		const bool emitted = actor->Say("%s", detail.c_str());
+		reason = emitted ? "say_emitted" : "evidence_capacity_deferred";
+		return emitted;
 	}
 
 	reason = "unsupported_action_kind";
@@ -1922,7 +1923,8 @@ AutonomousActorLoopScenarioResult ZoneHarnessRuntime::RunAutonomousActorLoop(uin
 		}
 
 		for (auto &action: result.actions) {
-			if (!action.accepted && action.reason.empty()) {
+			if (!action.accepted &&
+				(action.reason.empty() || action.reason == "evidence_capacity_deferred")) {
 				action.accepted = ExecuteAutonomousActorAction(
 					fixture.actor,
 					fixture.primary_target,
@@ -2148,6 +2150,12 @@ void ZoneHarnessRuntime::Shutdown()
 	std::lock_guard lock(mutex);
 	shutdown_requested = true;
 	ActorEventRecorder::ClearActiveRecorder(&events);
+	const auto recovery = actor_event_persistence_sink.ShutdownFor(std::chrono::seconds(2));
+	if (!recovery.drained || !recovery.error.empty()) {
+		std::cerr << "[ACTOR-EVIDENCE-RECOVERY] retained_records=" << recovery.retained_records
+			<< " path=" << recovery.recovery_path << " error=" << recovery.error << "\n";
+	}
+
 	events.SetPersistenceSink(nullptr);
 	StopAutonomousActorPrototypeSessionLocked();
 
@@ -2228,10 +2236,15 @@ void ZoneHarnessRuntime::ProcessAutonomousActorPrototypeActionLocked()
 		action.kind == "target" ? prototype.fixture.primary_target->GetCleanName() : action.detail,
 		reason
 	);
+	if (!accepted && reason == "evidence_capacity_deferred") {
+		// Evidence saturation is temporary backpressure. Leave the action at the
+		// front so the next bounded zone tick retries it in order.
+		return;
+	}
+
 	if (accepted) {
 		prototype.last_event_cursor = events.MaxEventID();
 	}
-
 	prototype.pending_actions.erase(prototype.pending_actions.begin());
 }
 

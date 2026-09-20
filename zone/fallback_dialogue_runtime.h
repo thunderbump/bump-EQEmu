@@ -18,6 +18,8 @@
 #pragma once
 
 #include <string>
+#include <optional>
+#include "common/fallback_dialogue.h"
 
 class Client;
 class Mob;
@@ -31,6 +33,14 @@ void HandleTargetedSay(
 	bool authored_dialogue_handled,
 	bool target_engaged
 );
+// Owns at most one popped reply until emission succeeds or the interaction expires.
+class DelayedDialogueDelivery {
+public:
+	void Process(FallbackDialogue::DelayedDialogueQueue& queue);
+private:
+	std::optional<FallbackDialogue::TargetedSayResult> deferred_;
+};
+
 void ProcessReadyDelayedDialogue();
 
 }
