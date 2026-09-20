@@ -49,6 +49,7 @@ void ZoneCLI::CommandHandler(int argc, char **argv)
 
 	// Register commands
 	function_map["benchmark:databuckets"]        = &ZoneCLI::BenchmarkDatabuckets;
+	function_map["actor-helper:run"]             = &ZoneCLI::ActorHelperRun;
 	function_map["sidecar:serve-http"]           = &ZoneCLI::SidecarServeHttp;
 	function_map["tests:actor-events"]           = &ZoneCLI::TestActorEvents;
 	function_map["tests:reserved-actor-owner"]   = &ZoneCLI::TestReservedActorOwner;

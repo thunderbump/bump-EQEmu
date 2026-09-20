@@ -1,0 +1,364 @@
+#include "actor_helper.h"
+
+#include "common/json/json.h"
+#include "common/repositories/actor_action_queue_repository.h"
+#include "common/repositories/actor_events_repository.h"
+#include "common/strings.h"
+
+#include <algorithm>
+#include <cstdlib>
+#include <ctime>
+#include <fstream>
+#include <limits>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace {
+
+struct DiscoveredActor {
+	uint32_t actor_id = 0;
+};
+
+bool IsGameplayEvent(const std::string& type) {
+	return type != "action_completed" && type != "action_rejected";
+}
+
+std::optional<uint64_t> JsonUInt64(const std::string& document, const char* member) {
+	Json::CharReaderBuilder builder;
+	std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
+	Json::Value root;
+	std::string errors;
+	if (!reader->parse(document.data(), document.data() + document.size(), &root, &errors) ||
+		!root.isObject() || !root.isMember(member) || !root[member].isUInt64()) {
+		return std::nullopt;
+	}
+	return root[member].asUInt64();
+}
+
+} // namespace
+
+ActorHelper::ActorHelper(Database& database, Options options) : database_(database), options_(std::move(options)) {
+	options_.freshness_seconds = std::clamp<uint32_t>(options_.freshness_seconds, 1, 3600);
+	options_.event_limit = std::clamp<size_t>(options_.event_limit, 1, 128);
+	options_.discovery_limit = std::clamp<size_t>(options_.discovery_limit, 1, 256);
+	discovery_cursor_ = LoadDiscoveryCursor();
+}
+
+uint64_t ActorHelper::LoadCursor(uint32_t actor_id) const {
+	std::ifstream input(options_.state_directory / (std::to_string(actor_id) + ".cursor"));
+	uint64_t cursor = 0;
+	if (!(input >> cursor)) {
+		return 0;
+	}
+	return cursor;
+}
+
+bool ActorHelper::StoreCursor(uint32_t actor_id, uint64_t cursor) const {
+	std::error_code error;
+	std::filesystem::create_directories(options_.state_directory, error);
+	if (error) {
+		return false;
+	}
+	const auto destination = options_.state_directory / (std::to_string(actor_id) + ".cursor");
+	const auto temporary = destination.string() + ".tmp";
+	{
+		std::ofstream output(temporary, std::ios::trunc);
+		if (!(output << cursor << "\n")) {
+			return false;
+		}
+	}
+	std::filesystem::rename(temporary, destination, error);
+	return !error;
+}
+
+uint32_t ActorHelper::LoadDiscoveryCursor() const {
+	std::ifstream input(options_.state_directory / "discovery.cursor");
+	uint64_t cursor = 0;
+	if (!(input >> cursor) || cursor > std::numeric_limits<uint32_t>::max()) {
+		return 0;
+	}
+	return static_cast<uint32_t>(cursor);
+}
+
+bool ActorHelper::StoreDiscoveryCursor(uint32_t cursor) const {
+	std::error_code error;
+	std::filesystem::create_directories(options_.state_directory, error);
+	if (error) {
+		return false;
+	}
+	const auto destination = options_.state_directory / "discovery.cursor";
+	const auto temporary = destination.string() + ".tmp";
+	{
+		std::ofstream output(temporary, std::ios::trunc);
+		if (!(output << cursor << "\n")) {
+			return false;
+		}
+	}
+	std::filesystem::rename(temporary, destination, error);
+	return !error;
+}
+
+ActorHelper::CycleResult ActorHelper::RunCycle(time_t now) {
+	CycleResult result;
+	now = now > 0 ? now : std::time(nullptr);
+	const auto actor_filter = options_.actor_id.has_value()
+		? fmt::format(" AND p.actor_id = {}", *options_.actor_id)
+		: std::string();
+	const auto zone_filter = options_.zone_id.has_value()
+		? fmt::format(" AND s.zone_id = {} AND COALESCE(s.instance_id, 0) = {}",
+			*options_.zone_id, options_.instance_id)
+		: std::string();
+	auto discovery = database_.QueryDatabase(fmt::format(R"SQL(
+SELECT p.actor_id
+FROM actor_profiles p
+JOIN actor_status s ON s.actor_id = p.actor_id
+WHERE p.enabled = 1 AND p.actor_type = 'autonomous_actor' AND p.actor_substrate = 'bot'
+  AND p.bot_id IS NOT NULL AND p.owner_character_id IS NOT NULL
+  AND s.zone_id IS NOT NULL AND s.entity_id IS NOT NULL AND s.state IN ('active', 'idle')
+  AND s.heartbeat_at >= FROM_UNIXTIME({} - {}){}{}
+ORDER BY (p.actor_id > {}) DESC, p.actor_id
+LIMIT {}
+)SQL", now, options_.freshness_seconds, actor_filter, zone_filter, discovery_cursor_, options_.discovery_limit));
+	if (!discovery.Success()) {
+		return result;
+	}
+
+	std::vector<DiscoveredActor> actors;
+	for (auto row = discovery.begin(); row != discovery.end(); ++row) {
+		actors.push_back({static_cast<uint32_t>(strtoul(row[0], nullptr, 10))});
+	}
+	result.discovered = actors.size();
+	if (!actors.empty() && !options_.actor_id.has_value()) {
+		// Persist the rotating scan position before processing actors. A helper
+		// that repeatedly restarts after one bounded cycle must still reach later
+		// IDs; the cyclic ordering above wraps after reaching the end. Failure is
+		// fatal to this cycle: otherwise a restart could falsely claim progress
+		// while repeatedly selecting the same bounded page.
+		const auto next_discovery_cursor = actors.back().actor_id;
+		if (!StoreDiscoveryCursor(next_discovery_cursor)) {
+			++result.state_persistence_errors;
+			return result;
+		}
+		discovery_cursor_ = next_discovery_cursor;
+	}
+
+	for (const auto actor : actors) {
+		uint64_t cursor = LoadCursor(actor.actor_id);
+
+		// Completion is the commit point for the cursor. Keeping it behind while an
+		// action is pending makes a killed helper recreate the same idempotency key.
+		auto terminals = database_.QueryDatabase(fmt::format(R"SQL(
+SELECT q.source_metadata_json, EXISTS (
+    SELECT 1 FROM actor_events e WHERE e.actor_id = q.actor_id
+      AND e.event_type IN ('action_completed', 'action_rejected')
+      AND JSON_UNQUOTE(JSON_EXTRACT(e.event_json, '$.action_id')) = CAST(q.action_id AS CHAR)
+  ) AS outcome_retained
+FROM actor_action_queue q
+WHERE q.actor_id = {} AND q.source = 'actor-helper' AND q.state IN ('completed', 'failed')
+ORDER BY q.action_id DESC LIMIT 16
+)SQL", actor.actor_id));
+		uint64_t completed_cursor = cursor;
+		bool completed_outcome_retained = true;
+		if (terminals.Success()) {
+			for (auto row = terminals.begin(); row != terminals.end(); ++row) {
+				if (row[0]) {
+					const auto trigger = JsonUInt64(row[0], "trigger_event_id");
+					if (trigger.has_value() && *trigger > completed_cursor) {
+						completed_cursor = *trigger;
+						completed_outcome_retained = row[1] && strtoull(row[1], nullptr, 10) != 0;
+					}
+				}
+			}
+		}
+		if (completed_cursor > cursor) {
+			// The terminal queue row is the durable commit record. Its correlated
+			// lifecycle event is observable evidence, but may legitimately age out
+			// while the helper is stopped; do not strand the original trigger when it
+			// does. Record that recovery separately from a retained observation.
+			if (!StoreCursor(actor.actor_id, completed_cursor)) {
+				++result.state_persistence_errors;
+				return result;
+			}
+			cursor = completed_cursor;
+			if (completed_outcome_retained) {
+				++result.outcomes_observed;
+			} else {
+				++result.retained_outcome_losses;
+			}
+		}
+
+		const auto latest = ActorEventsRepository::LatestGameplayEventId(database_, actor.actor_id);
+		if (!latest.has_value()) {
+			continue;
+		}
+		if (cursor > 0) {
+			auto retained = database_.QueryDatabase(fmt::format(
+				"SELECT 1 FROM actor_events WHERE actor_id = {} AND event_id = {} LIMIT 1",
+				actor.actor_id, cursor));
+			if (!retained.Success()) {
+				continue;
+			}
+			if (retained.RowCount() == 0) {
+				if (!StoreCursor(actor.actor_id, *latest)) {
+					++result.state_persistence_errors;
+					return result;
+				}
+				++result.retained_event_losses;
+				continue;
+			}
+		}
+
+		const auto events = ActorEventsRepository::ReadCursor(database_, actor.actor_id, cursor, options_.event_limit);
+		if (events.empty()) {
+			continue;
+		}
+		if (events.size() == options_.event_limit) {
+			const auto more = ActorEventsRepository::ReadCursor(database_, actor.actor_id, events.back().event_id, 1);
+			if (!more.empty()) {
+				// Catch up a bounded page without deciding from a partial view. This
+				// is an explicit cursor-gap outcome, not unbounded replay. Do not
+				// report recovery unless the new cursor is durable.
+				if (!StoreCursor(actor.actor_id, events.back().event_id)) {
+					++result.state_persistence_errors;
+					return result;
+				}
+				++result.cursor_gaps;
+				continue;
+			}
+		}
+		auto trigger = std::find_if(events.rbegin(), events.rend(), [](const auto& event) {
+			return IsGameplayEvent(event.event_type);
+		});
+		if (trigger == events.rend()) {
+			if (!StoreCursor(actor.actor_id, events.back().event_id)) {
+				++result.state_persistence_errors;
+				return result;
+			}
+			continue;
+		}
+
+		Json::Value metadata;
+		// The executor watermark must describe the gameplay snapshot that selected
+		// this action. A separate "latest" read can precede a concurrent append and
+		// make a newly selected trigger stale against an older watermark.
+		metadata["schema_version"] = 1;
+		metadata["expected_event_id"] = Json::UInt64(trigger->event_id);
+		metadata["trigger_event_id"] = Json::UInt64(trigger->event_id);
+		metadata["decision"]["policy"] = "stand_on_latest_gameplay_event";
+		metadata["decision"]["policy_version"] = 1;
+		metadata["decision"]["action_type"] = "stand";
+		// This deliberately simple policy depends only on ordering and event type,
+		// not on the event payload. Retain those complete decision inputs in the
+		// queue row so the choice remains reproducible after event retention.
+		metadata["decision"]["inputs"]["actor_id"] = actor.actor_id;
+		metadata["decision"]["inputs"]["event_id"] = Json::UInt64(trigger->event_id);
+		metadata["decision"]["inputs"]["event_type"] = trigger->event_type;
+		Json::Value action(Json::objectValue);
+		Json::StreamWriterBuilder writer;
+		writer["indentation"] = "";
+		const auto action_json = Json::writeString(writer, action);
+		const auto idempotency_key = fmt::format("actor-helper:stand:{}:{}", actor.actor_id, trigger->event_id);
+
+		// Serialize helper admission on the durable actor binding rows. This keeps
+		// eligibility validation, the active-count check, and insert/retry in one
+		// database critical section, so helpers with different cursor views cannot
+		// both admit work.
+		database_.TransactionBegin();
+		// Lock and revalidate both durable binding rows. Discovery is only a hint:
+		// enabled/fresh/zone/entity state may change while events are read. Keeping
+		// this validation and queue admission in one transaction also preserves the
+		// per-actor serialization contract.
+		auto actor_lock = database_.QueryDatabase(fmt::format(R"SQL(
+SELECT p.actor_id, p.bot_id, p.owner_character_id, s.zone_id,
+       COALESCE(s.instance_id, 0), s.entity_id
+FROM actor_profiles p
+JOIN actor_status s ON s.actor_id = p.actor_id
+WHERE p.actor_id = {}
+  AND p.enabled = 1 AND p.actor_type = 'autonomous_actor' AND p.actor_substrate = 'bot'
+  AND p.bot_id IS NOT NULL AND p.owner_character_id IS NOT NULL
+  AND s.zone_id IS NOT NULL AND s.entity_id IS NOT NULL AND s.state IN ('active', 'idle')
+  AND s.heartbeat_at >= FROM_UNIXTIME({} - {}){}
+FOR UPDATE
+)SQL", actor.actor_id, now, options_.freshness_seconds, zone_filter));
+		if (!actor_lock.Success() || actor_lock.RowCount() != 1) {
+			database_.TransactionRollback();
+			continue;
+		}
+		auto locked = actor_lock.begin();
+		if (!locked[1] || !locked[2] || !locked[3] || !locked[4] || !locked[5]) {
+			database_.TransactionRollback();
+			continue;
+		}
+		// Preserve the exact durable binding used for admission. The executor must
+		// reject this decision if a later move makes another zone eligible to claim
+		// it; validating only that destination's current binding would apply stale
+		// work in the wrong zone.
+		metadata["expected_binding"]["actor_id"] = actor.actor_id;
+		metadata["expected_binding"]["bot_id"] =
+			static_cast<Json::UInt>(strtoul(locked[1], nullptr, 10));
+		metadata["expected_binding"]["owner_character_id"] =
+			static_cast<Json::UInt>(strtoul(locked[2], nullptr, 10));
+		metadata["expected_binding"]["zone_id"] =
+			static_cast<Json::UInt>(strtoul(locked[3], nullptr, 10));
+		metadata["expected_binding"]["instance_id"] =
+			static_cast<Json::UInt>(strtoul(locked[4], nullptr, 10));
+		metadata["expected_binding"]["entity_id"] =
+			static_cast<Json::UInt>(strtoul(locked[5], nullptr, 10));
+		const auto metadata_json = Json::writeString(writer, metadata);
+
+		ActorActionQueueRepository::ExpireDue(database_, now, actor.actor_id);
+		auto active = database_.QueryDatabase(fmt::format(
+			"SELECT COUNT(*) FROM actor_action_queue WHERE actor_id = {} AND source = 'actor-helper' "
+			"AND state IN ('pending', 'claimed')", actor.actor_id));
+		if (!active.Success() || active.RowCount() != 1 || !active.begin()[0]) {
+			database_.TransactionRollback();
+			continue;
+		}
+		if (strtoull(active.begin()[0], nullptr, 10) != 0) {
+			if (!database_.TransactionCommit().Success()) {
+				database_.TransactionRollback();
+			}
+			++result.busy;
+			continue;
+		}
+
+		bool admitted = false;
+		const auto existing = ActorActionQueueRepository::FindByActorAndIdempotencyKey(
+			database_, actor.actor_id, idempotency_key);
+		if (existing.has_value() && existing->state == "expired") {
+			// Expiration is guaranteed to precede gameplay application in the zone
+			// executor, so the same durable request can safely become pending again.
+			auto retried = database_.QueryDatabase(fmt::format(R"SQL(
+UPDATE actor_action_queue
+SET state = 'pending', source_metadata_json = '{}', action_json = '{}',
+    not_before = NULL, expires_at = FROM_UNIXTIME({}), claimed_by = NULL,
+    claimed_at = NULL, completed_at = NULL, failure_reason = NULL,
+    result_json = NULL, updated_at = FROM_UNIXTIME({})
+WHERE action_id = {} AND state = 'expired'
+)SQL", Strings::Escape(metadata_json), Strings::Escape(action_json), now + 15, now, existing->action_id));
+			admitted = retried.Success() && retried.RowsAffected() == 1;
+		} else if (!existing.has_value()) {
+			const auto queued = ActorActionQueueRepository::Enqueue(database_, {
+				.actor_id = actor.actor_id,
+				.source = "actor-helper",
+				.source_metadata_json = metadata_json,
+				.action_type = "stand",
+				.action_json = action_json,
+				.idempotency_key = idempotency_key,
+				.expires_at = now + 15,
+				.created_at = now,
+			});
+			admitted = queued.action_id != 0;
+		}
+		if (!database_.TransactionCommit().Success()) {
+			database_.TransactionRollback();
+			admitted = false;
+		}
+		if (admitted) {
+			++result.enqueued;
+		}
+	}
+	return result;
+}

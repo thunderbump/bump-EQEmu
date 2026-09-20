@@ -140,6 +140,24 @@ void ActorActionExecutor::ProcessOne() {
 			reject("invalid_source_metadata");
 			return;
 		}
+		if (metadata.isMember("expected_binding")) {
+			const auto& binding = metadata["expected_binding"];
+			if (!binding.isObject() || !binding["actor_id"].isUInt() || !binding["bot_id"].isUInt() ||
+				!binding["owner_character_id"].isUInt() || !binding["zone_id"].isUInt() ||
+				!binding["instance_id"].isUInt() || !binding["entity_id"].isUInt()) {
+				reject("invalid_source_metadata");
+				return;
+			}
+			if (binding["actor_id"].asUInt() != action->actor_id ||
+				binding["bot_id"].asUInt() != *profile->bot_id ||
+				binding["owner_character_id"].asUInt() != *profile->owner_character_id ||
+				binding["zone_id"].asUInt() != *status->zone_id ||
+				binding["instance_id"].asUInt() != status->instance_id.value_or(0) ||
+				binding["entity_id"].asUInt() != *status->entity_id) {
+				reject("actor_binding_changed");
+				return;
+			}
+		}
 		if (metadata.isMember("expected_event_id")) {
 			if (!metadata["expected_event_id"].isUInt64()) {
 				reject("stale_event_watermark");

@@ -33,6 +33,7 @@
 #include "zone/client.h"
 #include "zone/fallback_dialogue_runtime.h"
 #include "zone/actor_action_executor.h"
+#include "zone/actor_helper.h"
 #include "zone/harness/actor_event_persistence_sink.h"
 #include "zone/harness/actor_event_recorder.h"
 #include "zone/harness/owned_bot_actor_fixture.h"
@@ -50,7 +51,10 @@
 #include <filesystem>
 #include <fstream>
 #ifndef _WIN32
+#include <signal.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #endif
 #include <iostream>
@@ -83,6 +87,58 @@ template <typename T> void ExpectEqual(const T& actual, const T& expected, const
 		Fail(message);
 	}
 }
+
+class ScopedTestDirectory {
+public:
+	explicit ScopedTestDirectory(std::filesystem::path path) : path_(std::move(path)) {
+		std::filesystem::remove_all(path_);
+		std::filesystem::create_directories(path_);
+	}
+	~ScopedTestDirectory() { std::filesystem::remove_all(path_); }
+	const std::filesystem::path& Path() const { return path_; }
+private:
+	std::filesystem::path path_;
+};
+
+#ifndef _WIN32
+pid_t SpawnActorHelper(uint32_t actor_id, const std::filesystem::path& state_directory, uint32_t max_cycles = 200,
+					   uint32_t poll_ms = 20, bool enabled = true) {
+	const auto actor = std::to_string(actor_id);
+	const auto cycles = std::to_string(max_cycles);
+	const auto poll = std::to_string(poll_ms);
+	const auto zone_id = std::to_string(zone->GetZoneID());
+	const auto instance_id = std::to_string(zone->GetInstanceID());
+	const auto state = state_directory.string();
+	const auto child = fork();
+	if (child == 0) {
+		if (enabled) {
+			execl("/proc/self/exe", "zone", "actor-helper:run", "--enabled", "--actor-id", actor.c_str(),
+				  "--zone-id", zone_id.c_str(), "--instance-id", instance_id.c_str(), "--state-dir", state.c_str(),
+				  "--max-cycles", cycles.c_str(), "--poll-ms", poll.c_str(), "--exit-after-outcome",
+				  static_cast<char*>(nullptr));
+		} else {
+			execl("/proc/self/exe", "zone", "actor-helper:run", "--actor-id", actor.c_str(),
+				  "--state-dir", state.c_str(), static_cast<char*>(nullptr));
+		}
+		std::_Exit(127);
+	}
+	return child;
+}
+
+bool WaitForChild(pid_t child, std::chrono::milliseconds timeout, int* status = nullptr) {
+	const auto deadline = std::chrono::steady_clock::now() + timeout;
+	int local_status = 0;
+	while (std::chrono::steady_clock::now() < deadline) {
+		const auto result = waitpid(child, &local_status, WNOHANG);
+		if (result == child) {
+			if (status) *status = local_status;
+			return true;
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));
+	}
+	return false;
+}
+#endif
 
 uint32_t BuildRunNonce() {
 	const auto now = static_cast<uint64_t>(std::chrono::system_clock::now().time_since_epoch().count());
@@ -954,6 +1010,372 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 																	   });
 		Expect(status.actor_id == inserted_profile.actor_id, "actor status should persist for queue execution");
 
+#ifndef _WIN32
+		// Launch the production helper executable beside the harness zone. Kill it
+		// with its request pending, then restart it to prove durable idempotency and
+		// correlated outcome observation through the real zone executor.
+		ScopedTestDirectory helper_state(
+			std::filesystem::temp_directory_path() / fmt::format("eqemu-actor-helper-{}", run_nonce));
+		const auto helper_action_count = [&]() -> uint64_t {
+			auto rows = database.QueryDatabase(fmt::format(
+				"SELECT COUNT(*) FROM actor_action_queue WHERE actor_id = {} AND source = 'actor-helper'",
+				inserted_profile.actor_id));
+			Expect(rows.Success() && rows.RowCount() == 1 && rows.begin()[0],
+				   "helper action count should be readable");
+			return strtoull(rows.begin()[0], nullptr, 10);
+		};
+		const auto wait_for_helper_action = [&]() {
+			const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+			while (std::chrono::steady_clock::now() < deadline) {
+				if (helper_action_count() == 1) return true;
+				std::this_thread::sleep_for(std::chrono::milliseconds(20));
+			}
+			return false;
+		};
+		const auto disabled_helper = SpawnActorHelper(inserted_profile.actor_id, helper_state.Path(), 1, 10, false);
+		int disabled_status = 0;
+		Expect(disabled_helper > 0 && WaitForChild(disabled_helper, std::chrono::seconds(10), &disabled_status) &&
+			   WIFEXITED(disabled_status) && WEXITSTATUS(disabled_status) == 0,
+			   "helper should remain disabled unless explicitly enabled");
+		ExpectEqual(helper_action_count(), uint64_t(0), "disabled helper must not enqueue work");
+
+		const auto first_helper = SpawnActorHelper(inserted_profile.actor_id, helper_state.Path());
+		Expect(first_helper > 0, "real actor helper should launch");
+		Expect(wait_for_helper_action(), "helper should discover the fresh actor and queue one bounded action");
+		kill(first_helper, SIGTERM);
+		int first_status = 0;
+		Expect(WaitForChild(first_helper, std::chrono::seconds(2), &first_status),
+			   "killed helper should terminate within the scenario deadline");
+		ExpectEqual(helper_action_count(), uint64_t(1), "pending helper work should survive process restart");
+
+		const auto restarted_helper = SpawnActorHelper(inserted_profile.actor_id, helper_state.Path());
+		Expect(restarted_helper > 0, "actor helper should restart with work pending");
+		ActorActionExecutor helper_executor(database, zone->GetZoneID(), zone->GetInstanceID(), zone->GetZoneServerId());
+		helper_executor.ProcessOne();
+		int restarted_status = 0;
+		Expect(WaitForChild(restarted_helper, std::chrono::seconds(10), &restarted_status),
+			   "restarted helper should observe the correlated zone outcome");
+		Expect(WIFEXITED(restarted_status) && WEXITSTATUS(restarted_status) == 0,
+			   "restarted helper should exit successfully after observing the outcome");
+		ExpectEqual(helper_action_count(), uint64_t(1), "restart must not duplicate the queued action or its effect");
+		auto helper_action = database.QueryDatabase(fmt::format(
+			"SELECT action_id, state FROM actor_action_queue WHERE actor_id = {} AND source = 'actor-helper'",
+			inserted_profile.actor_id));
+		Expect(helper_action.Success() && helper_action.RowCount() == 1 && helper_action.begin()[0] &&
+			   helper_action.begin()[1] && std::string(helper_action.begin()[1]) == "completed",
+			   "zone executor should complete the helper's production action");
+		Expect(ActorEventsRepository::HasActionOutcome(database, inserted_profile.actor_id,
+			strtoull(helper_action.begin()[0], nullptr, 10)),
+			"helper action should have one correlated zone outcome");
+
+		const auto idle_started = std::chrono::steady_clock::now();
+		const auto idle_helper = SpawnActorHelper(inserted_profile.actor_id, helper_state.Path(), 2, 50);
+		int idle_status = 0;
+		Expect(WaitForChild(idle_helper, std::chrono::seconds(10), &idle_status),
+			   "no-work helper should stop at its configured cycle bound");
+		Expect(std::chrono::steady_clock::now() - idle_started >= std::chrono::milliseconds(50),
+			   "no-work helper cycles should back off instead of spinning");
+		ExpectEqual(helper_action_count(), uint64_t(1), "no-work polling must not queue a duplicate action");
+
+		// An expired request has not applied gameplay. Reopen that same durable row
+		// instead of letting its idempotency key strand the triggering event.
+		const auto expiry_trigger = ActorEventsRepository::AppendEvent(database, {
+			.actor_id = inserted_profile.actor_id,
+			.event_type = "test_helper_expiry_delta",
+			.event_json = R"json({"sequence":1})json",
+			.created_at = now,
+		});
+		Expect(expiry_trigger.event_id != 0, "helper expiry trigger should persist");
+		ActorHelper expiry_helper(database, {.state_directory = helper_state.Path(),
+			.actor_id = inserted_profile.actor_id, .zone_id = zone->GetZoneID(),
+			.instance_id = zone->GetInstanceID()});
+		ExpectEqual(expiry_helper.RunCycle(now).enqueued, size_t(1),
+			"helper should enqueue the expiry regression request");
+		auto expiry_action = database.QueryDatabase(fmt::format(
+			"SELECT action_id FROM actor_action_queue WHERE actor_id = {} AND source = 'actor-helper' "
+			"AND state = 'pending'", inserted_profile.actor_id));
+		Expect(expiry_action.Success() && expiry_action.RowCount() == 1 && expiry_action.begin()[0],
+			"expiry regression request should be pending");
+		const auto expiry_action_id = strtoull(expiry_action.begin()[0], nullptr, 10);
+		Expect(database.QueryDatabase(fmt::format(
+			"UPDATE actor_action_queue SET state = 'expired', completed_at = FROM_UNIXTIME({}) "
+			"WHERE action_id = {}", now + 15, expiry_action_id)).Success(),
+			"expiry regression request should transition to expired");
+		const auto expiry_retry = expiry_helper.RunCycle(now + 16);
+		ExpectEqual(expiry_retry.enqueued, size_t(1), "expired helper work should be safely retried");
+		ExpectEqual(ActorActionQueueRepository::FindOne(database, expiry_action_id).state, std::string("pending"),
+			"expiry retry should reopen the same idempotent row");
+		ExpectEqual(helper_action_count(), uint64_t(2), "expiry retry must not create a duplicate queue row");
+
+		// A helper with a different cursor view derives a newer key, but admission
+		// remains serialized per actor while the retry is pending.
+		ScopedTestDirectory competing_helper_state(
+			std::filesystem::temp_directory_path() / fmt::format("eqemu-actor-helper-competing-{}", run_nonce));
+		Expect(ActorEventsRepository::AppendEvent(database, {
+			.actor_id = inserted_profile.actor_id,
+			.event_type = "test_helper_competing_delta",
+			.event_json = R"json({"sequence":2})json",
+			.created_at = now,
+		}).event_id != 0, "competing helper trigger should persist");
+		ActorHelper competing_helper(database, {.state_directory = competing_helper_state.Path(),
+			.actor_id = inserted_profile.actor_id, .zone_id = zone->GetZoneID(),
+			.instance_id = zone->GetInstanceID()});
+		const auto competing = competing_helper.RunCycle(now + 16);
+		ExpectEqual(competing.enqueued, size_t(0), "a second cursor view must not admit concurrent helper work");
+		ExpectEqual(competing.busy, size_t(1), "competing helper admission should observe the durable request");
+		ExpectEqual(helper_action_count(), uint64_t(2), "one-in-flight enforcement must not add a newer-key row");
+		Expect(ActorActionQueueRepository::DeleteOne(database, expiry_action_id) == 1,
+			"expiry regression request should clean up");
+		Expect(database.QueryDatabase(fmt::format(
+			"DELETE FROM actor_events WHERE actor_id = {} AND event_type IN "
+			"('test_helper_expiry_delta','test_helper_competing_delta')", inserted_profile.actor_id)).Success(),
+			"helper expiry and contention events should clean up");
+
+		// Hold an uncommitted profile change after discovery can see the old row.
+		// The helper must block at admission, then revalidate the now-disabled actor
+		// rather than enqueueing from its stale discovery result.
+		const auto admission_trigger = ActorEventsRepository::AppendEvent(database, {
+			.actor_id = inserted_profile.actor_id, .event_type = "test_helper_admission_race",
+			.event_json = R"json({"sequence":3})json", .created_at = now,
+		});
+		Expect(admission_trigger.event_id != 0, "admission-race trigger should persist");
+		const auto* helper_config = EQEmuConfig::get();
+		Expect(helper_config != nullptr, "admission-race helper needs database configuration");
+		Database admission_database;
+		Expect(admission_database.Connect(helper_config->DatabaseHost, helper_config->DatabaseUsername,
+			helper_config->DatabasePassword, helper_config->DatabaseDB, helper_config->DatabasePort,
+			"actor-helper-admission-race"), "admission-race helper should connect independently");
+		auto admission_connection = admission_database.QueryDatabase("SELECT CONNECTION_ID()");
+		Expect(admission_connection.Success() && admission_connection.RowCount() == 1 && admission_connection.begin()[0],
+			"admission-race helper connection id should be readable");
+		const auto admission_connection_id = strtoull(admission_connection.begin()[0], nullptr, 10);
+		ScopedTestDirectory admission_state(
+			std::filesystem::temp_directory_path() / fmt::format("eqemu-actor-helper-admission-{}", run_nonce));
+		database.TransactionBegin();
+		Expect(database.QueryDatabase(fmt::format(
+			"UPDATE actor_profiles SET enabled = 0 WHERE actor_id = {}", inserted_profile.actor_id)).Success(),
+			"admission-race profile change should hold the actor lock");
+		auto admission_future = std::async(std::launch::async, [&]() {
+			ActorHelper admission_helper(admission_database, {.state_directory = admission_state.Path(),
+				.actor_id = inserted_profile.actor_id, .zone_id = zone->GetZoneID(),
+				.instance_id = zone->GetInstanceID()});
+			return admission_helper.RunCycle(now);
+		});
+		bool admission_waiting = false;
+		bool admission_observation_ok = true;
+		const auto admission_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+		while (!admission_waiting && std::chrono::steady_clock::now() < admission_deadline) {
+			auto process = database.QueryDatabase(fmt::format(
+				"SELECT COUNT(*) FROM information_schema.PROCESSLIST WHERE ID = {} "
+				"AND INFO LIKE '%FROM actor_profiles p%' AND INFO LIKE '%FOR UPDATE%'",
+				admission_connection_id));
+			if (!process.Success() || process.RowCount() != 1 || !process.begin()[0]) {
+				admission_observation_ok = false;
+				break;
+			}
+			admission_waiting = strtoull(process.begin()[0], nullptr, 10) == 1;
+			if (!admission_waiting) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+		}
+		const bool admission_committed = database.TransactionCommit().Success();
+		const auto admission_result = admission_future.get();
+		Expect(admission_committed, "admission-race profile change should commit");
+		Expect(admission_observation_ok && admission_waiting,
+			"helper should reach admission while the stale discovery row is locked");
+		ExpectEqual(admission_result.discovered, size_t(1),
+			"admission-race helper should have discovered the actor before disable committed");
+		ExpectEqual(admission_result.enqueued, size_t(0),
+			"admission must reject an actor disabled after discovery");
+		Expect(database.QueryDatabase(fmt::format(
+			"UPDATE actor_profiles SET enabled = 1 WHERE actor_id = {}", inserted_profile.actor_id)).Success(),
+			"admission-race profile should be restored");
+		Expect(database.QueryDatabase(fmt::format(
+			"DELETE FROM actor_events WHERE event_id = {}", admission_trigger.event_id)).Success(),
+			"admission-race trigger should clean up");
+
+		// A decision admitted for this zone must not become executable merely because
+		// the actor's current binding makes the destination zone eligible to claim it.
+		const auto moved_after_admission_trigger = ActorEventsRepository::AppendEvent(database, {
+			.actor_id = inserted_profile.actor_id, .event_type = "test_helper_move_after_admission",
+			.event_json = R"json({"sequence":4})json", .created_at = now,
+		});
+		Expect(moved_after_admission_trigger.event_id != 0, "move-after-admission trigger should persist");
+		ActorHelper moved_after_admission_helper(database, {.state_directory = helper_state.Path(),
+			.actor_id = inserted_profile.actor_id, .zone_id = zone->GetZoneID(),
+			.instance_id = zone->GetInstanceID()});
+		ExpectEqual(moved_after_admission_helper.RunCycle(now).enqueued, size_t(1),
+			"helper should admit work against the source-zone binding");
+		fixture.OwnedBot()->Sit();
+		Expect(database.QueryDatabase(fmt::format(
+			"UPDATE actor_status SET zone_id = {} WHERE actor_id = {}", zone->GetZoneID() + 1,
+			inserted_profile.actor_id)).Success(), "actor should move after helper admission");
+		ActorActionExecutor moved_destination_executor(
+			database, zone->GetZoneID() + 1, zone->GetInstanceID(), zone->GetZoneServerId());
+		moved_destination_executor.ProcessOne();
+		auto moved_after_admission_action = database.QueryDatabase(fmt::format(
+			"SELECT action_id, state, failure_reason FROM actor_action_queue WHERE actor_id = {} "
+			"AND source = 'actor-helper' AND state = 'failed'", inserted_profile.actor_id));
+		Expect(moved_after_admission_action.Success() && moved_after_admission_action.RowCount() == 1 &&
+			moved_after_admission_action.begin()[0] && moved_after_admission_action.begin()[1] &&
+			moved_after_admission_action.begin()[2] &&
+			std::string(moved_after_admission_action.begin()[2]) == "actor_binding_changed",
+			"destination executor should reject the helper's source-zone binding");
+		Expect(fixture.OwnedBot()->IsSitting(), "a moved helper decision must not apply in the destination zone");
+		Expect(database.QueryDatabase(fmt::format(
+			"UPDATE actor_status SET zone_id = {} WHERE actor_id = {}", zone->GetZoneID(),
+			inserted_profile.actor_id)).Success(), "move-after-admission actor binding should be restored");
+		Expect(database.QueryDatabase(fmt::format(
+			"DELETE FROM actor_events WHERE actor_id = {} AND (event_id = {} OR "
+			"(event_type = 'action_rejected' AND JSON_UNQUOTE(JSON_EXTRACT(event_json, '$.action_id')) = '{}'))",
+			inserted_profile.actor_id, moved_after_admission_trigger.event_id,
+			moved_after_admission_action.begin()[0])).Success(),
+			"move-after-admission events should clean up");
+		Expect(database.QueryDatabase(fmt::format(
+			"DELETE FROM actor_action_queue WHERE action_id = {}", moved_after_admission_action.begin()[0])).Success(),
+			"move-after-admission action should clean up");
+
+		// Bounded discovery rotates rather than permanently selecting the lowest IDs.
+		ScopedTestDirectory fair_helper_state(
+			std::filesystem::temp_directory_path() / fmt::format("eqemu-actor-helper-fair-{}", run_nonce));
+		uint32_t fair_target_actor_id = 0;
+		for (uint32_t index = 0; index < 3; ++index) {
+			ActorProfilesRepository::ActorProfileRecord fair_profile{};
+			fair_profile.actor_type = "autonomous_actor";
+			fair_profile.actor_substrate = "bot";
+			fair_profile.bot_id = next_free_bot_id(100 + index);
+			fair_profile.owner_character_id = reserved_owner.character_id;
+			fair_profile.enabled = true;
+			fair_profile = ActorProfilesRepository::UpsertBotBackedProfile(database, fair_profile);
+			Expect(fair_profile.actor_id != 0, "fair-discovery actor should persist");
+			cleanup.TrackActorId(fair_profile.actor_id);
+			ActorStatusRepository::UpsertOne(database, {
+				.actor_id = fair_profile.actor_id, .zone_id = zone->GetZoneID(),
+				.instance_id = zone->GetInstanceID(), .entity_id = 60000 + index,
+				.state = "active", .heartbeat_at = now,
+			});
+			if (index == 2) fair_target_actor_id = fair_profile.actor_id;
+		}
+		const auto fair_trigger = ActorEventsRepository::AppendEvent(database, {
+			.actor_id = fair_target_actor_id, .event_type = "test_fair_discovery",
+			.event_json = R"json({"sequence":1})json", .created_at = now,
+		});
+		Expect(fair_trigger.event_id != 0, "fair-discovery target event should persist");
+		ActorHelper fair_helper(database, {.state_directory = fair_helper_state.Path(),
+			.zone_id = zone->GetZoneID(), .instance_id = zone->GetInstanceID(), .discovery_limit = 2});
+		ExpectEqual(fair_helper.RunCycle(now).enqueued, size_t(0),
+			"first bounded discovery page should not reach the later actor");
+		ActorHelper restarted_fair_helper(database, {.state_directory = fair_helper_state.Path(),
+			.zone_id = zone->GetZoneID(), .instance_id = zone->GetInstanceID(), .discovery_limit = 2});
+		ExpectEqual(restarted_fair_helper.RunCycle(now).enqueued, size_t(1),
+			"persisted bounded discovery should reach later actors after restart");
+		auto fair_action = database.QueryDatabase(fmt::format(
+			"SELECT source_metadata_json FROM actor_action_queue WHERE actor_id = {} "
+			"AND source = 'actor-helper'", fair_target_actor_id));
+		Expect(fair_action.Success() && fair_action.RowCount() == 1 && fair_action.begin()[0],
+			"fair-discovery helper action metadata should be readable");
+		const auto fair_metadata = ParseJson(fair_action.begin()[0]);
+		ExpectEqual(fair_metadata["expected_event_id"].asUInt64(), fair_trigger.event_id,
+			"helper watermark should come from the gameplay trigger snapshot");
+		ExpectEqual(fair_metadata["schema_version"].asUInt(), 1u,
+			"helper decision metadata should identify its schema");
+		ExpectEqual(fair_metadata["decision"]["policy"].asString(),
+			std::string("stand_on_latest_gameplay_event"),
+			"helper metadata should identify the deterministic decision policy");
+		ExpectEqual(fair_metadata["decision"]["policy_version"].asUInt(), 1u,
+			"helper metadata should identify the deterministic policy version");
+		ExpectEqual(fair_metadata["decision"]["inputs"]["actor_id"].asUInt(), fair_target_actor_id,
+			"helper metadata should retain the actor decision input");
+		ExpectEqual(fair_metadata["decision"]["inputs"]["event_id"].asUInt64(), fair_trigger.event_id,
+			"helper metadata should retain the selected event identity");
+		ExpectEqual(fair_metadata["decision"]["inputs"]["event_type"].asString(),
+			std::string("test_fair_discovery"),
+			"helper metadata should retain the event type used by the policy");
+		ExpectEqual(fair_metadata["expected_binding"]["actor_id"].asUInt(), fair_target_actor_id,
+			"helper metadata should retain the admitted actor binding");
+		ExpectEqual(fair_metadata["expected_binding"]["zone_id"].asUInt(), zone->GetZoneID(),
+			"helper metadata should retain the admitted zone binding");
+		ExpectEqual(fair_metadata["expected_binding"]["instance_id"].asUInt(), zone->GetInstanceID(),
+			"helper metadata should retain the admitted instance binding");
+		ExpectEqual(fair_metadata["expected_binding"]["entity_id"].asUInt(), 60002u,
+			"helper metadata should retain the admitted entity binding");
+		Expect(database.QueryDatabase(fmt::format(
+			"DELETE FROM actor_action_queue WHERE actor_id = {} AND source = 'actor-helper'", fair_target_actor_id)).Success(),
+			"fair-discovery request should clean up");
+		Expect(database.QueryDatabase(fmt::format(
+			"DELETE FROM actor_events WHERE actor_id = {} AND event_type = 'test_fair_discovery'", fair_target_actor_id)).Success(),
+			"fair-discovery event should clean up");
+
+		// Exercise bounded cursor catch-up and retained-event loss recovery without
+		// manufacturing a gameplay success; the helper only submits through the queue.
+		Expect(database.QueryDatabase(fmt::format(
+			"DELETE FROM actor_events WHERE actor_id = {} AND event_type IN ('action_completed','action_rejected') "
+			"AND JSON_UNQUOTE(JSON_EXTRACT(event_json, '$.action_id')) = '{}'",
+			inserted_profile.actor_id, helper_action.begin()[0])).Success(),
+			"helper outcome fixture should clean up before cursor assertions");
+		std::filesystem::remove(helper_state.Path() /
+			(std::to_string(inserted_profile.actor_id) + ".cursor"));
+		ActorHelper retained_outcome_helper(database, {.state_directory = helper_state.Path(),
+			.actor_id = inserted_profile.actor_id, .zone_id = zone->GetZoneID(),
+			.instance_id = zone->GetInstanceID()});
+		const auto retained_outcome_recovery = retained_outcome_helper.RunCycle(now);
+		ExpectEqual(retained_outcome_recovery.retained_outcome_losses, size_t(1),
+			"terminal queue state should recover progress after its correlated outcome is pruned");
+		ExpectEqual(retained_outcome_recovery.enqueued, size_t(0),
+			"retained-outcome recovery must not recreate an already completed effect");
+		ExpectEqual(helper_action_count(), uint64_t(1),
+			"retained-outcome recovery must preserve the single idempotent queue row");
+		Expect(database.QueryDatabase(fmt::format(
+			"DELETE FROM actor_action_queue WHERE actor_id = {} AND source = 'actor-helper'",
+			inserted_profile.actor_id)).Success(), "helper queue fixture should clean up before cursor assertions");
+		ActorHelper restarted_retained_outcome_helper(database, {.state_directory = helper_state.Path(),
+			.actor_id = inserted_profile.actor_id, .zone_id = zone->GetZoneID(),
+			.instance_id = zone->GetInstanceID()});
+		ExpectEqual(restarted_retained_outcome_helper.RunCycle(now).enqueued, size_t(0),
+			"retained-outcome recovery should durably suppress the completed effect after restart");
+		for (int index = 0; index < 3; ++index) {
+			Expect(ActorEventsRepository::AppendEvent(database, {
+				.actor_id = inserted_profile.actor_id,
+				.event_type = "test_gameplay_delta",
+				.event_json = fmt::format("{{\"sequence\":{}}}", index),
+				.created_at = now,
+			}).event_id != 0, "cursor-gap fixture event should persist");
+		}
+		ActorHelper bounded_helper(database, {.state_directory = helper_state.Path(),
+			.actor_id = inserted_profile.actor_id, .zone_id = zone->GetZoneID(),
+			.instance_id = zone->GetInstanceID(), .event_limit = 2});
+		const auto blocked_state = std::filesystem::temp_directory_path() /
+			fmt::format("eqemu-actor-helper-blocked-state-{}", run_nonce);
+		std::filesystem::remove_all(blocked_state);
+		{ std::ofstream occupied(blocked_state); occupied << "not-a-directory"; }
+		ActorHelper unwritable_helper(database, {.state_directory = blocked_state,
+			.actor_id = inserted_profile.actor_id, .zone_id = zone->GetZoneID(),
+			.instance_id = zone->GetInstanceID(), .event_limit = 2});
+		const auto unwritable_gap = unwritable_helper.RunCycle(now);
+		ExpectEqual(unwritable_gap.state_persistence_errors, size_t(1),
+			"failed durable cursor writes should produce a fatal cycle result");
+		ExpectEqual(unwritable_gap.cursor_gaps, size_t(0),
+			"failed durable cursor writes must not report a cursor gap as recovered");
+		std::filesystem::remove(blocked_state);
+
+		const auto gap = bounded_helper.RunCycle(now);
+		ExpectEqual(gap.cursor_gaps, size_t(1), "helper should report and boundedly catch up a cursor gap");
+		ExpectEqual(gap.state_persistence_errors, size_t(0),
+			"durable cursor catch-up should not report a persistence failure");
+		ExpectEqual(gap.enqueued, size_t(0), "helper must not decide from a partial cursor page");
+		auto cursor_input = std::ifstream(helper_state.Path() / (std::to_string(inserted_profile.actor_id) + ".cursor"));
+		uint64_t gap_cursor = 0;
+		cursor_input >> gap_cursor;
+		Expect(gap_cursor != 0, "cursor-gap catch-up should durably advance its cursor");
+		Expect(database.QueryDatabase(fmt::format(
+			"DELETE FROM actor_events WHERE actor_id = {} AND event_id = {}", inserted_profile.actor_id, gap_cursor)).Success(),
+			"retained-event-loss fixture should remove the saved cursor event");
+		const auto retained_loss = bounded_helper.RunCycle(now);
+		ExpectEqual(retained_loss.retained_event_losses, size_t(1),
+			"helper should explicitly resynchronize when its retained cursor event is lost");
+		Expect(database.QueryDatabase(fmt::format(
+			"DELETE FROM actor_events WHERE actor_id = {} AND event_type = 'test_gameplay_delta'",
+			inserted_profile.actor_id)).Success(), "cursor fixture events should clean up before queue assertions");
+#endif
+
 		const auto enqueue = [&](const std::string& type, const Json::Value& body, const std::string& key,
 								 std::optional<time_t> expires_at = std::nullopt) {
 			Json::StreamWriterBuilder writer;
@@ -1039,6 +1461,18 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 		const auto disabled_actor = enqueue_ineligible(disabled_bot, false, zone->GetZoneID(), "disabled-actor", now);
 		const auto stale_actor = enqueue_ineligible(stale_bot, true, zone->GetZoneID(), "stale-actor", now - 31);
 		const auto moved_actor = enqueue_ineligible(moved_bot, true, zone->GetZoneID() + 1, "moved-actor", now);
+		ScopedTestDirectory ineligible_helper_state(
+			std::filesystem::temp_directory_path() / fmt::format("eqemu-actor-helper-ineligible-{}", run_nonce));
+		for (const auto actor_id : {disabled_actor.actor_id, stale_actor.actor_id, moved_actor.actor_id}) {
+			ActorHelper ineligible_helper(database, {
+				.state_directory = ineligible_helper_state.Path(), .actor_id = actor_id,
+				.zone_id = zone->GetZoneID(), .instance_id = zone->GetInstanceID()});
+			const auto ineligible = ineligible_helper.RunCycle(now);
+			ExpectEqual(ineligible.discovered, size_t(0),
+				"helper discovery must skip disabled, stale, and moved actors");
+			ExpectEqual(ineligible.enqueued, size_t(0),
+				"ineligible actor discovery must not submit helper work");
+		}
 		ActorProfilesRepository::ActorProfileRecord stale_profile{};
 		stale_profile.actor_type = "autonomous_actor";
 		stale_profile.actor_substrate = "bot";
