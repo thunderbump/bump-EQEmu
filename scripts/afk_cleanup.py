@@ -1,7 +1,7 @@
 """Host-selected AFK cleanup adapter. Hold validation leases until deletion ends.
 
 Configure fixture_resources.<name>.cleanup_adapter with this trusted file's
-absolute path. AFK calls cleanup_targets(directory, job, apply=False), and owns
+absolute path. AFK calls cleanup_targets(directory, job, apply=False, resume=False), and owns
 job retention, lifecycle locks, deletion markers and removal. This adapter owns
 EQEmu release checks and the two generated fixture directories it yields.
 """
@@ -10,6 +10,7 @@ import fcntl
 import json
 import shutil
 import subprocess
+import uuid
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
@@ -48,8 +49,25 @@ def referenced_paths(value):
         yield Path(value).resolve()
 
 
+def release_gc_lease(lease):
+    """Recover only our atomic lease publication, with both guard locks held."""
+    target = lease.resolve()
+    expected_prefix = lease.name + ".gc-"
+    if target.parent != lease.parent or not target.name.startswith(expected_prefix):
+        raise ValueError("unknown validation lease; use validation recovery")
+    physical(target)
+    record = target / "gc-owner.json"
+    if set(target.iterdir()) != {record} or record.is_symlink():
+        raise ValueError("damaged GC lease; inspect before recovery")
+    if json.loads(record.read_text()) != {"kind": "afk-gc-v1", "lease": str(lease)}:
+        raise ValueError("GC lease ownership changed")
+    lease.unlink()
+    record.unlink()
+    target.rmdir()
+
+
 @contextmanager
-def cleanup_targets(directory, job, *, apply=False):
+def cleanup_targets(directory, job, *, apply=False, resume=False):
     """Refuse uncertain release, dirty clones, bound code, and baseline references."""
     directory = physical(directory)
     resource = job["fixture_resource"]
@@ -59,12 +77,24 @@ def cleanup_targets(directory, job, *, apply=False):
     leases = [home / "locks/validation-slot.lock", stack / ".validation-worker-code.lock"]
     with ExitStack() as locks:
         for lease in leases:
-            # Guard files coordinate newer workers; mkdir also excludes old workers.
             guard = physical(Path(str(lease) + ".guard"))
             handle = locks.enter_context(guard.open("a"))
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            lease.mkdir()
-            locks.callback(lease.rmdir)
+        # Both guards are held before recovering our leases. Old workers still
+        # see a directory at the lease path and cannot mkdir over it.
+        for lease in leases:
+            if lease.is_symlink():
+                release_gc_lease(lease)
+            pending = lease.with_name(lease.name + ".gc-" + uuid.uuid4().hex)
+            pending.mkdir()
+            (pending / "gc-owner.json").write_text(json.dumps({"kind": "afk-gc-v1", "lease": str(lease)}))
+            try:
+                lease.symlink_to(pending, target_is_directory=True)
+            except BaseException:
+                (pending / "gc-owner.json").unlink()
+                pending.rmdir()
+                raise
+            locks.callback(release_gc_lease, lease)
         evidence = physical(directory / "fixture-evidence")
         if (evidence / "docker-creation-pending").exists():
             raise ValueError("Docker creation is unconfirmed; recover validation first")
@@ -95,15 +125,21 @@ def cleanup_targets(directory, job, *, apply=False):
                 or checkout.name != metadata.get("run_id")
             ):
                 raise ValueError("validation checkout ownership is unproven")
-            if checkout.exists():
+            if checkout.exists() and (not resume or (checkout / ".git").exists()):
                 if not (checkout / ".git").is_dir() or (checkout / ".git").is_symlink():
                     raise ValueError("validation checkout is not an independent clone")
                 if run("git", "-C", str(checkout), "rev-parse", "HEAD") != job["head"] or run("git", "-C", str(checkout), "status", "--porcelain", "--untracked-files=all"):
                     raise ValueError("validation checkout has unpublished changes")
+                if run("git", "-C", str(checkout), "rev-list", "--all", "--reflog", "--not", job["head"], "--remotes"):
+                    raise ValueError("validation checkout has unpublished commits in refs or reflogs")
+                if run("git", "-C", str(checkout), "submodule", "foreach", "--quiet", "--recursive", "git rev-list --all --reflog --not HEAD --remotes"):
+                    raise ValueError("validation submodule has unpublished commits")
+            if resume and ((checkout / ".git").is_symlink() or ((checkout / ".git").exists() and not (checkout / ".git").is_dir())):
+                raise ValueError("linked checkout substituted during interrupted cleanup")
             targets.append(checkout)
             prepared = physical(evidence / "prepared-fixture")
             manifest = prepared / "migration-rehearsal-manifest.json"
-            if prepared.exists():
+            if prepared.exists() and not resume:
                 data = json.loads(manifest.read_text())
                 if data.get("source", {}).get("fixture_preparer_commit") != job["head"]:
                     raise ValueError("prepared fixture ownership is unproven")
@@ -124,7 +160,7 @@ def cleanup_targets(directory, job, *, apply=False):
                 value = json.loads(baseline.read_text())
                 if any(overlaps(ref, p) for ref in referenced_paths(value) for p in guarded):
                     raise ValueError("baseline still references cleanup target")
-        if apply and "fixtures" in job["expected_phases"] and manifest.exists():
+        if apply and not resume and "fixtures" in job["expected_phases"] and manifest.exists():
             # Preserve identity/hash metadata alongside the retained logs/results.
             retained = evidence / "prepared-fixture-manifest.json"
             if retained.is_symlink():

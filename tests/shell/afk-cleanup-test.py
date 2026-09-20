@@ -5,6 +5,7 @@ import importlib.util
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -106,6 +107,53 @@ class CleanupTest(unittest.TestCase):
         (self.evidence / 'result.json').write_text(json.dumps(self.result))
         with self.assertRaisesRegex(ValueError, 'ownership'), cleanup.cleanup_targets(self.directory, self.job):
             pass
+
+    def test_unpublished_branch_and_reflog_are_retained(self):
+        cleanup.run('git', '-C', str(self.checkout), 'checkout', '-qb', 'unpublished')
+        (self.checkout / 'source').write_text('unpublished commit')
+        cleanup.run('git', '-C', str(self.checkout), '-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-qam', 'local work')
+        cleanup.run('git', '-C', str(self.checkout), 'checkout', '--detach', self.head)
+        with self.assertRaisesRegex(ValueError, 'unpublished commits'), cleanup.cleanup_targets(self.directory, self.job):
+            pass
+        cleanup.run('git', '-C', str(self.checkout), 'branch', '-D', 'unpublished')
+        with self.assertRaisesRegex(ValueError, 'unpublished commits'), cleanup.cleanup_targets(self.directory, self.job):
+            pass
+
+    def test_partial_deletion_can_resume(self):
+        with cleanup.cleanup_targets(self.directory, self.job, apply=True):
+            shutil.rmtree(self.checkout / '.git')
+            self.manifest.unlink()
+        with cleanup.cleanup_targets(self.directory, self.job, apply=True, resume=True) as targets:
+            for target in targets:
+                shutil.rmtree(target)
+        self.assertTrue((self.evidence / 'prepared-fixture-manifest.json').exists())
+
+    def test_resume_keeps_new_work_in_intact_checkout(self):
+        (self.checkout / 'new-work').write_text('keep me')
+        with self.assertRaisesRegex(ValueError, 'unpublished'), cleanup.cleanup_targets(self.directory, self.job, resume=True):
+            pass
+        self.assertTrue((self.checkout / 'new-work').exists())
+
+    def test_killed_collector_leases_are_recovered_by_next_call(self):
+        program = """
+import importlib.util,json,sys,time
+from pathlib import Path
+s=importlib.util.spec_from_file_location('cleanup',sys.argv[1]);m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
+m.container_mounts=lambda:[]
+with m.cleanup_targets(Path(sys.argv[2]),json.loads(sys.argv[3])):
+ print('held',flush=True)
+ time.sleep(60)
+"""
+        with subprocess.Popen([sys.executable, '-c', program, str(ROOT / 'scripts/afk_cleanup.py'), str(self.directory), json.dumps(self.job)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as child:
+            import select
+            self.assertTrue(select.select([child.stdout], [], [], 5)[0])
+            self.assertEqual(child.stdout.readline().strip(), 'held')
+            child.kill()
+            child.wait(timeout=5)
+        self.assertTrue(all(p.is_symlink() for p in self.leases))
+        with cleanup.cleanup_targets(self.directory, self.job):
+            self.assertTrue(all(p.exists() for p in self.leases))
+        self.assertFalse(any(p.is_symlink() for p in self.leases))
 
     def test_uncertain_docker_creation_retains_payload(self):
         (self.evidence / 'docker-creation-pending').touch()
