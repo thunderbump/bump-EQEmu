@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <string>
 #include <utility>
@@ -42,6 +43,7 @@ ActorHelper::ActorHelper(Database& database, Options options) : database_(databa
 	options_.freshness_seconds = std::clamp<uint32_t>(options_.freshness_seconds, 1, 3600);
 	options_.event_limit = std::clamp<size_t>(options_.event_limit, 1, 128);
 	options_.discovery_limit = std::clamp<size_t>(options_.discovery_limit, 1, 256);
+	discovery_cursor_ = LoadDiscoveryCursor();
 }
 
 uint64_t ActorHelper::LoadCursor(uint32_t actor_id) const {
@@ -60,6 +62,33 @@ bool ActorHelper::StoreCursor(uint32_t actor_id, uint64_t cursor) const {
 		return false;
 	}
 	const auto destination = options_.state_directory / (std::to_string(actor_id) + ".cursor");
+	const auto temporary = destination.string() + ".tmp";
+	{
+		std::ofstream output(temporary, std::ios::trunc);
+		if (!(output << cursor << "\n")) {
+			return false;
+		}
+	}
+	std::filesystem::rename(temporary, destination, error);
+	return !error;
+}
+
+uint32_t ActorHelper::LoadDiscoveryCursor() const {
+	std::ifstream input(options_.state_directory / "discovery.cursor");
+	uint64_t cursor = 0;
+	if (!(input >> cursor) || cursor > std::numeric_limits<uint32_t>::max()) {
+		return 0;
+	}
+	return static_cast<uint32_t>(cursor);
+}
+
+bool ActorHelper::StoreDiscoveryCursor(uint32_t cursor) const {
+	std::error_code error;
+	std::filesystem::create_directories(options_.state_directory, error);
+	if (error) {
+		return false;
+	}
+	const auto destination = options_.state_directory / "discovery.cursor";
 	const auto temporary = destination.string() + ".tmp";
 	{
 		std::ofstream output(temporary, std::ios::trunc);
@@ -102,9 +131,13 @@ LIMIT {}
 	}
 	result.discovered = actors.size();
 	if (!actors.empty()) {
-		// Start the next bounded scan after the last actor in this page. The
-		// cyclic ordering above wraps to low IDs after reaching the end.
-		discovery_cursor_ = actors.back().actor_id;
+		// Persist the rotating scan position before processing actors. A helper
+		// that repeatedly restarts after one bounded cycle must still reach later
+		// IDs; the cyclic ordering above wraps after reaching the end.
+		const auto next_discovery_cursor = actors.back().actor_id;
+		if (StoreDiscoveryCursor(next_discovery_cursor)) {
+			discovery_cursor_ = next_discovery_cursor;
+		}
 	}
 
 	for (const auto actor : actors) {
@@ -180,7 +213,10 @@ ORDER BY q.action_id DESC LIMIT 16
 		}
 
 		Json::Value metadata;
-		metadata["expected_event_id"] = Json::UInt64(*latest);
+		// The executor watermark must describe the gameplay snapshot that selected
+		// this action. A separate "latest" read can precede a concurrent append and
+		// make a newly selected trigger stale against an older watermark.
+		metadata["expected_event_id"] = Json::UInt64(trigger->event_id);
 		metadata["trigger_event_id"] = Json::UInt64(trigger->event_id);
 		Json::Value action(Json::objectValue);
 		Json::StreamWriterBuilder writer;

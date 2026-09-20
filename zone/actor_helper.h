@@ -36,6 +36,8 @@ public:
 private:
 	uint64_t LoadCursor(uint32_t actor_id) const;
 	bool StoreCursor(uint32_t actor_id, uint64_t cursor) const;
+	uint32_t LoadDiscoveryCursor() const;
+	bool StoreDiscoveryCursor(uint32_t cursor) const;
 
 	Database& database_;
 	Options options_;

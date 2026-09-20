@@ -1152,16 +1152,27 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 			});
 			if (index == 2) fair_target_actor_id = fair_profile.actor_id;
 		}
-		Expect(ActorEventsRepository::AppendEvent(database, {
+		const auto fair_trigger = ActorEventsRepository::AppendEvent(database, {
 			.actor_id = fair_target_actor_id, .event_type = "test_fair_discovery",
 			.event_json = R"json({"sequence":1})json", .created_at = now,
-		}).event_id != 0, "fair-discovery target event should persist");
+		});
+		Expect(fair_trigger.event_id != 0, "fair-discovery target event should persist");
 		ActorHelper fair_helper(database, {.state_directory = fair_helper_state.Path(),
 			.zone_id = zone->GetZoneID(), .instance_id = zone->GetInstanceID(), .discovery_limit = 2});
 		ExpectEqual(fair_helper.RunCycle(now).enqueued, size_t(0),
 			"first bounded discovery page should not reach the later actor");
-		ExpectEqual(fair_helper.RunCycle(now).enqueued, size_t(1),
-			"rotating bounded discovery should reach actors beyond the first page");
+		ActorHelper restarted_fair_helper(database, {.state_directory = fair_helper_state.Path(),
+			.zone_id = zone->GetZoneID(), .instance_id = zone->GetInstanceID(), .discovery_limit = 2});
+		ExpectEqual(restarted_fair_helper.RunCycle(now).enqueued, size_t(1),
+			"persisted bounded discovery should reach later actors after restart");
+		auto fair_action = database.QueryDatabase(fmt::format(
+			"SELECT source_metadata_json FROM actor_action_queue WHERE actor_id = {} "
+			"AND source = 'actor-helper'", fair_target_actor_id));
+		Expect(fair_action.Success() && fair_action.RowCount() == 1 && fair_action.begin()[0],
+			"fair-discovery helper action metadata should be readable");
+		const auto fair_metadata = ParseJson(fair_action.begin()[0]);
+		ExpectEqual(fair_metadata["expected_event_id"].asUInt64(), fair_trigger.event_id,
+			"helper watermark should come from the gameplay trigger snapshot");
 		Expect(database.QueryDatabase(fmt::format(
 			"DELETE FROM actor_action_queue WHERE actor_id = {} AND source = 'actor-helper'", fair_target_actor_id)).Success(),
 			"fair-discovery request should clean up");
