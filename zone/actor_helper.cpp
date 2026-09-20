@@ -3,6 +3,7 @@
 #include "common/json/json.h"
 #include "common/repositories/actor_action_queue_repository.h"
 #include "common/repositories/actor_events_repository.h"
+#include "common/strings.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -40,6 +41,7 @@ std::optional<uint64_t> JsonUInt64(const std::string& document, const char* memb
 ActorHelper::ActorHelper(Database& database, Options options) : database_(database), options_(std::move(options)) {
 	options_.freshness_seconds = std::clamp<uint32_t>(options_.freshness_seconds, 1, 3600);
 	options_.event_limit = std::clamp<size_t>(options_.event_limit, 1, 128);
+	options_.discovery_limit = std::clamp<size_t>(options_.discovery_limit, 1, 256);
 }
 
 uint64_t ActorHelper::LoadCursor(uint32_t actor_id) const {
@@ -87,8 +89,9 @@ WHERE p.enabled = 1 AND p.actor_type = 'autonomous_actor' AND p.actor_substrate 
   AND p.bot_id IS NOT NULL AND p.owner_character_id IS NOT NULL
   AND s.zone_id IS NOT NULL AND s.entity_id IS NOT NULL AND s.state IN ('active', 'idle')
   AND s.heartbeat_at >= FROM_UNIXTIME({} - {}){}{}
-ORDER BY p.actor_id LIMIT 64
-)SQL", now, options_.freshness_seconds, actor_filter, zone_filter));
+ORDER BY (p.actor_id > {}) DESC, p.actor_id
+LIMIT {}
+)SQL", now, options_.freshness_seconds, actor_filter, zone_filter, discovery_cursor_, options_.discovery_limit));
 	if (!discovery.Success()) {
 		return result;
 	}
@@ -98,6 +101,11 @@ ORDER BY p.actor_id LIMIT 64
 		actors.push_back({static_cast<uint32_t>(strtoul(row[0], nullptr, 10))});
 	}
 	result.discovered = actors.size();
+	if (!actors.empty()) {
+		// Start the next bounded scan after the last actor in this page. The
+		// cyclic ordering above wraps to low IDs after reaching the end.
+		discovery_cursor_ = actors.back().actor_id;
+	}
 
 	for (const auto actor : actors) {
 		uint64_t cursor = LoadCursor(actor.actor_id);
@@ -129,15 +137,6 @@ ORDER BY q.action_id DESC LIMIT 16
 		if (completed_cursor > cursor && StoreCursor(actor.actor_id, completed_cursor)) {
 			cursor = completed_cursor;
 			++result.outcomes_observed;
-		}
-
-		auto active = database_.QueryDatabase(fmt::format(
-			"SELECT COUNT(*) FROM actor_action_queue WHERE actor_id = {} AND source = 'actor-helper' "
-			"AND state IN ('pending', 'claimed')", actor.actor_id));
-		if (!active.Success() || active.RowCount() != 1 || !active.begin()[0] ||
-			strtoull(active.begin()[0], nullptr, 10) != 0) {
-			++result.busy;
-			continue;
 		}
 
 		const auto latest = ActorEventsRepository::LatestGameplayEventId(database_, actor.actor_id);
@@ -186,17 +185,69 @@ ORDER BY q.action_id DESC LIMIT 16
 		Json::Value action(Json::objectValue);
 		Json::StreamWriterBuilder writer;
 		writer["indentation"] = "";
-		const auto queued = ActorActionQueueRepository::Enqueue(database_, {
-			.actor_id = actor.actor_id,
-			.source = "actor-helper",
-			.source_metadata_json = Json::writeString(writer, metadata),
-			.action_type = "stand",
-			.action_json = Json::writeString(writer, action),
-			.idempotency_key = fmt::format("actor-helper:stand:{}:{}", actor.actor_id, trigger->event_id),
-			.expires_at = now + 15,
-			.created_at = now,
-		});
-		if (queued.action_id != 0) {
+		const auto metadata_json = Json::writeString(writer, metadata);
+		const auto action_json = Json::writeString(writer, action);
+		const auto idempotency_key = fmt::format("actor-helper:stand:{}:{}", actor.actor_id, trigger->event_id);
+
+		// Serialize helper admission on the durable actor profile row. This keeps
+		// the active-count check and insert/retry in one database critical section,
+		// so helpers with different cursor views cannot both admit work.
+		database_.TransactionBegin();
+		auto actor_lock = database_.QueryDatabase(fmt::format(
+			"SELECT actor_id FROM actor_profiles WHERE actor_id = {} FOR UPDATE", actor.actor_id));
+		if (!actor_lock.Success() || actor_lock.RowCount() != 1) {
+			database_.TransactionRollback();
+			continue;
+		}
+		ActorActionQueueRepository::ExpireDue(database_, now, actor.actor_id);
+		auto active = database_.QueryDatabase(fmt::format(
+			"SELECT COUNT(*) FROM actor_action_queue WHERE actor_id = {} AND source = 'actor-helper' "
+			"AND state IN ('pending', 'claimed')", actor.actor_id));
+		if (!active.Success() || active.RowCount() != 1 || !active.begin()[0]) {
+			database_.TransactionRollback();
+			continue;
+		}
+		if (strtoull(active.begin()[0], nullptr, 10) != 0) {
+			if (!database_.TransactionCommit().Success()) {
+				database_.TransactionRollback();
+			}
+			++result.busy;
+			continue;
+		}
+
+		bool admitted = false;
+		const auto existing = ActorActionQueueRepository::FindByActorAndIdempotencyKey(
+			database_, actor.actor_id, idempotency_key);
+		if (existing.has_value() && existing->state == "expired") {
+			// Expiration is guaranteed to precede gameplay application in the zone
+			// executor, so the same durable request can safely become pending again.
+			auto retried = database_.QueryDatabase(fmt::format(R"SQL(
+UPDATE actor_action_queue
+SET state = 'pending', source_metadata_json = '{}', action_json = '{}',
+    not_before = NULL, expires_at = FROM_UNIXTIME({}), claimed_by = NULL,
+    claimed_at = NULL, completed_at = NULL, failure_reason = NULL,
+    result_json = NULL, updated_at = FROM_UNIXTIME({})
+WHERE action_id = {} AND state = 'expired'
+)SQL", Strings::Escape(metadata_json), Strings::Escape(action_json), now + 15, now, existing->action_id));
+			admitted = retried.Success() && retried.RowsAffected() == 1;
+		} else if (!existing.has_value()) {
+			const auto queued = ActorActionQueueRepository::Enqueue(database_, {
+				.actor_id = actor.actor_id,
+				.source = "actor-helper",
+				.source_metadata_json = metadata_json,
+				.action_type = "stand",
+				.action_json = action_json,
+				.idempotency_key = idempotency_key,
+				.expires_at = now + 15,
+				.created_at = now,
+			});
+			admitted = queued.action_id != 0;
+		}
+		if (!database_.TransactionCommit().Success()) {
+			database_.TransactionRollback();
+			admitted = false;
+		}
+		if (admitted) {
 			++result.enqueued;
 		}
 	}

@@ -1077,6 +1077,98 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 			   "no-work helper cycles should back off instead of spinning");
 		ExpectEqual(helper_action_count(), uint64_t(1), "no-work polling must not queue a duplicate action");
 
+		// An expired request has not applied gameplay. Reopen that same durable row
+		// instead of letting its idempotency key strand the triggering event.
+		const auto expiry_trigger = ActorEventsRepository::AppendEvent(database, {
+			.actor_id = inserted_profile.actor_id,
+			.event_type = "test_helper_expiry_delta",
+			.event_json = R"json({"sequence":1})json",
+			.created_at = now,
+		});
+		Expect(expiry_trigger.event_id != 0, "helper expiry trigger should persist");
+		ActorHelper expiry_helper(database, {.state_directory = helper_state.Path(),
+			.actor_id = inserted_profile.actor_id, .zone_id = zone->GetZoneID(),
+			.instance_id = zone->GetInstanceID()});
+		ExpectEqual(expiry_helper.RunCycle(now).enqueued, size_t(1),
+			"helper should enqueue the expiry regression request");
+		auto expiry_action = database.QueryDatabase(fmt::format(
+			"SELECT action_id FROM actor_action_queue WHERE actor_id = {} AND source = 'actor-helper' "
+			"AND state = 'pending'", inserted_profile.actor_id));
+		Expect(expiry_action.Success() && expiry_action.RowCount() == 1 && expiry_action.begin()[0],
+			"expiry regression request should be pending");
+		const auto expiry_action_id = strtoull(expiry_action.begin()[0], nullptr, 10);
+		Expect(database.QueryDatabase(fmt::format(
+			"UPDATE actor_action_queue SET state = 'expired', completed_at = FROM_UNIXTIME({}) "
+			"WHERE action_id = {}", now + 15, expiry_action_id)).Success(),
+			"expiry regression request should transition to expired");
+		const auto expiry_retry = expiry_helper.RunCycle(now + 16);
+		ExpectEqual(expiry_retry.enqueued, size_t(1), "expired helper work should be safely retried");
+		ExpectEqual(ActorActionQueueRepository::FindOne(database, expiry_action_id).state, std::string("pending"),
+			"expiry retry should reopen the same idempotent row");
+		ExpectEqual(helper_action_count(), uint64_t(2), "expiry retry must not create a duplicate queue row");
+
+		// A helper with a different cursor view derives a newer key, but admission
+		// remains serialized per actor while the retry is pending.
+		ScopedTestDirectory competing_helper_state(
+			std::filesystem::temp_directory_path() / fmt::format("eqemu-actor-helper-competing-{}", run_nonce));
+		Expect(ActorEventsRepository::AppendEvent(database, {
+			.actor_id = inserted_profile.actor_id,
+			.event_type = "test_helper_competing_delta",
+			.event_json = R"json({"sequence":2})json",
+			.created_at = now,
+		}).event_id != 0, "competing helper trigger should persist");
+		ActorHelper competing_helper(database, {.state_directory = competing_helper_state.Path(),
+			.actor_id = inserted_profile.actor_id, .zone_id = zone->GetZoneID(),
+			.instance_id = zone->GetInstanceID()});
+		const auto competing = competing_helper.RunCycle(now + 16);
+		ExpectEqual(competing.enqueued, size_t(0), "a second cursor view must not admit concurrent helper work");
+		ExpectEqual(competing.busy, size_t(1), "competing helper admission should observe the durable request");
+		ExpectEqual(helper_action_count(), uint64_t(2), "one-in-flight enforcement must not add a newer-key row");
+		Expect(ActorActionQueueRepository::DeleteOne(database, expiry_action_id) == 1,
+			"expiry regression request should clean up");
+		Expect(database.QueryDatabase(fmt::format(
+			"DELETE FROM actor_events WHERE actor_id = {} AND event_type IN "
+			"('test_helper_expiry_delta','test_helper_competing_delta')", inserted_profile.actor_id)).Success(),
+			"helper expiry and contention events should clean up");
+
+		// Bounded discovery rotates rather than permanently selecting the lowest IDs.
+		ScopedTestDirectory fair_helper_state(
+			std::filesystem::temp_directory_path() / fmt::format("eqemu-actor-helper-fair-{}", run_nonce));
+		uint32_t fair_target_actor_id = 0;
+		for (uint32_t index = 0; index < 3; ++index) {
+			ActorProfilesRepository::ActorProfileRecord fair_profile{};
+			fair_profile.actor_type = "autonomous_actor";
+			fair_profile.actor_substrate = "bot";
+			fair_profile.bot_id = next_free_bot_id(100 + index);
+			fair_profile.owner_character_id = reserved_owner.character_id;
+			fair_profile.enabled = true;
+			fair_profile = ActorProfilesRepository::UpsertBotBackedProfile(database, fair_profile);
+			Expect(fair_profile.actor_id != 0, "fair-discovery actor should persist");
+			cleanup.TrackActorId(fair_profile.actor_id);
+			ActorStatusRepository::UpsertOne(database, {
+				.actor_id = fair_profile.actor_id, .zone_id = zone->GetZoneID(),
+				.instance_id = zone->GetInstanceID(), .entity_id = 60000 + index,
+				.state = "active", .heartbeat_at = now,
+			});
+			if (index == 2) fair_target_actor_id = fair_profile.actor_id;
+		}
+		Expect(ActorEventsRepository::AppendEvent(database, {
+			.actor_id = fair_target_actor_id, .event_type = "test_fair_discovery",
+			.event_json = R"json({"sequence":1})json", .created_at = now,
+		}).event_id != 0, "fair-discovery target event should persist");
+		ActorHelper fair_helper(database, {.state_directory = fair_helper_state.Path(),
+			.zone_id = zone->GetZoneID(), .instance_id = zone->GetInstanceID(), .discovery_limit = 2});
+		ExpectEqual(fair_helper.RunCycle(now).enqueued, size_t(0),
+			"first bounded discovery page should not reach the later actor");
+		ExpectEqual(fair_helper.RunCycle(now).enqueued, size_t(1),
+			"rotating bounded discovery should reach actors beyond the first page");
+		Expect(database.QueryDatabase(fmt::format(
+			"DELETE FROM actor_action_queue WHERE actor_id = {} AND source = 'actor-helper'", fair_target_actor_id)).Success(),
+			"fair-discovery request should clean up");
+		Expect(database.QueryDatabase(fmt::format(
+			"DELETE FROM actor_events WHERE actor_id = {} AND event_type = 'test_fair_discovery'", fair_target_actor_id)).Success(),
+			"fair-discovery event should clean up");
+
 		// Exercise bounded cursor catch-up and retained-event loss recovery without
 		// manufacturing a gameplay success; the helper only submits through the queue.
 		for (int index = 0; index < 3; ++index) {

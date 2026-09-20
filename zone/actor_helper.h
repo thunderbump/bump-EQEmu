@@ -17,6 +17,7 @@ public:
 		uint32_t instance_id = 0;
 		uint32_t freshness_seconds = 30;
 		size_t event_limit = 32;
+		size_t discovery_limit = 64;
 	};
 
 	struct CycleResult {
@@ -38,4 +39,5 @@ private:
 
 	Database& database_;
 	Options options_;
+	uint32_t discovery_cursor_ = 0;
 };
