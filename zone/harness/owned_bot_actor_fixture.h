@@ -121,6 +121,7 @@ public:
 	void SetBotFollowTarget(Bot *actor, Mob *target);
 	void SetFollowersFollowActorLeader();
 	void SetBotAttackFlag(Bot *actor, bool enabled = true);
+	void SetBotReturningFlag(Bot *actor, bool enabled = true);
 
 	// Zone Harness setup shortcuts for preconditions, not Actor Actions.
 	bool MarkHostileSlowed(NPC *hostile, uint16_t slow_spell_id, uint32_t ticks = 600);

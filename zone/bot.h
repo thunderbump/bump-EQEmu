@@ -361,6 +361,7 @@ public:
 	void SetHoldFlag(bool flag = true) { m_hold_flag = flag; }
 	bool GetAttackFlag() const { return m_attack_flag; }
 	void SetAttackFlag(bool flag = true) { m_attack_flag = flag; }
+	void ClearAttackCommandFlags();
 	bool GetCombatRoundForAlerts() const { return m_combat_round_alert_flag; }
 	bool GetAttackingFlag() const { return m_attacking_flag; }
 	bool GetPullFlag() const { return m_pull_flag; }
@@ -802,6 +803,7 @@ public:
 	Mob* GetBotOwner() { return this->_botOwner; }
 	void SetCommandTargetSource(Mob* source);
 	void SetLeashSource(Mob* source);
+	bool IsCommandTargetSource(uint32 entity_id) const { return entity_id && _commandTargetSourceID == entity_id; }
 	void ClearCommandTargetSource() { _commandTargetSourceID = 0; }
 	void ClearLeashSource() { _leashSourceID = 0; }
 	void ClearCommandSourceReferences(uint16 entity_id);

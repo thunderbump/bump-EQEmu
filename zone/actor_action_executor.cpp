@@ -153,12 +153,9 @@ void ActorActionExecutor::CancelHuntCombat() {
 		// Bot::SetOwnerTarget can enlist a controllable pet in the same ordinary
 		// combat. Remove only this hunt target so unrelated pet hate is retained.
 		remove_hunt_aggro(party_bot->GetPet());
-		auto* bot_owner = party_bot->GetBotOwner();
-		auto* command_source = party_bot->GetCommandTargetSource(
-			bot_owner && bot_owner->IsClient() ? bot_owner->CastToClient() : nullptr);
-		if (command_source && hunt_engagement_->status.entity_id.has_value() &&
-			command_source->GetID() == *hunt_engagement_->status.entity_id) {
-			party_bot->SetAttackFlag(false);
+		if (hunt_engagement_->status.entity_id.has_value() &&
+			party_bot->IsCommandTargetSource(*hunt_engagement_->status.entity_id)) {
+			party_bot->ClearAttackCommandFlags();
 			party_bot->ClearCommandTargetSource();
 		}
 	}
@@ -443,7 +440,9 @@ void ActorActionExecutor::ProcessOne() {
 			});
 		if (!owned_materialized_party ||
 			std::any_of(hunt_party_bots.begin(), hunt_party_bots.end(), [](Bot* party_bot) {
-				return party_bot->HasDied() || party_bot->GetHP() <= 0 || party_bot->IsEngaged();
+				return party_bot->HasDied() || party_bot->GetHP() <= 0 || party_bot->IsEngaged() ||
+					party_bot->GetAttackFlag() || party_bot->GetAttackingFlag() || party_bot->GetPullFlag() ||
+					party_bot->GetPullingFlag() || party_bot->GetReturningFlag();
 			})) {
 			reject("actor_not_ready");
 			return;

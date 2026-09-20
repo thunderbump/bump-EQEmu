@@ -3590,13 +3590,17 @@ Mob* Bot::GetCommandTarget(Client* bot_owner)
 	return command_source ? command_source->GetTarget() : nullptr;
 }
 
+void Bot::ClearAttackCommandFlags() {
+	SetAttackFlag(false);
+	SetAttackingFlag(false);
+}
+
 void Bot::SetOwnerTarget(Client* bot_owner) {
 	if (GetPet() && (PULLING_BOT || RETURNING_BOT)) {
 		GetPet()->SetPetOrder(PetOrder::Follow);
 	}
 
-	SetAttackFlag(false);
-	SetAttackingFlag(false);
+	ClearAttackCommandFlags();
 	SetPullFlag(false);
 	SetPullingFlag(false);
 	SetReturningFlag(false);

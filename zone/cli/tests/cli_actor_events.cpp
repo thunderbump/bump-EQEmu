@@ -931,12 +931,12 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 	const auto clear_combat = [&]() {
 		fixture.OwnedBot()->WipeHateList();
 		fixture.OwnedBot()->SetTarget(nullptr);
-		fixture.OwnedBot()->SetAttackFlag(false);
+		fixture.OwnedBot()->ClearAttackCommandFlags();
 		fixture.OwnedBot()->ClearCommandTargetSource();
 		for (auto* follower : fixture.FollowerBots()) {
 			follower->WipeHateList();
 			follower->SetTarget(nullptr);
-			follower->SetAttackFlag(false);
+			follower->ClearAttackCommandFlags();
 			follower->ClearCommandTargetSource();
 		}
 	};
@@ -988,6 +988,36 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 	busy_follower->WipeHateList();
 	busy_follower->SetTarget(nullptr);
 	fixture.RemoveMob(busy_target);
+
+	busy_follower->SetAttackFlag();
+	const auto follower_attack_pending = enqueue("follower-attack-pending", valid_body);
+	executor.ProcessOne();
+	ExpectEqual(ActorActionQueueRepository::FindOne(database, follower_attack_pending.action_id).failure_reason,
+		std::optional<std::string>("actor_not_ready"),
+		"a pending follower attack command must prevent the Party hunt from being committed");
+	Expect(busy_follower->GetAttackFlag(),
+		"readiness rejection must not consume a follower's pending attack command");
+	busy_follower->SetAttackFlag(false);
+
+	busy_follower->SetPullFlag();
+	const auto follower_pull_pending = enqueue("follower-pull-pending", valid_body);
+	executor.ProcessOne();
+	ExpectEqual(ActorActionQueueRepository::FindOne(database, follower_pull_pending.action_id).failure_reason,
+		std::optional<std::string>("actor_not_ready"),
+		"a pending follower pull command must prevent the Party hunt from being committed");
+	Expect(busy_follower->GetPullFlag(),
+		"readiness rejection must not consume a follower's pending pull command");
+	busy_follower->SetPullFlag(false);
+
+	fixture.SetBotReturningFlag(busy_follower);
+	const auto follower_return_pending = enqueue("follower-return-pending", valid_body);
+	executor.ProcessOne();
+	ExpectEqual(ActorActionQueueRepository::FindOne(database, follower_return_pending.action_id).failure_reason,
+		std::optional<std::string>("actor_not_ready"),
+		"a returning follower must prevent the Party hunt from being committed");
+	Expect(busy_follower->GetReturningFlag(),
+		"readiness rejection must not consume a follower's return command state");
+	fixture.SetBotReturningFlag(busy_follower, false);
 
 	busy_follower->SetHP(0);
 	const auto follower_dead = enqueue("follower-dead", valid_body);
@@ -1082,14 +1112,20 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 	});
 	Expect(hunt_pet && unrelated_pet_target, "hunt cleanup pet fixtures should materialize");
 	fixture.OwnedBot()->SetPet(hunt_pet);
+	// Consume the pending hunt commands through the ordinary Bot path so the
+	// distinct attacking flag is part of the state cancellation must unwind.
+	fixture.OwnedBot()->SetOwnerTarget(fixture.Owner());
+	Expect(fixture.OwnedBot()->GetAttackingFlag(),
+		"ordinary Bot engagement should establish the leader's attacking state");
+	for (auto* party_bot : fixture.FollowerBots()) {
+		party_bot->SetOwnerTarget(fixture.Owner());
+		Expect(party_bot->GetAttackingFlag(),
+			"ordinary Bot engagement should establish each follower's attacking state");
+		timeout_target->AddToHateList(party_bot, 1);
+	}
 	hunt_pet->AddToHateList(timeout_target, 1);
 	hunt_pet->AddToHateList(unrelated_pet_target, 1);
 	timeout_target->AddToHateList(hunt_pet, 1);
-	for (auto* party_bot : fixture.FollowerBots()) {
-		party_bot->AddToHateList(timeout_target, 1);
-		timeout_target->AddToHateList(party_bot, 1);
-	}
-	fixture.OwnedBot()->AddToHateList(timeout_target, 1);
 	timeout_target->AddToHateList(fixture.OwnedBot(), 1);
 
 	hunt_clock += 2;
@@ -1097,12 +1133,13 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 	ExpectEqual(ActorActionQueueRepository::FindOne(database, timed.action_id).state, std::string("expired"),
 		"a hunt exceeding its deadline must expire without a forced result");
 	Expect(fixture.OwnedBot()->GetTarget() != timeout_target && !fixture.OwnedBot()->GetAttackFlag() &&
-		!fixture.OwnedBot()->CheckAggro(timeout_target) &&
+		!fixture.OwnedBot()->GetAttackingFlag() && !fixture.OwnedBot()->CheckAggro(timeout_target) &&
 		!timeout_target->CheckAggro(fixture.OwnedBot()),
 		"expiry must cancel both sides of the Actor leader's selected-target combat intent");
 	for (auto* follower : fixture.FollowerBots()) {
 		Expect(follower->GetTarget() != timeout_target && !follower->GetAttackFlag() &&
-			!follower->CheckAggro(timeout_target) && !timeout_target->CheckAggro(follower),
+			!follower->GetAttackingFlag() && !follower->CheckAggro(timeout_target) &&
+			!timeout_target->CheckAggro(follower),
 			"expiry must cancel both sides of each follower's selected-target combat intent");
 	}
 	Expect(!hunt_pet->CheckAggro(timeout_target) && !timeout_target->CheckAggro(hunt_pet) &&

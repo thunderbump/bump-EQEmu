@@ -657,6 +657,13 @@ void OwnedBotActorFixture::SetBotAttackFlag(Bot *actor, bool enabled)
 	}
 }
 
+void OwnedBotActorFixture::SetBotReturningFlag(Bot *actor, bool enabled)
+{
+	if (actor) {
+		actor->SetReturningFlag(enabled);
+	}
+}
+
 bool OwnedBotActorFixture::MarkHostileSlowed(NPC *hostile, uint16_t slow_spell_id, uint32_t ticks)
 {
 	if (!hostile || !bot || !IsValidSpell(slow_spell_id)) {
