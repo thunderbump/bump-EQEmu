@@ -1131,6 +1131,67 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 			"('test_helper_expiry_delta','test_helper_competing_delta')", inserted_profile.actor_id)).Success(),
 			"helper expiry and contention events should clean up");
 
+		// Hold an uncommitted profile change after discovery can see the old row.
+		// The helper must block at admission, then revalidate the now-disabled actor
+		// rather than enqueueing from its stale discovery result.
+		const auto admission_trigger = ActorEventsRepository::AppendEvent(database, {
+			.actor_id = inserted_profile.actor_id, .event_type = "test_helper_admission_race",
+			.event_json = R"json({"sequence":3})json", .created_at = now,
+		});
+		Expect(admission_trigger.event_id != 0, "admission-race trigger should persist");
+		const auto* helper_config = EQEmuConfig::get();
+		Expect(helper_config != nullptr, "admission-race helper needs database configuration");
+		Database admission_database;
+		Expect(admission_database.Connect(helper_config->DatabaseHost, helper_config->DatabaseUsername,
+			helper_config->DatabasePassword, helper_config->DatabaseDB, helper_config->DatabasePort,
+			"actor-helper-admission-race"), "admission-race helper should connect independently");
+		auto admission_connection = admission_database.QueryDatabase("SELECT CONNECTION_ID()");
+		Expect(admission_connection.Success() && admission_connection.RowCount() == 1 && admission_connection.begin()[0],
+			"admission-race helper connection id should be readable");
+		const auto admission_connection_id = strtoull(admission_connection.begin()[0], nullptr, 10);
+		ScopedTestDirectory admission_state(
+			std::filesystem::temp_directory_path() / fmt::format("eqemu-actor-helper-admission-{}", run_nonce));
+		database.TransactionBegin();
+		Expect(database.QueryDatabase(fmt::format(
+			"UPDATE actor_profiles SET enabled = 0 WHERE actor_id = {}", inserted_profile.actor_id)).Success(),
+			"admission-race profile change should hold the actor lock");
+		auto admission_future = std::async(std::launch::async, [&]() {
+			ActorHelper admission_helper(admission_database, {.state_directory = admission_state.Path(),
+				.actor_id = inserted_profile.actor_id, .zone_id = zone->GetZoneID(),
+				.instance_id = zone->GetInstanceID()});
+			return admission_helper.RunCycle(now);
+		});
+		bool admission_waiting = false;
+		bool admission_observation_ok = true;
+		const auto admission_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+		while (!admission_waiting && std::chrono::steady_clock::now() < admission_deadline) {
+			auto process = database.QueryDatabase(fmt::format(
+				"SELECT COUNT(*) FROM information_schema.PROCESSLIST WHERE ID = {} "
+				"AND INFO LIKE '%FROM actor_profiles p%' AND INFO LIKE '%FOR UPDATE%'",
+				admission_connection_id));
+			if (!process.Success() || process.RowCount() != 1 || !process.begin()[0]) {
+				admission_observation_ok = false;
+				break;
+			}
+			admission_waiting = strtoull(process.begin()[0], nullptr, 10) == 1;
+			if (!admission_waiting) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+		}
+		const bool admission_committed = database.TransactionCommit().Success();
+		const auto admission_result = admission_future.get();
+		Expect(admission_committed, "admission-race profile change should commit");
+		Expect(admission_observation_ok && admission_waiting,
+			"helper should reach admission while the stale discovery row is locked");
+		ExpectEqual(admission_result.discovered, size_t(1),
+			"admission-race helper should have discovered the actor before disable committed");
+		ExpectEqual(admission_result.enqueued, size_t(0),
+			"admission must reject an actor disabled after discovery");
+		Expect(database.QueryDatabase(fmt::format(
+			"UPDATE actor_profiles SET enabled = 1 WHERE actor_id = {}", inserted_profile.actor_id)).Success(),
+			"admission-race profile should be restored");
+		Expect(database.QueryDatabase(fmt::format(
+			"DELETE FROM actor_events WHERE event_id = {}", admission_trigger.event_id)).Success(),
+			"admission-race trigger should clean up");
+
 		// Bounded discovery rotates rather than permanently selecting the lowest IDs.
 		ScopedTestDirectory fair_helper_state(
 			std::filesystem::temp_directory_path() / fmt::format("eqemu-actor-helper-fair-{}", run_nonce));
@@ -1173,6 +1234,20 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 		const auto fair_metadata = ParseJson(fair_action.begin()[0]);
 		ExpectEqual(fair_metadata["expected_event_id"].asUInt64(), fair_trigger.event_id,
 			"helper watermark should come from the gameplay trigger snapshot");
+		ExpectEqual(fair_metadata["schema_version"].asUInt(), 1u,
+			"helper decision metadata should identify its schema");
+		ExpectEqual(fair_metadata["decision"]["policy"].asString(),
+			std::string("stand_on_latest_gameplay_event"),
+			"helper metadata should identify the deterministic decision policy");
+		ExpectEqual(fair_metadata["decision"]["policy_version"].asUInt(), 1u,
+			"helper metadata should identify the deterministic policy version");
+		ExpectEqual(fair_metadata["decision"]["inputs"]["actor_id"].asUInt(), fair_target_actor_id,
+			"helper metadata should retain the actor decision input");
+		ExpectEqual(fair_metadata["decision"]["inputs"]["event_id"].asUInt64(), fair_trigger.event_id,
+			"helper metadata should retain the selected event identity");
+		ExpectEqual(fair_metadata["decision"]["inputs"]["event_type"].asString(),
+			std::string("test_fair_discovery"),
+			"helper metadata should retain the event type used by the policy");
 		Expect(database.QueryDatabase(fmt::format(
 			"DELETE FROM actor_action_queue WHERE actor_id = {} AND source = 'actor-helper'", fair_target_actor_id)).Success(),
 			"fair-discovery request should clean up");
@@ -1182,6 +1257,14 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 
 		// Exercise bounded cursor catch-up and retained-event loss recovery without
 		// manufacturing a gameplay success; the helper only submits through the queue.
+		Expect(database.QueryDatabase(fmt::format(
+			"DELETE FROM actor_events WHERE actor_id = {} AND event_type IN ('action_completed','action_rejected') "
+			"AND JSON_UNQUOTE(JSON_EXTRACT(event_json, '$.action_id')) = '{}'",
+			inserted_profile.actor_id, helper_action.begin()[0])).Success(),
+			"helper outcome fixture should clean up before cursor assertions");
+		Expect(database.QueryDatabase(fmt::format(
+			"DELETE FROM actor_action_queue WHERE actor_id = {} AND source = 'actor-helper'",
+			inserted_profile.actor_id)).Success(), "helper queue fixture should clean up before cursor assertions");
 		for (int index = 0; index < 3; ++index) {
 			Expect(ActorEventsRepository::AppendEvent(database, {
 				.actor_id = inserted_profile.actor_id,
@@ -1193,8 +1276,24 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 		ActorHelper bounded_helper(database, {.state_directory = helper_state.Path(),
 			.actor_id = inserted_profile.actor_id, .zone_id = zone->GetZoneID(),
 			.instance_id = zone->GetInstanceID(), .event_limit = 2});
+		const auto blocked_state = std::filesystem::temp_directory_path() /
+			fmt::format("eqemu-actor-helper-blocked-state-{}", run_nonce);
+		std::filesystem::remove_all(blocked_state);
+		{ std::ofstream occupied(blocked_state); occupied << "not-a-directory"; }
+		ActorHelper unwritable_helper(database, {.state_directory = blocked_state,
+			.actor_id = inserted_profile.actor_id, .zone_id = zone->GetZoneID(),
+			.instance_id = zone->GetInstanceID(), .event_limit = 2});
+		const auto unwritable_gap = unwritable_helper.RunCycle(now);
+		ExpectEqual(unwritable_gap.state_persistence_errors, size_t(1),
+			"failed durable cursor writes should produce a fatal cycle result");
+		ExpectEqual(unwritable_gap.cursor_gaps, size_t(0),
+			"failed durable cursor writes must not report a cursor gap as recovered");
+		std::filesystem::remove(blocked_state);
+
 		const auto gap = bounded_helper.RunCycle(now);
 		ExpectEqual(gap.cursor_gaps, size_t(1), "helper should report and boundedly catch up a cursor gap");
+		ExpectEqual(gap.state_persistence_errors, size_t(0),
+			"durable cursor catch-up should not report a persistence failure");
 		ExpectEqual(gap.enqueued, size_t(0), "helper must not decide from a partial cursor page");
 		auto cursor_input = std::ifstream(helper_state.Path() / (std::to_string(inserted_profile.actor_id) + ".cursor"));
 		uint64_t gap_cursor = 0;
@@ -1209,14 +1308,6 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 		Expect(database.QueryDatabase(fmt::format(
 			"DELETE FROM actor_events WHERE actor_id = {} AND event_type = 'test_gameplay_delta'",
 			inserted_profile.actor_id)).Success(), "cursor fixture events should clean up before queue assertions");
-		Expect(database.QueryDatabase(fmt::format(
-			"DELETE FROM actor_events WHERE actor_id = {} AND event_type IN ('action_completed','action_rejected') "
-			"AND JSON_UNQUOTE(JSON_EXTRACT(event_json, '$.action_id')) = '{}'",
-			inserted_profile.actor_id, helper_action.begin()[0])).Success(),
-			"helper outcome fixture should clean up before executor assertions");
-		Expect(database.QueryDatabase(fmt::format(
-			"DELETE FROM actor_action_queue WHERE actor_id = {} AND source = 'actor-helper'",
-			inserted_profile.actor_id)).Success(), "helper queue fixture should clean up before executor assertions");
 #endif
 
 		const auto enqueue = [&](const std::string& type, const Json::Value& body, const std::string& key,

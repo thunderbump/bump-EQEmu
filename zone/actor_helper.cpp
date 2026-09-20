@@ -130,14 +130,18 @@ LIMIT {}
 		actors.push_back({static_cast<uint32_t>(strtoul(row[0], nullptr, 10))});
 	}
 	result.discovered = actors.size();
-	if (!actors.empty()) {
+	if (!actors.empty() && !options_.actor_id.has_value()) {
 		// Persist the rotating scan position before processing actors. A helper
 		// that repeatedly restarts after one bounded cycle must still reach later
-		// IDs; the cyclic ordering above wraps after reaching the end.
+		// IDs; the cyclic ordering above wraps after reaching the end. Failure is
+		// fatal to this cycle: otherwise a restart could falsely claim progress
+		// while repeatedly selecting the same bounded page.
 		const auto next_discovery_cursor = actors.back().actor_id;
-		if (StoreDiscoveryCursor(next_discovery_cursor)) {
-			discovery_cursor_ = next_discovery_cursor;
+		if (!StoreDiscoveryCursor(next_discovery_cursor)) {
+			++result.state_persistence_errors;
+			return result;
 		}
+		discovery_cursor_ = next_discovery_cursor;
 	}
 
 	for (const auto actor : actors) {
@@ -167,7 +171,11 @@ ORDER BY q.action_id DESC LIMIT 16
 				}
 			}
 		}
-		if (completed_cursor > cursor && StoreCursor(actor.actor_id, completed_cursor)) {
+		if (completed_cursor > cursor) {
+			if (!StoreCursor(actor.actor_id, completed_cursor)) {
+				++result.state_persistence_errors;
+				return result;
+			}
 			cursor = completed_cursor;
 			++result.outcomes_observed;
 		}
@@ -184,7 +192,10 @@ ORDER BY q.action_id DESC LIMIT 16
 				continue;
 			}
 			if (retained.RowCount() == 0) {
-				StoreCursor(actor.actor_id, *latest);
+				if (!StoreCursor(actor.actor_id, *latest)) {
+					++result.state_persistence_errors;
+					return result;
+				}
 				++result.retained_event_losses;
 				continue;
 			}
@@ -198,8 +209,12 @@ ORDER BY q.action_id DESC LIMIT 16
 			const auto more = ActorEventsRepository::ReadCursor(database_, actor.actor_id, events.back().event_id, 1);
 			if (!more.empty()) {
 				// Catch up a bounded page without deciding from a partial view. This
-				// is an explicit cursor-gap outcome, not unbounded replay.
-				StoreCursor(actor.actor_id, events.back().event_id);
+				// is an explicit cursor-gap outcome, not unbounded replay. Do not
+				// report recovery unless the new cursor is durable.
+				if (!StoreCursor(actor.actor_id, events.back().event_id)) {
+					++result.state_persistence_errors;
+					return result;
+				}
 				++result.cursor_gaps;
 				continue;
 			}
@@ -208,7 +223,10 @@ ORDER BY q.action_id DESC LIMIT 16
 			return IsGameplayEvent(event.event_type);
 		});
 		if (trigger == events.rend()) {
-			StoreCursor(actor.actor_id, events.back().event_id);
+			if (!StoreCursor(actor.actor_id, events.back().event_id)) {
+				++result.state_persistence_errors;
+				return result;
+			}
 			continue;
 		}
 
@@ -216,8 +234,18 @@ ORDER BY q.action_id DESC LIMIT 16
 		// The executor watermark must describe the gameplay snapshot that selected
 		// this action. A separate "latest" read can precede a concurrent append and
 		// make a newly selected trigger stale against an older watermark.
+		metadata["schema_version"] = 1;
 		metadata["expected_event_id"] = Json::UInt64(trigger->event_id);
 		metadata["trigger_event_id"] = Json::UInt64(trigger->event_id);
+		metadata["decision"]["policy"] = "stand_on_latest_gameplay_event";
+		metadata["decision"]["policy_version"] = 1;
+		metadata["decision"]["action_type"] = "stand";
+		// This deliberately simple policy depends only on ordering and event type,
+		// not on the event payload. Retain those complete decision inputs in the
+		// queue row so the choice remains reproducible after event retention.
+		metadata["decision"]["inputs"]["actor_id"] = actor.actor_id;
+		metadata["decision"]["inputs"]["event_id"] = Json::UInt64(trigger->event_id);
+		metadata["decision"]["inputs"]["event_type"] = trigger->event_type;
 		Json::Value action(Json::objectValue);
 		Json::StreamWriterBuilder writer;
 		writer["indentation"] = "";
@@ -225,12 +253,26 @@ ORDER BY q.action_id DESC LIMIT 16
 		const auto action_json = Json::writeString(writer, action);
 		const auto idempotency_key = fmt::format("actor-helper:stand:{}:{}", actor.actor_id, trigger->event_id);
 
-		// Serialize helper admission on the durable actor profile row. This keeps
-		// the active-count check and insert/retry in one database critical section,
-		// so helpers with different cursor views cannot both admit work.
+		// Serialize helper admission on the durable actor binding rows. This keeps
+		// eligibility validation, the active-count check, and insert/retry in one
+		// database critical section, so helpers with different cursor views cannot
+		// both admit work.
 		database_.TransactionBegin();
-		auto actor_lock = database_.QueryDatabase(fmt::format(
-			"SELECT actor_id FROM actor_profiles WHERE actor_id = {} FOR UPDATE", actor.actor_id));
+		// Lock and revalidate both durable binding rows. Discovery is only a hint:
+		// enabled/fresh/zone/entity state may change while events are read. Keeping
+		// this validation and queue admission in one transaction also preserves the
+		// per-actor serialization contract.
+		auto actor_lock = database_.QueryDatabase(fmt::format(R"SQL(
+SELECT p.actor_id
+FROM actor_profiles p
+JOIN actor_status s ON s.actor_id = p.actor_id
+WHERE p.actor_id = {}
+  AND p.enabled = 1 AND p.actor_type = 'autonomous_actor' AND p.actor_substrate = 'bot'
+  AND p.bot_id IS NOT NULL AND p.owner_character_id IS NOT NULL
+  AND s.zone_id IS NOT NULL AND s.entity_id IS NOT NULL AND s.state IN ('active', 'idle')
+  AND s.heartbeat_at >= FROM_UNIXTIME({} - {}){}
+FOR UPDATE
+)SQL", actor.actor_id, now, options_.freshness_seconds, zone_filter));
 		if (!actor_lock.Success() || actor_lock.RowCount() != 1) {
 			database_.TransactionRollback();
 			continue;

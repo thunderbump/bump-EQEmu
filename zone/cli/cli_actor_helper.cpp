@@ -60,8 +60,13 @@ void ZoneCLI::ActorHelperRun(int, char**, argh::parser& cmd, std::string& descri
 		std::cout << "[ACTOR-HELPER] discovered=" << result.discovered << " enqueued=" << result.enqueued
 				  << " outcomes=" << result.outcomes_observed << " busy=" << result.busy
 				  << " cursor_gaps=" << result.cursor_gaps
-				  << " retained_event_losses=" << result.retained_event_losses << "\n";
+				  << " retained_event_losses=" << result.retained_event_losses
+				  << " state_persistence_errors=" << result.state_persistence_errors << "\n";
 		std::cout.flush();
+		if (result.Fatal()) {
+			std::cerr << "actor-helper: durable state persistence failed\n";
+			std::exit(1);
+		}
 		++cycle;
 		if (cmd[{"--exit-after-outcome"}] && result.outcomes_observed != 0) {
 			break;
