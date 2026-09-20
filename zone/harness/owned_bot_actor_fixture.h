@@ -58,6 +58,7 @@ struct OwnedBotActorFixtureNames {
 struct OwnedBotPartyConfig {
 	std::string owner_name = "HarnessPartyOwner";
 	uint32_t owner_character_id = 0;
+	bool owner_connected = false;
 	std::string actor_leader_name = "HarnessActorLeader";
 	std::string follower_name_prefix = "HarnessFollower";
 	uint8_t follower_count = 3;

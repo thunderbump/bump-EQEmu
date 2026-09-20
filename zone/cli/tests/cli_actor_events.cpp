@@ -1316,9 +1316,12 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 		Expect(fixture.SetUpOwnedBotParty({
 				   .owner_name = reserved_owner.name,
 				   .owner_character_id = reserved_owner.character_id,
+				   .owner_connected = true,
 				   .follower_count = 1,
 			   }),
 			   "owned bot Actor-led Party harness fixture should boot");
+		Expect(fixture.Owner() && fixture.Owner()->Connected(),
+			"hunt fixture owner must participate as an ordinary connected player");
 		Expect(fixture.OwnedBot() != nullptr, "owned bot harness fixture should create a bot actor");
 
 		const auto next_free_bot_id = [&](uint32_t salt) -> uint32_t {

@@ -232,7 +232,8 @@ bool OwnedBotActorFixture::SetUpOwnedBotParty(const OwnedBotPartyConfig &config)
 {
 	Reset();
 
-	owner = CreateSyntheticOwnerClient(config.owner_name, config.owner_character_id, config.level);
+	owner = CreateSyntheticOwnerClient(
+		config.owner_name, config.owner_character_id, config.level, config.owner_connected);
 	if (!owner) {
 		failure_reason = "synthetic_owner_create_failed";
 		Reset();
