@@ -26,6 +26,7 @@ public:
 
 private:
 	struct HuntEngagement;
+	void CancelHuntCombat();
 	void ProcessHuntEngagement(time_t now);
 	ZoneDatabase& database_;
 	uint32_t zone_id_;

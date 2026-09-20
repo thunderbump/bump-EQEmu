@@ -49,8 +49,11 @@ bool IsClaimedByPlayer(NPC* target, Bot* actor) {
 		return false;
 	}
 	for (const auto* entry : target->GetHateList()) {
-		if (entry && entry->entity_on_hatelist && entry->entity_on_hatelist->IsClient() &&
-			entry->entity_on_hatelist != actor->GetBotOwner()) {
+		if (!entry || !entry->entity_on_hatelist) {
+			continue;
+		}
+		auto* player_owner = entry->entity_on_hatelist->GetUltimateOwner();
+		if (player_owner && player_owner->IsClient() && player_owner != actor->GetBotOwner()) {
 			return true;
 		}
 	}
@@ -99,6 +102,8 @@ struct ActorActionExecutor::HuntEngagement {
 	ActorStatusRepository::ActorStatusRecord status;
 	uint16_t target_entity_id = 0;
 	uint32_t target_npc_type_id = 0;
+	std::vector<uint16_t> party_bot_entity_ids;
+	bool target_attack_flag_added = false;
 	bool death_observed = false;
 	uint16_t killer_entity_id = 0;
 };
@@ -113,7 +118,42 @@ ActorActionExecutor::ActorActionExecutor(ZoneDatabase& database, uint32_t zone_i
 }
 
 ActorActionExecutor::~ActorActionExecutor() {
+	CancelHuntCombat();
 	active_executors.erase(std::remove(active_executors.begin(), active_executors.end(), this), active_executors.end());
+}
+
+void ActorActionExecutor::CancelHuntCombat() {
+	if (!hunt_engagement_) {
+		return;
+	}
+	const auto target_id = hunt_engagement_->target_entity_id;
+	for (const auto bot_id : hunt_engagement_->party_bot_entity_ids) {
+		auto* party_member = entity_list.GetMob(bot_id);
+		auto* party_bot = party_member && party_member->IsBot() ? party_member->CastToBot() : nullptr;
+		if (!party_bot) {
+			continue;
+		}
+		auto* target = entity_list.GetMob(target_id);
+		if (target) {
+			party_bot->RemoveFromHateList(target);
+		}
+		if (party_bot->GetTarget() && party_bot->GetTarget()->GetID() == target_id) {
+			party_bot->SetTarget(nullptr);
+		}
+		auto* bot_owner = party_bot->GetBotOwner();
+		auto* command_source = party_bot->GetCommandTargetSource(
+			bot_owner && bot_owner->IsClient() ? bot_owner->CastToClient() : nullptr);
+		if (command_source && hunt_engagement_->status.entity_id.has_value() &&
+			command_source->GetID() == *hunt_engagement_->status.entity_id) {
+			party_bot->SetAttackFlag(false);
+			party_bot->ClearCommandTargetSource();
+		}
+	}
+	if (hunt_engagement_->target_attack_flag_added) {
+		if (auto* target = entity_list.GetMob(target_id)) {
+			target->RemoveBotAttackFlag(*hunt_engagement_->profile.owner_character_id);
+		}
+	}
 }
 
 void ActorActionExecutor::ObserveNpcDeath(uint16_t entity_id, uint32_t npc_type_id, uint16_t killer_entity_id) {
@@ -138,6 +178,7 @@ void ActorActionExecutor::ProcessHuntEngagement(time_t now) {
 	auto engagement = *hunt_engagement_;
 	const auto terminal = ActorActionQueueRepository::FindOne(database_, engagement.action.action_id);
 	if (terminal.action_id == 0 || terminal.state != "claimed") {
+		CancelHuntCombat();
 		hunt_engagement_.reset();
 		return;
 	}
@@ -145,8 +186,13 @@ void ActorActionExecutor::ProcessHuntEngagement(time_t now) {
 	std::string failure_reason;
 	if (!engagement.death_observed && engagement.action.expires_at.has_value() &&
 		*engagement.action.expires_at <= now) {
-		ActorActionQueueRepository::ExpireDue(database_, now, engagement.action.actor_id);
-		hunt_engagement_.reset();
+		const auto expired = ActorActionQueueRepository::ExpireDue(database_, now, engagement.action.actor_id) > 0;
+		// Stop gameplay at the deadline even when persistence is temporarily
+		// unavailable. Retain the engagement so terminalization can retry.
+		CancelHuntCombat();
+		if (expired) {
+			hunt_engagement_.reset();
+		}
 		return;
 	}
 
@@ -190,6 +236,7 @@ void ActorActionExecutor::ProcessHuntEngagement(time_t now) {
 		database_.TransactionRollback();
 		return;
 	}
+	CancelHuntCombat();
 	hunt_engagement_.reset();
 }
 
@@ -420,22 +467,8 @@ void ActorActionExecutor::ProcessOne() {
 	if (action->action_type == "target") {
 		bot->SetTarget(target);
 	} else if (action->action_type == "hunt_one_allowlisted_target") {
-		// This is the same target/attack intent consumed by ordinary Bot AI. Combat,
-		// movement, spell checks, damage and death remain authoritative gameplay.
-		hunt_target->SetBotAttackFlag(*profile->owner_character_id);
-		bot->SetCommandTargetSource(bot);
-		bot->SetTarget(hunt_target);
-		bot->SetAttackFlag();
-		if (auto* group = bot->GetGroup()) {
-			std::list<Bot*> party_bots;
-			group->GetBotList(party_bots);
-			for (auto* party_bot : party_bots) {
-				if (party_bot && party_bot != bot) {
-					party_bot->SetCommandTargetSource(bot);
-					party_bot->SetAttackFlag();
-				}
-			}
-		}
+		// Persist the execution state before mutating combat. A failed/uncertain
+		// transaction must never leave the party attacking without durable evidence.
 		const auto committed = AppendOutcome(database_, *action, &*profile, &*status, "hunt_engagement_committed",
 											 "ordinary_bot_combat", applied_at, hunt_target);
 		if (!committed || !database_.TransactionCommit().Success()) {
@@ -443,13 +476,44 @@ void ActorActionExecutor::ProcessOne() {
 			ActorActionQueueRepository::ReleaseClaim(database_, action->action_id, claimant_);
 			return;
 		}
+
+		const auto attack_flags = hunt_target->GetBotAttackFlags();
+		const bool target_attack_flag_added =
+			std::find(attack_flags.begin(), attack_flags.end(), *profile->owner_character_id) == attack_flags.end();
+		std::vector<uint16_t> party_bot_entity_ids{bot->GetID()};
+		std::list<Bot*> party_bots;
+		if (auto* group = bot->GetGroup()) {
+			group->GetBotList(party_bots);
+			for (auto* party_bot : party_bots) {
+				if (party_bot && party_bot != bot) {
+					party_bot_entity_ids.push_back(party_bot->GetID());
+				}
+			}
+		}
 		hunt_engagement_ = std::make_unique<HuntEngagement>(HuntEngagement{
 			.action = *action,
 			.profile = *profile,
 			.status = *status,
 			.target_entity_id = hunt_target->GetID(),
 			.target_npc_type_id = hunt_target->GetNPCTypeID(),
+			.party_bot_entity_ids = std::move(party_bot_entity_ids),
+			.target_attack_flag_added = target_attack_flag_added,
 		});
+
+		// This is the same target/attack intent consumed by ordinary Bot AI. Combat,
+		// movement, spell checks, damage and death remain authoritative gameplay.
+		if (target_attack_flag_added) {
+			hunt_target->SetBotAttackFlag(*profile->owner_character_id);
+		}
+		bot->SetCommandTargetSource(bot);
+		bot->SetTarget(hunt_target);
+		bot->SetAttackFlag();
+		for (auto* party_bot : party_bots) {
+			if (party_bot && party_bot != bot) {
+				party_bot->SetCommandTargetSource(bot);
+				party_bot->SetAttackFlag();
+			}
+		}
 		return;
 	} else {
 		bot->Stand();

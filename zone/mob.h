@@ -32,6 +32,7 @@
 #include "zone/pathfinder_interface.h"
 #include "zone/position.h"
 
+#include <algorithm>
 #include <any>
 #include <memory>
 #include <set>
@@ -1132,6 +1133,9 @@ public:
 
 	inline std::vector<uint32> GetBotAttackFlags() { return bot_attack_flags; }
 	inline void SetBotAttackFlag(uint32 value) { bot_attack_flags.push_back(value); }
+	inline void RemoveBotAttackFlag(uint32 value) {
+		bot_attack_flags.erase(std::remove(bot_attack_flags.begin(), bot_attack_flags.end(), value), bot_attack_flags.end());
+	}
 	inline void ClearBotAttackFlags() { bot_attack_flags.clear(); }
 	bool HasBotAttackFlag(Mob* tar);
 

@@ -930,9 +930,13 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 	const auto clear_combat = [&]() {
 		fixture.OwnedBot()->WipeHateList();
 		fixture.OwnedBot()->SetTarget(nullptr);
+		fixture.OwnedBot()->SetAttackFlag(false);
+		fixture.OwnedBot()->ClearCommandTargetSource();
 		for (auto* follower : fixture.FollowerBots()) {
 			follower->WipeHateList();
 			follower->SetTarget(nullptr);
+			follower->SetAttackFlag(false);
+			follower->ClearCommandTargetSource();
 		}
 	};
 
@@ -960,17 +964,24 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 	});
 	auto* contender = fixture.AddSyntheticPlayer("HarnessHuntContender", profile.owner_character_id.value() + 1000000,
 		3, glm::vec4(-2082.0f, 400.0f, -3.0f, 0.0f));
-	Expect(claimed && contender, "player-contention hunt fixtures should materialize");
+	auto* contender_pet = fixture.AddHostileNPC({
+		.name = "HarnessHuntContenderPet", .position = glm::vec4(-2083.0f, 400.0f, -3.0f, 0.0f),
+	});
+	Expect(claimed && contender && contender_pet, "player-contention hunt fixtures should materialize");
 	Expect(contender->Connected() && contender->InZone(),
 		"synthetic contention player must represent a connected client");
-	claimed->AddToHateList(contender, 100, 1, false);
-	Expect(claimed->CheckAggro(contender), "contention setup must establish ordinary player hate before hunting");
+	contender->SetPet(contender_pet);
+	claimed->AddToHateList(contender_pet, 100, 1, false);
+	Expect(claimed->CheckAggro(contender_pet),
+		"contention setup must establish ordinary player-owned pet hate before hunting");
 	const auto contended = enqueue("contended", valid_body);
 	executor.ProcessOne();
 	ExpectEqual(ActorActionQueueRepository::FindOne(database, contended.action_id).failure_reason,
 		std::optional<std::string>("target_claimed_by_player"), "a synthetic player's target must not be engaged");
 	Expect(fixture.OwnedBot()->GetTarget() != claimed, "contention must not mutate the Actor leader's target");
 	fixture.RemoveMob(claimed);
+	contender->SetPet(nullptr);
+	fixture.RemoveMob(contender_pet);
 	fixture.RemoveMob(contender);
 
 	auto* lost = fixture.AddHostileNPC({
@@ -1002,6 +1013,17 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 	timeout_executor.ProcessOne();
 	ExpectEqual(ActorActionQueueRepository::FindOne(database, timed.action_id).state, std::string("expired"),
 		"a hunt exceeding its deadline must expire without a forced result");
+	Expect(fixture.OwnedBot()->GetTarget() != timeout_target && !fixture.OwnedBot()->GetAttackFlag() &&
+		!fixture.OwnedBot()->CheckAggro(timeout_target),
+		"expiry must cancel the Actor leader's selected-target combat intent");
+	for (auto* follower : fixture.FollowerBots()) {
+		Expect(follower->GetTarget() != timeout_target && !follower->GetAttackFlag() &&
+			!follower->CheckAggro(timeout_target),
+			"expiry must cancel each follower's selected-target combat intent");
+	}
+	const auto retained_attack_flags = timeout_target->GetBotAttackFlags();
+	Expect(std::find(retained_attack_flags.begin(), retained_attack_flags.end(), *profile.owner_character_id) ==
+		retained_attack_flags.end(), "expiry must remove the hunt's target authorization");
 	fixture.RemoveMob(timeout_target);
 	clear_combat();
 
