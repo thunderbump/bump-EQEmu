@@ -1123,6 +1123,19 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 			"ordinary Bot engagement should establish each follower's attacking state");
 		timeout_target->AddToHateList(party_bot, 1);
 	}
+	// EntityList::RemoveMob invalidates references before executor cleanup. Model
+	// that ordering without removing the Actor needed to drive the fixture.
+	auto* invalidated_follower = fixture.FollowerBots().front();
+	invalidated_follower->SetCommandTargetSource(invalidated_follower);
+	invalidated_follower->SetAttackFlag();
+	invalidated_follower->ClearCommandSourceReferences(fixture.OwnedBot()->GetID());
+	Expect(invalidated_follower->GetAttackFlag() && invalidated_follower->GetAttackingFlag(),
+		"removing an obsolete source must preserve superseding command state");
+	invalidated_follower->SetCommandTargetSource(fixture.OwnedBot());
+	invalidated_follower->ClearCommandSourceReferences(fixture.OwnedBot()->GetID());
+	Expect(!invalidated_follower->IsCommandTargetSource(fixture.OwnedBot()->GetID()) &&
+		!invalidated_follower->GetAttackFlag() && !invalidated_follower->GetAttackingFlag(),
+		"source invalidation must clear hunt-owned flags before owner-target fallback");
 	hunt_pet->AddToHateList(timeout_target, 1);
 	hunt_pet->AddToHateList(unrelated_pet_target, 1);
 	timeout_target->AddToHateList(hunt_pet, 1);

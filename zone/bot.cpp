@@ -3528,6 +3528,9 @@ void Bot::ClearCommandSourceReferences(uint16 entity_id)
 	}
 
 	if (_commandTargetSourceID == entity_id) {
+		// A queued or active attack command must not silently fall back to the
+		// owner's target after its explicit source leaves the entity list.
+		ClearAttackCommandFlags();
 		ClearCommandTargetSource();
 	}
 
@@ -3568,6 +3571,9 @@ Mob* Bot::GetCommandTargetSource(Client* bot_owner)
 			return command_source;
 		}
 
+		// Invalid/dead command sources cannot continue to own attack intent.
+		// Clear it before falling back to the owner as the default source.
+		ClearAttackCommandFlags();
 		ClearCommandTargetSource();
 	}
 
