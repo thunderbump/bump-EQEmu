@@ -21,6 +21,8 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <memory>
+#include <optional>
 
 class Mob;
 class Database;
@@ -67,6 +69,17 @@ public:
 		uint64_t flush_nanoseconds = 0;
 	};
 
+	struct ShutdownResult {
+		bool drained = false;
+		bool worker_stopped = false; // Persistence loop exited; TLS cleanup may still run.
+		size_t retained_records = 0;
+		bool in_flight_outcome_unknown = false;
+		std::string recovery_path;
+		std::string error;
+	};
+
+	// An injected operation must own anything it captures: a non-cooperative
+	// operation may outlive the sink after shutdown's wait deadline.
 	using PersistenceOperation = std::function<bool(const PendingSpeechEvent&)>;
 
 	explicit ActorEventRepositoryPersistenceSink(size_t max_records = 64, size_t max_bytes = 64 * 1024,
@@ -80,6 +93,11 @@ public:
 	ActorEventCaptureResult Enqueue(PendingSpeechEvent event);
 	bool FlushFor(std::chrono::milliseconds timeout);
 	Metrics GetMetrics() const;
+	// Terminal: stops admission, drains within the wait budget, then retains any
+	// pending payloads. Local recovery-file I/O is outside the worker wait budget.
+	// Empty directory selects the server log directory. Repeated successful calls
+	// return the same receipt; a file error can be retried with another directory.
+	ShutdownResult ShutdownFor(std::chrono::milliseconds timeout, const std::string& recovery_directory = {});
 
 	// Per-thread connection used only by persistence, including injected adapter wrappers.
 	// Returns null on connection failure; socket/connect timeouts apply to this connection.
@@ -89,21 +107,13 @@ public:
 	static bool PersistToRepository(const PendingSpeechEvent& event);
 
 private:
+	struct WorkerState;
 	static size_t EventBytes(const PendingSpeechEvent& event);
-	void Run();
-	void Stop();
+	static void Run(const std::shared_ptr<WorkerState>& state);
 
-	const size_t max_records_;
-	const size_t max_bytes_;
-	PersistenceOperation persistence_operation_;
-	mutable std::mutex mutex_;
-	std::condition_variable work_available_;
-	std::condition_variable state_changed_;
-	std::deque<PendingSpeechEvent> queue_;
-	Metrics metrics_;
-	bool persistence_in_flight_ = false;
-	bool stop_requested_ = false;
+	std::shared_ptr<WorkerState> state_;
 	std::thread worker_;
+	std::optional<ShutdownResult> shutdown_result_;
 };
 
 } // namespace EQ::ZoneHarness

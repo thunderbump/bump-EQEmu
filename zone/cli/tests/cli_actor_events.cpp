@@ -46,6 +46,12 @@
 #include <cstdlib>
 #include <exception>
 #include <future>
+#include <filesystem>
+#include <fstream>
+#ifndef _WIN32
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -583,6 +589,84 @@ void ExpectFallbackRepliesRetryInOrder(
 	FallbackDialogue::ResetDialogueCooldowns();
 }
 
+// A non-cooperative persistence operation must not own the sink's lifetime.
+void ExpectShutdownRetainsRecoverablePayloads() {
+#ifndef _WIN32
+	using namespace std::chrono_literals;
+	using Sink = EQ::ZoneHarness::ActorEventRepositoryPersistenceSink;
+	std::string pattern = (std::filesystem::temp_directory_path() / "actor-recovery-test-XXXXXX").string();
+	std::vector<char> name(pattern.begin(), pattern.end());
+	name.push_back(0);
+	Expect(mkdtemp(name.data()) != nullptr, "recovery test must create a private directory");
+	const std::filesystem::path directory(name.data());
+	struct CleanupDirectory {
+		std::filesystem::path path;
+		~CleanupDirectory() { std::error_code error; std::filesystem::remove_all(path, error); }
+	} cleanup{directory};
+	struct Gate {
+		std::promise<void> entered;
+		std::promise<void> release;
+		std::shared_future<void> released = release.get_future().share();
+		std::promise<void> finished;
+	};
+	auto gate = std::make_shared<Gate>();
+	auto entered = gate->entered.get_future();
+	auto finished = gate->finished.get_future();
+	Sink::ShutdownResult result;
+	{
+		Sink sink(2, 1024, [gate](const auto&) {
+			gate->entered.set_value();
+			gate->released.wait_for(5s);
+			gate->finished.set_value();
+			return false;
+		});
+		Expect(sink.Enqueue({.bot_id = 42, .channel = "say", .text = "in-flight payload"}) ==
+			EQ::ZoneHarness::ActorEventCaptureResult::Accepted, "shutdown probe must admit first payload");
+		Expect(entered.wait_for(2s) == std::future_status::ready, "shutdown probe must block inside persistence");
+		Expect(sink.Enqueue({.bot_id = 43, .channel = "emote", .text = "queued payload"}) ==
+			EQ::ZoneHarness::ActorEventCaptureResult::Accepted, "shutdown probe must admit queued payload");
+		const auto started = std::chrono::steady_clock::now();
+		result = sink.ShutdownFor(50ms, directory.string());
+		Expect(std::chrono::steady_clock::now() - started < 500ms, "shutdown must not wait for the blocked callback");
+		Expect(!result.drained && !result.worker_stopped, "shutdown must report incomplete persistence");
+		Expect(result.in_flight_outcome_unknown, "in-flight write must be marked uncertain");
+		ExpectEqual(result.retained_records, size_t(2), "shutdown must retain both accepted records");
+		Expect(result.error.empty() && !result.recovery_path.empty(), "shutdown must publish a recovery path");
+		Expect(sink.Enqueue({.text = "late"}) == EQ::ZoneHarness::ActorEventCaptureResult::Stopped,
+			"shutdown must stop admission");
+		ExpectEqual(sink.ShutdownFor(1ms, directory.string()).recovery_path, result.recovery_path,
+			"repeated shutdown must return the same recovery file");
+	}
+	std::ifstream input(result.recovery_path);
+	const std::string saved((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+	const auto document = ParseJson(saved);
+	ExpectEqual(document["records"].size(), Json::ArrayIndex(2), "payloads must remain readable after sink destruction");
+	ExpectEqual(document["records"][0]["text"].asString(), std::string("in-flight payload"), "recovery must retain in-flight text");
+	ExpectEqual(document["records"][1]["text"].asString(), std::string("queued payload"), "recovery must retain queued text");
+	Expect(!document["automatic_replay_safe"].asBool(), "recovery must not permit blind replay of uncertain writes");
+	struct stat permissions{};
+	Expect(stat(result.recovery_path.c_str(), &permissions) == 0 && (permissions.st_mode & 0777) == 0600,
+		"recovery file must be private to its owner");
+	gate->release.set_value();
+	Expect(finished.wait_for(2s) == std::future_status::ready, "detached operation must be able to finish safely");
+
+	// A local filesystem failure must be explicit and retryable before destruction.
+	const auto blocked_path = directory / "not-a-directory";
+	{ std::ofstream file(blocked_path); file << "occupied"; }
+	Sink unavailable(1, 1024, [](const auto&) { return false; });
+	Expect(unavailable.Enqueue({.bot_id = 44, .channel = "say", .text = "retry-file"}) ==
+		EQ::ZoneHarness::ActorEventCaptureResult::Accepted, "file failure probe must admit evidence");
+	const auto failed = unavailable.ShutdownFor(20ms, blocked_path.string());
+	Expect(!failed.error.empty() && !failed.drained, "file failure must not claim successful recovery");
+	const auto recovered = unavailable.ShutdownFor(100ms, directory.string());
+	Expect(recovered.error.empty() && !recovered.recovery_path.empty(), "file publication must retry without repeating persistence");
+
+	Sink empty;
+	const auto drained = empty.ShutdownFor(100ms, directory.string());
+	Expect(drained.drained && drained.recovery_path.empty() && drained.error.empty(), "empty shutdown must need no recovery file");
+#endif
+}
+
 // Exercise the same connection factory used by the real persistence adapter.
 void ExpectPersistenceConnectionIsolated(
 	const ActorProfilesRepository::ActorProfileRecord& profile
@@ -722,6 +806,7 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 	try {
 		ExpectRecorderShutdownWaitsForInFlightCallbacks();
 		ExpectBoundedPersistenceOverloadAndRecovery();
+		ExpectShutdownRetainsRecoverablePayloads();
 
 		const auto run_nonce = BuildRunNonce();
 

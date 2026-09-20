@@ -2150,12 +2150,12 @@ void ZoneHarnessRuntime::Shutdown()
 	std::lock_guard lock(mutex);
 	shutdown_requested = true;
 	ActorEventRecorder::ClearActiveRecorder(&events);
-	if (!actor_event_persistence_sink.FlushFor(std::chrono::seconds(2))) {
-		const auto metrics = actor_event_persistence_sink.GetMetrics();
-		std::cerr << "[ACTOR-EVIDENCE-FAIL] shutdown retained_records=" << metrics.queue_records
-				  << " retained_bytes=" << metrics.queue_bytes
-				  << " persistence_failures=" << metrics.persistence_failures << "\n";
+	const auto recovery = actor_event_persistence_sink.ShutdownFor(std::chrono::seconds(2));
+	if (!recovery.drained || !recovery.error.empty()) {
+		std::cerr << "[ACTOR-EVIDENCE-RECOVERY] retained_records=" << recovery.retained_records
+			<< " path=" << recovery.recovery_path << " error=" << recovery.error << "\n";
 	}
+
 	events.SetPersistenceSink(nullptr);
 	StopAutonomousActorPrototypeSessionLocked();
 
