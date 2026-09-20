@@ -545,10 +545,12 @@ void ExpectFallbackRepliesRetryInOrder(
 	enqueue("Stale reply.");
 	delivery.Process(queue);
 	fixture.OwnerTargets(nullptr);
+	recorder.Drain(); // Exclude the setup target-change event from delivery observations.
 	sink.result = ActorEventCaptureResult::Accepted;
 	delivery.Process(queue);
 	Expect(recorder.Since(0, 8).empty(), "a deferred reply must be discarded if the speaker changes target");
 	fixture.OwnerTargets(fixture.OwnedBot());
+	recorder.Drain();
 	delivery.Process(queue);
 	Expect(recorder.Since(0, 8).empty(), "discarded stale replies must not reappear");
 
