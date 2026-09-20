@@ -239,9 +239,9 @@ bool DBcore::Open(uint32 *errnum, char *errbuf)
 	}
 	if (GetStatus() == Error) {
 		mysql_close(mysql);
-		mysql_init(mysql);        // Initialize structure again
+		mysql = mysql_init(nullptr); // mysql_close freed the previously allocated handle.
 	}
-	if (m_host.empty()) {
+	if (!mysql || m_host.empty()) {
 		return false;
 	}
 	/*
