@@ -869,7 +869,10 @@ run_request() {
       else
         validation_status=$?
       fi
-      if [[ "$validation_status" -eq 124 || "$validation_status" -eq 125 || "$validation_status" -eq 127 ]]; then
+      if [[ "$validation_status" -eq 124 || "$validation_status" -eq 125 || "$validation_status" -eq 127 ]] && ! {
+        [[ "$afk_profile" == migration-rehearsal ]] &&
+        jq -e --arg head "$head_commit" '.candidate_commit == $head and .status == "failed" and .failure_step == "candidate_scenarios" and .actor_runtime.status == "failed"'           "$evidence_dir/migration-rehearsal/result.json" >/dev/null 2>&1
+      }; then
         afk_failure_status=inconclusive
         afk_failure_message="$afk_inconclusive_message"
       fi

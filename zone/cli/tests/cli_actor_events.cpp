@@ -960,14 +960,15 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 		"hunt requests without a finite deadline must be visibly rejected");
 
 	auto* removed_follower = fixture.FollowerBots().front();
-	Expect(fixture.ActorGroup()->DelMember(removed_follower),
-		"party-shape fixture must temporarily remove its only follower");
+	// DelMember consults persisted leadership and can delete a synthetic group.
+	// Model an absent follower using the ordinary zone-out/return membership path.
+	fixture.ActorGroup()->MemberZoned(removed_follower);
 	const auto followerless = enqueue("followerless", valid_body);
 	executor.ProcessOne();
 	ExpectEqual(ActorActionQueueRepository::FindOne(database, followerless.action_id).failure_reason,
 		std::optional<std::string>("actor_not_ready"),
 		"a grouped Actor without a materialized Bot follower must not hunt solo");
-	Expect(fixture.ActorGroup()->AddMember(removed_follower),
+	Expect(fixture.ActorGroup()->UpdatePlayer(removed_follower),
 		"party-shape fixture must restore its follower for subsequent cases");
 
 	auto* busy_target = fixture.AddHostileNPC({

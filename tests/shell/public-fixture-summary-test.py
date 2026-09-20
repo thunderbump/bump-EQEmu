@@ -42,6 +42,16 @@ class SummaryTest(unittest.TestCase):
         result = MODULE['summarize'](self.outer, self.checks, self.rehearsal)
         self.assertEqual(result['step'], 'migration_rehearsal')
 
+    def test_executed_scenario_failure_is_not_a_missing_prerequisite(self):
+        self.checks['checks'][0]['status'] = 'inconclusive'
+        self.rehearsal.update(failure_step='candidate_scenarios', assertion_result='',
+                              actor_runtime={'status': 'failed'})
+        result = MODULE['summarize'](self.outer, self.checks, self.rehearsal)
+        self.assertEqual(result['diagnostic_codes'], ['validation_failed'])
+        self.rehearsal['failure_step'] = 'prerequisites'
+        result = MODULE['summarize'](self.outer, self.checks, self.rehearsal)
+        self.assertEqual(result['diagnostic_codes'], ['prerequisite_unavailable'])
+
     def test_direct_migration_profile_retains_nested_diagnostic(self):
         self.outer['profile'] = 'migration-rehearsal'
         result = MODULE['summarize'](self.outer, {}, self.rehearsal)
@@ -76,11 +86,14 @@ class SummaryTest(unittest.TestCase):
             for filename, value in [('result.json', self.outer), ('afk-checks.json', self.checks),
                                     ('migration-rehearsal/result.json', self.rehearsal)]:
                 (directory / filename).write_text(json.dumps(value))
+            (directory / 'migration-rehearsal/rehearsal.log').write_text('[FAIL] private scenario detail')
             (directory / 'private.log').write_text('password=PRIVATE_SENTINEL')
             subprocess.run(['python3', str(ROOT / 'scripts/public-fixture-summary.py'), name], check=True)
             result = json.loads((directory / 'public-summary.json').read_text())
             self.assertEqual(result['diagnostic_codes'][0], 'actor_events.event_json_constraint')
             self.assertNotIn('PRIVATE_SENTINEL', json.dumps(result))
+            manifest = json.loads((directory / 'diagnostic-files.json').read_text())
+            self.assertEqual(manifest, {'schema_version': 1, 'head': HEAD, 'files': ['migration-rehearsal/rehearsal.log']})
 
 
 if __name__ == '__main__':

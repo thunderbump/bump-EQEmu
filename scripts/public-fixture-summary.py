@@ -64,6 +64,8 @@ def summarize(outer, checks, rehearsal):
     if status == 'failed' and step == 'migration_rehearsal' and matching and rehearsal.get('status') == 'failed':
         if rehearsal.get('failure_step') in STEPS:
             step = rehearsal['failure_step']
+        if rehearsal.get('failure_step') == 'candidate_scenarios' and rehearsal.get('actor_runtime', {}).get('status') == 'failed':
+            codes = ['validation_failed']
         raw = rehearsal.get('assertion_result', '')
         if isinstance(raw, str) and raw.startswith('failed:'):
             labels = raw[7:].split(',')
@@ -87,6 +89,12 @@ def main(directory):
     temporary = directory / 'public-summary.json.tmp'
     temporary.write_text(json.dumps(summary, indent=2) + '\n')
     temporary.replace(directory / 'public-summary.json')
+    # Private evidence contract for consumers; never copied into public summary.
+    files = [name for name in ('migration-rehearsal/rehearsal.log',)
+             if (directory / name).is_file() and not (directory / name).is_symlink()]
+    diagnostic = directory / 'diagnostic-files.json.tmp'
+    diagnostic.write_text(json.dumps({'schema_version': 1, 'head': summary['head'], 'files': files}) + '\n')
+    diagnostic.replace(directory / 'diagnostic-files.json')
 
 
 if __name__ == '__main__':
