@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """No private text survives the repository's public diagnostics projection."""
 import json
+import os
 from pathlib import Path
 import runpy
 import subprocess
@@ -51,6 +52,27 @@ class SummaryTest(unittest.TestCase):
         self.rehearsal['failure_step'] = 'prerequisites'
         result = MODULE['summarize'](self.outer, self.checks, self.rehearsal)
         self.assertEqual(result['diagnostic_codes'], ['prerequisite_unavailable'])
+
+    def test_worker_classifies_nested_scenario_timeout_as_validation_failure(self):
+        script = (ROOT / 'scripts/validation-worker.sh').read_text()
+        block = script[script.index('      if [[ "$validation_status" -eq 124'):]
+        block = block.split('      afk_check_statuses[$afk_check_index]', 1)[0]
+        with tempfile.TemporaryDirectory() as name:
+            evidence = Path(name)
+            (evidence / 'migration-rehearsal').mkdir()
+            record = {'candidate_commit': HEAD, 'status': 'failed',
+                      'failure_step': 'candidate_scenarios', 'actor_runtime': {'status': 'failed'}}
+            for step, head, expected in [('candidate_scenarios', HEAD, 'rejected'),
+                                         ('prerequisites', HEAD, 'inconclusive'),
+                                         ('candidate_scenarios', 'b' * 40, 'inconclusive')]:
+                record.update(failure_step=step, candidate_commit=head)
+                (evidence / 'migration-rehearsal/result.json').write_text(json.dumps(record))
+                env = dict(os.environ, evidence_dir=name, head_commit=HEAD,
+                           afk_profile='migration-rehearsal', validation_status='124',
+                           afk_failure_status='rejected', afk_inconclusive_message='unavailable')
+                result = subprocess.run(['bash', '-c', block + '\nprintf %s "$afk_failure_status"'],
+                                        env=env, capture_output=True, text=True, check=True)
+                self.assertEqual(result.stdout, expected)
 
     def test_direct_migration_profile_retains_nested_diagnostic(self):
         self.outer['profile'] = 'migration-rehearsal'
