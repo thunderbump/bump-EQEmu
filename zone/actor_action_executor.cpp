@@ -45,8 +45,8 @@ bool IsMistyHuntNpcType(uint32_t npc_type_id) {
 	return npc_type_id == 33005 || npc_type_id == 33160 || npc_type_id == 33024;
 }
 
-bool IsClaimedByPlayer(NPC* target, Bot* actor) {
-	if (!target || !actor) {
+bool IsClaimedByPlayer(NPC* target) {
+	if (!target) {
 		return false;
 	}
 	for (const auto* entry : target->GetHateList()) {
@@ -54,7 +54,10 @@ bool IsClaimedByPlayer(NPC* target, Bot* actor) {
 			continue;
 		}
 		auto* player_owner = entry->entity_on_hatelist->GetUltimateOwner();
-		if (player_owner && player_owner->IsClient() && player_owner != actor->GetBotOwner()) {
+		// Existing player-owned hate is contention even when it belongs to the
+		// Actor's owner. Ownership does not prove that the owner, one of their
+		// pets, or another Bot is participating in this hunt.
+		if (player_owner && player_owner->IsClient()) {
 			return true;
 		}
 	}
@@ -459,9 +462,13 @@ void ActorActionExecutor::ProcessOne() {
 			});
 		if (!owned_materialized_party ||
 			std::any_of(hunt_party_bots.begin(), hunt_party_bots.end(), [](Bot* party_bot) {
+				auto* controllable_pet = party_bot->HasControllablePet(BotAnimEmpathy::Attack)
+					? party_bot->GetPet()
+					: nullptr;
 				return party_bot->HasDied() || party_bot->GetHP() <= 0 || party_bot->IsEngaged() ||
 					party_bot->GetAttackFlag() || party_bot->GetAttackingFlag() || party_bot->GetPullFlag() ||
-					party_bot->GetPullingFlag() || party_bot->GetReturningFlag();
+					party_bot->GetPullingFlag() || party_bot->GetReturningFlag() ||
+					(controllable_pet && controllable_pet->IsEngaged());
 			})) {
 			reject("actor_not_ready");
 			return;
@@ -483,7 +490,7 @@ void ActorActionExecutor::ProcessOne() {
 			if (distance_squared > nearest_distance_squared) {
 				continue;
 			}
-			if (IsClaimedByPlayer(candidate, bot)) {
+			if (IsClaimedByPlayer(candidate)) {
 				claimed_candidate = true;
 				continue;
 			}

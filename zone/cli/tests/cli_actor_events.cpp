@@ -1027,6 +1027,29 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 		"a dead follower must prevent the Party hunt from being committed");
 	busy_follower->SetHP(busy_follower->GetMaxHP());
 
+	auto* busy_pet = fixture.AddHostileNPC({
+		.name = "HarnessBusyBotPet", .position = glm::vec4(-2078.0f, 400.0f, -3.0f, 0.0f),
+	});
+	auto* busy_pet_target = fixture.AddHostileNPC({
+		.name = "HarnessBusyBotPetTarget", .position = glm::vec4(-2076.0f, 400.0f, -3.0f, 0.0f),
+	});
+	Expect(busy_pet && busy_pet_target, "busy controllable-pet fixtures should materialize");
+	fixture.OwnedBot()->SetPet(busy_pet);
+	busy_pet->AddToHateList(busy_pet_target, 1);
+	busy_pet->SetTarget(busy_pet_target);
+	Expect(fixture.OwnedBot()->HasControllablePet(BotAnimEmpathy::Attack) && busy_pet->IsEngaged(),
+		"pet readiness setup must establish unrelated controllable-pet combat");
+	const auto pet_busy = enqueue("pet-busy", valid_body);
+	executor.ProcessOne();
+	ExpectEqual(ActorActionQueueRepository::FindOne(database, pet_busy.action_id).failure_reason,
+		std::optional<std::string>("actor_not_ready"),
+		"an engaged controllable pet must prevent the Party hunt from being committed");
+	Expect(busy_pet->CheckAggro(busy_pet_target) && busy_pet->GetTarget() == busy_pet_target,
+		"readiness rejection must not overwrite a controllable pet's unrelated combat intent");
+	fixture.OwnedBot()->SetPet(nullptr);
+	fixture.RemoveMob(busy_pet);
+	fixture.RemoveMob(busy_pet_target);
+
 	auto* non_allowlisted = fixture.AddHostileNPC({
 		.name = "HarnessNonAllowlistedTarget", .position = glm::vec4(-2080.0f, 400.0f, -3.0f, 0.0f),
 	});
@@ -1036,6 +1059,23 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 	ExpectEqual(ActorActionQueueRepository::FindOne(database, non_allowlisted_action.action_id).failure_reason,
 		std::optional<std::string>("no_eligible_hunt_target"), "non-allowlisted NPC types must not be selected");
 	fixture.RemoveMob(non_allowlisted);
+
+	auto* owner_claimed = fixture.AddHostileNPC({
+		.name = "HarnessOwnerClaimedLargeRat", .position = glm::vec4(-2080.0f, 400.0f, -3.0f, 0.0f),
+		.npc_type_id = 33005,
+	});
+	Expect(owner_claimed, "owner-contention hunt fixture should materialize");
+	owner_claimed->AddToHateList(fixture.Owner(), 100, 1, false);
+	Expect(owner_claimed->CheckAggro(fixture.Owner()),
+		"owner-contention setup must establish ordinary player hate before hunting");
+	const auto owner_contended = enqueue("owner-contended", valid_body);
+	executor.ProcessOne();
+	ExpectEqual(ActorActionQueueRepository::FindOne(database, owner_contended.action_id).failure_reason,
+		std::optional<std::string>("target_claimed_by_player"),
+		"the Actor owner's existing target must not be treated as hunt-owned contention");
+	Expect(fixture.OwnedBot()->GetTarget() != owner_claimed,
+		"owner contention must not mutate the Actor leader's target");
+	fixture.RemoveMob(owner_claimed);
 
 	auto* claimed = fixture.AddHostileNPC({
 		.name = "HarnessClaimedLargeRat", .position = glm::vec4(-2080.0f, 400.0f, -3.0f, 0.0f),
