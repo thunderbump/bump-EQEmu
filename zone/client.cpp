@@ -78,7 +78,7 @@ extern volatile bool RunLoops;
 void UpdateWindowTitle(char* iNewTitle);
 
 // client constructor purely for testing / mocking
-Client::Client() : Mob(
+Client::Client(CLIENT_CONN_STATUS initial_state) : Mob(
 	"No name", // in_name
 	"", // in_lastname
 	0, // in_cur_hp
@@ -191,7 +191,7 @@ Client::Client() : Mob(
 	client_data_loaded = false;
 	berserk = false;
 	dead = false;
-	client_state = CLIENT_CONNECTING;
+	client_state = initial_state;
 	SetTrader(false);
 	Haste = 0;
 	SetCustomerID(0);

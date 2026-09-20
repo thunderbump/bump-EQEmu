@@ -22,7 +22,7 @@ public:
 		Clock clock = []() { return std::time(nullptr); }, GameplayEventWatermarkReader watermark_reader = {});
 	~ActorActionExecutor();
 	void ProcessOne();
-	static void ObserveNpcDeath(NPC* npc, Mob* killer);
+	static void ObserveNpcDeath(uint16_t entity_id, uint32_t npc_type_id, uint16_t killer_entity_id);
 
 private:
 	struct HuntEngagement;

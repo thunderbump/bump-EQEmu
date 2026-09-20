@@ -32,6 +32,7 @@ namespace {
 // no network stream for Client::Process to poll during bounded harness ticks.
 class SyntheticOwnerClient final : public Client {
 public:
+	explicit SyntheticOwnerClient(CLIENT_CONN_STATUS initial_state) : Client(initial_state) {}
 	bool Process() override { return true; }
 };
 
@@ -130,9 +131,9 @@ bool OwnedBotActorFixture::SetUpOwnedBotSolo(const OwnedBotActorConfig &config)
 	return true;
 }
 
-Client *OwnedBotActorFixture::CreateSyntheticOwnerClient(const std::string &owner_name, uint32_t owner_character_id, uint8_t level)
+Client *OwnedBotActorFixture::CreateSyntheticOwnerClient(const std::string &owner_name, uint32_t owner_character_id, uint8_t level, bool connected)
 {
-	auto *synthetic_owner = new SyntheticOwnerClient();
+	auto *synthetic_owner = new SyntheticOwnerClient(connected ? Mob::CLIENT_CONNECTED : Mob::CLIENT_CONNECTING);
 	synthetic_owner->TempName(owner_name.c_str());
 	synthetic_owner->SetCharacterId(owner_character_id);
 	// Headless clients have no zone-entry packet to select an inventory layout.
@@ -356,7 +357,9 @@ NPC *OwnedBotActorFixture::AddHostileNPC(const HostileNpcConfig &config)
 Client *OwnedBotActorFixture::AddSyntheticPlayer(
 	const std::string &name, uint32_t character_id, uint8_t level, const glm::vec4 &position)
 {
-	auto *player = CreateSyntheticOwnerClient(name, character_id, level);
+	// Ordinary hate admission ignores connecting clients. The headless player
+	// must represent a connected observer, while Process still avoids sockets.
+	auto *player = CreateSyntheticOwnerClient(name, character_id, level, true);
 	if (player) {
 		player->GMMove(position.x, position.y, position.z, position.w);
 	}

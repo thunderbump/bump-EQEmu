@@ -116,17 +116,17 @@ ActorActionExecutor::~ActorActionExecutor() {
 	active_executors.erase(std::remove(active_executors.begin(), active_executors.end(), this), active_executors.end());
 }
 
-void ActorActionExecutor::ObserveNpcDeath(NPC* npc, Mob* killer) {
-	if (!npc) {
+void ActorActionExecutor::ObserveNpcDeath(uint16_t entity_id, uint32_t npc_type_id, uint16_t killer_entity_id) {
+	if (!entity_id) {
 		return;
 	}
 	for (auto* executor : active_executors) {
-		if (executor && executor->hunt_engagement_ && executor->hunt_engagement_->target_entity_id == npc->GetID() &&
-			executor->hunt_engagement_->target_npc_type_id == npc->GetNPCTypeID() &&
+		if (executor && executor->hunt_engagement_ && executor->hunt_engagement_->target_entity_id == entity_id &&
+			executor->hunt_engagement_->target_npc_type_id == npc_type_id &&
 			(!executor->hunt_engagement_->action.expires_at.has_value() ||
 			 *executor->hunt_engagement_->action.expires_at > std::time(nullptr))) {
 			executor->hunt_engagement_->death_observed = true;
-			executor->hunt_engagement_->killer_entity_id = killer ? killer->GetID() : 0;
+			executor->hunt_engagement_->killer_entity_id = killer_entity_id;
 		}
 	}
 }

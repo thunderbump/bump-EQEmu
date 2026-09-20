@@ -29,6 +29,7 @@
 #include "common/repositories/player_event_logs_repository.h"
 #include "common/rulesys.h"
 #include "common/strings.h"
+#include "common/timer.h"
 #include "zone/bot.h"
 #include "zone/client.h"
 #include "zone/fallback_dialogue_runtime.h"
@@ -65,6 +66,8 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+extern double frame_time;
 
 namespace {
 
@@ -958,7 +961,10 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 	auto* contender = fixture.AddSyntheticPlayer("HarnessHuntContender", profile.owner_character_id.value() + 1000000,
 		3, glm::vec4(-2082.0f, 400.0f, -3.0f, 0.0f));
 	Expect(claimed && contender, "player-contention hunt fixtures should materialize");
+	Expect(contender->Connected() && contender->InZone(),
+		"synthetic contention player must represent a connected client");
 	claimed->AddToHateList(contender, 100, 1, false);
+	Expect(claimed->CheckAggro(contender), "contention setup must establish ordinary player hate before hunting");
 	const auto contended = enqueue("contended", valid_body);
 	executor.ProcessOne();
 	ExpectEqual(ActorActionQueueRepository::FindOne(database, contended.action_id).failure_reason,
@@ -1004,19 +1010,40 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 		.npc_type_id = 33005,
 	});
 	Expect(kill_target, "success fixture should create an allowlisted NPC");
+	// The shared fixture is a high-level caster configured for slow spells.
+	// Enable its ordinary melee policy for this combat scenario, not forced damage.
+	struct RestoreCombatSettings {
+		Bot* actor;
+		uint8_t stop_melee_level;
+		double previous_frame_time;
+		~RestoreCombatSettings() {
+			actor->SetStopMeleeLevel(stop_melee_level);
+			frame_time = previous_frame_time;
+		}
+	} restore_combat{fixture.OwnedBot(), fixture.OwnedBot()->GetStopMeleeLevel(), frame_time};
+	fixture.OwnedBot()->SetStopMeleeLevel(255);
 	const auto target_id = kill_target->GetID();
 	const auto succeeded = enqueue("success", valid_body, std::time(nullptr) + 15);
 	executor.ProcessOne();
+	auto previous_tick = std::chrono::steady_clock::now();
 	for (uint32_t tick = 0; tick < 300 &&
 		ActorActionQueueRepository::FindOne(database, succeeded.action_id).state == "claimed"; ++tick) {
+		const auto current_tick = std::chrono::steady_clock::now();
+		frame_time = std::chrono::duration<double>(current_tick - previous_tick).count();
+		previous_tick = current_tick;
+		Timer::SetCurrentTime();
 		entity_list.Process();
 		entity_list.MobProcess();
+		Expect(zone->Process(), "hunt combat tick must keep its zone alive");
 		executor.ProcessOne();
 		std::this_thread::sleep_for(std::chrono::milliseconds(20));
 	}
 	const auto terminal = ActorActionQueueRepository::FindOne(database, succeeded.action_id);
 	ExpectEqual(terminal.state, std::string("completed"),
-		"ordinary Bot combat should authoritatively complete the bounded hunt");
+		"ordinary Bot combat should authoritatively complete the bounded hunt: state=" + terminal.state +
+		", reason=" + terminal.failure_reason.value_or("none"));
+	Expect(entity_list.GetNPCByID(target_id) == nullptr && entity_list.GetCorpseByID(target_id) != nullptr,
+		"hunt completion must retain the selected identity after NPC-to-corpse transfer");
 	const auto result = ParseJson(terminal.result_json.value_or("{}"));
 	ExpectEqual(result["outcome"].asString(), std::string("succeeded"),
 		"only selected-target death should satisfy the hunt");

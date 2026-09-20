@@ -152,7 +152,7 @@ public:
 	Group *group = nullptr;
 
 private:
-	Client *CreateSyntheticOwnerClient(const std::string &owner_name, uint32_t owner_character_id, uint8_t level);
+	Client *CreateSyntheticOwnerClient(const std::string &owner_name, uint32_t owner_character_id, uint8_t level, bool connected = false);
 	Bot *CreateOwnedBot(const OwnedBotActorConfig &config);
 	void RememberMob(Mob *mob);
 
