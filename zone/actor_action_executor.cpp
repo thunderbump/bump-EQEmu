@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cmath>
 #include <ctime>
+#include <list>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -176,8 +177,16 @@ void ActorActionExecutor::ProcessHuntEngagement(time_t now) {
 		return;
 	}
 	auto engagement = *hunt_engagement_;
-	const auto terminal = ActorActionQueueRepository::FindOne(database_, engagement.action.action_id);
-	if (terminal.action_id == 0 || terminal.state != "claimed") {
+	const auto lookup = ActorActionQueueRepository::LookupByActionId(database_, engagement.action.action_id);
+	if (!lookup.succeeded) {
+		// The durable owner is unknown, so retain the engagement for retry. The
+		// locally known deadline still bounds gameplay during a database outage.
+		if (engagement.action.expires_at.has_value() && *engagement.action.expires_at <= now) {
+			CancelHuntCombat();
+		}
+		return;
+	}
+	if (!lookup.action.has_value() || lookup.action->state != "claimed") {
 		CancelHuntCombat();
 		hunt_engagement_.reset();
 		return;
@@ -200,7 +209,27 @@ void ActorActionExecutor::ProcessHuntEngagement(time_t now) {
 	if (!engagement.death_observed && (!target || target->GetNPCTypeID() != engagement.target_npc_type_id)) {
 		failure_reason = "hunt_target_lost";
 	} else if (!engagement.death_observed && target && !target->HasDied() && target->GetHP() > 0) {
-		return;
+		bool selected_target_combat_active = false;
+		for (const auto bot_id : engagement.party_bot_entity_ids) {
+			auto* member = entity_list.GetMob(bot_id);
+			auto* party_bot = member && member->IsBot() ? member->CastToBot() : nullptr;
+			if (!party_bot) {
+				continue;
+			}
+			auto* bot_owner = party_bot->GetBotOwner();
+			auto* command_source = party_bot->GetCommandTargetSource(
+				bot_owner && bot_owner->IsClient() ? bot_owner->CastToClient() : nullptr);
+			const bool hunt_command_pending = party_bot->GetAttackFlag() && command_source &&
+				engagement.status.entity_id.has_value() && command_source->GetID() == *engagement.status.entity_id;
+			if (hunt_command_pending || (party_bot->IsEngaged() && party_bot->CheckAggro(target))) {
+				selected_target_combat_active = true;
+				break;
+			}
+		}
+		if (selected_target_combat_active) {
+			return;
+		}
+		failure_reason = "hunt_combat_ended";
 	} else if (!engagement.death_observed) {
 		// A zero-HP target is not success until NPC::Death reports its authoritative completion.
 		return;
@@ -366,6 +395,7 @@ void ActorActionExecutor::ProcessOne() {
 	}
 	Mob* target = nullptr;
 	NPC* hunt_target = nullptr;
+	std::list<Bot*> hunt_party_bots;
 	if (action->action_type == "target") {
 		if (!body.isMember("entity_id") || !body["entity_id"].isUInt()) {
 			reject("invalid_action_json");
@@ -383,11 +413,19 @@ void ActorActionExecutor::ProcessOne() {
 		}
 	} else if (action->action_type == "hunt_one_allowlisted_target") {
 		if (zone_id_ != kMistyZoneId || body.size() != 1 || !body["area"].isString() ||
-			body["area"].asString() != "misty-local-v1") {
+			body["area"].asString() != "misty-local-v1" || !action->expires_at.has_value()) {
 			reject("illegal_hunt_request");
 			return;
 		}
-		if (bot->HasDied() || bot->GetHP() <= 0 || bot->IsEngaged()) {
+		if (auto* group = bot->GetGroup()) {
+			group->GetBotList(hunt_party_bots);
+		}
+		if (std::find(hunt_party_bots.begin(), hunt_party_bots.end(), bot) == hunt_party_bots.end()) {
+			hunt_party_bots.push_front(bot);
+		}
+		if (std::any_of(hunt_party_bots.begin(), hunt_party_bots.end(), [](const Bot* party_bot) {
+				return !party_bot || party_bot->HasDied() || party_bot->GetHP() <= 0 || party_bot->IsEngaged();
+			})) {
 			reject("actor_not_ready");
 			return;
 		}
@@ -480,15 +518,10 @@ void ActorActionExecutor::ProcessOne() {
 		const auto attack_flags = hunt_target->GetBotAttackFlags();
 		const bool target_attack_flag_added =
 			std::find(attack_flags.begin(), attack_flags.end(), *profile->owner_character_id) == attack_flags.end();
-		std::vector<uint16_t> party_bot_entity_ids{bot->GetID()};
-		std::list<Bot*> party_bots;
-		if (auto* group = bot->GetGroup()) {
-			group->GetBotList(party_bots);
-			for (auto* party_bot : party_bots) {
-				if (party_bot && party_bot != bot) {
-					party_bot_entity_ids.push_back(party_bot->GetID());
-				}
-			}
+		std::vector<uint16_t> party_bot_entity_ids;
+		party_bot_entity_ids.reserve(hunt_party_bots.size());
+		for (auto* party_bot : hunt_party_bots) {
+			party_bot_entity_ids.push_back(party_bot->GetID());
 		}
 		hunt_engagement_ = std::make_unique<HuntEngagement>(HuntEngagement{
 			.action = *action,
@@ -508,8 +541,8 @@ void ActorActionExecutor::ProcessOne() {
 		bot->SetCommandTargetSource(bot);
 		bot->SetTarget(hunt_target);
 		bot->SetAttackFlag();
-		for (auto* party_bot : party_bots) {
-			if (party_bot && party_bot != bot) {
+		for (auto* party_bot : hunt_party_bots) {
+			if (party_bot != bot) {
 				party_bot->SetCommandTargetSource(bot);
 				party_bot->SetAttackFlag();
 			}

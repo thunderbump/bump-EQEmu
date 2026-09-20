@@ -923,8 +923,8 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 		return ActorActionQueueRepository::Enqueue(database, {
 			.actor_id = profile.actor_id, .source = "actor-hunt-runtime-test",
 			.action_type = "hunt_one_allowlisted_target", .action_json = Json::writeString(writer, body),
-			.idempotency_key = fmt::format("hunt-{}-{}", suffix, run_nonce), .expires_at = expires_at,
-			.created_at = now,
+			.idempotency_key = fmt::format("hunt-{}-{}", suffix, run_nonce),
+			.expires_at = expires_at.value_or(now + 30), .created_at = now,
 		});
 	};
 	const auto clear_combat = [&]() {
@@ -947,6 +947,42 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 	executor.ProcessOne();
 	ExpectEqual(ActorActionQueueRepository::FindOne(database, illegal.action_id).failure_reason,
 		std::optional<std::string>("illegal_hunt_request"), "unapproved hunt areas must be visibly rejected");
+
+	const auto unbounded = ActorActionQueueRepository::Enqueue(database, {
+		.actor_id = profile.actor_id, .source = "actor-hunt-runtime-test",
+		.action_type = "hunt_one_allowlisted_target", .action_json = Json::writeString(writer, valid_body),
+		.idempotency_key = fmt::format("hunt-unbounded-{}", run_nonce), .created_at = now,
+	});
+	executor.ProcessOne();
+	ExpectEqual(ActorActionQueueRepository::FindOne(database, unbounded.action_id).failure_reason,
+		std::optional<std::string>("illegal_hunt_request"),
+		"hunt requests without a finite deadline must be visibly rejected");
+
+	auto* busy_target = fixture.AddHostileNPC({
+		.name = "HarnessFollowerBusyTarget", .position = glm::vec4(-2080.0f, 400.0f, -3.0f, 0.0f),
+	});
+	Expect(busy_target && !fixture.FollowerBots().empty(), "follower readiness fixture should materialize");
+	auto* busy_follower = fixture.FollowerBots().front();
+	busy_follower->AddToHateList(busy_target, 1);
+	Expect(busy_follower->IsEngaged(), "follower readiness setup must establish ordinary combat state");
+	const auto follower_busy = enqueue("follower-busy", valid_body);
+	executor.ProcessOne();
+	ExpectEqual(ActorActionQueueRepository::FindOne(database, follower_busy.action_id).failure_reason,
+		std::optional<std::string>("actor_not_ready"),
+		"an engaged follower must prevent the Party hunt from being committed");
+	Expect(busy_follower->CheckAggro(busy_target),
+		"readiness rejection must not overwrite a follower's unrelated combat intent");
+	busy_follower->WipeHateList();
+	busy_follower->SetTarget(nullptr);
+	fixture.RemoveMob(busy_target);
+
+	busy_follower->SetHP(0);
+	const auto follower_dead = enqueue("follower-dead", valid_body);
+	executor.ProcessOne();
+	ExpectEqual(ActorActionQueueRepository::FindOne(database, follower_dead.action_id).failure_reason,
+		std::optional<std::string>("actor_not_ready"),
+		"a dead follower must prevent the Party hunt from being committed");
+	busy_follower->SetHP(busy_follower->GetMaxHP());
 
 	auto* non_allowlisted = fixture.AddHostileNPC({
 		.name = "HarnessNonAllowlistedTarget", .position = glm::vec4(-2080.0f, 400.0f, -3.0f, 0.0f),
@@ -998,6 +1034,20 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 	ExpectEqual(ActorActionQueueRepository::FindOne(database, lost_action.action_id).failure_reason,
 		std::optional<std::string>("hunt_target_lost"), "lost targets need a visible bounded outcome");
 	clear_combat();
+
+	auto* ended_target = fixture.AddHostileNPC({
+		.name = "HarnessCombatEndedLargeRat", .position = glm::vec4(-2080.0f, 400.0f, -3.0f, 0.0f),
+		.npc_type_id = 33005,
+	});
+	Expect(ended_target, "combat-ended fixture should create an allowlisted NPC");
+	const auto combat_ended = enqueue("combat-ended", valid_body);
+	executor.ProcessOne();
+	clear_combat();
+	executor.ProcessOne();
+	ExpectEqual(ActorActionQueueRepository::FindOne(database, combat_ended.action_id).failure_reason,
+		std::optional<std::string>("hunt_combat_ended"),
+		"combat ending while the selected target lives must produce a visible failed outcome");
+	fixture.RemoveMob(ended_target);
 
 	auto* timeout_target = fixture.AddHostileNPC({
 		.name = "HarnessTimeoutLargeRat", .position = glm::vec4(-2080.0f, 400.0f, -3.0f, 0.0f),

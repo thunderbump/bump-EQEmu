@@ -145,14 +145,36 @@ ON DUPLICATE KEY UPDATE
 		return FindOne(db, results.LastInsertedID());
 	}
 
-	static std::optional<ActorActionRecord> FindByActionId(Database &db, uint64_t action_id)
+	struct ActionLookupResult {
+		bool succeeded = false;
+		std::optional<ActorActionRecord> action;
+	};
+
+	// Unlike the generated FindOne helper, preserve the distinction between a
+	// missing row and an unavailable database read. Callers managing retained
+	// gameplay state must not interpret an uncertain read as a terminal action.
+	static ActionLookupResult LookupByActionId(Database &db, uint64_t action_id)
 	{
-		const auto action = FindOne(db, action_id);
-		if (!action.action_id) {
-			return std::nullopt;
+		if (!action_id) {
+			return {.succeeded = true};
 		}
 
-		return action;
+		auto results = db.QueryDatabase(fmt::format(
+			"{} WHERE {} = {} LIMIT 1", BaseSelect(), PrimaryKey(), action_id));
+		if (!results.Success()) {
+			return {};
+		}
+		if (results.RowCount() == 0) {
+			return {.succeeded = true};
+		}
+
+		return {.succeeded = true, .action = FromRow(results.begin())};
+	}
+
+	static std::optional<ActorActionRecord> FindByActionId(Database &db, uint64_t action_id)
+	{
+		const auto lookup = LookupByActionId(db, action_id);
+		return lookup.succeeded ? lookup.action : std::nullopt;
 	}
 
 	static std::optional<ActorActionRecord> FindByActorAndIdempotencyKey(
