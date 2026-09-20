@@ -2994,7 +2994,8 @@ bool NPC::Death(Mob* killer_mob, int64 damage, uint16 spell, EQ::skills::SkillTy
 
 	// Corpse creation has cleared this NPC's live ID. Correlate completion
 	// with the original identity retained before that ownership transfer.
-	ActorActionExecutor::ObserveNpcDeath(entity_id, GetNPCTypeID(), killer_mob ? killer_mob->GetID() : 0);
+	ActorActionExecutor::ObserveNpcDeath(
+		entity_id, GetNPCTypeID(), GetRuntimeInstanceID(), killer_mob ? killer_mob->GetID() : 0);
 
 	parse->EventMercNPC(EVENT_DEATH_COMPLETE, this, owner_or_self,
 		[&]() {

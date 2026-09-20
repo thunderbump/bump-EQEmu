@@ -1027,6 +1027,16 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 		"a dead follower must prevent the Party hunt from being committed");
 	busy_follower->SetHP(busy_follower->GetMaxHP());
 
+	busy_follower->GMMove(-1800.0f, 400.0f, -3.0f, 0.0f);
+	const auto follower_nonlocal = enqueue("follower-nonlocal", valid_body);
+	executor.ProcessOne();
+	ExpectEqual(ActorActionQueueRepository::FindOne(database, follower_nonlocal.action_id).failure_reason,
+		std::optional<std::string>("actor_not_ready"),
+		"a Party follower outside the authored Misty hunt bounds must not receive hunt intent");
+	Expect(!busy_follower->GetAttackFlag() && !busy_follower->GetAttackingFlag(),
+		"nonlocal Party rejection must not create follower combat state");
+	busy_follower->GMMove(-2100.0f, 400.0f, -3.0f, 0.0f);
+
 	auto* busy_pet = fixture.AddHostileNPC({
 		.name = "HarnessBusyBotPet", .position = glm::vec4(-2078.0f, 400.0f, -3.0f, 0.0f),
 	});
@@ -1112,10 +1122,23 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 	executor.ProcessOne();
 	ExpectEqual(ActorActionQueueRepository::FindOne(database, lost_action.action_id).state, std::string("claimed"),
 		"accepted hunts should remain claimed during Committed Engagement");
+	auto* replacement_identity = fixture.AddHostileNPC({
+		.name = "HarnessReplacementLargeRat", .position = glm::vec4(-2070.0f, 400.0f, -3.0f, 0.0f),
+		.npc_type_id = 33005,
+	});
+	Expect(replacement_identity && replacement_identity->GetRuntimeInstanceID() != lost->GetRuntimeInstanceID(),
+		"replacement-identity fixture must create a distinct NPC instance");
+	ActorActionExecutor::ObserveNpcDeath(
+		lost->GetID(), lost->GetNPCTypeID(), replacement_identity->GetRuntimeInstanceID(),
+		replacement_identity->GetID());
+	executor.ProcessOne();
+	ExpectEqual(ActorActionQueueRepository::FindOne(database, lost_action.action_id).state, std::string("claimed"),
+		"a same-type replacement identity must not satisfy the selected target death");
 	fixture.RemoveMob(lost);
 	executor.ProcessOne();
 	ExpectEqual(ActorActionQueueRepository::FindOne(database, lost_action.action_id).failure_reason,
 		std::optional<std::string>("hunt_target_lost"), "lost targets need a visible bounded outcome");
+	fixture.RemoveMob(replacement_identity);
 	clear_combat();
 
 	auto* ended_target = fixture.AddHostileNPC({
@@ -1227,6 +1250,7 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 	} restore_combat{fixture.OwnedBot(), fixture.OwnedBot()->GetStopMeleeLevel(), frame_time};
 	fixture.OwnedBot()->SetStopMeleeLevel(255);
 	const auto target_id = kill_target->GetID();
+	const auto target_runtime_instance_id = kill_target->GetRuntimeInstanceID();
 	time_t success_clock = now;
 	const auto succeeded = enqueue("success", valid_body, success_clock + 15);
 	ActorActionExecutor success_executor(
@@ -1263,6 +1287,8 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 		"only selected-target death should satisfy the hunt");
 	ExpectEqual(result["target_entity_id"].asUInt(), static_cast<unsigned>(target_id),
 		"hunt success must correlate the selected target");
+	ExpectEqual(result["target_runtime_instance_id"].asUInt64(), target_runtime_instance_id,
+		"hunt success must retain the exact selected NPC instance identity");
 	const auto events = ActorEventsRepository::ReadCursor(database, profile.actor_id, 0, 1000);
 	Expect(std::any_of(events.begin(), events.end(), [&](const auto& event) {
 		if (event.event_type != "hunt_succeeded") return false;

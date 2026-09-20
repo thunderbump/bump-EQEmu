@@ -45,6 +45,11 @@ bool IsMistyHuntNpcType(uint32_t npc_type_id) {
 	return npc_type_id == 33005 || npc_type_id == 33160 || npc_type_id == 33024;
 }
 
+bool IsWithinMistyHuntBounds(const Mob* mob) {
+	return mob && mob->GetX() >= kMistyHuntMinX && mob->GetX() <= kMistyHuntMaxX &&
+		mob->GetY() >= kMistyHuntMinY && mob->GetY() <= kMistyHuntMaxY;
+}
+
 bool IsClaimedByPlayer(NPC* target) {
 	if (!target) {
 		return false;
@@ -68,7 +73,8 @@ bool AppendOutcome(ZoneDatabase& database, const ActorActionQueueRepository::Act
 				   const ActorProfilesRepository::ActorProfileRecord* profile,
 				   const ActorStatusRepository::ActorStatusRecord* status, const std::string& event_type,
 				   const std::string& reason, time_t now, NPC* target = nullptr, uint16_t target_entity_id = 0,
-				   uint32_t target_npc_type_id = 0, uint16_t killer_entity_id = 0) {
+				   uint32_t target_npc_type_id = 0, uint16_t killer_entity_id = 0,
+				   uint64_t target_runtime_instance_id = 0) {
 	Json::Value payload;
 	payload["action_id"] = Json::UInt64(action.action_id);
 	payload["action_type"] = action.action_type;
@@ -76,6 +82,8 @@ bool AppendOutcome(ZoneDatabase& database, const ActorActionQueueRepository::Act
 	if (target || target_entity_id) {
 		payload["target_entity_id"] = target ? target->GetID() : target_entity_id;
 		payload["target_npc_type_id"] = target ? target->GetNPCTypeID() : target_npc_type_id;
+		payload["target_runtime_instance_id"] = Json::UInt64(
+			target ? target->GetRuntimeInstanceID() : target_runtime_instance_id);
 	}
 	if (killer_entity_id) {
 		payload["killer_entity_id"] = killer_entity_id;
@@ -106,6 +114,7 @@ struct ActorActionExecutor::HuntEngagement {
 	ActorStatusRepository::ActorStatusRecord status;
 	uint16_t target_entity_id = 0;
 	uint32_t target_npc_type_id = 0;
+	uint64_t target_runtime_instance_id = 0;
 	std::vector<uint16_t> party_bot_entity_ids;
 	bool target_attack_flag_added = false;
 	std::optional<time_t> death_observed_at;
@@ -131,8 +140,12 @@ void ActorActionExecutor::CancelHuntCombat() {
 		return;
 	}
 	const auto target_id = hunt_engagement_->target_entity_id;
-	auto* target = entity_list.GetMob(target_id);
-	auto remove_hunt_aggro = [target, target_id](Mob* attacker) {
+	auto* target_candidate = entity_list.GetNPCByID(target_id);
+	auto* target = target_candidate &&
+			target_candidate->GetRuntimeInstanceID() == hunt_engagement_->target_runtime_instance_id
+		? target_candidate
+		: nullptr;
+	auto remove_hunt_aggro = [target](Mob* attacker) {
 		if (!attacker) {
 			return;
 		}
@@ -142,7 +155,7 @@ void ActorActionExecutor::CancelHuntCombat() {
 			target->RemoveFromHateList(attacker);
 			target->RemoveFromRampageList(attacker);
 		}
-		if (attacker->GetTarget() && attacker->GetTarget()->GetID() == target_id) {
+		if (target && attacker->GetTarget() == target) {
 			attacker->SetTarget(nullptr);
 		}
 	};
@@ -162,20 +175,20 @@ void ActorActionExecutor::CancelHuntCombat() {
 			party_bot->ClearCommandTargetSource();
 		}
 	}
-	if (hunt_engagement_->target_attack_flag_added) {
-		if (auto* target = entity_list.GetMob(target_id)) {
-			target->RemoveBotAttackFlag(*hunt_engagement_->profile.owner_character_id);
-		}
+	if (hunt_engagement_->target_attack_flag_added && target) {
+		target->RemoveBotAttackFlag(*hunt_engagement_->profile.owner_character_id);
 	}
 }
 
-void ActorActionExecutor::ObserveNpcDeath(uint16_t entity_id, uint32_t npc_type_id, uint16_t killer_entity_id) {
+void ActorActionExecutor::ObserveNpcDeath(
+	uint16_t entity_id, uint32_t npc_type_id, uint64_t runtime_instance_id, uint16_t killer_entity_id) {
 	if (!entity_id) {
 		return;
 	}
 	for (auto* executor : active_executors) {
 		if (!executor || !executor->hunt_engagement_ || executor->hunt_engagement_->target_entity_id != entity_id ||
-			executor->hunt_engagement_->target_npc_type_id != npc_type_id) {
+			executor->hunt_engagement_->target_npc_type_id != npc_type_id ||
+			executor->hunt_engagement_->target_runtime_instance_id != runtime_instance_id) {
 			continue;
 		}
 		const auto observed_at = executor->clock_();
@@ -226,7 +239,8 @@ void ActorActionExecutor::ProcessHuntEngagement(time_t now) {
 	}
 
 	auto* target = entity_list.GetNPCByID(engagement.target_entity_id);
-	if (!death_observed && (!target || target->GetNPCTypeID() != engagement.target_npc_type_id)) {
+	if (!death_observed && (!target || target->GetNPCTypeID() != engagement.target_npc_type_id ||
+		target->GetRuntimeInstanceID() != engagement.target_runtime_instance_id)) {
 		failure_reason = "hunt_target_lost";
 	} else if (!death_observed && target && !target->HasDied() && target->GetHP() > 0) {
 		bool selected_target_combat_active = false;
@@ -263,6 +277,7 @@ void ActorActionExecutor::ProcessHuntEngagement(time_t now) {
 		result["outcome"] = "succeeded";
 		result["target_entity_id"] = engagement.target_entity_id;
 		result["target_npc_type_id"] = engagement.target_npc_type_id;
+		result["target_runtime_instance_id"] = Json::UInt64(engagement.target_runtime_instance_id);
 		result["killer_entity_id"] = engagement.killer_entity_id;
 		Json::StreamWriterBuilder writer;
 		writer["indentation"] = "";
@@ -276,14 +291,16 @@ void ActorActionExecutor::ProcessHuntEngagement(time_t now) {
 			completed.has_value() && completed->state == "completed" &&
 			AppendOutcome(database_, engagement.action, &engagement.profile, &engagement.status, "hunt_succeeded",
 						  "selected_target_death", completed_at, nullptr, engagement.target_entity_id,
-						  engagement.target_npc_type_id, engagement.killer_entity_id);
+						  engagement.target_npc_type_id, engagement.killer_entity_id,
+						  engagement.target_runtime_instance_id);
 	} else {
 		const auto failed =
 			ActorActionQueueRepository::MarkFailed(database_, {engagement.action.action_id, failure_reason, now});
 		outcome_persisted =
 			failed.has_value() && failed->state == "failed" &&
 			AppendOutcome(database_, engagement.action, &engagement.profile, &engagement.status, "hunt_failed",
-						  failure_reason, now, nullptr, engagement.target_entity_id, engagement.target_npc_type_id);
+						  failure_reason, now, nullptr, engagement.target_entity_id, engagement.target_npc_type_id, 0,
+						  engagement.target_runtime_instance_id);
 	}
 	if (!outcome_persisted || !database_.TransactionCommit().Success()) {
 		database_.TransactionRollback();
@@ -458,7 +475,8 @@ void ActorActionExecutor::ProcessOne() {
 		const bool owned_materialized_party = actor_member != hunt_party_bots.end() && hunt_party_bots.size() >= 2 &&
 			std::all_of(hunt_party_bots.begin(), hunt_party_bots.end(), [&](Bot* party_bot) {
 				return party_bot && party_bot->GetGroup() == hunt_group &&
-					party_bot->GetBotOwnerCharacterID() == *profile->owner_character_id;
+					party_bot->GetBotOwnerCharacterID() == *profile->owner_character_id &&
+					IsWithinMistyHuntBounds(party_bot);
 			});
 		if (!owned_materialized_party ||
 			std::any_of(hunt_party_bots.begin(), hunt_party_bots.end(), [](Bot* party_bot) {
@@ -573,6 +591,7 @@ void ActorActionExecutor::ProcessOne() {
 			.status = *status,
 			.target_entity_id = hunt_target->GetID(),
 			.target_npc_type_id = hunt_target->GetNPCTypeID(),
+			.target_runtime_instance_id = hunt_target->GetRuntimeInstanceID(),
 			.party_bot_entity_ids = std::move(party_bot_entity_ids),
 			.target_attack_flag_added = target_attack_flag_added,
 		});
