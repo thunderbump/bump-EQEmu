@@ -625,7 +625,7 @@ void ActorActionExecutor::ProcessOne() {
 				.bot_id = party_bot->GetBotID(),
 				.owner_character_id = party_bot->GetBotOwnerCharacterID(),
 				.runtime_instance_id = party_bot->GetRuntimeInstanceID(),
-				.pet_entity_id = enlisted_pet ? enlisted_pet->GetID() : 0,
+				.pet_entity_id = static_cast<uint16_t>(enlisted_pet ? enlisted_pet->GetID() : 0),
 				.pet_runtime_instance_id = enlisted_pet ? enlisted_pet->GetRuntimeInstanceID() : 0,
 			});
 		}
