@@ -323,8 +323,8 @@ ORDER BY COALESCE(q.not_before, FROM_UNIXTIME(0)), q.action_id LIMIT 1
 		return claimed.action_id ? std::optional<ActorActionRecord>(claimed) : std::nullopt;
 	}
 
-	// A caller retaining authoritative terminal evidence may exclude that one
-	// action while its atomic terminalization retries; all other due work still expires.
+	// A caller retaining authoritative gameplay ownership may exclude that one
+	// action while committed work or terminalization is retained; all other due work still expires.
 	static int ExpireDue(Database &db, time_t now, std::optional<uint32_t> actor_id = std::nullopt,
 		std::optional<uint64_t> excluded_action_id = std::nullopt)
 	{

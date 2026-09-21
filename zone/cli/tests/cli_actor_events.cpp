@@ -1245,11 +1245,52 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 	hunt_clock += 2;
 	timeout_executor.ProcessOne();
 	ExpectEqual(ActorActionQueueRepository::FindOne(database, timed.action_id).state, std::string("expired"),
-		"a hunt exceeding its deadline must expire without a forced result");
+		"a hunt exceeding its deadline must record visible expiry without forcing combat's result");
+	Expect(fixture.OwnedBot()->GetTarget() == timeout_target && fixture.OwnedBot()->GetAttackingFlag() &&
+		timeout_target->CheckAggro(fixture.OwnedBot()),
+		"expiry must retain the Actor leader's authoritative committed combat");
+	for (auto* follower : fixture.FollowerBots()) {
+		if (follower == rebound_follower) {
+			continue;
+		}
+		Expect(follower->GetTarget() == timeout_target && follower->GetAttackingFlag() &&
+			timeout_target->CheckAggro(follower),
+			"expiry must retain each identity-matched follower's committed combat");
+	}
+	Expect(hunt_pet->CheckAggro(timeout_target) && timeout_target->CheckAggro(hunt_pet),
+		"expiry must retain the Bot pet's committed combat");
+	const auto active_attack_flags = timeout_target->GetBotAttackFlags();
+	Expect(std::find(active_attack_flags.begin(), active_attack_flags.end(), *profile.owner_character_id) !=
+		active_attack_flags.end(), "expiry must retain the committed target authorization");
+
+	const auto fenced = ActorActionQueueRepository::Enqueue(database, {
+		.actor_id = profile.actor_id, .source = "actor-hunt-runtime-test", .action_type = "stand",
+		.action_json = "{}", .idempotency_key = fmt::format("hunt-expiry-fenced-{}", run_nonce),
+		.expires_at = hunt_clock + 30, .created_at = hunt_clock,
+	});
+	timeout_executor.ProcessOne();
+	ExpectEqual(ActorActionQueueRepository::FindOne(database, fenced.action_id).state, std::string("pending"),
+		"an expired Committed Engagement must fence replacement consequential work");
+
+	// NPC::Death reports through this production observer. A selected-target death
+	// after action freshness expiry still classifies the combat terminal, while the
+	// already-visible queue state remains expired.
+	ActorActionExecutor::ObserveNpcDeath(timeout_target->GetID(), timeout_target->GetNPCTypeID(),
+		timeout_target->GetRuntimeInstanceID(), fixture.OwnedBot()->GetID());
+	timeout_executor.ProcessOne();
+	ExpectEqual(ActorActionQueueRepository::FindOne(database, timed.action_id).state, std::string("expired"),
+		"post-expiry combat classification must not rewrite the visible timeout state");
+	const auto timeout_events = ActorEventsRepository::ReadCursor(database, profile.actor_id, 0, 1000);
+	Expect(std::any_of(timeout_events.begin(), timeout_events.end(), [&](const auto& event) {
+		if (event.event_type != "hunt_succeeded") return false;
+		const auto payload = ParseJson(event.event_json);
+		return payload["action_id"].asUInt64() == timed.action_id &&
+			payload["target_runtime_instance_id"].asUInt64() == timeout_target->GetRuntimeInstanceID();
+	}), "the eventual authoritative combat terminal must remain correlated after expiry");
 	Expect(fixture.OwnedBot()->GetTarget() != timeout_target && !fixture.OwnedBot()->GetAttackFlag() &&
 		!fixture.OwnedBot()->GetAttackingFlag() && !fixture.OwnedBot()->CheckAggro(timeout_target) &&
 		!timeout_target->CheckAggro(fixture.OwnedBot()),
-		"expiry must cancel both sides of the Actor leader's selected-target combat intent");
+		"authoritative terminal processing must clean up the leader's hunt combat state");
 	for (auto* follower : fixture.FollowerBots()) {
 		if (follower == rebound_follower) {
 			continue;
@@ -1257,19 +1298,19 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 		Expect(follower->GetTarget() != timeout_target && !follower->GetAttackFlag() &&
 			!follower->GetAttackingFlag() && !follower->CheckAggro(timeout_target) &&
 			!timeout_target->CheckAggro(follower),
-			"expiry must cancel both sides of each identity-matched follower's selected-target combat intent");
+			"terminal processing must clean up each identity-matched follower's hunt combat state");
 	}
 	Expect(!hunt_pet->CheckAggro(timeout_target) && !timeout_target->CheckAggro(hunt_pet) &&
 		hunt_pet->GetTarget() != timeout_target,
-		"expiry must cancel a Bot pet's selected-target combat intent in both directions");
+		"terminal processing must clean up a Bot pet's selected-target combat state");
 	Expect(hunt_pet->CheckAggro(unrelated_pet_target),
-		"hunt cleanup must retain a pet's unrelated combat state");
+		"terminal cleanup must retain a pet's unrelated combat state");
 	Expect(rebound_follower->GetTarget() == timeout_target && rebound_follower->GetAttackFlag() &&
 		rebound_follower->CheckAggro(timeout_target) && timeout_target->CheckAggro(rebound_follower),
-		"hunt cleanup must not mutate a Bot whose stable identity no longer matches the participant");
+		"terminal cleanup must not mutate a Bot whose stable identity no longer matches the participant");
 	const auto retained_attack_flags = timeout_target->GetBotAttackFlags();
 	Expect(std::find(retained_attack_flags.begin(), retained_attack_flags.end(), *profile.owner_character_id) ==
-		retained_attack_flags.end(), "expiry must remove the hunt's target authorization");
+		retained_attack_flags.end(), "terminal cleanup must remove the hunt's target authorization");
 	fixture.OwnedBot()->SetPet(nullptr);
 	fixture.RemoveMob(timeout_target);
 	fixture.RemoveMob(hunt_pet);

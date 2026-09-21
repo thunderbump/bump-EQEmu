@@ -201,10 +201,9 @@ void ActorActionExecutor::ObserveNpcDeath(
 			continue;
 		}
 		const auto observed_at = executor->clock_();
-		if (executor->hunt_engagement_->action.expires_at.has_value() &&
-			*executor->hunt_engagement_->action.expires_at <= observed_at) {
-			continue;
-		}
+		// Expiry fences replacement work but does not invent a mid-combat retreat.
+		// Keep accepting the exact target's authoritative terminal after expiry so
+		// the runner can classify how the committed combat actually ended.
 		if (!executor->hunt_engagement_->death_observed_at.has_value() ||
 			observed_at < *executor->hunt_engagement_->death_observed_at) {
 			executor->hunt_engagement_->death_observed_at = observed_at;
@@ -220,30 +219,26 @@ void ActorActionExecutor::ProcessHuntEngagement(time_t now) {
 	auto engagement = *hunt_engagement_;
 	const auto lookup = ActorActionQueueRepository::LookupByActionId(database_, engagement.action.action_id);
 	if (!lookup.succeeded) {
-		// The durable owner is unknown, so retain the engagement for retry. The
-		// locally known deadline still bounds gameplay during a database outage.
-		if (engagement.action.expires_at.has_value() && *engagement.action.expires_at <= now) {
-			CancelHuntCombat();
-		}
+		// The durable owner is unknown, so retain both ordinary combat and its
+		// replacement-work fence until the action can be read authoritatively.
 		return;
 	}
-	if (!lookup.action.has_value() || lookup.action->state != "claimed") {
+	if (!lookup.action.has_value() ||
+		(lookup.action->state != "claimed" && lookup.action->state != "expired")) {
 		CancelHuntCombat();
 		hunt_engagement_.reset();
 		return;
 	}
 
+	const bool action_expired = lookup.action->state == "expired";
 	const bool death_observed = engagement.death_observed_at.has_value();
 	std::string failure_reason;
-	if (!death_observed && engagement.action.expires_at.has_value() &&
+	if (!action_expired && !death_observed && engagement.action.expires_at.has_value() &&
 		*engagement.action.expires_at <= now) {
-		const auto expired = ActorActionQueueRepository::ExpireDue(database_, now, engagement.action.actor_id) > 0;
-		// Stop gameplay at the deadline even when persistence is temporarily
-		// unavailable. Retain the engagement so terminalization can retry.
-		CancelHuntCombat();
-		if (expired) {
-			hunt_engagement_.reset();
-		}
+		// Action freshness expiry is visible durable stuck evidence. It does not
+		// authorize a retreat: retain Committed Engagement until ordinary combat
+		// reaches target death, target loss, or observed combat end.
+		ActorActionQueueRepository::ExpireDue(database_, now, engagement.action.actor_id);
 		return;
 	}
 
@@ -293,22 +288,26 @@ void ActorActionExecutor::ProcessHuntEngagement(time_t now) {
 		Json::StreamWriterBuilder writer;
 		writer["indentation"] = "";
 		// Completion is governed by the authoritative death time, not by a later
-		// executor retry. An in-deadline kill remains success across zone delay or
-		// a transient persistence outage after NPC::Death has reported it.
+		// executor retry. Once freshness expiry has recorded stuck evidence, the
+		// queue remains expired but the actual combat terminal is still retained.
 		const auto completed_at = *engagement.death_observed_at;
-		const auto completed = ActorActionQueueRepository::MarkCompleted(
-			database_, {engagement.action.action_id, Json::writeString(writer, result), completed_at});
+		const auto completed = action_expired
+			? std::optional<ActorActionQueueRepository::ActorActionRecord>(*lookup.action)
+			: ActorActionQueueRepository::MarkCompleted(
+				database_, {engagement.action.action_id, Json::writeString(writer, result), completed_at});
 		outcome_persisted =
-			completed.has_value() && completed->state == "completed" &&
+			completed.has_value() && (completed->state == "completed" || completed->state == "expired") &&
 			AppendOutcome(database_, engagement.action, &engagement.profile, &engagement.status, "hunt_succeeded",
 						  "selected_target_death", completed_at, nullptr, engagement.target_entity_id,
 						  engagement.target_npc_type_id, engagement.killer_entity_id,
 						  engagement.target_runtime_instance_id);
 	} else {
-		const auto failed =
-			ActorActionQueueRepository::MarkFailed(database_, {engagement.action.action_id, failure_reason, now});
+		const auto failed = action_expired
+			? std::optional<ActorActionQueueRepository::ActorActionRecord>(*lookup.action)
+			: ActorActionQueueRepository::MarkFailed(
+				database_, {engagement.action.action_id, failure_reason, now});
 		outcome_persisted =
-			failed.has_value() && failed->state == "failed" &&
+			failed.has_value() && (failed->state == "failed" || failed->state == "expired") &&
 			AppendOutcome(database_, engagement.action, &engagement.profile, &engagement.status, "hunt_failed",
 						  failure_reason, now, nullptr, engagement.target_entity_id, engagement.target_npc_type_id, 0,
 						  engagement.target_runtime_instance_id);
@@ -324,14 +323,13 @@ void ActorActionExecutor::ProcessHuntEngagement(time_t now) {
 void ActorActionExecutor::ProcessOne() {
 	const auto now = clock_();
 	ProcessHuntEngagement(now);
-	// An authoritative in-deadline death may still be claimed while its atomic
-	// completion/outcome transaction retries. Expire unrelated work, but do not
-	// let the generic sweep destroy the retained success evidence.
-	const auto completion_retry_action_id =
-		hunt_engagement_ && hunt_engagement_->death_observed_at.has_value()
-			? std::optional<uint64_t>(hunt_engagement_->action.action_id)
-			: std::nullopt;
-	ActorActionQueueRepository::ExpireDue(database_, now, std::nullopt, completion_retry_action_id);
+	// Every Committed Engagement fences replacement work through its authoritative
+	// combat terminal. Let ProcessHuntEngagement record this action's expiry while
+	// the generic sweep expires unrelated work only.
+	const auto committed_action_id = hunt_engagement_
+		? std::optional<uint64_t>(hunt_engagement_->action.action_id)
+		: std::nullopt;
+	ActorActionQueueRepository::ExpireDue(database_, now, std::nullopt, committed_action_id);
 	if (hunt_engagement_) {
 		return;
 	}
