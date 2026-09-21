@@ -111,9 +111,11 @@ LIMIT {}
 
 	static std::optional<uint64_t> LatestGameplayEventId(Database &db, uint32_t actor_id)
 	{
+		// A hunt reservation can expire without ever starting combat. Keep it
+		// cursor-visible for diagnosis without treating intent as gameplay progress.
 		auto results = db.QueryDatabase(fmt::format(
 			"SELECT COALESCE(MAX(event_id), 0) FROM actor_events WHERE actor_id = {} "
-			"AND event_type NOT IN ('action_completed', 'action_rejected')", actor_id));
+			"AND event_type NOT IN ('action_completed', 'action_rejected', 'hunt_engagement_reserved')", actor_id));
 		if (!results.Success() || results.RowCount() != 1) {
 			return std::nullopt;
 		}

@@ -593,18 +593,19 @@ void ActorActionExecutor::ProcessOne() {
 	if (action->action_type == "target") {
 		bot->SetTarget(target);
 	} else if (action->action_type == "hunt_one_allowlisted_target") {
-		// Persist the execution state before mutating combat. A failed/uncertain
-		// transaction must never leave the party attacking without durable evidence.
-		const auto committed = AppendOutcome(database_, *action, &*profile, &*status, "hunt_engagement_committed",
-											 "ordinary_bot_combat", applied_at, hunt_target);
-		if (!committed || !database_.TransactionCommit().Success()) {
+		// Reserve execution before mutating combat. The commit may cross the
+		// deadline, so this is intent evidence, not proof of a Committed Engagement
+		// or gameplay progress. The queue records expiry if combat never starts.
+		const auto reserved = AppendOutcome(database_, *action, &*profile, &*status, "hunt_engagement_reserved",
+										 "ordinary_bot_combat", applied_at, hunt_target);
+		if (!reserved || !database_.TransactionCommit().Success()) {
 			database_.TransactionRollback();
 			ActorActionQueueRepository::ReleaseClaim(database_, action->action_id, claimant_);
 			return;
 		}
 
 		// The transaction can finish after the bounded request expires. Do not
-		// install combat intent merely because engagement evidence committed.
+		// install combat intent merely because the reservation committed.
 		const auto combat_started_at = clock_();
 		if (action->expires_at.has_value() && *action->expires_at <= combat_started_at) {
 			ActorActionQueueRepository::ExpireDue(database_, combat_started_at, action->actor_id);

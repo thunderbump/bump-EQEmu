@@ -1433,11 +1433,22 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 		"hunt success must retain the exact selected NPC instance identity");
 	const auto events = ActorEventsRepository::ReadCursor(database, profile.actor_id, 0, 1000);
 	Expect(std::any_of(events.begin(), events.end(), [&](const auto& event) {
+		if (event.event_type != "hunt_engagement_reserved") return false;
+		const auto payload = ParseJson(event.event_json);
+		return payload["action_id"].asUInt64() == succeeded.action_id &&
+			payload["target_runtime_instance_id"].asUInt64() == target_runtime_instance_id;
+	}), "successful combat must retain its correlated pre-combat reservation");
+	Expect(std::any_of(events.begin(), events.end(), [&](const auto& event) {
 		if (event.event_type != "hunt_succeeded") return false;
 		const auto payload = ParseJson(event.event_json);
 		return payload["action_id"].asUInt64() == succeeded.action_id &&
 			payload["target_entity_id"].asUInt() == target_id;
 	}), "durable authoritative death evidence must correlate action and selected target");
+	const auto terminal_watermark = ActorEventsRepository::LatestGameplayEventId(database, profile.actor_id);
+	Expect(terminal_watermark.has_value() && std::any_of(events.begin(), events.end(), [&](const auto& event) {
+		return event.event_id == *terminal_watermark && event.event_type == "hunt_succeeded" &&
+			ParseJson(event.event_json)["action_id"].asUInt64() == succeeded.action_id;
+	}), "actual hunt success must still advance the gameplay watermark");
 }
 
 } // namespace
