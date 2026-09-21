@@ -114,6 +114,8 @@ struct ActorActionExecutor::HuntEngagement {
 		uint32_t bot_id = 0;
 		uint32_t owner_character_id = 0;
 		uint64_t runtime_instance_id = 0;
+		uint16_t pet_entity_id = 0;
+		uint64_t pet_runtime_instance_id = 0;
 	};
 
 	ActorActionQueueRepository::ActorActionRecord action;
@@ -176,8 +178,14 @@ void ActorActionExecutor::CancelHuntCombat() {
 		}
 		remove_hunt_aggro(party_bot);
 		// Bot::SetOwnerTarget can enlist a controllable pet in the same ordinary
-		// combat. Remove only this hunt target so unrelated pet hate is retained.
-		remove_hunt_aggro(party_bot->GetPet());
+		// combat. Resolve the exact pet retained at admission rather than whichever
+		// pet currently belongs to the Bot, and preserve unrelated pet hate.
+		auto* pet_candidate = identity.pet_entity_id ? entity_list.GetMob(identity.pet_entity_id) : nullptr;
+		auto* enlisted_pet = pet_candidate &&
+			pet_candidate->GetRuntimeInstanceID() == identity.pet_runtime_instance_id
+			? pet_candidate
+			: nullptr;
+		remove_hunt_aggro(enlisted_pet);
 		if (hunt_engagement_->status.entity_id.has_value() &&
 			party_bot->IsCommandTargetSource(*hunt_engagement_->status.entity_id)) {
 			party_bot->ClearAttackCommandFlags();
@@ -262,10 +270,13 @@ void ActorActionExecutor::ProcessHuntEngagement(time_t now) {
 			const bool hunt_command_pending = party_bot->GetAttackFlag() && command_source &&
 											  engagement.status.entity_id.has_value() &&
 											  command_source->GetID() == *engagement.status.entity_id;
-			auto* controllable_pet =
-				party_bot->HasControllablePet(BotAnimEmpathy::Attack) ? party_bot->GetPet() : nullptr;
+			auto* pet_candidate = identity.pet_entity_id ? entity_list.GetMob(identity.pet_entity_id) : nullptr;
+			auto* enlisted_pet = pet_candidate &&
+				pet_candidate->GetRuntimeInstanceID() == identity.pet_runtime_instance_id
+				? pet_candidate
+				: nullptr;
 			const bool hunt_pet_combat_active =
-				controllable_pet && controllable_pet->IsEngaged() && controllable_pet->CheckAggro(target);
+				enlisted_pet && enlisted_pet->IsEngaged() && enlisted_pet->CheckAggro(target);
 			if (hunt_command_pending || (party_bot->IsEngaged() && party_bot->CheckAggro(target)) ||
 				hunt_pet_combat_active) {
 				selected_target_combat_active = true;
@@ -606,11 +617,16 @@ void ActorActionExecutor::ProcessOne() {
 		std::vector<HuntEngagement::PartyBotIdentity> party_bots;
 		party_bots.reserve(hunt_party_bots.size());
 		for (auto* party_bot : hunt_party_bots) {
+			auto* enlisted_pet = party_bot->HasControllablePet(BotAnimEmpathy::Attack)
+				? party_bot->GetPet()
+				: nullptr;
 			party_bots.push_back({
 				.entity_id = party_bot->GetID(),
 				.bot_id = party_bot->GetBotID(),
 				.owner_character_id = party_bot->GetBotOwnerCharacterID(),
 				.runtime_instance_id = party_bot->GetRuntimeInstanceID(),
+				.pet_entity_id = enlisted_pet ? enlisted_pet->GetID() : 0,
+				.pet_runtime_instance_id = enlisted_pet ? enlisted_pet->GetRuntimeInstanceID() : 0,
 			});
 		}
 		hunt_engagement_ = std::make_unique<HuntEngagement>(HuntEngagement{

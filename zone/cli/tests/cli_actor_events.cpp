@@ -1163,14 +1163,33 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 				"pet combat must retain the committed engagement after all Party Bots disengage");
 	Expect(engaged_pet->CheckAggro(ended_target),
 		   "engagement processing must not cancel a controllable pet that is still fighting the selected target");
+
+	// Replace the enlisted pet while retaining independently-established combat on
+	// the same target. The replacement must neither extend nor be cleaned up as
+	// part of this hunt. Keep the original instance materialized but disengaged so
+	// the executor must attribute both lifecycle decisions by retained identity.
+	fixture.OwnedBot()->SetPet(nullptr);
 	engaged_pet->WipeHateList();
 	engaged_pet->SetTarget(nullptr);
+	auto* replacement_pet = fixture.AddHostileNPC({
+		.name = "HarnessReplacementBotPet",
+		.position = glm::vec4(-2077.0f, 400.0f, -3.0f, 0.0f),
+	});
+	Expect(replacement_pet, "replacement pet fixture should materialize");
+	fixture.OwnedBot()->SetPet(replacement_pet);
+	replacement_pet->AddToHateList(ended_target, 1);
+	replacement_pet->SetTarget(ended_target);
+	ended_target->AddToHateList(replacement_pet, 1);
 	executor.ProcessOne();
 	ExpectEqual(ActorActionQueueRepository::FindOne(database, combat_ended.action_id).failure_reason,
 				std::optional<std::string>("hunt_combat_ended"),
-				"combat ending for both Party Bots and enlisted pets must produce a visible failed outcome");
+				"combat ending for the exact enlisted pet must produce a visible failed outcome");
+	Expect(replacement_pet->CheckAggro(ended_target) && ended_target->CheckAggro(replacement_pet) &&
+			replacement_pet->GetTarget() == ended_target,
+		"terminal cleanup must preserve a replacement pet's independent combat state");
 	fixture.OwnedBot()->SetPet(nullptr);
 	fixture.RemoveMob(engaged_pet);
+	fixture.RemoveMob(replacement_pet);
 	fixture.RemoveMob(ended_target);
 
 	// Let the production clock cross the deadline while the engagement event
@@ -1204,13 +1223,8 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 		.npc_type_id = 33005,
 	});
 	Expect(timeout_target, "timeout fixture should create an allowlisted NPC");
-	time_t hunt_clock = now;
-	const auto timed = enqueue("timeout", valid_body, hunt_clock + 1);
-	ActorActionExecutor timeout_executor(database, zone->GetZoneID(), zone->GetInstanceID(), zone->GetZoneServerId(),
-		[&]() { return hunt_clock; });
-	timeout_executor.ProcessOne();
-	// Model the bidirectional hate ordinary combat establishes, including the
-	// controllable-pet path used by Bot::SetOwnerTarget.
+	// Materialize the controllable pet before admission so the committed
+	// engagement retains the exact instance that ordinary Bot combat can enlist.
 	auto* hunt_pet = fixture.AddHostileNPC({
 		.name = "HarnessHuntBotPet", .position = glm::vec4(-2078.0f, 400.0f, -3.0f, 0.0f),
 	});
@@ -1219,8 +1233,14 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 	});
 	Expect(hunt_pet && unrelated_pet_target, "hunt cleanup pet fixtures should materialize");
 	fixture.OwnedBot()->SetPet(hunt_pet);
-	// Consume the pending hunt commands through the ordinary Bot path so the
-	// distinct attacking flag is part of the state cancellation must unwind.
+	time_t hunt_clock = now;
+	const auto timed = enqueue("timeout", valid_body, hunt_clock + 1);
+	ActorActionExecutor timeout_executor(database, zone->GetZoneID(), zone->GetInstanceID(), zone->GetZoneServerId(),
+		[&]() { return hunt_clock; });
+	timeout_executor.ProcessOne();
+	// Model the bidirectional hate ordinary combat establishes, including the
+	// controllable-pet path used by Bot::SetOwnerTarget. Consuming the pending
+	// commands also establishes the distinct attacking state cleanup must unwind.
 	fixture.OwnedBot()->SetOwnerTarget(fixture.Owner());
 	Expect(fixture.OwnedBot()->GetAttackingFlag(),
 		"ordinary Bot engagement should establish the leader's attacking state");
