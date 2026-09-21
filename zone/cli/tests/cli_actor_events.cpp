@@ -1146,13 +1146,31 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 		.npc_type_id = 33005,
 	});
 	Expect(ended_target, "combat-ended fixture should create an allowlisted NPC");
+	auto* engaged_pet = fixture.AddHostileNPC({
+		.name = "HarnessEngagedBotPet",
+		.position = glm::vec4(-2078.0f, 400.0f, -3.0f, 0.0f),
+	});
+	Expect(engaged_pet, "combat-ended pet fixture should materialize");
+	fixture.OwnedBot()->SetPet(engaged_pet);
 	const auto combat_ended = enqueue("combat-ended", valid_body);
 	executor.ProcessOne();
+	fixture.OwnedBot()->SetOwnerTarget(fixture.Owner());
+	Expect(engaged_pet->IsEngaged() && engaged_pet->CheckAggro(ended_target),
+		   "ordinary Bot engagement should enlist its controllable pet");
 	clear_combat();
 	executor.ProcessOne();
+	ExpectEqual(ActorActionQueueRepository::FindOne(database, combat_ended.action_id).state, std::string("claimed"),
+				"pet combat must retain the committed engagement after all Party Bots disengage");
+	Expect(engaged_pet->CheckAggro(ended_target),
+		   "engagement processing must not cancel a controllable pet that is still fighting the selected target");
+	engaged_pet->WipeHateList();
+	engaged_pet->SetTarget(nullptr);
+	executor.ProcessOne();
 	ExpectEqual(ActorActionQueueRepository::FindOne(database, combat_ended.action_id).failure_reason,
-		std::optional<std::string>("hunt_combat_ended"),
-		"combat ending while the selected target lives must produce a visible failed outcome");
+				std::optional<std::string>("hunt_combat_ended"),
+				"combat ending for both Party Bots and enlisted pets must produce a visible failed outcome");
+	fixture.OwnedBot()->SetPet(nullptr);
+	fixture.RemoveMob(engaged_pet);
 	fixture.RemoveMob(ended_target);
 
 	// Let the production clock cross the deadline while the engagement event

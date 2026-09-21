@@ -260,8 +260,14 @@ void ActorActionExecutor::ProcessHuntEngagement(time_t now) {
 			auto* command_source = party_bot->GetCommandTargetSource(
 				bot_owner && bot_owner->IsClient() ? bot_owner->CastToClient() : nullptr);
 			const bool hunt_command_pending = party_bot->GetAttackFlag() && command_source &&
-				engagement.status.entity_id.has_value() && command_source->GetID() == *engagement.status.entity_id;
-			if (hunt_command_pending || (party_bot->IsEngaged() && party_bot->CheckAggro(target))) {
+											  engagement.status.entity_id.has_value() &&
+											  command_source->GetID() == *engagement.status.entity_id;
+			auto* controllable_pet =
+				party_bot->HasControllablePet(BotAnimEmpathy::Attack) ? party_bot->GetPet() : nullptr;
+			const bool hunt_pet_combat_active =
+				controllable_pet && controllable_pet->IsEngaged() && controllable_pet->CheckAggro(target);
+			if (hunt_command_pending || (party_bot->IsEngaged() && party_bot->CheckAggro(target)) ||
+				hunt_pet_combat_active) {
 				selected_target_combat_active = true;
 				break;
 			}
