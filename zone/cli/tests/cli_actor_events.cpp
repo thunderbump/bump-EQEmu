@@ -1180,6 +1180,13 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 	replacement_pet->AddToHateList(ended_target, 1);
 	replacement_pet->SetTarget(ended_target);
 	ended_target->AddToHateList(replacement_pet, 1);
+	// Pet hate propagates to its AI-controlled owner. Remove that setup side
+	// effect so only the replacement pet is fighting when we test attribution.
+	Expect(fixture.OwnedBot()->CheckAggro(ended_target),
+		"replacement pet setup must expose the ordinary owner hate propagation");
+	clear_combat();
+	Expect(!fixture.OwnedBot()->IsEngaged() && !engaged_pet->IsEngaged(),
+		"original hunt participants must be disengaged before checking replacement pet attribution");
 	executor.ProcessOne();
 	ExpectEqual(ActorActionQueueRepository::FindOne(database, combat_ended.action_id).failure_reason,
 				std::optional<std::string>("hunt_combat_ended"),
@@ -1192,15 +1199,16 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 	fixture.RemoveMob(replacement_pet);
 	fixture.RemoveMob(ended_target);
 
-	// Let the production clock cross the deadline while the engagement event
-	// transaction commits. Durable evidence may exist, but expired work must not
-	// install even transient combat intent afterward.
+	// Let the production clock cross the deadline while the reservation commits.
+	// Reserving work is not gameplay progress or evidence that combat started.
 	auto* commit_crossed_target = fixture.AddHostileNPC({
 		.name = "HarnessCommitCrossedDeadlineLargeRat", .position = glm::vec4(-2080.0f, 400.0f, -3.0f, 0.0f),
 		.npc_type_id = 33005,
 	});
 	Expect(commit_crossed_target, "commit-crossed-deadline fixture should create an allowlisted NPC");
 	const auto commit_crossed = enqueue("commit-crossed-deadline", valid_body, now + 1);
+	const auto watermark_before_reservation = ActorEventsRepository::LatestGameplayEventId(database, profile.actor_id);
+	Expect(watermark_before_reservation.has_value(), "deadline fixture must read the gameplay watermark");
 	uint32_t deadline_clock_reads = 0;
 	ActorActionExecutor commit_crossed_executor(
 		database, zone->GetZoneID(), zone->GetInstanceID(), zone->GetZoneServerId(), [&]() {
@@ -1209,6 +1217,17 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 	commit_crossed_executor.ProcessOne();
 	ExpectEqual(ActorActionQueueRepository::FindOne(database, commit_crossed.action_id).state, std::string("expired"),
 		"a hunt whose engagement commit crosses its deadline must expire before combat starts");
+	ExpectEqual(ActorEventsRepository::LatestGameplayEventId(database, profile.actor_id), watermark_before_reservation,
+		"a reservation expiring before combat must not advance the gameplay watermark");
+	const auto reservation_events = ActorEventsRepository::ReadCursor(database, profile.actor_id, 0, 1000);
+	uint32_t matching_reservations = 0;
+	for (const auto& event : reservation_events) {
+		if (ParseJson(event.event_json)["action_id"].asUInt64() != commit_crossed.action_id) continue;
+		ExpectEqual(event.event_type, std::string("hunt_engagement_reserved"),
+			"an expired reservation must not claim that combat began or ended");
+		++matching_reservations;
+	}
+	ExpectEqual(matching_reservations, uint32_t(1), "the expired action must retain one correlated reservation");
 	Expect(fixture.OwnedBot()->GetTarget() != commit_crossed_target && !fixture.OwnedBot()->GetAttackFlag(),
 		"post-commit deadline enforcement must not create leader combat intent");
 	for (auto* follower : fixture.FollowerBots()) {
