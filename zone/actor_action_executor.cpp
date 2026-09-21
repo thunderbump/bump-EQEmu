@@ -126,6 +126,8 @@ struct ActorActionExecutor::HuntEngagement {
 	uint64_t target_runtime_instance_id = 0;
 	std::vector<PartyBotIdentity> party_bots;
 	bool target_attack_flag_added = false;
+	time_t combat_started_at = 0;
+	bool commitment_recorded = false;
 	std::optional<time_t> death_observed_at;
 	uint16_t killer_entity_id = 0;
 };
@@ -223,6 +225,18 @@ void ActorActionExecutor::ObserveNpcDeath(
 void ActorActionExecutor::ProcessHuntEngagement(time_t now) {
 	if (!hunt_engagement_) {
 		return;
+	}
+	if (!hunt_engagement_->commitment_recorded) {
+		// Combat intent is already installed. Retain the engagement and any
+		// observed death while persistence is unavailable, and record commitment
+		// before its terminal so the event history cannot imply terminal-only combat.
+		const auto& pending = *hunt_engagement_;
+		if (!AppendOutcome(database_, pending.action, &pending.profile, &pending.status,
+				"hunt_engagement_committed", "ordinary_bot_combat", pending.combat_started_at,
+				nullptr, pending.target_entity_id, pending.target_npc_type_id, 0, pending.target_runtime_instance_id)) {
+			return;
+		}
+		hunt_engagement_->commitment_recorded = true;
 	}
 	auto engagement = *hunt_engagement_;
 	const auto lookup = ActorActionQueueRepository::LookupByActionId(database_, engagement.action.action_id);
@@ -639,6 +653,7 @@ void ActorActionExecutor::ProcessOne() {
 			.target_runtime_instance_id = hunt_target->GetRuntimeInstanceID(),
 			.party_bots = std::move(party_bots),
 			.target_attack_flag_added = target_attack_flag_added,
+			.combat_started_at = combat_started_at,
 		});
 
 		// This is the same target/attack intent consumed by ordinary Bot AI. Combat,
@@ -655,6 +670,7 @@ void ActorActionExecutor::ProcessOne() {
 				party_bot->SetAttackFlag();
 			}
 		}
+		ProcessHuntEngagement(combat_started_at);
 		return;
 	} else {
 		bot->Stand();
