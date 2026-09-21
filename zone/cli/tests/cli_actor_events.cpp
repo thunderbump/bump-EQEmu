@@ -1119,9 +1119,38 @@ void ExpectAllowlistedMistyHunt(EQ::ZoneHarness::OwnedBotActorFixture& fixture,
 	});
 	Expect(lost, "lost-target fixture should create an allowlisted NPC");
 	const auto lost_action = enqueue("lost", valid_body);
+	const auto commitment_trigger = fmt::format("hunt_commit_failure_{}", run_nonce);
+	struct DropCommitmentTrigger {
+		std::string name;
+		~DropCommitmentTrigger() { database.QueryDatabase("DROP TRIGGER IF EXISTS " + name); }
+	} drop_commitment_trigger{commitment_trigger};
+	Expect(database.QueryDatabase(fmt::format(
+		"CREATE TRIGGER {} BEFORE INSERT ON actor_events FOR EACH ROW BEGIN "
+		"IF NEW.actor_id = {} AND NEW.event_type = 'hunt_engagement_committed' THEN "
+		"SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'hunt commitment persistence test'; END IF; END",
+		commitment_trigger, profile.actor_id)).Success(), "commitment failure fixture must install its trigger");
+	const auto count_commitments = [&]() {
+		const auto events = ActorEventsRepository::ReadCursor(database, profile.actor_id, 0, 1000);
+		return std::count_if(events.begin(), events.end(), [&](const auto& event) {
+			return event.event_type == "hunt_engagement_committed" &&
+				ParseJson(event.event_json)["action_id"].asUInt64() == lost_action.action_id;
+		});
+	};
 	executor.ProcessOne();
 	ExpectEqual(ActorActionQueueRepository::FindOne(database, lost_action.action_id).state, std::string("claimed"),
 		"accepted hunts should remain claimed during Committed Engagement");
+	Expect(fixture.OwnedBot()->GetAttackFlag() && fixture.OwnedBot()->GetTarget() == lost,
+		"a commitment evidence failure must retain the installed ordinary combat intent");
+	ExpectEqual(count_commitments(), decltype(count_commitments())(0),
+		"the injected failure must prevent the commitment write");
+	Expect(database.QueryDatabase("DROP TRIGGER " + commitment_trigger).Success(),
+		"commitment failure fixture must restore event persistence");
+	executor.ProcessOne();
+	ExpectEqual(count_commitments(), decltype(count_commitments())(1),
+		"installed combat must retry its durable commitment when event persistence recovers");
+	executor.ProcessOne();
+	ExpectEqual(count_commitments(), decltype(count_commitments())(1),
+		"ordinary engagement processing must not repeat a successful commitment write");
 	auto* replacement_identity = fixture.AddHostileNPC({
 		.name = "HarnessReplacementLargeRat", .position = glm::vec4(-2070.0f, 400.0f, -3.0f, 0.0f),
 		.npc_type_id = 33005,
