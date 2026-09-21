@@ -181,8 +181,8 @@ void ActorActionExecutor::CancelHuntCombat() {
 		// combat. Resolve the exact pet retained at admission rather than whichever
 		// pet currently belongs to the Bot, and preserve unrelated pet hate.
 		auto* pet_candidate = identity.pet_entity_id ? entity_list.GetMob(identity.pet_entity_id) : nullptr;
-		auto* enlisted_pet = pet_candidate &&
-			pet_candidate->GetRuntimeInstanceID() == identity.pet_runtime_instance_id
+		auto* enlisted_pet = pet_candidate && pet_candidate->IsNPC() &&
+			pet_candidate->CastToNPC()->GetRuntimeInstanceID() == identity.pet_runtime_instance_id
 			? pet_candidate
 			: nullptr;
 		remove_hunt_aggro(enlisted_pet);
@@ -271,8 +271,8 @@ void ActorActionExecutor::ProcessHuntEngagement(time_t now) {
 											  engagement.status.entity_id.has_value() &&
 											  command_source->GetID() == *engagement.status.entity_id;
 			auto* pet_candidate = identity.pet_entity_id ? entity_list.GetMob(identity.pet_entity_id) : nullptr;
-			auto* enlisted_pet = pet_candidate &&
-				pet_candidate->GetRuntimeInstanceID() == identity.pet_runtime_instance_id
+			auto* enlisted_pet = pet_candidate && pet_candidate->IsNPC() &&
+				pet_candidate->CastToNPC()->GetRuntimeInstanceID() == identity.pet_runtime_instance_id
 				? pet_candidate
 				: nullptr;
 			const bool hunt_pet_combat_active =
@@ -512,7 +512,7 @@ void ActorActionExecutor::ProcessOne() {
 				return party_bot->HasDied() || party_bot->GetHP() <= 0 || party_bot->IsEngaged() ||
 					party_bot->GetAttackFlag() || party_bot->GetAttackingFlag() || party_bot->GetPullFlag() ||
 					party_bot->GetPullingFlag() || party_bot->GetReturningFlag() ||
-					(controllable_pet && controllable_pet->IsEngaged());
+					(controllable_pet && (!controllable_pet->IsNPC() || controllable_pet->IsEngaged()));
 			})) {
 			reject("actor_not_ready");
 			return;
@@ -618,7 +618,7 @@ void ActorActionExecutor::ProcessOne() {
 		party_bots.reserve(hunt_party_bots.size());
 		for (auto* party_bot : hunt_party_bots) {
 			auto* enlisted_pet = party_bot->HasControllablePet(BotAnimEmpathy::Attack)
-				? party_bot->GetPet()
+				? party_bot->GetPet()->CastToNPC()
 				: nullptr;
 			party_bots.push_back({
 				.entity_id = party_bot->GetID(),
