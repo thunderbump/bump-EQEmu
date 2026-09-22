@@ -51,6 +51,7 @@
 #include <filesystem>
 #include <fstream>
 #ifndef _WIN32
+#include <poll.h>
 #include <signal.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -340,18 +341,37 @@ void ExpectAssertionSubprocessTerminatesBoundedly() {
 	const int log_fd = mkstemp(log_path.data());
 	Expect(log_fd >= 0, "assertion teardown probe should create a private diagnostic log");
 
+	int ready_pipe[2] = {-1, -1};
+	if (pipe(ready_pipe) != 0) {
+		close(log_fd);
+		std::filesystem::remove(log_path.data());
+		Fail("assertion teardown probe should create a readiness pipe");
+	}
+
 	const auto child = fork();
 	if (child == 0) {
+		close(ready_pipe[0]);
 		dup2(log_fd, STDERR_FILENO);
 		close(log_fd);
+		const auto ready_fd = std::to_string(ready_pipe[1]);
 		execl("/proc/self/exe", "zone", "tests:actor-events", "--assertion-teardown-probe",
-			static_cast<char*>(nullptr));
+			"--assertion-teardown-ready-fd", ready_fd.c_str(), static_cast<char*>(nullptr));
 		std::_Exit(127);
 	}
 	close(log_fd);
+	close(ready_pipe[1]);
+
+	// Process startup and fixture construction are prerequisites, not part of
+	// the assertion-unwind bound. Start the two-second clock only after the
+	// child has an in-flight persistence operation and is about to throw.
+	pollfd ready_poll{.fd = ready_pipe[0], .events = POLLIN, .revents = 0};
+	const bool readiness_signaled = child > 0 && poll(&ready_poll, 1, 10000) > 0;
+	char ready = 0;
+	const bool assertion_started = readiness_signaled && read(ready_pipe[0], &ready, 1) == 1 && ready == '1';
+	close(ready_pipe[0]);
 
 	int status = 0;
-	const bool finished = child > 0 && WaitForChild(child, 2s, &status);
+	const bool finished = assertion_started && WaitForChild(child, 2s, &status);
 	if (child > 0 && !finished) {
 		kill(child, SIGKILL);
 		waitpid(child, &status, 0);
@@ -360,12 +380,15 @@ void ExpectAssertionSubprocessTerminatesBoundedly() {
 	const std::string diagnostics((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
 	std::filesystem::remove(log_path.data());
 
-	Expect(finished, "controlled assertion teardown subprocess should terminate within two seconds");
+	Expect(assertion_started, "controlled assertion teardown subprocess should reach the assertion");
+	Expect(finished, "controlled assertion teardown subprocess should terminate within two seconds of the assertion");
 	Expect(WIFEXITED(status) && WEXITSTATUS(status) == 1,
 		"controlled assertion teardown subprocess should return the assertion failure status");
 	Expect(diagnostics.find("[FAIL] controlled actor-events assertion teardown") != std::string::npos,
 		"controlled assertion teardown subprocess should retain the original diagnostic");
-	Expect(diagnostics.find("malloc():") == std::string::npos,
+	Expect(diagnostics.find("malloc():") == std::string::npos &&
+			diagnostics.find("double free") == std::string::npos &&
+			diagnostics.find("invalid pointer") == std::string::npos,
 		"controlled assertion teardown subprocess should not report allocator corruption");
 }
 #endif
@@ -385,7 +408,7 @@ public:
 	std::vector<std::string> attempted_texts;
 };
 
-[[noreturn]] void RunAssertionTeardownProbe() {
+[[noreturn]] void RunAssertionTeardownProbe(int ready_fd) {
 	using namespace std::chrono_literals;
 
 	Zone::Bootup(ZoneID("qrg"), 0, false);
@@ -394,8 +417,9 @@ public:
 	entity_list.MobProcess();
 
 	std::mutex persistence_mutex;
-	std::condition_variable persistence_started_cv;
+	std::condition_variable persistence_state_cv;
 	bool persistence_started = false;
+	bool release_persistence = false;
 
 	// This ordering is the production failure-path contract: temporary and main
 	// asynchronous persistence stop before fixture destruction begins.
@@ -406,14 +430,24 @@ public:
 	ScopedActiveRecorder active_recorder(recorder, &main_persistence_sink);
 	EQ::ZoneHarness::ActorEventRepositoryPersistenceSink temporary_persistence_sink(
 		8, 4096, [&](const auto&) {
-			{
-				std::lock_guard lock(persistence_mutex);
-				persistence_started = true;
-				persistence_started_cv.notify_all();
-			}
-			std::this_thread::sleep_for(50ms);
+			std::unique_lock lock(persistence_mutex);
+			persistence_started = true;
+			persistence_state_cv.notify_all();
+			persistence_state_cv.wait(lock, [&]() { return release_persistence; });
 			return true;
 		});
+	struct ReleasePersistenceOnExit {
+		std::mutex& mutex;
+		std::condition_variable& state_cv;
+		bool& release;
+		~ReleasePersistenceOnExit() {
+			{
+				std::lock_guard lock(mutex);
+				release = true;
+			}
+			state_cv.notify_all();
+		}
+	} release_persistence_on_exit{persistence_mutex, persistence_state_cv, release_persistence};
 	ScopedPersistenceSinkOverride sink_override(
 		recorder, &temporary_persistence_sink, &main_persistence_sink);
 
@@ -424,10 +458,18 @@ public:
 		"assertion teardown probe should enqueue speech through the temporary repository sink");
 	{
 		std::unique_lock lock(persistence_mutex);
-		Expect(persistence_started_cv.wait_for(lock, 1s, [&]() { return persistence_started; }),
+		Expect(persistence_state_cv.wait_for(lock, 1s, [&]() { return persistence_started; }),
 			"assertion teardown probe should start asynchronous persistence");
 	}
 
+#ifndef _WIN32
+	if (ready_fd >= 0) {
+		const char ready = '1';
+		Expect(write(ready_fd, &ready, 1) == 1,
+			"assertion teardown probe should signal that the assertion is starting");
+		close(ready_fd);
+	}
+#endif
 	Fail("controlled actor-events assertion teardown");
 }
 
@@ -1075,7 +1117,13 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 
 	try {
 		if (cmd[{"--assertion-teardown-probe"}]) {
-			RunAssertionTeardownProbe();
+			int ready_fd = -1;
+#ifndef _WIN32
+			if (!cmd("--assertion-teardown-ready-fd").str().empty()) {
+				ready_fd = std::stoi(cmd("--assertion-teardown-ready-fd").str());
+			}
+#endif
+			RunAssertionTeardownProbe(ready_fd);
 		}
 
 		ExpectRecorderShutdownWaitsForInFlightCallbacks();
