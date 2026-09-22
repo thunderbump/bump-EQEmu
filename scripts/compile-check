@@ -1,0 +1,206 @@
+#!/usr/bin/env python3
+"""Compile explicitly selected current-worktree sources without linking or running tests."""
+
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import shlex
+import signal
+import math
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import uuid
+
+
+class Inconclusive(Exception):
+    """The requested compile coverage could not be established."""
+
+
+def selected_sources(root, names):
+    sources = []
+    for name in names:
+        path = Path(name)
+        if path.is_absolute() or ".." in path.parts or path.suffix not in {".c", ".cc", ".cpp", ".cxx"}:
+            raise Inconclusive(f"Select repository-relative C/C++ source files, not headers: {name}")
+        if not (root / path).is_file() or not (root / path).resolve().is_relative_to(root.resolve()):
+            raise Inconclusive(f"Source is missing or escapes the checkout: {name}")
+        if path.as_posix() not in sources:
+            sources.append(path.as_posix())
+    if not sources or len(sources) > 16:
+        raise Inconclusive("Select between one and sixteen source files")
+    return sources
+
+
+def object_targets(database, sources):
+    """Use CMake's actual translation units and output names; never guess coverage."""
+    targets = []
+    for source in sources:
+        entries = [entry for entry in database if entry["file"] == "/home/eqemu/code/" + source]
+        if not entries:
+            raise Inconclusive(f"No standalone compile entry for {source}; new/unity sources may need full validation")
+        for entry in entries:
+            args = entry.get("arguments") or shlex.split(entry["command"])
+            try:
+                target = args[args.index("-o") + 1]
+            except (ValueError, IndexError) as exc:
+                raise Inconclusive(f"No object output for {source}") from exc
+            path = Path(target)
+            if path.is_absolute() or ".." in path.parts or target.startswith("-") or path.suffix != ".o":
+                raise Inconclusive(f"Unsupported object target: {target}")
+            if target not in targets:
+                targets.append(target)
+    return targets
+
+
+def snapshot(root, destination, paths, deadline):
+    """Copy tracked and nonignored files, including edits/deletions, without Git metadata."""
+    digest = hashlib.sha256()
+    for name in sorted(set(paths)):
+        if time.monotonic() >= deadline:
+            raise TimeoutError("Source snapshot exceeded the time budget")
+        path = root / name
+        if path.is_dir():  # Gitlinks are initialized separately at their recorded revisions.
+            continue
+        if not path.exists() and not path.is_symlink():  # Deleted tracked file.
+            continue
+        if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
+            raise Inconclusive(f"Snapshot does not support symlink files: {name}")
+        target = destination / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        content = path.read_bytes()
+        target.write_bytes(content)
+        target.chmod(path.stat().st_mode & 0o777)
+        digest.update(name.encode() + b"\0" + hashlib.sha256(content).digest())
+    return digest.hexdigest()
+
+
+def inside(sources):
+    """Run only CMake configure and selected object targets inside the development image."""
+    evidence = Path("/evidence/compile-phase.json")
+    result = {"status": "inconclusive", "phase": "configure", "checked_sources": sources}
+    try:
+        Path(os.environ["VCPKG_DOWNLOADS"]).mkdir(parents=True, exist_ok=True)
+        subprocess.run(["cmake", "--preset", "linux-debug"], check=True)
+        result["phase"] = "selection"
+        targets = object_targets(json.loads(Path("build/compile_commands.json").read_text()), sources)
+        result["targets"] = targets
+        result["phase"] = "compile"
+        code = subprocess.run(["cmake", "--build", "build", "--parallel", "4", "--target", *targets]).returncode
+        result.update(status="passed" if code == 0 else "failed", compiler_exit_code=code)
+    except (Inconclusive, OSError, ValueError, subprocess.CalledProcessError) as exc:
+        result["reason"] = str(exc)
+    evidence.write_text(json.dumps(result, indent=2) + "\n")
+    return {"passed": 0, "failed": 1, "inconclusive": 2}[result["status"]]
+
+
+def main(argv=None, root=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--timeout", type=int, default=60, help="total work budget in seconds, 1–60; cleanup may add up to 5 seconds")
+    parser.add_argument("sources", nargs="+", help="repository-relative C/C++ source paths; header coverage is not inferred")
+    args = parser.parse_args(argv)
+    if not 1 <= args.timeout <= 60:
+        parser.error("--timeout must be between 1 and 60 seconds")
+    root = Path(root or Path(__file__).resolve().parent.parent).resolve()
+    state = Path(os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local/state"))) / "eqemu-compile-check"
+    evidence = state / uuid.uuid4().hex
+    evidence.mkdir(parents=True, mode=0o700)
+    started = time.monotonic()
+    deadline = started + args.timeout
+    result = {"schema_version": 1, "status": "inconclusive", "coverage": "explicit translation units only; no link or runtime tests", "requested_sources": args.sources, "evidence_dir": str(evidence)}
+    container = "eqemu-compile-" + evidence.name
+    launched = False
+    env = dict(os.environ, GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_SYSTEM="/dev/null", GIT_TERMINAL_PROMPT="0")
+
+    def run(command, capture=False):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("Compilation budget exhausted")
+        log.write(("$ " + shlex.join(command) + "\n").encode()); log.flush()
+        with subprocess.Popen(command, stdout=subprocess.PIPE if capture else log, stderr=log, env=env, start_new_session=True) as process:
+            try:
+                output, _ = process.communicate(timeout=remaining)
+            except (subprocess.TimeoutExpired, KeyboardInterrupt):
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.wait()
+                raise
+            if process.returncode:
+                raise subprocess.CalledProcessError(process.returncode, command)
+            return output
+
+    with (evidence / "compile.log").open("wb") as log, tempfile.TemporaryDirectory(prefix="eqemu-compile-") as scratch:
+        try:
+            sources = selected_sources(root, args.sources)
+            result["checked_sources"] = sources
+            result["head"] = run(["git", "-C", str(root), "rev-parse", "HEAD"], True).decode().strip()
+            image = os.environ.get("EQEMU_COMPILE_IMAGE", "eqemulator/eqemu-server:v16-dev")
+            packages = os.environ.get("EQEMU_COMPILE_PACKAGE_CACHE", "bump-akk-stack-validation_go-build-cache")
+            image = run(["docker", "image", "inspect", "--format", "{{.Id}}", image], True).decode().strip()  # Pin the locally available image.
+            run(["docker", "volume", "inspect", "--format", "{{.Name}}", packages])  # No implicit empty shared volume.
+            work = Path(scratch) / "code"; work.mkdir()
+            names = run(["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard"], True).decode().split("\0")
+            result["snapshot_sha256"] = snapshot(root, work, [n for n in names if n], deadline)
+            index = run(["git", "-C", str(root), "ls-files", "--stage", "-z"], True).decode().split("\0")
+            for entry in index:
+                if not entry.startswith("160000 "):
+                    continue
+                metadata, name = entry.split("\t", 1)
+                if Path(name).is_absolute() or ".." in Path(name).parts:
+                    raise Inconclusive("Invalid submodule path")
+                sha = metadata.split()[1]
+                if (root / name / ".git").exists():
+                    current = run(["git", "-C", str(root / name), "rev-parse", "HEAD"], True).decode().strip()
+                    dirty = run(["git", "-C", str(root / name), "status", "--porcelain"], True).strip()
+                    if current != sha or dirty:
+                        raise Inconclusive(f"Modified submodule is unsupported: {name}")
+                result.setdefault("submodules", {})[name] = sha
+                url = run(["git", "config", "-f", str(root / ".gitmodules"), "--get", f"submodule.{name}.url"], True).decode().strip()
+                if not url.startswith("https://"):
+                    raise Inconclusive("Submodule initialization requires HTTPS")
+                sub = work / name; sub.mkdir(parents=True, exist_ok=True)
+                run(["git", "init", "-q", str(sub)])
+                run(["git", "-C", str(sub), "-c", "protocol.allow=never", "-c", "protocol.https.allow=always", "fetch", "--quiet", "--depth=1", url, sha])
+                run(["git", "-C", str(sub), "checkout", "--quiet", "--detach", "FETCH_HEAD"])
+            result["image"] = image
+            command = ["docker", "run", "--rm", "--name", container, "--mount", f"type=bind,src={work},dst=/home/eqemu/code", "--mount", f"type=bind,src={evidence},dst=/evidence", "--mount", f"type=bind,src={Path(__file__).resolve()},dst=/compile-check.py,readonly", "--mount", f"type=volume,src={packages},dst=/home/eqemu/.cache,readonly", "--env", "CCACHE_DIR=/tmp/compile-ccache", "--env", "VCPKG_DOWNLOADS=/tmp/vcpkg-downloads", "--env", "VCPKG_BINARY_SOURCES=clear;files,/home/eqemu/.cache/vcpkg/archives,read", "--workdir", "/home/eqemu/code", "--entrypoint", "timeout", image, "--signal=TERM", "--kill-after=5s", str(max(1, math.ceil(deadline - time.monotonic()))), "python3", "/compile-check.py", "--inside", *sources]
+            launched = True
+            try:
+                run(command)
+            except subprocess.CalledProcessError:
+                if not (evidence / "compile-phase.json").exists():
+                    raise
+            result.update(json.loads((evidence / "compile-phase.json").read_text()))
+        except (TimeoutError, subprocess.TimeoutExpired) as exc:
+            result.update(status="inconclusive", reason="time budget exceeded", detail=str(exc))
+        except (Inconclusive, OSError, ValueError, subprocess.CalledProcessError) as exc:
+            result.update(status="inconclusive", reason=str(exc))
+        except KeyboardInterrupt:
+            result.update(status="inconclusive", reason="interrupted")
+        finally:
+            if launched:
+                try:
+                    cleanup = subprocess.run(["docker", "rm", "-f", container], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+                    log.write(cleanup.stdout + cleanup.stderr)
+                    if cleanup.returncode and b"No such container" not in cleanup.stderr:
+                        result.update(status="inconclusive", reason="container cleanup not confirmed", container=container)
+                except (OSError, subprocess.TimeoutExpired):
+                    result.update(status="inconclusive", reason="container cleanup not confirmed", container=container)
+            result["elapsed_seconds"] = round(time.monotonic() - started, 3)
+            (evidence / "result.json").write_text(json.dumps(result, indent=2) + "\n")
+    print(json.dumps(result, indent=2))
+    if result["status"] != "passed":
+        lines = (evidence / "compile.log").read_text(errors="replace").splitlines()
+        errors = [line for line in lines if "error:" in line or "Error" in line]
+        print("\n".join(errors[:16] or lines[-12:]), file=sys.stderr)
+    return {"passed": 0, "failed": 1, "inconclusive": 2}[result["status"]]
+
+
+if __name__ == "__main__":
+    sys.exit(inside(sys.argv[2:]) if sys.argv[1:2] == ["--inside"] else main())

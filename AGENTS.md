@@ -35,3 +35,7 @@ AFK owns its implementation, review, repair, and publication workflow. This repo
 For implementation, read [validation instructions](docs/agents/validation.md). Every new world behavior needs a bounded automated Zone Harness scenario through production gameplay paths. Manual play judges feel; it does not replace setup-heavy correctness tests.
 
 For schema, migrations, saved-data changes, or database operations, also read [database instructions](docs/agents/database.md). Use the validation stack for automation; gameplay deployment is a separate operation. Prefer repository wrappers and avoid AkkStack edits unless required validation cannot be supported here.
+
+## Compilation during implementation
+
+Use `./scripts/compile-check path/to/source.cpp [...]` to check current uncommitted C/C++ edits during inference. It compiles only explicitly selected translation units with the normal CMake configuration. It does not link, run tests or replace `validate-afk`. Read the returned diagnostics and check again after compiler repairs. Exit 2 means inconclusive, including timeout or missing prerequisites. See [validation instructions](docs/agents/validation.md) for scope and setup.
