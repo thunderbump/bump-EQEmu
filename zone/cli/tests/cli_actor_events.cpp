@@ -260,6 +260,44 @@ private:
 	bool active_ = true;
 };
 
+// Sink pointers are borrowed by callbacks. Temporarily detach the global
+// recorder at both transitions so no callback can retain the sink being
+// replaced or restored past that sink's lifetime.
+class ScopedPersistenceSinkOverride {
+public:
+	ScopedPersistenceSinkOverride(
+		EQ::ZoneHarness::ActorEventRecorder& recorder,
+		EQ::ZoneHarness::ActorEventPersistenceSink* temporary_sink,
+		EQ::ZoneHarness::ActorEventPersistenceSink* original_sink
+	) : recorder_(recorder), original_sink_(original_sink) {
+		TransitionTo(temporary_sink);
+	}
+
+	ScopedPersistenceSinkOverride(const ScopedPersistenceSinkOverride&) = delete;
+	ScopedPersistenceSinkOverride& operator=(const ScopedPersistenceSinkOverride&) = delete;
+
+	~ScopedPersistenceSinkOverride() { Restore(); }
+
+	void Restore() {
+		if (!active_) {
+			return;
+		}
+		TransitionTo(original_sink_);
+		active_ = false;
+	}
+
+private:
+	void TransitionTo(EQ::ZoneHarness::ActorEventPersistenceSink* sink) {
+		EQ::ZoneHarness::ActorEventRecorder::ClearActiveRecorder(&recorder_);
+		recorder_.SetPersistenceSink(sink);
+		EQ::ZoneHarness::ActorEventRecorder::RegisterActiveRecorder(&recorder_);
+	}
+
+	EQ::ZoneHarness::ActorEventRecorder& recorder_;
+	EQ::ZoneHarness::ActorEventPersistenceSink* original_sink_;
+	bool active_ = true;
+};
+
 void ExpectAssertionUnwindDetachesRecorderFirst() {
 	using namespace std::chrono_literals;
 
@@ -346,6 +384,52 @@ public:
 		EQ::ZoneHarness::ActorEventCaptureResult::Saturated;
 	std::vector<std::string> attempted_texts;
 };
+
+[[noreturn]] void RunAssertionTeardownProbe() {
+	using namespace std::chrono_literals;
+
+	Zone::Bootup(ZoneID("qrg"), 0, false);
+	zone->StopShutdownTimer();
+	entity_list.Process();
+	entity_list.MobProcess();
+
+	std::mutex persistence_mutex;
+	std::condition_variable persistence_started_cv;
+	bool persistence_started = false;
+
+	// This ordering is the production failure-path contract: temporary and main
+	// asynchronous persistence stop before fixture destruction begins.
+	EQ::ZoneHarness::OwnedBotActorFixture fixture;
+	EQ::ZoneHarness::ActorEventRecorder recorder;
+	EQ::ZoneHarness::ActorEventRepositoryPersistenceSink main_persistence_sink(
+		8, 4096, [](const auto&) { return true; });
+	ScopedActiveRecorder active_recorder(recorder, &main_persistence_sink);
+	EQ::ZoneHarness::ActorEventRepositoryPersistenceSink temporary_persistence_sink(
+		8, 4096, [&](const auto&) {
+			{
+				std::lock_guard lock(persistence_mutex);
+				persistence_started = true;
+				persistence_started_cv.notify_all();
+			}
+			std::this_thread::sleep_for(50ms);
+			return true;
+		});
+	ScopedPersistenceSinkOverride sink_override(
+		recorder, &temporary_persistence_sink, &main_persistence_sink);
+
+	Expect(fixture.SetUpOwnedBotSolo({.bot_name = "AssertionTeardownProbe"}),
+		"assertion teardown probe should create the real owned-bot fixture");
+	fixture.AssignBotID(fixture.OwnedBot(), 490000001u);
+	Expect(fixture.OwnedBot()->Say("%s", "assertion-teardown-persistence"),
+		"assertion teardown probe should enqueue speech through the temporary repository sink");
+	{
+		std::unique_lock lock(persistence_mutex);
+		Expect(persistence_started_cv.wait_for(lock, 1s, [&]() { return persistence_started; }),
+			"assertion teardown probe should start asynchronous persistence");
+	}
+
+	Fail("controlled actor-events assertion teardown");
+}
 
 class ScopedRuleOverride {
 public:
@@ -487,7 +571,7 @@ void ExpectSpeechDefersAndRetriesThroughProductionPath(
 	using EQ::ZoneHarness::ActorEventCaptureResult;
 
 	ConfigurablePersistenceSink controlled_sink;
-	recorder.SetPersistenceSink(&controlled_sink);
+	ScopedPersistenceSinkOverride sink_override(recorder, &controlled_sink, original_sink);
 	ScopedRuleOverride saylink_rule("Chat:AutoInjectSaylinksToSay", "false");
 
 	{
@@ -544,7 +628,6 @@ void ExpectSpeechDefersAndRetriesThroughProductionPath(
 	ExpectEqual(controlled_sink.attempted_texts.size(), static_cast<size_t>(6),
 				"speech and emote paths should capture before each deferred or emitted action");
 	recorder.Drain();
-	recorder.SetPersistenceSink(original_sink);
 }
 
 void ExpectBoundedPersistenceOverloadAndRecovery() {
@@ -667,12 +750,7 @@ void ExpectFallbackRepliesRetryInOrder(
 	FallbackDialogue::DelayedDialogueQueue queue(provider, settings);
 	ZoneFallbackDialogueRuntime::DelayedDialogueDelivery delivery;
 	ConfigurablePersistenceSink sink;
-	struct RestorePersistenceSink {
-		EQ::ZoneHarness::ActorEventRecorder& recorder;
-		EQ::ZoneHarness::ActorEventPersistenceSink* original;
-		~RestorePersistenceSink() { recorder.SetPersistenceSink(original); }
-	} restore_sink{recorder, original_sink};
-	recorder.SetPersistenceSink(&sink);
+	ScopedPersistenceSinkOverride sink_override(recorder, &sink, original_sink);
 	fixture.OwnerTargets(fixture.OwnedBot());
 	const auto enqueue = [&](const std::string& response) {
 		const auto queued = queue.HandleTargetedSay({
@@ -743,7 +821,6 @@ void ExpectFallbackRepliesRetryInOrder(
 	delivery.Process(queue);
 	ExpectEqual(recorder.Since(0, 32).size(), size_t(10), "later ticks must deliver the remaining replies");
 	recorder.Drain();
-	recorder.SetPersistenceSink(original_sink);
 	FallbackDialogue::ResetDialogueCooldowns();
 }
 
@@ -998,8 +1075,7 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 
 	try {
 		if (cmd[{"--assertion-teardown-probe"}]) {
-			ExpectAssertionUnwindDetachesRecorderFirst();
-			Fail("controlled actor-events assertion teardown");
+			RunAssertionTeardownProbe();
 		}
 
 		ExpectRecorderShutdownWaitsForInFlightCallbacks();
@@ -1911,12 +1987,7 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 				}
 				return true;
 			});
-		recorder.SetPersistenceSink(&blocked_sink);
-		struct RestoreMainPersistenceSink {
-			EQ::ZoneHarness::ActorEventRecorder& recorder;
-			EQ::ZoneHarness::ActorEventPersistenceSink* sink;
-			~RestoreMainPersistenceSink() { recorder.SetPersistenceSink(sink); }
-		} restore_main_sink{recorder, &persistence_sink};
+		ScopedPersistenceSinkOverride blocked_sink_override(recorder, &blocked_sink, &persistence_sink);
 		const auto overload_cursor = recorder.MaxEventID();
 		const auto retained_marker = fmt::format("retained-speech-{}", run_nonce);
 		const auto deferred_marker = fmt::format("deferred-speech-{}", run_nonce);
@@ -1944,7 +2015,7 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 			   "retried production speech evidence should flush");
 		ExpectEqual(recorder.Since(overload_cursor, 8).size(), static_cast<size_t>(2),
 					"recovery should record the deferred speech exactly once");
-		recorder.SetPersistenceSink(&persistence_sink);
+		blocked_sink_override.Restore();
 
 		// The dialogue-window rendering branch must pass through the same
 		// evidence gate and persist the same speech payload.
