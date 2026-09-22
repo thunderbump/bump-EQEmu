@@ -9,6 +9,7 @@ from pathlib import Path
 import shlex
 import signal
 import math
+import stat
 import shutil
 import subprocess
 import sys
@@ -68,14 +69,22 @@ def snapshot(root, destination, paths, deadline):
             continue
         if not path.exists() and not path.is_symlink():  # Deleted tracked file.
             continue
-        if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
-            raise Inconclusive(f"Snapshot does not support symlink files: {name}")
+        if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()) or not stat.S_ISREG(path.stat().st_mode):
+            raise Inconclusive(f"Snapshot requires regular files inside the checkout: {name}")
         target = destination / name
         target.parent.mkdir(parents=True, exist_ok=True)
-        content = path.read_bytes()
-        target.write_bytes(content)
+        file_digest = hashlib.sha256()
+        with path.open("rb") as source, target.open("wb") as output:
+            while True:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("Source snapshot exceeded the time budget")
+                chunk = source.read(1024 * 1024)
+                if not chunk:
+                    break
+                output.write(chunk)
+                file_digest.update(chunk)
         target.chmod(path.stat().st_mode & 0o777)
-        digest.update(name.encode() + b"\0" + hashlib.sha256(content).digest())
+        digest.update(name.encode() + b"\0" + file_digest.digest())
     return digest.hexdigest()
 
 
@@ -105,6 +114,10 @@ def main(argv=None, root=None):
     args = parser.parse_args(argv)
     if not 1 <= args.timeout <= 60:
         parser.error("--timeout must be between 1 and 60 seconds")
+    def interrupted(_signum, _frame):
+        raise KeyboardInterrupt
+
+    previous_term_handler = signal.signal(signal.SIGTERM, interrupted)
     root = Path(root or Path(__file__).resolve().parent.parent).resolve()
     state = Path(os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local/state"))) / "eqemu-compile-check"
     evidence = state / uuid.uuid4().hex
@@ -194,6 +207,7 @@ def main(argv=None, root=None):
                     result.update(status="inconclusive", reason="container cleanup not confirmed", container=container)
             result["elapsed_seconds"] = round(time.monotonic() - started, 3)
             (evidence / "result.json").write_text(json.dumps(result, indent=2) + "\n")
+    signal.signal(signal.SIGTERM, previous_term_handler)
     print(json.dumps(result, indent=2))
     if result["status"] != "passed":
         lines = (evidence / "compile.log").read_text(errors="replace").splitlines()

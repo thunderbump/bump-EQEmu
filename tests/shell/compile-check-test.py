@@ -37,6 +37,9 @@ class CompileCheckTests(unittest.TestCase):
             self.assertEqual((dest / "new.h").read_text(), "new untracked header")
             self.assertFalse((dest / "deleted.cpp").exists())
             self.assertEqual(len(digest), 64)
+            os.mkfifo(root / "pipe.cpp")
+            with self.assertRaises(module.Inconclusive):
+                module.snapshot(root, dest, ["pipe.cpp"], float("inf"))
             (root / "escape.cpp").symlink_to("/etc/passwd")
             with self.assertRaises(module.Inconclusive):
                 module.selected_sources(root, ["escape.cpp"])
