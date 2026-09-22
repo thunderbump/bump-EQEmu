@@ -231,6 +231,107 @@ private:
 	std::vector<uint32_t> actor_ids_;
 };
 
+class ScopedActiveRecorder {
+public:
+	ScopedActiveRecorder(
+		EQ::ZoneHarness::ActorEventRecorder& recorder,
+		EQ::ZoneHarness::ActorEventPersistenceSink* sink
+	) : recorder_(recorder) {
+		recorder_.SetPersistenceSink(sink);
+		EQ::ZoneHarness::ActorEventRecorder::RegisterActiveRecorder(&recorder_);
+	}
+
+	ScopedActiveRecorder(const ScopedActiveRecorder&) = delete;
+	ScopedActiveRecorder& operator=(const ScopedActiveRecorder&) = delete;
+
+	~ScopedActiveRecorder() { Shutdown(); }
+
+	void Shutdown() {
+		if (!active_) {
+			return;
+		}
+		EQ::ZoneHarness::ActorEventRecorder::ClearActiveRecorder(&recorder_);
+		recorder_.SetPersistenceSink(nullptr);
+		active_ = false;
+	}
+
+private:
+	EQ::ZoneHarness::ActorEventRecorder& recorder_;
+	bool active_ = true;
+};
+
+void ExpectAssertionUnwindDetachesRecorderFirst() {
+	using namespace std::chrono_literals;
+
+	EQ::ZoneHarness::ActorEventRecorder recorder;
+	bool cleanup_saw_detached_recorder = false;
+	std::string diagnostic;
+	const auto started = std::chrono::steady_clock::now();
+
+	try {
+		struct CleanupProbe {
+			bool& saw_detached_recorder;
+			~CleanupProbe() {
+				saw_detached_recorder =
+					EQ::ZoneHarness::ActorEventRecorder::ObserveSpeechEmitted(
+						nullptr, "say", "assertion-unwind-cleanup", 200) ==
+					EQ::ZoneHarness::ActorEventCaptureResult::NotRequired;
+			}
+		} cleanup_probe{cleanup_saw_detached_recorder};
+		ScopedActiveRecorder active_recorder(recorder, nullptr);
+		Fail("controlled actor-events assertion teardown");
+	} catch (const TestFailure& e) {
+		diagnostic = e.what();
+	}
+
+	ExpectEqual(diagnostic, std::string("controlled actor-events assertion teardown"),
+		"failure-path teardown should retain the original assertion diagnostic");
+	Expect(cleanup_saw_detached_recorder,
+		"failure-path teardown should detach the recorder before fixture-like cleanup callbacks");
+	Expect(std::chrono::steady_clock::now() - started < 1s,
+		"failure-path teardown should terminate within its local bound");
+}
+
+#ifndef _WIN32
+void ExpectAssertionSubprocessTerminatesBoundedly() {
+	using namespace std::chrono_literals;
+
+	std::string pattern = (std::filesystem::temp_directory_path() / "actor-assertion-teardown-XXXXXX").string();
+	std::vector<char> log_path(pattern.begin(), pattern.end());
+	log_path.push_back(0);
+	const int log_fd = mkstemp(log_path.data());
+	Expect(log_fd >= 0, "assertion teardown probe should create a private diagnostic log");
+
+	const auto child = fork();
+	if (child == 0) {
+		dup2(log_fd, STDERR_FILENO);
+		close(log_fd);
+		execl("/proc/self/exe", "zone", "tests:actor-events", "--assertion-teardown-probe",
+			static_cast<char*>(nullptr));
+		std::_Exit(127);
+	}
+	close(log_fd);
+
+	int status = 0;
+	const bool finished = child > 0 && WaitForChild(child, 2s, &status);
+	if (child > 0 && !finished) {
+		kill(child, SIGKILL);
+		waitpid(child, &status, 0);
+	}
+	std::ifstream input(log_path.data());
+	const std::string diagnostics((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+	std::filesystem::remove(log_path.data());
+
+	Expect(finished, "controlled assertion teardown subprocess should terminate within two seconds");
+	Expect(WIFEXITED(status) && WEXITSTATUS(status) == 1,
+		"controlled assertion teardown subprocess should return the assertion failure status");
+	Expect(diagnostics.find("[FAIL] controlled actor-events assertion teardown") != std::string::npos,
+		"controlled assertion teardown subprocess should retain the original diagnostic");
+	Expect(diagnostics.find("malloc():") == std::string::npos,
+		"controlled assertion teardown subprocess should not report allocator corruption");
+}
+#endif
+
 class ConfigurablePersistenceSink final : public EQ::ZoneHarness::ActorEventPersistenceSink {
 public:
 	EQ::ZoneHarness::ActorEventCaptureResult PersistSpeechEmitted(
@@ -896,7 +997,16 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 	EQEmuLogSys::Instance()->SilenceConsoleLogging();
 
 	try {
+		if (cmd[{"--assertion-teardown-probe"}]) {
+			ExpectAssertionUnwindDetachesRecorderFirst();
+			Fail("controlled actor-events assertion teardown");
+		}
+
 		ExpectRecorderShutdownWaitsForInFlightCallbacks();
+		ExpectAssertionUnwindDetachesRecorderFirst();
+#ifndef _WIN32
+		ExpectAssertionSubprocessTerminatesBoundedly();
+#endif
 		ExpectBoundedPersistenceOverloadAndRecovery();
 		ExpectShutdownRetainsRecoverablePayloads();
 
@@ -908,23 +1018,26 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 		entity_list.MobProcess();
 
 		EQ::ZoneHarness::ActorEventRecorder recorder;
-		EQ::ZoneHarness::ActorEventRepositoryPersistenceSink persistence_sink;
-		recorder.SetPersistenceSink(&persistence_sink);
-		EQ::ZoneHarness::ActorEventRecorder::RegisterActiveRecorder(&recorder);
-		struct ClearRecorderOnExit {
-			EQ::ZoneHarness::ActorEventRecorder& recorder;
-			~ClearRecorderOnExit() {
-				EQ::ZoneHarness::ActorEventRecorder::ClearActiveRecorder(&recorder);
-				recorder.SetPersistenceSink(nullptr);
-			}
-		} clear_recorder{recorder};
-
 		ActorEventPersistenceCleanup cleanup;
+
+		// Keep every scenario fixture outside the active-recorder guard's lifetime.
+		// Some are populated later, but all must be destroyed only after recorder
+		// callbacks have been disabled on either success or assertion unwind.
+		EQ::ZoneHarness::OwnedBotActorFixture fixture;
+		EQ::ZoneHarness::OwnedBotActorFixture disabled_fixture;
+		EQ::ZoneHarness::OwnedBotActorFixture stale_fixture;
+		EQ::ZoneHarness::OwnedBotActorFixture moved_fixture;
+
+		// Declare the asynchronous sink and active-recorder guard after the fixtures.
+		// Reverse destruction then detaches the global recorder and drains the sink
+		// before fixture removal can emit callbacks involving destroyed Mobs.
+		EQ::ZoneHarness::ActorEventRepositoryPersistenceSink persistence_sink;
+		ScopedActiveRecorder active_recorder(recorder, &persistence_sink);
+
 		const auto reserved_owner = EQ::Actor::ReservedOwners::Provision(database, "ActorownerRuntime" + std::to_string(run_nonce));
 		Expect(reserved_owner.character_id > 0,
 			   "reserved owner provisioning should succeed for runtime actor event persistence");
 		cleanup.reserved_owner_character_id = reserved_owner.character_id;
-		EQ::ZoneHarness::OwnedBotActorFixture fixture;
 		Expect(fixture.SetUpOwnedBotSolo({
 				   .owner_name = reserved_owner.name,
 				   .owner_character_id = reserved_owner.character_id,
@@ -1439,9 +1552,6 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 							  .created_at = now,
 						  });
 		};
-		EQ::ZoneHarness::OwnedBotActorFixture disabled_fixture;
-		EQ::ZoneHarness::OwnedBotActorFixture stale_fixture;
-		EQ::ZoneHarness::OwnedBotActorFixture moved_fixture;
 		const auto set_up_ineligible_fixture = [&](EQ::ZoneHarness::OwnedBotActorFixture& ineligible_fixture,
 												   const std::string& suffix) {
 			return ineligible_fixture.SetUpOwnedBotSolo({
@@ -1802,6 +1912,11 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 				return true;
 			});
 		recorder.SetPersistenceSink(&blocked_sink);
+		struct RestoreMainPersistenceSink {
+			EQ::ZoneHarness::ActorEventRecorder& recorder;
+			EQ::ZoneHarness::ActorEventPersistenceSink* sink;
+			~RestoreMainPersistenceSink() { recorder.SetPersistenceSink(sink); }
+		} restore_main_sink{recorder, &persistence_sink};
 		const auto overload_cursor = recorder.MaxEventID();
 		const auto retained_marker = fmt::format("retained-speech-{}", run_nonce);
 		const auto deferred_marker = fmt::format("deferred-speech-{}", run_nonce);
@@ -1852,10 +1967,9 @@ void ZoneCLI::TestActorEvents(int argc, char** argv, argh::parser& cmd, std::str
 		ExpectEqual(CountPlayerEventLogRowsWithMarker(speech_marker), int64_t(0),
 					"runtime actor event persistence should not write marker rows to player_event_logs");
 
-		EQ::ZoneHarness::ActorEventRecorder::ClearActiveRecorder(&recorder);
+		active_recorder.Shutdown();
 		Expect(persistence_sink.FlushFor(std::chrono::seconds(2)),
 			   "runtime actor evidence queue should be empty before fixture cleanup");
-		recorder.SetPersistenceSink(nullptr);
 		fixture.Cleanup();
 		std::string cleanup_failure;
 		const bool cleanup_succeeded = cleanup.Cleanup(&cleanup_failure);
