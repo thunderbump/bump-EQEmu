@@ -4258,6 +4258,10 @@ void Mob::CommonDamage(Mob* attacker, int64 &damage, const uint16 spell_id, cons
 			damage = 0;
 		}
 
+		if (PressureAwareHealing::ShouldRecordCombatDamage(damage, attacker != nullptr, attacker == this)) {
+			RecordIncomingDamagePressure(damage, Timer::GetCurrentTime());
+		}
+
 		SetHP(int64(GetHP() - damage));
 
 		if (HasDied()) {

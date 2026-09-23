@@ -17,6 +17,7 @@
 */
 #include "bot.h"
 
+#include "common/bot_slow_target.h"
 #include "common/data_verification.h"
 #include "common/repositories/bot_inventories_repository.h"
 #include "common/repositories/bot_spell_settings_repository.h"
@@ -28,6 +29,25 @@
 #include "zone/object.h"
 #include "zone/quest_parser_collection.h"
 #include "zone/raids.h"
+
+namespace {
+
+Client* GetDefaultLeashOwner(Client* bot_owner, Group* bot_group, Raid* raid, uint32 r_group)
+{
+	if (raid && r_group < MAX_RAID_GROUPS && raid->GetGroupLeader(r_group)) {
+		auto* raid_group_leader = raid->GetGroupLeader(r_group);
+		return raid_group_leader && raid_group_leader->IsClient() ? raid_group_leader->CastToClient() : bot_owner;
+	}
+
+	if (bot_group) {
+		auto* group_leader = bot_group->GetLeader();
+		return group_leader && group_leader->IsClient() ? group_leader->CastToClient() : bot_owner;
+	}
+
+	return bot_owner;
+}
+
+}
 
 /*
 TODO bot rewrite:
@@ -488,6 +508,8 @@ Bot::~Bot() {
 	AI_Stop();
 	LeaveHealRotationMemberPool();
 	DataBucket::DeleteCachedBuckets(DataBucketLoadType::Bot, GetBotID());
+	ClearCommandTargetSource();
+	ClearLeashSource();
 
 	if (HasPet()) {
 		GetPet()->Depop();
@@ -507,6 +529,15 @@ Bot::~Bot() {
 void Bot::SetBotID(uint32 botID) {
 	_botID = botID;
 	npctype_id = botID;
+}
+
+void Bot::SetBotOwner(Mob* botOwner)
+{
+	_botOwner = botOwner;
+	if (!botOwner) {
+		ClearCommandTargetSource();
+		ClearLeashSource();
+	}
 }
 
 void Bot::SetBotSpellID(uint32 newSpellID) {
@@ -1662,7 +1693,7 @@ bool Bot::Process()
 	}
 
 	if (GetDepop()) {
-		_botOwner = nullptr;
+		SetBotOwner(nullptr);
 		_botOwnerCharacterID = 0;
 
 		return false;
@@ -2155,24 +2186,13 @@ void Bot::AI_Process()
 		return;
 	}
 
-	Client* leash_owner = bot_owner;
+	Mob* leash_owner = GetLeashSource(bot_owner, bot_group, raid, r_group);
 
 	if (!leash_owner) {
 		return;
 	}
 
-	Mob* follow_mob = nullptr;
-
-	if (!GetFollowID()) {
-		follow_mob = leash_owner;
-	}
-	else {
-		follow_mob = entity_list.GetMob(GetFollowID());
-
-		if (!follow_mob || !IsInGroupOrRaid(follow_mob)) {
-			follow_mob = leash_owner;
-		}
-	}
+	Mob* follow_mob = SetFollowMob(leash_owner);
 
 	SetFollowID(follow_mob->GetID());
 
@@ -2625,7 +2645,39 @@ bool Bot::TryAutoDefend(Client* bot_owner, float leash_distance) {
 			XTargetAutoHaters* temp_haters;
 			std::vector<XTargetAutoHaters*> assistee_haters;
 			std::vector<Client*> assistee_members;
-			bool found = false;
+
+			auto engage_assist_target = [&](Mob *assist_target) {
+				if (!assist_target) {
+					return false;
+				}
+
+				AddToHateList(assist_target, 1);
+				SetTarget(assist_target);
+				SetAttackingFlag();
+
+				if (HasControllablePet(BotAnimEmpathy::Attack)) {
+					GetPet()->AddToHateList(assist_target, 1);
+					GetPet()->SetTarget(assist_target);
+				}
+
+				m_auto_defend_timer.Disable();
+				return true;
+			};
+
+			auto *assist_command_source = GetAssistCommandSource(bot_owner);
+			auto *assist_command_target = assist_command_source ? assist_command_source->GetTarget() : nullptr;
+			if (
+				assist_command_source &&
+				assist_command_target &&
+				assist_command_target->GetAppearance() != eaDead &&
+				assist_command_target->GetHP() > 0 &&
+				!assist_command_target->IsMezzed() &&
+				assist_command_target->CheckAggro(assist_command_source) &&
+				IsAttackAllowed(assist_command_target) &&
+				(DistanceSquared(assist_command_target->GetPosition(), bot_owner->GetPosition()) <= leash_distance)
+			) {
+				return engage_assist_target(assist_command_target);
+			}
 
 			if (bot_owner->GetAggroCount()) {
 				temp_haters = bot_owner->GetXTargetAutoMgr();
@@ -2741,18 +2793,7 @@ bool Bot::TryAutoDefend(Client* bot_owner, float leash_distance) {
 							}
 
 							if (hater) {
-								AddToHateList(hater, 1);
-								SetTarget(hater);
-								SetAttackingFlag();
-
-								if (HasControllablePet(BotAnimEmpathy::Attack)) {
-									GetPet()->AddToHateList(hater, 1);
-									GetPet()->SetTarget(hater);
-								}
-
-								m_auto_defend_timer.Disable();
-
-								return true;
+								return engage_assist_target(hater);
 							}
 						}
 					}
@@ -3151,7 +3192,7 @@ CombatRangeOutput Bot::EvaluateCombatRange(const CombatRangeInput& input) {
 
 bool Bot::IsValidTarget(
 	Client* bot_owner,
-	Client* leash_owner,
+	Mob* leash_owner,
 	float lo_distance,
 	float leash_distance,
 	Mob* tar,
@@ -3466,10 +3507,39 @@ void Bot::SetBerserkState() {// Berserk updates should occur if primary AI crite
 	}
 }
 
-Mob* Bot::SetFollowMob(Client* leash_owner) {
+void Bot::SetCommandTargetSource(Mob* source)
+{
+	_commandTargetSourceID = source ? source->GetID() : 0;
+}
+
+void Bot::SetLeashSource(Mob* source)
+{
+	_leashSourceID = source ? source->GetID() : 0;
+}
+
+void Bot::ClearCommandSourceReferences(uint16 entity_id)
+{
+	if (!entity_id) {
+		return;
+	}
+
+	if (GetFollowID() == entity_id) {
+		SetFollowID(0);
+	}
+
+	if (_commandTargetSourceID == entity_id) {
+		ClearCommandTargetSource();
+	}
+
+	if (_leashSourceID == entity_id) {
+		ClearLeashSource();
+	}
+}
+
+Mob* Bot::SetFollowMob(Mob* leash_owner) {
 	Mob* follow_mob = entity_list.GetMob(GetFollowID());
 
-	if (!follow_mob) {
+	if (!follow_mob || !IsInGroupOrRaid(follow_mob)) {
 		follow_mob = leash_owner;
 		SetFollowID(leash_owner->GetID());
 	}
@@ -3477,21 +3547,47 @@ Mob* Bot::SetFollowMob(Client* leash_owner) {
 	return follow_mob;
 }
 
-Client* Bot::SetLeashOwner(Client* bot_owner, Group* bot_group, Raid* raid, uint32 r_group) const {
-	Client* leash_owner = nullptr;
+Mob* Bot::GetLeashSource(Client* bot_owner, Group* bot_group, Raid* raid, uint32 r_group) {
+	if (_leashSourceID) {
+		auto* leash_source = entity_list.GetMob(_leashSourceID);
+		if (leash_source && leash_source->GetAppearance() != eaDead && leash_source->GetHP() > 0 && IsInGroupOrRaid(leash_source)) {
+			return leash_source;
+		}
 
-	if (raid && r_group < MAX_RAID_GROUPS && raid->GetGroupLeader(r_group)) {
-		leash_owner =
-			raid->GetGroupLeader(r_group) &&
-			raid->GetGroupLeader(r_group)->IsClient() ?
-				raid->GetGroupLeader(r_group)->CastToClient() : bot_owner;
-	} else if (bot_group) {
-		leash_owner = (bot_group->GetLeader() && bot_group->GetLeader()->IsClient() ? bot_group->GetLeader()->CastToClient() : bot_owner);
-	} else {
-		leash_owner = bot_owner;
+		ClearLeashSource();
 	}
 
-	return leash_owner;
+	return GetDefaultLeashOwner(bot_owner, bot_group, raid, r_group);
+}
+
+Mob* Bot::GetCommandTargetSource(Client* bot_owner)
+{
+	if (_commandTargetSourceID) {
+		auto* command_source = entity_list.GetMob(_commandTargetSourceID);
+		if (command_source && command_source->GetAppearance() != eaDead && command_source->GetHP() > 0 && IsInGroupOrRaid(command_source)) {
+			return command_source;
+		}
+
+		ClearCommandTargetSource();
+	}
+
+	return bot_owner;
+}
+
+Mob* Bot::GetAssistCommandSource(Client* bot_owner)
+{
+	auto *command_source = GetCommandTargetSource(bot_owner);
+	if (!command_source || command_source == bot_owner) {
+		return nullptr;
+	}
+
+	return command_source;
+}
+
+Mob* Bot::GetCommandTarget(Client* bot_owner)
+{
+	auto* command_source = GetCommandTargetSource(bot_owner);
+	return command_source ? command_source->GetTarget() : nullptr;
 }
 
 void Bot::SetOwnerTarget(Client* bot_owner) {
@@ -3507,7 +3603,7 @@ void Bot::SetOwnerTarget(Client* bot_owner) {
 	bot_owner->SetBotPulling(false);
 
 	if (NOT_HOLDING && NOT_PASSIVE) {
-		auto attack_target = bot_owner->GetTarget();
+		auto attack_target = GetCommandTarget(bot_owner);
 
 		if (attack_target && HasBotAttackFlag(attack_target)) {
 			InterruptSpell();
@@ -3540,7 +3636,7 @@ void Bot::BotPullerProcess(Client* bot_owner, Raid* raid) {
 	}
 
 	if (NOT_HOLDING && NOT_PASSIVE) {
-		auto pull_target = bot_owner->GetTarget();
+		auto pull_target = GetCommandTarget(bot_owner);
 
 		if (pull_target) {
 			RaidGroupSay(
@@ -3575,6 +3671,8 @@ void Bot::Depop() {
 	WipeHateList();
 	entity_list.RemoveFromHateLists(this);
 	RemoveAllAuras();
+	ClearCommandTargetSource();
+	ClearLeashSource();
 
 	Mob* bot_pet = GetPet();
 
@@ -3587,7 +3685,7 @@ void Bot::Depop() {
 		}
 	}
 
-	_botOwner = nullptr;
+	SetBotOwner(nullptr);
 	_botOwnerCharacterID = 0;
 
 	NPC::Depop(false);
@@ -3600,6 +3698,8 @@ bool Bot::Spawn(Client* botCharacterOwner) {
 		botCharacterOwner &&
 		botCharacterOwner->CharacterID() == _botOwnerCharacterID
 	) {
+		SetBotOwner(botCharacterOwner);
+
 		// Rename the bot name to make sure that Mob::GetName() matches Mob::GetCleanName() so we dont have a bot named "Jesuschrist001"
 		strcpy(name, GetCleanName());
 
@@ -7578,116 +7678,6 @@ bool EntityList::RemoveBot(uint16 entityID) {
 	return false;
 }
 
-void EntityList::ShowSpawnWindow(Client* client, int Distance, bool NamedOnly) {
-	const char *WindowTitle = "Bot Tracking Window";
-	std::string WindowText;
-	int LastCon = -1;
-	int CurrentCon = 0;
-	Mob* curMob = nullptr;
-	uint32 array_counter = 0;
-
-	for (const auto& m : mob_list) {
-	curMob = m.second;
-		if (curMob && DistanceNoZ(curMob->GetPosition(), client->GetPosition()) <= Distance) {
-			if (curMob->IsTrackable()) {
-				Mob* cur_entity = curMob;
-				int Extras = (cur_entity->IsBot() || cur_entity->IsPet() || cur_entity->IsFamiliar() || cur_entity->IsClient());
-				const char *const MyArray[] = {
-					"a_","an_","Innkeep_","Barkeep_",
-					"Guard_","Merchant_","Lieutenant_",
-					"Banker_","Centaur_","Aviak_","Baker_",
-					"Sir_","Armorer_","Deathfist_","Deputy_",
-					"Sentry_","Sentinel_","Leatherfoot_",
-					"Corporal_","goblin_","Bouncer_","Captain_",
-					"orc_","fire_","inferno_","young_","cinder_",
-					"flame_","gnomish_","CWG_","sonic_","greater_",
-					"ice_","dry_","Priest_","dark-boned_",
-					"Tentacle_","Basher_","Dar_","Greenblood_",
-					"clockwork_","guide_","rogue_","minotaur_",
-					"brownie_","Teir'","dark_","tormented_",
-					"mortuary_","lesser_","giant_","infected_",
-					"wharf_","Apprentice_","Scout_","Recruit_",
-					"Spiritist_","Pit_","Royal_","scalebone_",
-					"carrion_","Crusader_","Trooper_","hunter_",
-					"decaying_","iksar_","klok_","templar_","lord_",
-					"froglok_","war_","large_","charbone_","icebone_",
-					"Vicar_","Cavalier_","Heretic_","Reaver_","venomous_",
-					"Sheildbearer_","pond_","mountain_","plaguebone_","Brother_",
-					"great_","strathbone_","briarweb_","strathbone_","skeletal_",
-					"minion_","spectral_","myconid_","spurbone_","sabretooth_",
-					"Tin_","Iron_","Erollisi_","Petrifier_","Burynai_",
-					"undead_","decayed_","You_","smoldering_","gyrating_",
-					"lumpy_","Marshal_","Sheriff_","Chief_","Risen_",
-					"lascar_","tribal_","fungi_","Xi_","Legionnaire_",
-					"Centurion_","Zun_","Diabo_","Scribe_","Defender_","Capt_",
-					"blazing_","Solusek_","imp_","hexbone_","elementalbone_",
-					"stone_","lava_","_",""
-				};
-				unsigned int MyArraySize;
-				for ( MyArraySize = 0; true; MyArraySize++) {
-					if (!(*(MyArray[MyArraySize])))
-						break;
-				}
-				if (NamedOnly) {
-					bool ContinueFlag = false;
-					const char *CurEntityName = cur_entity->GetName();
-					for (int Index = 0; Index < MyArraySize; Index++) {
-						if (!strncasecmp(CurEntityName, MyArray[Index], strlen(MyArray[Index])) || (Extras)) {
-							ContinueFlag = true;
-							break;
-						}
-					}
-					if (ContinueFlag)
-						continue;
-				}
-
-				CurrentCon = client->GetLevelCon(cur_entity->GetLevel());
-				if (CurrentCon != LastCon) {
-					if (LastCon != -1)
-						WindowText += "</c>";
-
-					LastCon = CurrentCon;
-					switch(CurrentCon) {
-						case ConsiderColor::Green: {
-							WindowText += "<c \"#00FF00\">";
-							break;
-						}
-						case ConsiderColor::LightBlue: {
-							WindowText += "<c \"#8080FF\">";
-							break;
-						}
-						case ConsiderColor::DarkBlue: {
-							WindowText += "<c \"#2020FF\">";
-							break;
-						}
-						case ConsiderColor::Yellow: {
-							WindowText += "<c \"#FFFF00\">";
-							break;
-						}
-						case ConsiderColor::Red: {
-							WindowText += "<c \"#FF0000\">";
-							break;
-						}
-						default: {
-							WindowText += "<c \"#FFFFFF\">";
-							break;
-						}
-					}
-				}
-				WindowText += cur_entity->GetCleanName();
-				WindowText += "<br>";
-				if (strlen(WindowText.c_str()) > 4000) {
-					WindowText += "</c><br><br>List truncated... too many mobs to display";
-					break;
-				}
-			}
-		}
-	}
-	WindowText += "</c>";
-	client->SendPopupToClient(WindowTitle, WindowText.c_str());
-	return;
-}
-
 uint8 Bot::GetNumberNeedingHealedInGroup(Mob* tar, uint16 spell_type, uint16 spell_id, float range) {
 	if (!TargetValidation(tar)) {
 		return 0;
@@ -9852,7 +9842,7 @@ bool Bot::CastChecks(uint16 spell_id, Mob* tar, uint16 spell_type, bool precheck
 
 	if (
 		spells[spell_id].target_type != ST_Self &&
-		IsBeneficialSpell(spell_id) &&
+		(IsBeneficialSpell(spell_id) || spell_type == BotSpellTypes::Slow) &&
 		!IsAnyHealSpell(spell_id) &&
 		!IsCureSpell(spell_id) &&
 		!IsHealOverTimeSpell(spell_id) &&
@@ -10634,7 +10624,11 @@ void Bot::SetBotSpellRecastTimer(uint16 spell_type, Mob* tar, bool precast) {
 	}
 }
 
-BotSpell Bot::GetSpellByHealType(uint16 spell_type, Mob* tar) {
+BotSpell Bot::GetSpellByHealType(
+	uint16 spell_type,
+	Mob* tar,
+	const RegularHealEfficiency::Settings* regular_heal_efficiency_settings
+) {
 	if (!TargetValidation(tar)) {
 		BotSpell result{};
 
@@ -10650,7 +10644,13 @@ BotSpell Bot::GetSpellByHealType(uint16 spell_type, Mob* tar) {
 			return GetBestBotSpellForFastHeal(this, tar, spell_type);
 		case BotSpellTypes::RegularHeal:
 		case BotSpellTypes::PetRegularHeals:
-			return GetBestBotSpellForRegularSingleTargetHeal(this, tar, spell_type);
+			return GetBestBotSpellForRegularSingleTargetHeal(
+				this,
+				tar,
+				spell_type,
+				false,
+				regular_heal_efficiency_settings
+			);
 		case BotSpellTypes::GroupHeals:
 			return GetBestBotSpellForGroupHeal(this, tar, spell_type);
 		case BotSpellTypes::CompleteHeal:
@@ -11316,6 +11316,10 @@ bool Bot::AttemptAICastSpell(uint16 spell_type, Mob* tar) {
 		}
 	}
 	else {
+		if (spell_type == BotSpellTypes::Slow) {
+			return AICastSpell(tar, GetChanceToCastBySpellType(spell_type), spell_type);
+		}
+
 		if (!PrecastChecks(tar, spell_type) || !AICastSpell(tar, GetChanceToCastBySpellType(spell_type), spell_type)) {
 			return result;
 		}
@@ -12820,6 +12824,139 @@ std::vector<Mob*> Bot::GatherSpellTargets(bool entire_raid, Mob* target, bool no
 	}
 
 	return valid_spell_targets;
+}
+
+std::vector<Mob*> Bot::GetSingleTargetSlowMaintenanceCandidates(uint32 max_scan_count)
+{
+	struct Candidate {
+		Mob*                       mob = nullptr;
+		EQ::BotSlowTarget::Ordering order;
+	};
+
+	std::vector<Mob*> combat_members;
+	combat_members.reserve(16);
+
+	auto add_combat_member = [&combat_members](Mob* member) {
+		if (!member) {
+			return;
+		}
+
+		if (std::find(combat_members.begin(), combat_members.end(), member) == combat_members.end()) {
+			combat_members.emplace_back(member);
+		}
+	};
+
+	add_combat_member(GetOwner());
+
+	for (auto* member : GatherSpellTargets(true, GetOwner())) {
+		add_combat_member(member);
+	}
+
+	std::vector<Candidate> candidates;
+	candidates.reserve(max_scan_count ? max_scan_count + 1 : 1);
+
+	auto add_candidate = [this, &combat_members, &candidates](Mob* mob, bool current_target, std::size_t sequence) {
+		if (
+			!mob ||
+			!mob->IsNPC() ||
+			mob->GetAppearance() == eaDead ||
+			!IsAttackAllowed(mob) ||
+			(mob->GetSpecialAbility(SpecialAbility::SlowImmunity))
+		) {
+			return;
+		}
+
+		bool threatens_combat_member = false;
+		bool threatens_pet = false;
+
+		auto* npc = mob->CastToNPC();
+		for (auto* member : combat_members) {
+			if (npc->IsOnHatelist(member)) {
+				threatens_combat_member = true;
+				break;
+			}
+		}
+
+		if (!threatens_combat_member) {
+			for (auto* member : combat_members) {
+				auto* pet = member ? member->GetPet() : nullptr;
+				if (pet && npc->IsOnHatelist(pet)) {
+					threatens_pet = true;
+					break;
+				}
+			}
+		}
+
+		const auto threat_priority = EQ::BotSlowTarget::GetThreatPriority(threatens_combat_member, threatens_pet);
+		if (!EQ::BotSlowTarget::IsEngagedHostileThreat(threat_priority)) {
+			return;
+		}
+
+		if (std::find_if(candidates.begin(), candidates.end(), [mob](const Candidate &candidate) { return candidate.mob == mob; }) != candidates.end()) {
+			return;
+		}
+
+		candidates.push_back(
+			{
+				mob,
+				{
+					current_target,
+					threat_priority,
+					DistanceSquared(GetPosition(), mob->GetPosition()),
+					sequence
+				}
+			}
+		);
+	};
+
+	add_candidate(GetTarget(), true, 0);
+
+	const uint32 effective_max_scan_count = max_scan_count ? max_scan_count : 48;
+	uint32 scanned = 0;
+	std::size_t sequence = 1;
+	for (const auto& close_mob : m_close_mobs) {
+		if (scanned >= effective_max_scan_count) {
+			break;
+		}
+
+		++scanned;
+		add_candidate(close_mob.second, false, sequence++);
+	}
+
+	std::sort(
+		candidates.begin(),
+		candidates.end(),
+		[](const Candidate &left, const Candidate &right) {
+			return EQ::BotSlowTarget::CompareOrdering(left.order, right.order);
+		}
+	);
+
+	std::vector<Mob*> candidate_mobs;
+	candidate_mobs.reserve(candidates.size());
+
+	for (const auto& candidate : candidates) {
+		candidate_mobs.emplace_back(candidate.mob);
+	}
+
+	return candidate_mobs;
+}
+
+Mob* Bot::SelectSingleTargetSlowMaintenanceTarget(uint16 spell_id, uint32 max_scan_count)
+{
+	if (!IsValidSpell(spell_id) || !IsSlowSpell(spell_id) || IsAnyAESpell(spell_id)) {
+		return nullptr;
+	}
+
+	return EQ::BotSlowTarget::SelectMaintenanceCandidate<Mob*>(
+		GetSingleTargetSlowMaintenanceCandidates(max_scan_count),
+		true,
+		[](Mob* candidate) {
+			return candidate && candidate->IsMezzed();
+		},
+		[this, spell_id](Mob* candidate) {
+			return candidate && CastChecks(spell_id, candidate, BotSpellTypes::Slow, true);
+		}
+	);
 }
 
 std::vector<Mob*> Bot::GetBuffTargets(Mob* spellTarget) {

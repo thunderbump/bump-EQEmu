@@ -26,6 +26,7 @@
 #include "common/strings.h"
 #include "zone/bot.h"
 #include "zone/dialogue_window.h"
+#include "zone/harness/actor_event_recorder.h"
 #include "zone/mob_movement_manager.h"
 #include "zone/quest_parser_collection.h"
 #include "zone/string_ids.h"
@@ -529,6 +530,38 @@ Mob::Mob(
 	is_boat = IsBoat();
 
 	current_alliance_faction = -1;
+}
+
+void Mob::RecordIncomingDamagePressure(int64 damage, uint32 current_time_ms)
+{
+	PressureAwareHealing::RecordCombatDamage(incoming_damage_pressure, damage, current_time_ms);
+}
+
+void Mob::ClearIncomingDamagePressure()
+{
+	PressureAwareHealing::ClearDamagePressure(incoming_damage_pressure);
+}
+
+const PressureAwareHealing::IncomingDamagePressure &Mob::GetIncomingDamagePressure() const
+{
+	return incoming_damage_pressure;
+}
+
+bool Mob::HasActiveIncomingDamagePressure(
+	const PressureAwareHealing::Settings &settings,
+	uint32 current_time_ms
+) const
+{
+	return PressureAwareHealing::HasActiveDamagePressure(
+		incoming_damage_pressure,
+		settings,
+		current_time_ms
+	);
+}
+
+bool Mob::HasActiveIncomingDamagePressure(const PressureAwareHealing::Settings &settings) const
+{
+	return HasActiveIncomingDamagePressure(settings, Timer::GetCurrentTime());
 }
 
 Mob::~Mob()
@@ -4999,7 +5032,7 @@ uint32 Mob::IsEliteMaterialItem(uint8 material_slot) const
 }
 
 // works just like a printf
-void Mob::Say(const char *format, ...)
+bool Mob::Say(const char *format, ...)
 {
 	char    buf[1000];
 	va_list ap;
@@ -5025,6 +5058,12 @@ void Mob::Say(const char *format, ...)
 	int16 distance = 200;
 
 	if (RuleB(Chat, QuestDialogueUsesDialogueWindow)) {
+		const auto evidence = EQ::ZoneHarness::ActorEventRecorder::ObserveSpeechEmitted(talker, "say", buf, distance);
+		if (evidence == EQ::ZoneHarness::ActorEventCaptureResult::Saturated ||
+			evidence == EQ::ZoneHarness::ActorEventCaptureResult::Stopped) {
+			return false;
+		}
+
 		for (auto &e : talker->GetCloseMobList(distance)) {
 			Mob *mob = e.second;
 			if (!mob) {
@@ -5042,21 +5081,34 @@ void Mob::Say(const char *format, ...)
 			}
 		}
 
-		return;
+		return true;
 	}
 	else if (RuleB(Chat, AutoInjectSaylinksToSay)) {
 		std::string new_message = EQ::SayLinkEngine::InjectSaylinksIfNotExist(buf);
+		const auto evidence =
+			EQ::ZoneHarness::ActorEventRecorder::ObserveSpeechEmitted(talker, "say", new_message, distance);
+		if (evidence == EQ::ZoneHarness::ActorEventCaptureResult::Saturated ||
+			evidence == EQ::ZoneHarness::ActorEventCaptureResult::Stopped) {
+			return false;
+		}
 		entity_list.MessageCloseString(
 			talker, false, distance, Chat::NPCQuestSay,
 			GENERIC_SAY, GetCleanName(), new_message.c_str()
 		);
 	}
 	else {
+		const auto evidence = EQ::ZoneHarness::ActorEventRecorder::ObserveSpeechEmitted(talker, "say", buf, distance);
+		if (evidence == EQ::ZoneHarness::ActorEventCaptureResult::Saturated ||
+			evidence == EQ::ZoneHarness::ActorEventCaptureResult::Stopped) {
+			return false;
+		}
 		entity_list.MessageCloseString(
 			talker, false, distance, Chat::NPCQuestSay,
 			GENERIC_SAY, GetCleanName(), buf
 		);
 	}
+
+	return true;
 }
 
 //
@@ -5121,7 +5173,7 @@ void Mob::Shout(const char *format, ...)
 		GENERIC_SHOUT, GetCleanName(), buf);
 }
 
-void Mob::Emote(const char *format, ...)
+bool Mob::Emote(const char *format, ...)
 {
 	char buf[1000];
 	va_list ap;
@@ -5130,10 +5182,16 @@ void Mob::Emote(const char *format, ...)
 	vsnprintf(buf, 1000, format, ap);
 	va_end(ap);
 
+	const auto evidence = EQ::ZoneHarness::ActorEventRecorder::ObserveSpeechEmitted(this, "emote", buf, 200);
+	if (evidence == EQ::ZoneHarness::ActorEventCaptureResult::Saturated ||
+		evidence == EQ::ZoneHarness::ActorEventCaptureResult::Stopped) {
+		return false;
+	}
 	entity_list.MessageCloseString(
 		this, false, 200, 10,
 		GENERIC_EMOTE, GetCleanName(), buf
 	);
+	return true;
 }
 
 void Mob::QuestJournalledSay(Client *QuestInitiator, const char *str, Journal::Options &opts)
@@ -5511,7 +5569,9 @@ void Mob::SetTarget(Mob *mob)
 		return;
 	}
 
+	Mob *previous_target = target;
 	target = mob;
+	EQ::ZoneHarness::ActorEventRecorder::ObserveTargetChanged(this, previous_target, mob);
 	entity_list.UpdateHoTT(this);
 
 	if (IsClient() && CastToClient()->admin > AccountStatus::GMMgmt) {
