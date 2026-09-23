@@ -7207,6 +7207,298 @@ ALTER TABLE `character_parcels_containers`
 )",
 		.content_schema_update = false
 	},
+	ManifestEntry{
+		.version = 9329,
+		.description = "2026_06_27_actor_profiles.sql",
+		.check = "SHOW TABLES LIKE 'actor_profiles'",
+		.condition = "empty",
+		.match = "",
+		.sql = R"(
+CREATE TABLE `actor_profiles` (
+	`actor_id` INT(10) UNSIGNED NOT NULL AUTO_INCREMENT,
+	`actor_type` VARCHAR(32) NOT NULL COLLATE 'utf8mb4_general_ci',
+	`actor_substrate` VARCHAR(32) NOT NULL COLLATE 'utf8mb4_general_ci',
+	`bot_id` INT(10) UNSIGNED NULL DEFAULT NULL,
+	`owner_character_id` INT(10) UNSIGNED NULL DEFAULT NULL,
+	`enabled` TINYINT(1) UNSIGNED NOT NULL DEFAULT '1',
+	`created_at` DATETIME NOT NULL,
+	`updated_at` DATETIME NOT NULL,
+	PRIMARY KEY (`actor_id`) USING BTREE,
+	UNIQUE INDEX `idx_actor_profiles_bot_id` (`bot_id`) USING BTREE,
+	INDEX `idx_actor_profiles_owner_character_id` (`owner_character_id`) USING BTREE
+)
+COLLATE='utf8mb4_general_ci'
+ENGINE=InnoDB
+AUTO_INCREMENT=1;
+)",
+		.content_schema_update = false
+	},
+	ManifestEntry{
+		.version = 9330,
+		.description = "2026_06_27_actor_status.sql",
+		.check = "SHOW TABLES LIKE 'actor_status'",
+		.condition = "empty",
+		.match = "",
+		.sql = R"(
+CREATE TABLE `actor_status` (
+	`actor_id` INT(10) UNSIGNED NOT NULL,
+	`zone_id` INT(10) UNSIGNED NULL DEFAULT NULL,
+	`instance_id` INT(10) UNSIGNED NULL DEFAULT NULL,
+	`entity_id` INT(10) UNSIGNED NULL DEFAULT NULL,
+	`state` VARCHAR(32) NOT NULL COLLATE 'utf8mb4_general_ci',
+	`status_json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL DEFAULT NULL CHECK (`status_json` IS NULL OR (json_valid(`status_json`) AND char_length(`status_json`) <= 4096)),
+	`heartbeat_at` DATETIME NULL DEFAULT NULL,
+	`updated_at` DATETIME NOT NULL,
+	PRIMARY KEY (`actor_id`) USING BTREE,
+	INDEX `idx_actor_status_zone_binding` (`zone_id`, `instance_id`, `entity_id`) USING BTREE,
+	INDEX `idx_actor_status_state_heartbeat` (`state`, `heartbeat_at`) USING BTREE
+)
+COLLATE='utf8mb4_general_ci'
+ENGINE=InnoDB;
+)",
+		.content_schema_update = false
+	},
+	ManifestEntry{
+		.version = 9331,
+		.description = "2026_06_27_actor_status_status_json_bound.sql",
+		.check = "SHOW CREATE TABLE `actor_status`",
+		.condition = "missing",
+		.match = "char_length(`status_json`) <= 4096",
+		.sql = R"(
+ALTER TABLE `actor_status`
+	ADD CONSTRAINT `chk_actor_status_status_json_bounded`
+	CHECK (`status_json` IS NULL OR (json_valid(`status_json`) AND char_length(`status_json`) <= 4096));
+)",
+		.content_schema_update = false
+	},
+	ManifestEntry{
+		.version = 9332,
+		.description = "2026_06_27_actor_events.sql",
+		.check = "SHOW TABLES LIKE 'actor_events'",
+		.condition = "empty",
+		.match = "",
+		.sql = R"(
+CREATE TABLE `actor_events` (
+	`event_id` BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+	`actor_id` INT(10) UNSIGNED NOT NULL,
+	`bot_id` INT(10) UNSIGNED NULL DEFAULT NULL,
+	`owner_character_id` INT(10) UNSIGNED NULL DEFAULT NULL,
+	`zone_id` INT(10) UNSIGNED NULL DEFAULT NULL,
+	`instance_id` INT(10) UNSIGNED NULL DEFAULT NULL,
+	`entity_id` INT(10) UNSIGNED NULL DEFAULT NULL,
+	`event_type` VARCHAR(64) NOT NULL COLLATE 'utf8mb4_general_ci',
+	`event_json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL CHECK (json_valid(`event_json`) AND char_length(`event_json`) <= 16384),
+	`created_at` DATETIME NOT NULL,
+	PRIMARY KEY (`event_id`) USING BTREE,
+	INDEX `idx_actor_events_actor_cursor` (`actor_id`, `event_id`) USING BTREE,
+	INDEX `idx_actor_events_zone_created` (`zone_id`, `instance_id`, `created_at`) USING BTREE
+)
+COLLATE='utf8mb4_general_ci'
+ENGINE=InnoDB
+AUTO_INCREMENT=1;
+)",
+		.content_schema_update = false
+	},
+	ManifestEntry{
+		.version = 9333,
+		.description = "2026_06_27_actor_events_schema_convergence.sql",
+		.check = "SHOW CREATE TABLE `actor_events`",
+		.condition = "missing",
+		.match = "chk_actor_events_event_json_bounded",
+		.sql = R"(
+ALTER TABLE `actor_events`
+	ADD COLUMN IF NOT EXISTS `bot_id` INT(10) UNSIGNED NULL DEFAULT NULL AFTER `actor_id`,
+	ADD COLUMN IF NOT EXISTS `owner_character_id` INT(10) UNSIGNED NULL DEFAULT NULL AFTER `bot_id`,
+	ADD COLUMN IF NOT EXISTS `zone_id` INT(10) UNSIGNED NULL DEFAULT NULL AFTER `owner_character_id`,
+	ADD COLUMN IF NOT EXISTS `instance_id` INT(10) UNSIGNED NULL DEFAULT NULL AFTER `zone_id`,
+	ADD COLUMN IF NOT EXISTS `entity_id` INT(10) UNSIGNED NULL DEFAULT NULL AFTER `instance_id`,
+	ADD COLUMN IF NOT EXISTS `event_type` VARCHAR(64) NOT NULL COLLATE 'utf8mb4_general_ci' AFTER `entity_id`,
+	ADD COLUMN IF NOT EXISTS `event_json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL AFTER `event_type`,
+	ADD COLUMN IF NOT EXISTS `created_at` DATETIME NOT NULL AFTER `event_json`,
+	MODIFY COLUMN `event_id` BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+	MODIFY COLUMN `actor_id` INT(10) UNSIGNED NOT NULL,
+	MODIFY COLUMN `bot_id` INT(10) UNSIGNED NULL DEFAULT NULL AFTER `actor_id`,
+	MODIFY COLUMN `owner_character_id` INT(10) UNSIGNED NULL DEFAULT NULL AFTER `bot_id`,
+	MODIFY COLUMN `zone_id` INT(10) UNSIGNED NULL DEFAULT NULL AFTER `owner_character_id`,
+	MODIFY COLUMN `instance_id` INT(10) UNSIGNED NULL DEFAULT NULL AFTER `zone_id`,
+	MODIFY COLUMN `entity_id` INT(10) UNSIGNED NULL DEFAULT NULL AFTER `instance_id`,
+	MODIFY COLUMN `event_type` VARCHAR(64) NOT NULL COLLATE 'utf8mb4_general_ci' AFTER `entity_id`,
+	MODIFY COLUMN `event_json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL AFTER `event_type`,
+	MODIFY COLUMN `created_at` DATETIME NOT NULL AFTER `event_json`,
+	DROP INDEX IF EXISTS `idx_actor_events_actor_cursor`,
+	DROP INDEX IF EXISTS `idx_actor_events_zone_created`,
+	ADD INDEX `idx_actor_events_actor_cursor` (`actor_id`, `event_id`) USING BTREE,
+	ADD INDEX `idx_actor_events_zone_created` (`zone_id`, `instance_id`, `created_at`) USING BTREE,
+	ADD CONSTRAINT `chk_actor_events_event_json_bounded`
+	CHECK (json_valid(`event_json`) AND char_length(`event_json`) <= 16384);
+)",
+		.content_schema_update = false
+	},
+	ManifestEntry{
+		.version = 9334,
+		.description = "2026_06_27_actor_action_queue.sql",
+		.check = "SHOW TABLES LIKE 'actor_action_queue'",
+		.condition = "empty",
+		.match = "",
+		.sql = R"(
+CREATE TABLE `actor_action_queue` (
+	`action_id` BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+	`actor_id` INT(10) UNSIGNED NOT NULL,
+	`source` VARCHAR(64) NOT NULL COLLATE 'utf8mb4_general_ci',
+	`source_metadata_json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL DEFAULT NULL CHECK (`source_metadata_json` IS NULL OR (json_valid(`source_metadata_json`) AND char_length(`source_metadata_json`) <= 4096)),
+	`action_type` VARCHAR(64) NOT NULL COLLATE 'utf8mb4_general_ci',
+	`action_json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL CHECK (json_valid(`action_json`) AND char_length(`action_json`) <= 16384),
+	`idempotency_key` VARCHAR(128) NOT NULL COLLATE 'utf8mb4_general_ci',
+	`state` VARCHAR(32) NOT NULL COLLATE 'utf8mb4_general_ci',
+	`not_before` DATETIME NULL DEFAULT NULL,
+	`expires_at` DATETIME NULL DEFAULT NULL,
+	`claimed_by` VARCHAR(128) NULL DEFAULT NULL COLLATE 'utf8mb4_general_ci',
+	`claimed_at` DATETIME NULL DEFAULT NULL,
+	`completed_at` DATETIME NULL DEFAULT NULL,
+	`failure_reason` VARCHAR(255) NULL DEFAULT NULL COLLATE 'utf8mb4_general_ci',
+	`result_json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL DEFAULT NULL CHECK (`result_json` IS NULL OR (json_valid(`result_json`) AND char_length(`result_json`) <= 16384)),
+	`created_at` DATETIME NOT NULL,
+	`updated_at` DATETIME NOT NULL,
+	PRIMARY KEY (`action_id`) USING BTREE,
+	UNIQUE INDEX `idx_actor_action_queue_actor_idempotency` (`actor_id`, `idempotency_key`) USING BTREE,
+	INDEX `idx_actor_action_queue_claim_path` (`state`, `not_before`, `expires_at`, `action_id`) USING BTREE,
+	INDEX `idx_actor_action_queue_actor_state` (`actor_id`, `state`, `not_before`, `action_id`) USING BTREE
+)
+COLLATE='utf8mb4_general_ci'
+ENGINE=InnoDB
+AUTO_INCREMENT=1;
+)",
+		.content_schema_update = false
+	},
+	ManifestEntry{
+		.version = 9335,
+		.description = "2026_06_27_actor_action_queue_schema_convergence.sql",
+		.check = R"SQL(
+SELECT IF(
+	(
+		SELECT COUNT(DISTINCT index_name)
+		FROM information_schema.statistics
+		WHERE table_schema = DATABASE()
+		  AND table_name = 'actor_action_queue'
+		  AND index_name IN (
+			'idx_actor_action_queue_actor_idempotency',
+			'idx_actor_action_queue_claim_path',
+			'idx_actor_action_queue_actor_state'
+		  )
+	) = 3
+	AND (
+		SELECT COUNT(*)
+		FROM information_schema.table_constraints
+		WHERE table_schema = DATABASE()
+		  AND table_name = 'actor_action_queue'
+		  AND constraint_type = 'CHECK'
+		  AND constraint_name IN (
+			'chk_actor_action_queue_source_metadata_json_bounded',
+			'chk_actor_action_queue_action_json_bounded',
+			'chk_actor_action_queue_result_json_bounded'
+		  )
+	) = 3,
+	'actor_action_queue_schema_converged',
+	'actor_action_queue_schema_incomplete'
+);
+)SQL",
+		.condition = "missing",
+		.match = "actor_action_queue_schema_converged",
+		.sql = R"(
+ALTER TABLE `actor_action_queue`
+	ADD COLUMN IF NOT EXISTS `actor_id` INT(10) UNSIGNED NOT NULL AFTER `action_id`,
+	ADD COLUMN IF NOT EXISTS `source` VARCHAR(64) NOT NULL COLLATE 'utf8mb4_general_ci' AFTER `actor_id`,
+	ADD COLUMN IF NOT EXISTS `source_metadata_json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL DEFAULT NULL AFTER `source`,
+	ADD COLUMN IF NOT EXISTS `action_type` VARCHAR(64) NOT NULL COLLATE 'utf8mb4_general_ci' AFTER `source_metadata_json`,
+	ADD COLUMN IF NOT EXISTS `action_json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL AFTER `action_type`,
+	ADD COLUMN IF NOT EXISTS `idempotency_key` VARCHAR(128) NOT NULL COLLATE 'utf8mb4_general_ci' AFTER `action_json`,
+	ADD COLUMN IF NOT EXISTS `state` VARCHAR(32) NOT NULL COLLATE 'utf8mb4_general_ci' AFTER `idempotency_key`,
+	ADD COLUMN IF NOT EXISTS `not_before` DATETIME NULL DEFAULT NULL AFTER `state`,
+	ADD COLUMN IF NOT EXISTS `expires_at` DATETIME NULL DEFAULT NULL AFTER `not_before`,
+	ADD COLUMN IF NOT EXISTS `claimed_by` VARCHAR(128) NULL DEFAULT NULL COLLATE 'utf8mb4_general_ci' AFTER `expires_at`,
+	ADD COLUMN IF NOT EXISTS `claimed_at` DATETIME NULL DEFAULT NULL AFTER `claimed_by`,
+	ADD COLUMN IF NOT EXISTS `completed_at` DATETIME NULL DEFAULT NULL AFTER `claimed_at`,
+	ADD COLUMN IF NOT EXISTS `failure_reason` VARCHAR(255) NULL DEFAULT NULL COLLATE 'utf8mb4_general_ci' AFTER `completed_at`,
+	ADD COLUMN IF NOT EXISTS `result_json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL DEFAULT NULL AFTER `failure_reason`,
+	ADD COLUMN IF NOT EXISTS `created_at` DATETIME NOT NULL AFTER `result_json`,
+	ADD COLUMN IF NOT EXISTS `updated_at` DATETIME NOT NULL AFTER `created_at`,
+	MODIFY COLUMN `action_id` BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+	MODIFY COLUMN `actor_id` INT(10) UNSIGNED NOT NULL AFTER `action_id`,
+	MODIFY COLUMN `source` VARCHAR(64) NOT NULL COLLATE 'utf8mb4_general_ci' AFTER `actor_id`,
+	MODIFY COLUMN `source_metadata_json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL DEFAULT NULL AFTER `source`,
+	MODIFY COLUMN `action_type` VARCHAR(64) NOT NULL COLLATE 'utf8mb4_general_ci' AFTER `source_metadata_json`,
+	MODIFY COLUMN `action_json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL AFTER `action_type`,
+	MODIFY COLUMN `idempotency_key` VARCHAR(128) NOT NULL COLLATE 'utf8mb4_general_ci' AFTER `action_json`,
+	MODIFY COLUMN `state` VARCHAR(32) NOT NULL COLLATE 'utf8mb4_general_ci' AFTER `idempotency_key`,
+	MODIFY COLUMN `not_before` DATETIME NULL DEFAULT NULL AFTER `state`,
+	MODIFY COLUMN `expires_at` DATETIME NULL DEFAULT NULL AFTER `not_before`,
+	MODIFY COLUMN `claimed_by` VARCHAR(128) NULL DEFAULT NULL COLLATE 'utf8mb4_general_ci' AFTER `expires_at`,
+	MODIFY COLUMN `claimed_at` DATETIME NULL DEFAULT NULL AFTER `claimed_by`,
+	MODIFY COLUMN `completed_at` DATETIME NULL DEFAULT NULL AFTER `claimed_at`,
+	MODIFY COLUMN `failure_reason` VARCHAR(255) NULL DEFAULT NULL COLLATE 'utf8mb4_general_ci' AFTER `completed_at`,
+	MODIFY COLUMN `result_json` LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL DEFAULT NULL AFTER `failure_reason`,
+	MODIFY COLUMN `created_at` DATETIME NOT NULL AFTER `result_json`,
+	MODIFY COLUMN `updated_at` DATETIME NOT NULL AFTER `created_at`,
+	DROP INDEX IF EXISTS `idx_actor_action_queue_actor_idempotency`,
+	DROP INDEX IF EXISTS `idx_actor_action_queue_claim_path`,
+	DROP INDEX IF EXISTS `idx_actor_action_queue_actor_state`,
+	ADD UNIQUE INDEX `idx_actor_action_queue_actor_idempotency` (`actor_id`, `idempotency_key`) USING BTREE,
+	ADD INDEX `idx_actor_action_queue_claim_path` (`state`, `not_before`, `expires_at`, `action_id`) USING BTREE,
+	ADD INDEX `idx_actor_action_queue_actor_state` (`actor_id`, `state`, `not_before`, `action_id`) USING BTREE;
+
+SET @have_chk_actor_action_queue_source_metadata_json_bounded = (
+	SELECT COUNT(*)
+	FROM information_schema.table_constraints
+	WHERE table_schema = DATABASE()
+	  AND table_name = 'actor_action_queue'
+	  AND constraint_type = 'CHECK'
+	  AND constraint_name = 'chk_actor_action_queue_source_metadata_json_bounded'
+);
+SET @actor_action_queue_source_metadata_json_bounded_sql = IF(
+	@have_chk_actor_action_queue_source_metadata_json_bounded = 0,
+	'ALTER TABLE `actor_action_queue` ADD CONSTRAINT `chk_actor_action_queue_source_metadata_json_bounded` CHECK (`source_metadata_json` IS NULL OR (json_valid(`source_metadata_json`) AND char_length(`source_metadata_json`) <= 4096))',
+	'SELECT 1'
+);
+PREPARE stmt FROM @actor_action_queue_source_metadata_json_bounded_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @have_chk_actor_action_queue_action_json_bounded = (
+	SELECT COUNT(*)
+	FROM information_schema.table_constraints
+	WHERE table_schema = DATABASE()
+	  AND table_name = 'actor_action_queue'
+	  AND constraint_type = 'CHECK'
+	  AND constraint_name = 'chk_actor_action_queue_action_json_bounded'
+);
+SET @actor_action_queue_action_json_bounded_sql = IF(
+	@have_chk_actor_action_queue_action_json_bounded = 0,
+	'ALTER TABLE `actor_action_queue` ADD CONSTRAINT `chk_actor_action_queue_action_json_bounded` CHECK (json_valid(`action_json`) AND char_length(`action_json`) <= 16384)',
+	'SELECT 1'
+);
+PREPARE stmt FROM @actor_action_queue_action_json_bounded_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @have_chk_actor_action_queue_result_json_bounded = (
+	SELECT COUNT(*)
+	FROM information_schema.table_constraints
+	WHERE table_schema = DATABASE()
+	  AND table_name = 'actor_action_queue'
+	  AND constraint_type = 'CHECK'
+	  AND constraint_name = 'chk_actor_action_queue_result_json_bounded'
+);
+SET @actor_action_queue_result_json_bounded_sql = IF(
+	@have_chk_actor_action_queue_result_json_bounded = 0,
+	'ALTER TABLE `actor_action_queue` ADD CONSTRAINT `chk_actor_action_queue_result_json_bounded` CHECK (`result_json` IS NULL OR (json_valid(`result_json`) AND char_length(`result_json`) <= 16384))',
+	'SELECT 1'
+);
+PREPARE stmt FROM @actor_action_queue_result_json_bounded_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+)",
+		.content_schema_update = false
+	},
 // -- template; copy/paste this when you need to create a new entry
 //	ManifestEntry{
 //		.version = 9228,

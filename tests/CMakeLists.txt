@@ -8,12 +8,19 @@ set(tests_sources
 
 set(tests_headers
 	atobool_test.h
+	bot_aided_tracking_test.h
+	bot_heal_selection_test.h
+	bot_loot_request_test.h
+	bot_slow_target_test.h
 	data_verification_test.h
+	fallback_dialogue_test.h
 	fixed_memory_test.h
 	fixed_memory_variable_test.h
 	hextoi_32_64_test.h
 	ipc_mutex_test.h
 	memory_mapped_file_test.h
+	pressure_aware_healing_test.h
+	regular_heal_efficiency_test.h
 	string_util_test.h
 	skills_util_test.h
 	task_state_test.h
@@ -37,7 +44,7 @@ endif()
 
 if(UNIX)
 	target_link_libraries(tests "${CMAKE_DL_LIBS}")
-	target_link_libraries(tests "z")
+	target_link_libraries(tests ZLIB::ZLIB)
 	target_link_libraries(tests "m")
 	if(NOT DARWIN)
 		target_link_libraries(tests "rt")
