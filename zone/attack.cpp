@@ -23,6 +23,7 @@
 #include "common/rulesys.h"
 #include "common/spdat.h"
 #include "common/strings.h"
+#include "zone/actor_action_executor.h"
 #include "zone/bot.h"
 #include "zone/fastmath.h"
 #include "zone/lua_parser.h"
@@ -2991,6 +2992,11 @@ bool NPC::Death(Mob* killer_mob, int64 damage, uint16 spell, EQ::skills::SkillTy
 
 	std::vector<std::any> args = { corpse };
 
+	// Corpse creation has cleared this NPC's live ID. Correlate completion
+	// with the original identity retained before that ownership transfer.
+	ActorActionExecutor::ObserveNpcDeath(
+		entity_id, GetNPCTypeID(), GetRuntimeInstanceID(), killer_mob ? killer_mob->GetID() : 0);
+
 	parse->EventMercNPC(EVENT_DEATH_COMPLETE, this, owner_or_self,
 		[&]() {
 			return fmt::format(
@@ -4260,6 +4266,10 @@ void Mob::CommonDamage(Mob* attacker, int64 &damage, const uint16 spell_id, cons
 			damage = damage_override;
 		} else if (damage_override < 0) {
 			damage = 0;
+		}
+
+		if (PressureAwareHealing::ShouldRecordCombatDamage(damage, attacker != nullptr, attacker == this)) {
+			RecordIncomingDamagePressure(damage, Timer::GetCurrentTime());
 		}
 
 		SetHP(int64(GetHP() - damage));

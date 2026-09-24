@@ -16,10 +16,17 @@
 	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 #include "bot.h"
+#include "bot_heal_selection.h"
 
+#include "common/pressure_aware_healing.h"
+#include "common/regular_heal_efficiency.h"
+
+#include "common/bot_slow_target.h"
 #include "common/data_verification.h"
 #include "common/repositories/bot_spells_entries_repository.h"
 #include "common/repositories/npc_spells_repository.h"
+
+#include <vector>
 
 bool Bot::AICastSpell(Mob* tar, uint8 chance, uint16 spell_type, uint16 sub_target_type, uint16 sub_type) {
 	if (!tar) {
@@ -222,7 +229,14 @@ bool Bot::AICastSpell(Mob* tar, uint8 chance, uint16 spell_type, uint16 sub_targ
 			continue;
 		}
 
-		if (BotRequiresLoSToCast(spell_type, s.SpellId) && !HasLoS()) {
+		if (EQ::BotSlowTarget::UsesSingleTargetMaintenance(spell_type, IsCommandedSpell())) {
+			tar = SelectSingleTargetSlowMaintenanceTarget(s.SpellId);
+			if (!tar) {
+				continue;
+			}
+		}
+
+		if (BotRequiresLoSToCast(spell_type, s.SpellId) && !DoLosChecks(tar)) {
 			continue;
 		}
 
@@ -516,11 +530,22 @@ bool Bot::BotCastHeal(Mob* tar, uint8 bot_class, BotSpell& bot_spell, uint16 spe
 		return false;
 	}
 
-	bot_spell = GetSpellByHealType(spell_type, tar);
+	const auto pressure_aware_healing_settings = PressureAwareHealing::LoadSettingsFromRules();
+	const auto regular_heal_efficiency_settings = RegularHealEfficiency::LoadSettingsFromRules();
+	const auto heal_selection = BotHealSelection::Select(
+		*this,
+		*tar,
+		spell_type,
+		pressure_aware_healing_settings,
+		regular_heal_efficiency_settings
+	);
 
-	if (!IsValidSpell(bot_spell.SpellId)) {
+	if (!heal_selection.found) {
 		return false;
 	}
+
+	spell_type = heal_selection.selected_spell_type;
+	bot_spell = heal_selection.spell;
 
 	if (AIDoSpellCast(bot_spell.SpellIndex, tar, bot_spell.ManaCost)) {
 		if (IsGroupSpell(bot_spell.SpellId)) {
@@ -855,7 +880,7 @@ bool Bot::AIHealRotation(Mob* tar, bool useFastHeals) {
 	botSpell.ManaCost = 0;
 
 	if (useFastHeals) {
-		botSpell = GetBestBotSpellForRegularSingleTargetHeal(this, tar);
+		botSpell = GetBestBotSpellForRegularSingleTargetHeal(this, tar, BotSpellTypes::RegularHeal, true);
 
 		if (!IsValidSpell(botSpell.SpellId))
 			botSpell = GetBestBotSpellForFastHeal(this, tar);
@@ -864,7 +889,7 @@ bool Bot::AIHealRotation(Mob* tar, bool useFastHeals) {
 		botSpell = GetBestBotSpellForPercentageHeal(this, tar);
 
 		if (!IsValidSpell(botSpell.SpellId)) {
-			botSpell = GetBestBotSpellForRegularSingleTargetHeal(this, tar);
+			botSpell = GetBestBotSpellForRegularSingleTargetHeal(this, tar, BotSpellTypes::RegularHeal, true);
 		}
 		if (!IsValidSpell(botSpell.SpellId)) {
 			botSpell = GetFirstBotSpellForSingleTargetHeal(this, tar);
@@ -1098,7 +1123,12 @@ std::vector<BotSpell_wPriority> Bot::GetPrioritizedBotSpellsBySpellType(Bot* cas
 					continue;
 				}
 
-				if (!IsPBAESpell(bot_spell_list[i].spellid) && !caster->CastChecks(bot_spell_list[i].spellid, tar, spell_type, false, IsAEBotSpellType(spell_type))) {
+				const bool select_single_target_slow_later = EQ::BotSlowTarget::UsesSingleTargetMaintenance(spell_type, caster->IsCommandedSpell());
+				if (
+					!select_single_target_slow_later &&
+					!IsPBAESpell(bot_spell_list[i].spellid) &&
+					!caster->CastChecks(bot_spell_list[i].spellid, tar, spell_type, false, IsAEBotSpellType(spell_type))
+				) {
 					continue;
 				}
 
@@ -1247,6 +1277,14 @@ BotSpell Bot::GetBestBotSpellForPercentageHeal(Bot* caster, Mob* tar, uint16 spe
 
 	if (caster && caster->AI_HasSpells()) {
 		const std::vector<BotSpells_wIndex>& bot_spell_list = caster->BotGetSpellsByType(spell_type);
+		const uint8 target_hp_ratio = tar ? tar->GetHPRatio() : 100;
+		const uint8 complete_heal_parent_fallback_max_threshold =
+			(
+				(spell_type == BotSpellTypes::CompleteHeal || spell_type == BotSpellTypes::PetCompleteHeals) &&
+				tar
+			) ?
+				caster->GetUltimateSpellTypeMaxThreshold(GetParentSpellType(spell_type), tar) :
+				0;
 		for (int i = bot_spell_list.size() - 1; i >= 0; i--) {
 			if (!IsValidSpell(bot_spell_list[i].spellid)) {
 				continue;
@@ -1256,6 +1294,12 @@ BotSpell Bot::GetBestBotSpellForPercentageHeal(Bot* caster, Mob* tar, uint16 spe
 				(bot_spell_list[i].type == spell_type || bot_spell_list[i].type == GetParentSpellType(spell_type)) &&
 				caster->IsValidSpellTypeBySpellID(spell_type, bot_spell_list[i].spellid) &&
 				IsCompleteHealSpell(bot_spell_list[i].spellid) &&
+				BotHealSelection::AllowsCompleteHealParentFallback(
+					spell_type,
+					bot_spell_list[i].type,
+					target_hp_ratio,
+					complete_heal_parent_fallback_max_threshold
+				) &&
 				caster->CastChecks(bot_spell_list[i].spellid, tar, spell_type)
 			) {
 				result.SpellId = bot_spell_list[i].spellid;
@@ -1270,7 +1314,13 @@ BotSpell Bot::GetBestBotSpellForPercentageHeal(Bot* caster, Mob* tar, uint16 spe
 	return result;
 }
 
-BotSpell Bot::GetBestBotSpellForRegularSingleTargetHeal(Bot* caster, Mob* tar, uint16 spell_type) {
+BotSpell Bot::GetBestBotSpellForRegularSingleTargetHeal(
+	Bot* caster,
+	Mob* tar,
+	uint16 spell_type,
+	bool is_heal_rotation,
+	const RegularHealEfficiency::Settings* settings
+) {
 	BotSpell result;
 
 	result.SpellId = 0;
@@ -1278,15 +1328,66 @@ BotSpell Bot::GetBestBotSpellForRegularSingleTargetHeal(Bot* caster, Mob* tar, u
 	result.ManaCost = 0;
 
 	if (caster) {
+		const auto loaded_settings = settings ? *settings : RegularHealEfficiency::LoadSettingsFromRules();
+		const bool prefer_efficient_regular_heals = RegularHealEfficiency::ShouldUseEfficientSelection(
+			loaded_settings,
+			spell_type,
+			is_heal_rotation
+		);
 		std::list<BotSpell> bot_spell_list = GetBotSpellsForSpellEffect(caster, spell_type, SpellEffect::CurrentHP);
+		std::vector<BotSpell> valid_spells;
+		std::vector<RegularHealEfficiency::Candidate> candidates;
+		uint32 list_order = 0;
 
 		for (std::list<BotSpell>::iterator bot_spell_list_itr = bot_spell_list.begin(); bot_spell_list_itr != bot_spell_list.end(); ++bot_spell_list_itr) {
-			if (IsRegularSingleTargetHealSpell(bot_spell_list_itr->SpellId) && caster->CastChecks(bot_spell_list_itr->SpellId, tar, spell_type)) {
+			if (!IsRegularSingleTargetHealSpell(bot_spell_list_itr->SpellId) || !caster->CastChecks(bot_spell_list_itr->SpellId, tar, spell_type)) {
+				continue;
+			}
+
+			if (!prefer_efficient_regular_heals) {
 				result.SpellId = bot_spell_list_itr->SpellId;
 				result.SpellIndex = bot_spell_list_itr->SpellIndex;
 				result.ManaCost = bot_spell_list_itr->ManaCost;
 
 				break;
+			}
+
+			const auto estimate = RegularHealEfficiency::EstimateRegularHealAmount(
+				bot_spell_list_itr->SpellId,
+				[caster](uint16_t spell_id, int effect_index) {
+					return caster->CalcSpellEffectValue(
+						spell_id,
+						effect_index,
+						caster->GetLevel(),
+						caster->GetInstrumentMod(spell_id),
+						caster
+					);
+				},
+				[caster, tar](uint16_t spell_id, int64_t value) {
+					return caster->GetActSpellHealing(spell_id, value, tar);
+				}
+			);
+
+			valid_spells.push_back(*bot_spell_list_itr);
+			candidates.push_back({
+				.spell_id = bot_spell_list_itr->SpellId,
+				.list_order = list_order++,
+				.mana_cost = bot_spell_list_itr->ManaCost,
+				.has_usable_estimated_heal = estimate.usable,
+				.estimated_heal = estimate.amount
+			});
+		}
+
+		if (prefer_efficient_regular_heals && !candidates.empty()) {
+			const auto selection = RegularHealEfficiency::SelectRegularHealCandidate(
+				loaded_settings,
+				tar ? tar->GetMaxHP() - tar->GetHP() : 0,
+				0,
+				candidates
+			);
+
+			if (selection.found && selection.list_order < valid_spells.size()) {
+				result = valid_spells[selection.list_order];
 			}
 		}
 	}

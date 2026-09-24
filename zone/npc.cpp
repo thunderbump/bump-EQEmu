@@ -47,6 +47,7 @@
 #include "zone/water_map.h"
 #include "zone/zone.h"
 
+#include <atomic>
 #include <cstdio>
 #include <string>
 #include <utility>
@@ -55,6 +56,10 @@ extern Zone* zone;
 extern QueryServ* QServ;
 extern volatile bool is_zone_loaded;
 extern EntityList entity_list;
+
+namespace {
+std::atomic<uint64_t> next_runtime_npc_instance_id{1};
+}
 
 NPC::NPC(const NPCType *npc_type_data, Spawn2 *in_respawn, const glm::vec4 &position, GravityBehavior iflymode, bool IsCorpse)
 	: Mob(
@@ -132,6 +137,8 @@ NPC::NPC(const NPCType *npc_type_data, Spawn2 *in_respawn, const glm::vec4 &posi
 	  m_GuardPoint(-1, -1, -1, 0),
 	  m_GuardPointSaved(0, 0, 0, 0)
 {
+	m_runtime_instance_id = next_runtime_npc_instance_id.fetch_add(1, std::memory_order_relaxed);
+
 	//What is the point of this, since the names get mangled..
 	Mob *mob = entity_list.GetMob(name);
 	if (mob != nullptr) {

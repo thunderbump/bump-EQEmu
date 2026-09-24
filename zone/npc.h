@@ -133,6 +133,7 @@ public:
 	virtual Group* GetGroup() { return 0; }
 
 	virtual bool IsNPC() const { return true; }
+	uint64_t GetRuntimeInstanceID() const { return m_runtime_instance_id; }
 
 	virtual bool Process();
 	virtual void	AI_Init();
@@ -794,6 +795,7 @@ public:
 	const Handin GetHandin() { return m_hand_in; }
 
 private:
+	uint64_t            m_runtime_instance_id;
 	uint32              m_loottable_id;
 	bool                m_skip_global_loot;
 	bool                m_skip_auto_scale;

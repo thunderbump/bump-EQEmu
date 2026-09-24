@@ -28,6 +28,9 @@ install_manifest.txt
 [Bb]uild*/
 log/
 logs/
+graphify-out/
+.afk/
+.validation-worker/
 vcpkg/
 perl/
 
@@ -69,3 +72,7 @@ compile_flags.txt
 # CMake Files
 cmake-build-relwithdebinfo/*
 skill-caps.diff
+
+# Python prototype/test artifacts
+__pycache__/
+*.py[cod]

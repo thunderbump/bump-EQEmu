@@ -269,6 +269,16 @@ void Mob::CalculateNewFearpoint()
 		}
 	}
 
+	if (!zone->zonemap) {
+		currently_fleeing = false;
+		LogFlee(
+			"Mob [{}] cannot calculate a fearpoint because zone [{}] has no map loaded",
+			GetCleanName(),
+			zone->GetShortName()
+		);
+		return;
+	}
+
 	if (RuleB(Pathing, Fear) && zone->pathing) {
 		glm::vec3 Node;
 		int flags = PathingNotDisabled ^ PathingZoneLine;
@@ -430,4 +440,3 @@ void Mob::CalculateNewFearpoint()
 
 	return;
 }
-
