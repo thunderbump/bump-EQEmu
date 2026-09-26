@@ -40,7 +40,7 @@ public:
 
 	DBcore();
 	~DBcore();
-	eStatus GetStatus() { return pStatus; }
+	eStatus GetStatus() { return connection_owner ? connection_owner->GetStatus() : pStatus; }
 	MySQLRequestResult QueryDatabase(const char *query, uint32 querylen, bool retryOnFailureOnce = true);
 	MySQLRequestResult QueryDatabase(const std::string& query, bool retryOnFailureOnce = true);
 	MySQLRequestResult QueryDatabaseMulti(const std::string &query);
@@ -50,17 +50,18 @@ public:
 	std::string Escape(const std::string& s);
 	uint32 DoEscapeString(char *tobuf, const char *frombuf, uint32 fromlen);
 	void ping();
+	// Applies socket/connect deadlines to this connection and future reconnects.
+	// Call before opening the connection. Zero preserves the client default.
+	void SetConnectionTimeouts(uint32 connect_seconds, uint32 read_seconds, uint32 write_seconds);
 
 	const std::string& GetOriginHost() const;
 	void SetOriginHost(const std::string& origin_host);
 
 	bool DoesTableExist(const std::string& table_name);
 
-	void SetMySQL(const DBcore& o)
-	{
-		mysql      = o.mysql;
-		mysqlOwner = false;
-	}
+	// Borrow the owner's operations, not a raw handle that reconnect can replace.
+	// The owner must outlive this wrapper, as with the previous borrowed-handle API.
+	void SetMySQL(DBcore& owner);
 	void SetMutex(const std::shared_ptr<Mutex>& mutex);
 
 	// only safe on connections shared with other threads if results buffered
@@ -85,7 +86,7 @@ private:
 	bool Open(uint32 *errnum = nullptr, char *errbuf = nullptr);
 
 	MYSQL*  mysql = nullptr;
-	bool    mysqlOwner = true;
+	DBcore* connection_owner = nullptr;
 	eStatus pStatus = Closed;
 
 	std::shared_ptr<Mutex> m_mutex;
@@ -99,6 +100,9 @@ private:
 	bool   pCompress = false;
 	uint32 pPort = 0;
 	bool   pSSL = false;
+	uint32 connect_timeout_seconds = 0;
+	uint32 read_timeout_seconds = 0;
+	uint32 write_timeout_seconds = 0;
 
 	// allows multiple queries to be executed within the same query
 	// do not use this under normal operation

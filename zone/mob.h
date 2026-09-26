@@ -20,6 +20,7 @@
 #include "common/data_bucket.h"
 #include "common/emu_constants.h"
 #include "common/light_source.h"
+#include "common/pressure_aware_healing.h"
 #include "zone/aa_ability.h"
 #include "zone/aa.h"
 #include "zone/combat_record.h"
@@ -657,6 +658,14 @@ public:
 	inline virtual int32 GetDelayDeath() const { return 0; }
 	inline int64 GetHP() const { return current_hp; }
 	inline int64 GetMaxHP() const { return max_hp; }
+	void RecordIncomingDamagePressure(int64 damage, uint32 current_time_ms);
+	void ClearIncomingDamagePressure();
+	const PressureAwareHealing::IncomingDamagePressure &GetIncomingDamagePressure() const;
+	bool HasActiveIncomingDamagePressure(
+		const PressureAwareHealing::Settings &settings,
+		uint32 current_time_ms
+	) const;
+	bool HasActiveIncomingDamagePressure(const PressureAwareHealing::Settings &settings) const;
 	virtual int64 CalcMaxHP();
 	virtual int64 CalcHPRegenCap() { return 0; }
 	inline int64 GetMaxMana() const { return max_mana; }
@@ -923,7 +932,7 @@ public:
 			const char *message5 = nullptr, const char *message6 = nullptr,
 			const char *message7 = nullptr, const char *message8 = nullptr,
 			const char *message9 = nullptr) { }
-	void Say(const char *format, ...);
+	bool Say(const char *format, ...);
 	void SayString(uint32 string_id, const char *message3 = 0, const char *message4 = 0, const char *message5 = 0,
 		const char *message6 = 0, const char *message7 = 0, const char *message8 = 0, const char *message9 = 0);
 	void SayString(uint32 type, uint32 string_id, const char *message3 = 0, const char *message4 = 0, const char *message5 = 0,
@@ -933,7 +942,7 @@ public:
 	void SayString(Client *to, uint32 type, uint32 string_id, const char *message3 = 0, const char *message4 = 0, const char *message5 = 0,
 		const char *message6 = 0, const char *message7 = 0, const char *message8 = 0, const char *message9 = 0);
 	void Shout(const char *format, ...);
-	void Emote(const char *format, ...);
+	bool Emote(const char *format, ...);
 	void QuestJournalledSay(Client *QuestInitiator, const char *str, Journal::Options &opts);
 	const int GetItemStat(uint32 item_id, std::string identifier);
 
@@ -1577,6 +1586,7 @@ protected:
 	bool trackable;
 	int64 current_hp;
 	int64 max_hp;
+	PressureAwareHealing::IncomingDamagePressure incoming_damage_pressure;
 	int64 base_hp;
 	int64 current_mana;
 	int64 max_mana;

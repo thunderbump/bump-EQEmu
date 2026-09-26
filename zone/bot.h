@@ -38,6 +38,14 @@ constexpr uint32 MAG_EPIC_1_0 = 28034;
 
 extern WorldServer worldserver;
 
+namespace EQ::ZoneHarness {
+	class OwnedBotActorFixture;
+}
+
+namespace RegularHealEfficiency {
+	struct Settings;
+}
+
 constexpr int NegativeItemReuse = -1; // Unlinked timer for items
 
 constexpr uint8 SumWater               = 1;
@@ -536,6 +544,8 @@ public:
 
 	// Targeting
 	std::vector<Mob*> GatherSpellTargets(bool entireRaid = false, Mob* target = nullptr, bool no_clients = false, bool no_bots = false);
+	std::vector<Mob*> GetSingleTargetSlowMaintenanceCandidates(uint32 max_scan_count = 48);
+	Mob* SelectSingleTargetSlowMaintenanceTarget(uint16 spell_id, uint32 max_scan_count = 48);
 	bool HasValidAETarget(Bot* caster, uint16 spell_id, uint16 spell_type, Mob* tar);
 	void SetHasLoS(bool has_los) { _hasLoS = has_los; }
 	bool HasLoS() const { return _hasLoS; }
@@ -734,12 +744,22 @@ public:
 	static std::vector<BotSpell_wPriority> GetPrioritizedBotSpellsBySpellType(Bot* caster, uint16 spell_type, Mob* tar, bool AE = false, uint16 sub_target_type = UINT16_MAX, uint16 sub_type = UINT16_MAX);
 
 	static BotSpell GetFirstBotSpellBySpellType(Bot* caster, uint16 spell_type);
-	BotSpell GetSpellByHealType(uint16 spell_type, Mob* tar);
+	BotSpell GetSpellByHealType(
+		uint16 spell_type,
+		Mob* tar,
+		const RegularHealEfficiency::Settings* regular_heal_efficiency_settings = nullptr
+	);
 	static BotSpell GetBestBotSpellForVeryFastHeal(Bot* caster, Mob* tar, uint16 spell_type = BotSpellTypes::RegularHeal);
 	static BotSpell GetBestBotSpellForFastHeal(Bot* caster, Mob* tar, uint16 spell_type = BotSpellTypes::RegularHeal);
 	static BotSpell GetBestBotSpellForHealOverTime(Bot* caster, Mob* tar, uint16 spell_type = BotSpellTypes::RegularHeal);
 	static BotSpell GetBestBotSpellForPercentageHeal(Bot* caster, Mob* tar, uint16 spell_type = BotSpellTypes::RegularHeal);
-	static BotSpell GetBestBotSpellForRegularSingleTargetHeal(Bot* caster, Mob* tar, uint16 spell_type = BotSpellTypes::RegularHeal);
+	static BotSpell GetBestBotSpellForRegularSingleTargetHeal(
+		Bot* caster,
+		Mob* tar,
+		uint16 spell_type = BotSpellTypes::RegularHeal,
+		bool is_heal_rotation = false,
+		const RegularHealEfficiency::Settings* settings = nullptr
+	);
 	static BotSpell GetFirstBotSpellForSingleTargetHeal(Bot* caster, Mob* tar, uint16 spell_type = BotSpellTypes::RegularHeal);
 	static BotSpell GetBestBotSpellForGroupHealOverTime(Bot* caster, Mob* tar, uint16 spell_type = BotSpellTypes::RegularHeal);
 	static BotSpell GetBestBotSpellForGroupCompleteHeal(Bot* caster, Mob* tar, uint16 spell_type = BotSpellTypes::RegularHeal);
@@ -780,6 +800,11 @@ public:
 	uint32 GetBotOwnerCharacterID() const { return _botOwnerCharacterID; }
 	uint32 GetBotSpellID() const { return npc_spells_id; }
 	Mob* GetBotOwner() { return this->_botOwner; }
+	void SetCommandTargetSource(Mob* source);
+	void SetLeashSource(Mob* source);
+	void ClearCommandTargetSource() { _commandTargetSourceID = 0; }
+	void ClearLeashSource() { _leashSourceID = 0; }
+	void ClearCommandSourceReferences(uint16 entity_id);
 	uint32 GetBotRangedValue();
 	EQ::ItemInstance* GetBotItem(uint16 slot_id);
 	bool GetSpawnStatus() { return _spawnStatus; }
@@ -908,7 +933,7 @@ public:
 	void SetPetChooserID(uint8 id) { _petChooserID = id; }
 	void SetBotRangedSetting(bool value) { _botRangedSetting = value; }
 	void SetBotCharmer(bool c) { _botCharmer = c; }
-	void SetBotOwner(Mob* botOwner) { this->_botOwner = botOwner; }
+	void SetBotOwner(Mob* botOwner);
 	void SetRangerAutoWeaponSelect(bool enable) { GetClass() == Class::Ranger ? _rangerAutoWeaponSelect = enable : _rangerAutoWeaponSelect = false; }
 	void SetBotStance(uint8 stance_id) { _botStance = Stance::IsValid(stance_id) ? stance_id : Stance::Passive; }
 	uint32 GetSpellRecastTimer(uint16 spell_id = 0);
@@ -1058,14 +1083,17 @@ public:
 	bool BotProcessBlind();
 	bool IsAIProcessValid(const Client* bot_owner, const Group* bot_group, const Raid* raid);
 
-	Client* SetLeashOwner(Client* bot_owner, Group* bot_group, Raid* raid, uint32 r_group) const;
-	Mob* SetFollowMob(Client* leash_owner);
+	Mob* GetLeashSource(Client* bot_owner, Group* bot_group, Raid* raid, uint32 r_group);
+	Mob* SetFollowMob(Mob* leash_source);
 
 	Mob* GetBotTarget(Client* bot_owner);
+	Mob* GetCommandTarget(Client* bot_owner);
+	Mob* GetCommandTargetSource(Client* bot_owner);
+	Mob* GetAssistCommandSource(Client* bot_owner);
 	void SetOwnerTarget(Client* bot_owner);
 	bool IsValidTarget(
 		Client* bot_owner,
-		Client* leash_owner,
+		Mob* leash_source,
 		float lo_distance,
 		float leash_distance,
 		Mob* tar,
@@ -1136,6 +1164,8 @@ private:
 	uint32 _botOwnerCharacterID;
 	bool _spawnStatus;
 	Mob* _botOwner;
+	uint16 _commandTargetSourceID = 0;
+	uint16 _leashSourceID = 0;
 	bool _botCharmer;
 	uint8 _petChooserID;
 	bool berserk;
@@ -1238,6 +1268,7 @@ private:
 	int32 GenerateBaseHitPoints();
 	int32 GenerateBaseManaPoints();
 	void GenerateSpecialAttacks();
+	friend class EQ::ZoneHarness::OwnedBotActorFixture;
 	void SetBotID(uint32 botID);
 	void SetCombatRoundForAlerts(bool flag = true) { m_combat_round_alert_flag = flag; }
 	void SetAttackingFlag(bool flag = true) { m_attacking_flag = flag; }
