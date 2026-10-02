@@ -50,6 +50,8 @@
 #include "zone/spawngroup.h"
 #include "zone/zonedb.h"
 
+#include <memory>
+
 struct EXPModifier
 {
 	float aa_modifier;
@@ -57,6 +59,7 @@ struct EXPModifier
 };
 
 class DynamicZone;
+class ActorActionExecutor;
 
 struct ZonePoint {
 	float  x;
@@ -554,6 +557,8 @@ private:
 	Timer                               clientauth_timer;
 	Timer                               initgrids_timer;
 	Timer                               qglobal_purge_timer;
+	Timer                               actor_action_timer{5000};
+	std::unique_ptr<ActorActionExecutor> actor_action_executor;
 	ZoneSpellsBlocked                   *blocked_spells;
 
 	// Factions

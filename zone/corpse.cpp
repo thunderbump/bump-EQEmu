@@ -17,6 +17,7 @@
 */
 #include "corpse.h"
 
+#include "common/bot_loot_request.h"
 #include "common/data_verification.h"
 #include "common/eqemu_logsys.h"
 #include "common/events/player_event_logs.h"
@@ -26,7 +27,9 @@
 #include "common/rulesys.h"
 #include "common/say_link.h"
 #include "common/strings.h"
+#include "common/timer.h"
 #include "zone/bot.h"
+#include "zone/bot_loot_request_runtime.h"
 #include "zone/dynamic_zone.h"
 #include "zone/entity.h"
 #include "zone/groups.h"
@@ -38,6 +41,7 @@
 #include "zone/worldserver.h"
 
 #include <iostream>
+#include <list>
 
 using json = nlohmann::json;
 
@@ -46,6 +50,82 @@ extern Zone                *zone;
 extern WorldServer          worldserver;
 extern npcDecayTimes_Struct npcCorpseDecayTimes[100];
 extern QueryServ           *QServ;
+
+namespace {
+
+BotLootRequest::DeliveryState bot_loot_request_delivery_state;
+
+void MaybeSendBotLootRequest(
+	Client *looter,
+	const EQ::ItemInstance *inst,
+	Group *group,
+	const std::string &item_link,
+	uint64_t loot_event_id
+)
+{
+	if (!looter || !inst || !inst->GetItem() || !group || !RuleB(Chat, BotLootRequestEnabled)) {
+		return;
+	}
+
+	std::list<Bot *> grouped_bots;
+	group->GetBotList(grouped_bots);
+	if (grouped_bots.empty()) {
+		return;
+	}
+
+	BotLootRequest::SuccessfulLootEvent event{
+		.looter_stable_id = looter->CharacterID(),
+		.loot_event_id = loot_event_id,
+		.looter_name = looter->GetCleanName(),
+		.looted_item = inst->GetItem(),
+		.looted_item_instance = inst,
+		.looted_item_link = item_link
+	};
+
+	for (auto *bot : grouped_bots) {
+		if (!bot) {
+			continue;
+		}
+
+		BotLootRequest::GroupedBotSnapshot bot_snapshot{
+			.name_stable_id = bot->GetBotID(),
+			.name = bot->GetCleanName(),
+			.race_id = bot->GetBaseRace(),
+			.class_id = bot->GetClass(),
+			.level = bot->GetLevel(),
+			.ranged_mode = bot->IsBotRanged()
+		};
+
+		for (int slot_id = EQ::invslot::EQUIPMENT_BEGIN; slot_id <= EQ::invslot::EQUIPMENT_END; ++slot_id) {
+			if (const auto *bot_item = bot->GetBotItem(slot_id); bot_item && bot_item->GetItem()) {
+				bot_snapshot.equipped_items.push_back({
+					.item = bot_item->GetItem(),
+					.item_instance = bot_item,
+					.slot_id = slot_id
+				});
+			}
+		}
+
+		event.grouped_bots.push_back(bot_snapshot);
+	}
+
+	const auto request = BotLootRequest::PlanVisibleRequestForSuccessfulLoot(
+		event,
+		{
+			.enabled = RuleB(Chat, BotLootRequestEnabled),
+			.cooldown_seconds = RuleI(Chat, BotLootRequestCooldownSeconds),
+			.current_time_ms = Timer::GetCurrentTime()
+		},
+		bot_loot_request_delivery_state
+	);
+	if (!request.produced) {
+		return;
+	}
+
+	ZoneBotLootRequestRuntime::EnqueueLootRequestDialogue(request, event);
+}
+
+} // namespace
 
 void Corpse::SendEndLootErrorPacket(Client *client)
 {
@@ -1695,24 +1775,28 @@ void Corpse::LootCorpseItem(Client *c, const EQApplicationPacket *app)
 		}
 		else {
 			c->PutLootInInventory(EQ::invslot::slotCursor, *inst, bag_item_data);
-		}
+			}
 
-		/* Update any tasks that have an activity to loot this item */
-		if (RuleB(TaskSystem, EnableTaskSystem) && IsNPCCorpse()) {
-			c->UpdateTasksOnLoot(this, item->ID, count);
-		}
+			/* Update any tasks that have an activity to loot this item */
+			if (RuleB(TaskSystem, EnableTaskSystem) && IsNPCCorpse()) {
+				c->UpdateTasksOnLoot(this, item->ID, count);
+			}
 
-		/* Remove it from Corpse */
-		if (item_data) {
-			/* Delete needs to be before RemoveItem because its deletes the pointer for
-			* item_data/bag_item_data */
-			database.DeleteItemOffCharacterCorpse(
-				m_corpse_db_id, item_data->equip_slot,
-				item_data->item_id
-			);
-			/* Delete Item Instance */
-			RemoveItem(item_data->lootslot);
-		}
+			const uint64_t bot_loot_request_event_id =
+				(static_cast<uint64_t>(m_corpse_db_id) << 32) |
+				static_cast<uint32_t>(item_data ? item_data->lootslot : 0);
+
+			/* Remove it from Corpse */
+				if (item_data) {
+					/* Delete needs to be before RemoveItem because its deletes the pointer for
+					* item_data/bag_item_data */
+					database.DeleteItemOffCharacterCorpse(
+						m_corpse_db_id, item_data->equip_slot,
+						item_data->item_id
+					);
+					/* Delete Item Instance */
+					RemoveItem(item_data->lootslot);
+				}
 
 		/* Remove Bag Contents */
 		if (item->IsClassBag() && (GetPlayerKillItem() != -1 || GetPlayerKillItem() != 1)) {
@@ -1745,15 +1829,16 @@ void Corpse::LootCorpseItem(Client *c, const EQApplicationPacket *app)
 		c->MessageString(Chat::Loot, LOOTED_MESSAGE, linker.Link().c_str());
 
 		if (!IsPlayerCorpse()) {
-			Group *g = c->GetGroup();
-			if (g != nullptr) {
-				g->GroupMessageString(
-					c, Chat::Loot,
-					OTHER_LOOTED_MESSAGE,
-					c->GetName(),
-					linker.Link().c_str()
-				);
-			}
+				Group *g = c->GetGroup();
+				if (g != nullptr) {
+					g->GroupMessageString(
+						c, Chat::Loot,
+						OTHER_LOOTED_MESSAGE,
+						c->GetName(),
+						linker.Link().c_str()
+					);
+					MaybeSendBotLootRequest(c, inst, g, linker.Link(), bot_loot_request_event_id);
+				}
 			else {
 				Raid *r = c->GetRaid();
 				if (r != nullptr) {

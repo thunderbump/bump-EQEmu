@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.20.0)
 set(common_sources
     base_packet.cpp
     bazaar.cpp
+    bot_loot_request.cpp
     bodytypes.cpp
     classes.cpp
     cli/eqemu_command_handler.cpp
@@ -46,6 +47,7 @@ set(common_sources
     events/player_event_logs.cpp
     evolving_items.cpp
     extprofile.cpp
+    fallback_dialogue.cpp
     faction.cpp
     file.cpp
     guild_base.cpp
@@ -102,6 +104,8 @@ set(common_sources
     patches/uf.cpp
     path_manager.cpp
     path_manager.cpp
+    pressure_aware_healing.cpp
+    regular_heal_efficiency.cpp
     perl_eqdb_res.cpp
     perl_eqdb.cpp
     platform.cpp
@@ -155,6 +159,10 @@ set(repositories
     repositories/base/base_adventure_template_entry_flavor_repository.h
     repositories/base/base_adventure_template_entry_repository.h
     repositories/base/base_adventure_template_repository.h
+    repositories/base/base_actor_action_queue_repository.h
+    repositories/base/base_actor_events_repository.h
+    repositories/base/base_actor_profiles_repository.h
+    repositories/base/base_actor_status_repository.h
     repositories/base/base_alternate_currency_repository.h
     repositories/base/base_auras_repository.h
     repositories/base/base_base_data_repository.h
@@ -353,6 +361,10 @@ set(repositories
     repositories/adventure_template_entry_flavor_repository.h
     repositories/adventure_template_entry_repository.h
     repositories/adventure_template_repository.h
+    repositories/actor_action_queue_repository.h
+    repositories/actor_events_repository.h
+    repositories/actor_profiles_repository.h
+    repositories/actor_status_repository.h
     repositories/alternate_currency_repository.h
     repositories/auras_repository.h
     repositories/base_data_repository.h

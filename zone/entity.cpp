@@ -19,6 +19,8 @@
 
 #include "common/data_verification.h"
 #include "common/features.h"
+#include "zone/fallback_dialogue_runtime.h"
+#include "zone/bot_loot_request_runtime.h"
 #include "common/guilds.h"
 #include "zone/bot.h"
 #include "zone/dialogue_window.h"
@@ -2780,6 +2782,15 @@ bool EntityList::RemoveMob(uint16 delete_id)
 		if (!it->second) {
 			return false;
 		}
+
+		for (const auto &bot_entry : bot_list) {
+			if (!bot_entry.second) {
+				continue;
+			}
+
+			bot_entry.second->ClearCommandSourceReferences(delete_id);
+		}
+
 		if (npc_list.count(delete_id)) {
 			entity_list.RemoveNPC(delete_id);
 		}
@@ -3128,6 +3139,8 @@ void EntityList::RemoveEntity(uint16 id)
 void EntityList::Process()
 {
 	CheckSpawnQueue();
+	ZoneFallbackDialogueRuntime::ProcessReadyDelayedDialogue();
+	ZoneBotLootRequestRuntime::ProcessReadyLootRequestDialogue();
 }
 
 void EntityList::Depop(bool StartSpawnTimer)

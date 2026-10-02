@@ -180,6 +180,11 @@ namespace EQEmuCommand {
 		}
 
 		if (ran_command) {
+			if (argc > 1 && std::string(argv[1]).rfind("tests:", 0) == 0) {
+				std::cout.flush();
+				std::cerr.flush();
+				std::_Exit(0);
+			}
 			std::exit(0);
 		}
 	}

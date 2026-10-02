@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 set(zone_sources
+	actor_action_executor.cpp
     aa.cpp
     aa_ability.cpp
     aggro.cpp
@@ -11,16 +12,22 @@ set(zone_sources
     beacon.cpp
     bonuses.cpp
     bot.cpp
+    bot_aided_tracking_runtime.cpp
     bot_database.cpp
+    bot_heal_selection.cpp
+    bot_loot_request_runtime.cpp
     bot_raid.cpp
     botspellsai.cpp
     cheat_manager.cpp
     cli/cli_benchmark_databuckets.cpp
     cli/cli_sidecar_serve_http.cpp
+    cli/tests/cli_actor_events.cpp
+    cli/tests/cli_reserved_actor_owner.cpp
     cli/tests/cli_databuckets.cpp
     cli/tests/cli_npc_handins.cpp
     cli/tests/cli_npc_handins_multiquest.cpp
     cli/tests/cli_test_util.cpp
+    cli/tests/cli_zone_harness_serve_http.cpp
     cli/tests/cli_zone_state.cpp
     client.cpp
     client_bot.cpp
@@ -41,6 +48,7 @@ set(zone_sources
     entity.cpp
     exp.cpp
     expedition_request.cpp
+    fallback_dialogue_runtime.cpp
     fastmath.cpp
     fearpath.cpp
     forage.cpp
@@ -48,6 +56,12 @@ set(zone_sources
     groups.cpp
     guild.cpp
     guild_mgr.cpp
+    harness/actor_event_persistence_sink.cpp
+    harness/actor_event_recorder.cpp
+    harness/harness_snapshot_service.cpp
+    harness/owned_bot_actor_fixture.cpp
+    harness/zone_harness_http.cpp
+    harness/zone_harness_runtime.cpp
     hate_list.cpp
     heal_rotation.cpp
     horse.cpp
@@ -124,9 +138,11 @@ set(zone_headers
     aura.h
     beacon.h
     bot.h
+    bot_aided_tracking_runtime.h
     bot_command.h
     bot_database.h
     bot_structs.h
+    bot_loot_request_runtime.h
     cheat_manager.h
     client.h
     client_packet.h
@@ -143,11 +159,17 @@ set(zone_headers
     entity.h
     event_codes.h
     expedition_request.h
+    fallback_dialogue_runtime.h
     fastmath.h
     forage.h
     global_loot_manager.h
     groups.h
     guild_mgr.h
+    harness/actor_event_recorder.h
+    harness/harness_snapshot_service.h
+    harness/owned_bot_actor_fixture.h
+    harness/zone_harness_http.h
+    harness/zone_harness_runtime.h
     hate_list.h
     heal_rotation.h
     horse.h

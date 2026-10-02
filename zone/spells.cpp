@@ -83,6 +83,7 @@
 #include "zone/bot.h"
 #include "zone/client.h"
 #include "zone/fastmath.h"
+#include "zone/harness/actor_event_recorder.h"
 #include "zone/lua_parser.h"
 #include "zone/mob_movement_manager.h"
 #include "zone/queryserv.h"
@@ -446,6 +447,15 @@ bool Mob::DoCastSpell(uint16 spell_id, uint16 target_id, CastingSlot slot,
 	// now tell the people in the area -- we ALWAYS want to send this, even instant cast spells.
 	// The only time this is skipped is for NPC innate procs and weapon procs. Procs from buffs
 	// oddly still send this. Since those cases don't reach here, we don't need to check them
+	EQ::ZoneHarness::ActorEventRecorder::ObserveSpellCastStarted(
+		this,
+		entity_list.GetMob(target_id),
+		spell_id,
+		static_cast<uint32_t>(slot),
+		cast_time,
+		orgcasttime
+	);
+
 	if (slot != CastingSlot::Discipline) {
 		SendBeginCast(spell_id, orgcasttime);
 	}
