@@ -15,6 +15,7 @@
 #include "common/strings.h"
 
 {{ADDITIONAL_INCLUDES}}
+#include <optional>
 #include <ctime>
 
 class Base{{TABLE_NAME_CLASS}}Repository {

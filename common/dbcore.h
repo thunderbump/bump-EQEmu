@@ -50,6 +50,9 @@ public:
 	std::string Escape(const std::string& s);
 	uint32 DoEscapeString(char *tobuf, const char *frombuf, uint32 fromlen);
 	void ping();
+	// Applies socket/connect deadlines to this connection and future reconnects.
+	// Call before opening the connection. Zero preserves the client default.
+	void SetConnectionTimeouts(uint32 connect_seconds, uint32 read_seconds, uint32 write_seconds);
 
 	const std::string& GetOriginHost() const;
 	void SetOriginHost(const std::string& origin_host);
@@ -99,6 +102,9 @@ private:
 	bool   pCompress = false;
 	uint32 pPort = 0;
 	bool   pSSL = false;
+	uint32 connect_timeout_seconds = 0;
+	uint32 read_timeout_seconds = 0;
+	uint32 write_timeout_seconds = 0;
 
 	// allows multiple queries to be executed within the same query
 	// do not use this under normal operation
