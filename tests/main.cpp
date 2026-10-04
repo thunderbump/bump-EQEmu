@@ -25,6 +25,7 @@
 #include "tests/skills_util_test.h"
 #include "tests/string_util_test.h"
 #include "tests/task_state_test.h"
+#include "tests/suite_runner.h"
 
 #include "common/path_manager.h"
 #include "common/platform.h"
@@ -44,7 +45,6 @@ int main()
 	auto ConfigLoadResult = EQEmuConfig::LoadConfig();
 	Config = EQEmuConfig::get();
 	try {
-		std::unique_ptr<Test::Output> output(new Test::TextOutput(Test::TextOutput::Verbose));
 		Test::Suite                   tests;
 		tests.add(new MemoryMappedFileTest());
 		tests.add(new IPCMutexTest());
@@ -56,7 +56,7 @@ int main()
 		tests.add(new DataVerificationTest());
 		tests.add(new SkillsUtilsTest());
 		tests.add(new TaskStateTest());
-		tests.run(*output, true);
+		return EQEmuTest::RunSuite(tests);
 	}
 	catch (std::exception &ex) {
 		LogError("Test Failure [{}]", ex.what());
