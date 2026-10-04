@@ -148,3 +148,5 @@ If you want to set up your own EQEmulator server, please refer to the current [s
 <a href="https://github.com/EQEmu/EQEmu/graphs/contributors">
   <img src="https://contributors-img.firebaseapp.com/image?repo=EQEmu/EQEmu" />
 </a>
+
+<!-- Temporary central-1f7n fixture-only host qualification; no source behavior changes. -->
