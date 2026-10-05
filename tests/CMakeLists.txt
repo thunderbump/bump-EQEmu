@@ -26,6 +26,10 @@ add_executable(tests ${tests_sources} ${tests_headers})
 add_executable(tests_runner_controls EXCLUDE_FROM_ALL runner_controls.cpp suite_runner.h)
 target_link_libraries(tests_runner_controls cppunit)
 
+# Small, opt-in lifecycle/reporting checks; no utility fixtures or server linkage.
+add_executable(tests_reporting_controls EXCLUDE_FROM_ALL reporting_controls.cpp suite_runner.h)
+target_link_libraries(tests_reporting_controls cppunit)
+
 target_link_libraries(tests common cppunit)
 target_include_directories(tests PRIVATE ..)
 

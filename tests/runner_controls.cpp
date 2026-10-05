@@ -15,12 +15,18 @@ public:
 			throw std::runtime_error("intentional setup exception");
 		}
 	}
+	void tear_down() override
+	{
+		if (mode == "teardown-exception") {
+			throw std::runtime_error("intentional teardown exception");
+		}
+	}
 	void Check()
 	{
 		if (mode == "body-exception") {
 			throw std::runtime_error("intentional body exception");
 		}
-		TEST_ASSERT(mode == "pass");
+		TEST_ASSERT(mode == "pass" || mode == "teardown-exception");
 	}
 private:
 	std::string mode;
@@ -33,7 +39,8 @@ int main(int argc, char **argv)
 	}
 	const std::string mode = argv[1];
 	if (mode != "pass" && mode != "fail" && mode != "empty"
-		&& mode != "setup-exception" && mode != "body-exception") {
+		&& mode != "setup-exception" && mode != "body-exception"
+		&& mode != "teardown-exception") {
 		return 2;
 	}
 	Test::Suite suite;
