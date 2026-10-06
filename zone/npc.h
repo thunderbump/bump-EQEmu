@@ -102,6 +102,9 @@ namespace EQ
 	struct ItemData;
 }
 
+namespace Actors { class Lifecycle; }
+class ActorLifecycleScenario;
+
 class NPC : public Mob
 {
 public:
@@ -794,6 +797,10 @@ public:
 	const Handin GetHandin() { return m_hand_in; }
 
 private:
+	friend class Actors::Lifecycle;
+	friend class ActorLifecycleScenario;
+	uint64_t actor_incarnation_marker = 0;
+	uint64_t actor_native_ticks = 0;
 	uint32              m_loottable_id;
 	bool                m_skip_global_loot;
 	bool                m_skip_auto_scale;

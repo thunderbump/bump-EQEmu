@@ -52,6 +52,7 @@
 #include "zone/titles.h"
 #include "zone/worldserver.h"
 #include "zone/zone_cli.h"
+#include "zone/cli/tests/actor_lifecycle_scenario.h"
 #include "zone/zone_config.h"
 #include "zone/zone_event_scheduler.h"
 #include "zone/zone.h"
@@ -96,12 +97,19 @@ void CatchSignal(int sig_num);
 extern void MapOpcodes();
 
 bool CheckForCompatibleQuestPlugins();
-int main(int argc, char **argv)
+static bool actor_command = false;
+static volatile std::sig_atomic_t actor_interrupted = 0;
+static ActorScenario::Result actor_result;
+
+static int ZoneMain(int argc, char **argv)
 {
 	RegisterExecutablePlatform(ExePlatformZone);
 	EQEmuLogSys::Instance()->LoadLogSettingsDefaults();
 
 	set_exception_handler();
+	if (actor_command) {
+		std::signal(SIGINT, CatchSignal); std::signal(SIGTERM, CatchSignal);
+	}
 
 	// silence logging if we ran a command
 	if (ZoneCLI::RanConsoleCommand(argc, argv) || ZoneCLI::RanTestCommand(argc, argv)) {
@@ -457,6 +465,25 @@ int main(int argc, char **argv)
 	LogInfo("Loading quests");
 	parse->ReloadQuests();
 
+	if (actor_command) {
+		actor_result.boot = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count() - actor_result.boot;
+		ActorScenario::Run(actor_result, actor_interrupted);
+		const auto shutdown_start = std::chrono::steady_clock::now();
+		// Zone destruction uses parser, configuration and scaling data. Keep those alive until afterward.
+		if (zone) { zone->SetSaveZoneState(false); zone->Shutdown(true); }
+		entity_list.Clear(); entity_list.RemoveAllEncounters();
+		parse->ClearInterfaces();
+#ifdef EMBPERL
+		safe_delete(perl_parser);
+#endif
+		safe_delete(npc_scale_manager); command_deinit(); bot_command_deinit(); safe_delete(parse);
+		EQEmuLogSys::Instance()->CloseFileLogs(); safe_delete(QServ); safe_delete(Config);
+		actor_result.native_cleanup = !zone && entity_list.GetMobList().empty() && entity_list.GetNPCList().empty();
+		actor_result.shutdown += std::chrono::duration<double>(std::chrono::steady_clock::now() - shutdown_start).count();
+		actor_result.Finalize(actor_interrupted != 0);
+		return actor_result.ExitCode();
+	}
+
 	QServ->CheckForConnectState();
 
 	worldserver.Connect();
@@ -667,7 +694,7 @@ int main(int argc, char **argv)
 
 void Shutdown()
 {
-	zone->Shutdown(true);
+	if (zone) zone->Shutdown(true);
 	LogInfo("Shutting down...");
 	EQEmuLogSys::Instance()->CloseFileLogs();
 	EQ::EventLoop::Get().Shutdown();
@@ -675,6 +702,7 @@ void Shutdown()
 
 void CatchSignal(int sig_num)
 {
+	if (actor_command) { actor_interrupted = sig_num; return; }
 #ifdef _WINDOWS
 	LogInfo("Recieved signal: [{}]", sig_num);
 #endif
@@ -743,4 +771,37 @@ bool CheckForCompatibleQuestPlugins()
 	if (!perl_found) { LogError("Failed to find CheckHandin in the Perl plugins quest directories");}
 
 	return lua_found && perl_found;
+}
+
+// Actor completion is emitted only after native cleanup returns, never from a test assertion helper.
+int main(int argc, char **argv)
+{
+	actor_command = ActorScenario::Selected(argc, argv);
+	if (!actor_command) return ZoneMain(argc, argv);
+	if (!ActorScenario::Arguments(argc, argv, actor_result.control)) {
+		actor_result.native_cleanup = true; // refused before creating any native resource
+		std::cout << "EQEMU_ACTOR_RESULT " << actor_result.Json() << std::endl;
+		return 2;
+	}
+	const auto start = std::chrono::steady_clock::now();
+	actor_result.boot = std::chrono::duration<double>(start.time_since_epoch()).count();
+	try { ZoneMain(argc, argv); }
+	catch (const std::exception &error) { std::cerr << "Actor initialization/shutdown refused: " << error.what() << std::endl; }
+	catch (...) { std::cerr << "Actor initialization/shutdown refused: unknown exception" << std::endl; }
+	if (!actor_result.native_cleanup) {
+		actor_result.status = actor_interrupted ? "cancelled" : "refused";
+		actor_result.boot = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+	}
+	// Commit one completion after cleanup. Pending/observed cancellation remains non-pass.
+#ifndef _WINDOWS
+	sigset_t completion_signals, pending;
+	sigemptyset(&completion_signals); sigemptyset(&pending); sigaddset(&completion_signals, SIGINT); sigaddset(&completion_signals, SIGTERM);
+	if (sigprocmask(SIG_BLOCK, &completion_signals, nullptr) != 0) { actor_result.native_cleanup = false; }
+	if (sigpending(&pending) != 0) actor_result.native_cleanup = false;
+	actor_result.Finalize(actor_interrupted || sigismember(&pending, SIGINT) || sigismember(&pending, SIGTERM));
+#else
+	actor_result.Finalize(actor_interrupted != 0);
+#endif
+	std::cout << "EQEMU_ACTOR_RESULT " << actor_result.Json() << std::endl;
+	return actor_result.ExitCode();
 }
