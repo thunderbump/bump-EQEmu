@@ -117,8 +117,8 @@ Result Lifecycle::Create(const Definition &d)
 		auto npc = std::make_unique<NPC>(type.get(), nullptr, glm::vec4(d.x, d.y, d.z, d.heading), GravityBehavior::Water);
 		npc->GiveNPCTypeData(type.release()); // NPC owns its private type exactly once
 		npc->actor_incarnation_marker = handle.incarnation;
-		// AddNPC installs both native indexes before its callbacks. They own deletion from this point.
-		entity_list.AddNPC(npc.release(), true, true);
+		// Native registration keeps scoped custody until both indexes accept, then owns deletion before callbacks.
+		entity_list.AddNPC(std::move(npc), true, true);
 		// Never use the transferred pointer or an iterator retained across native callbacks.
 		uint16_t native_id = 0;
 		for (const auto &[id, candidate] : entity_list.GetNPCList()) {

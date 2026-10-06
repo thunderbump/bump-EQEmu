@@ -25,10 +25,10 @@ Zone *zone = &loaded_zone;
 void Check(bool value, const char *message) { if(!value) throw std::runtime_error(message); }
 void ProcessRemoval() {
 	for(auto i=entity_list.npcs.begin();i!=entity_list.npcs.end();) {
-		if(i->second->depop) { delete i->second; i=entity_list.npcs.erase(i); } else ++i;
+		if(i->second->depop) { entity_list.mobs.erase(i->first);delete i->second; i=entity_list.npcs.erase(i); } else ++i;
 	}
 }
-void Clear() { for(auto [id,n]:entity_list.npcs) delete n; entity_list.npcs.clear(); }
+void Clear() { for(auto [id,n]:entity_list.npcs) delete n; entity_list.npcs.clear();entity_list.mobs.clear(); }
 int main() {
 	try {
 		auto &actors=Actors::Lifecycle::Get();
@@ -60,7 +60,7 @@ int main() {
 		Check(replacement.handle!=first.handle && replacement.outcome==Actors::Outcome::Created,"recreation reused handle");
 		actors.Retire(first.handle);Check(actors.Inspect(replacement.handle).state==Actors::State::Live,"stale handle retired new incarnation");
 		auto native=entity_list.npcs.begin()->second;auto native_id=native->id;
-		delete native;entity_list.npcs.clear();
+		delete native;entity_list.npcs.clear();entity_list.mobs.clear();
 		Check(actors.Inspect(replacement.handle).state==Actors::State::Absent,"external removal not reconciled");
 		entity_list.next=native_id;
 		auto other=d;other.key="other";other.display_name="Other_Actor";auto unrelated=actors.Create(other);
@@ -73,7 +73,25 @@ int main() {
 		registration_callback=[] { Clear(); };
 		Check(actors.Create(d).outcome==Actors::Outcome::Refused && NPC::allocations==0,"removed registration not refused");registration_callback={};
 		Check(actors.Create(d).outcome==Actors::Outcome::Created,"removed registration left key permanently busy");
-		loaded_zone.End();Clear();Check(NPC::allocations==0,"policy fixture leaked native owner");
+		loaded_zone.End();Clear();loaded_zone.Begin();
+		for(auto fault:{RegistrationFault::BeforeIndexes,RegistrationFault::BetweenIndexes,RegistrationFault::Callback}) {
+			registration_fault=fault;bool failed=false;
+			try { actors.Create(d); } catch(const std::runtime_error &) { failed=true; }
+			Check(failed,"registration fault was swallowed");
+			registration_fault=RegistrationFault::None;
+			if(fault==RegistrationFault::Callback) {
+				Check(NPC::allocations==1 && entity_list.npcs.size()==1 && entity_list.mobs.size()==1,"callback transfer lost native custody");
+				ProcessRemoval();
+			}
+			Check(NPC::allocations==0 && entity_list.npcs.empty() && entity_list.mobs.empty(),"registration fault leaked or left partial indexes");
+			Check(actors.Create(d).outcome==Actors::Outcome::Created,"registration fault left key busy");
+			Clear();
+		}
+		// Existing raw-pointer callers continue to transfer ownership through the same native registration.
+		auto *type=new NPCType{};type->current_hp=1;
+		auto raw=new NPC(type,nullptr,glm::vec4(0,0,0,0),GravityBehavior::Water);raw->GiveNPCTypeData(type);
+		entity_list.AddNPC(raw,false,false);Check(NPC::allocations==1 && entity_list.mobs.size()==1,"ordinary raw registration compatibility failed");
+		Clear();loaded_zone.End();Check(NPC::allocations==0,"policy fixture leaked native owner");
 		std::cout<<"actor lifecycle policy PASS (synthetic native shim; runtime pending)\n";return 0;
 	} catch(const std::exception &e) { std::cerr<<e.what()<<"\n"; Clear();return 1; }
 }

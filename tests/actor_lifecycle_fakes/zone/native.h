@@ -22,6 +22,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <stdexcept>
 #include <unordered_map>
 namespace glm { struct vec4 { float x,y,z,w; vec4(float x,float y,float z,float w):x(x),y(y),z(z),w(w){} }; }
 enum class GravityBehavior { Water };
@@ -62,13 +63,29 @@ private:
 	uint64_t actor_incarnation_marker=0,actor_native_ticks=0;
 	const NPCType *type; NPCType *owned=nullptr;
 };
+enum class RegistrationFault { None, BeforeIndexes, BetweenIndexes, Callback };
+inline RegistrationFault registration_fault = RegistrationFault::None;
 class EntityList {
 public:
-	std::unordered_map<uint16_t,NPC*> npcs;
+	std::unordered_map<uint16_t,NPC*> npcs, mobs;
 	uint16_t next=1;
 	NPC *GetNPCByID(uint16_t id) { auto it=npcs.find(id);return it==npcs.end()?nullptr:it->second; }
 	const auto &GetNPCList() { return npcs; }
-	const auto &GetMobList() { return npcs; }
-	void AddNPC(NPC *npc,bool,bool) { npc->id=next++;npc->name=npc->type_name(); npc->clean=npc->name; for(char &c:npc->clean) if(c=='_') c=' '; npcs.emplace(npc->id,npc); if(registration_callback) registration_callback(); }
+	const auto &GetMobList() { return mobs; }
+	void AddNPC(NPC *npc,bool send,bool queue) { AddNPC(std::unique_ptr<NPC>(npc),send,queue); }
+	void AddNPC(std::unique_ptr<NPC> owned,bool,bool) {
+		owned->id=next++;
+		if (registration_fault==RegistrationFault::BeforeIndexes) throw std::runtime_error("pre-index fault");
+		const auto id=owned->id;
+		try {
+			npcs.emplace(id,owned.get());
+			if (registration_fault==RegistrationFault::BetweenIndexes) throw std::runtime_error("partial-index fault");
+			mobs.emplace(id,owned.get());
+		} catch (...) { npcs.erase(id);throw; }
+		auto *npc=owned.release();
+		npc->name=npc->type_name();npc->clean=npc->name;for(char &c:npc->clean) if(c=='_') c=' ';
+		if (registration_fault==RegistrationFault::Callback) throw std::runtime_error("callback fault");
+		if(registration_callback) registration_callback();
+	}
 };
 extern EntityList entity_list;
