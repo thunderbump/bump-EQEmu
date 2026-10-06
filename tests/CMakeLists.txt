@@ -57,3 +57,10 @@ endif()
 
 set(EXECUTABLE_OUTPUT_PATH ${PROJECT_BINARY_DIR}/bin)
 set_property(TARGET tests PROPERTY FOLDER executables/tests)
+
+# Policy-only shim builds the maintained module, without linking a game server or fixture DB.
+add_executable(tests_actor_lifecycle_policy EXCLUDE_FROM_ALL actor_lifecycle_policy.cpp ../zone/actor_lifecycle.cpp)
+target_include_directories(tests_actor_lifecycle_policy BEFORE PRIVATE actor_lifecycle_fakes ..)
+
+add_executable(tests_actor_lifecycle_command_controls EXCLUDE_FROM_ALL actor_lifecycle_command_controls.cpp ../zone/cli/tests/actor_lifecycle_command.cpp)
+target_include_directories(tests_actor_lifecycle_command_controls PRIVATE ..)

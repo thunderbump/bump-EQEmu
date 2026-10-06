@@ -570,6 +570,7 @@ void NPC::SetTarget(Mob* mob) {
 
 bool NPC::Process()
 {
+	if (actor_incarnation_marker && !p_depop) ++actor_native_ticks;
 	if (p_depop)
 	{
 		Mob* owner = entity_list.GetMob(ownerid);

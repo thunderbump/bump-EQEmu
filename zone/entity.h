@@ -134,8 +134,11 @@ private:
 	time_t spawn_timestamp;
 };
 
+class ActorIdReuseScope;
+
 class EntityList
 {
+	friend class ActorIdReuseScope;
 public:
 	struct Area {
 		int id;

@@ -20,6 +20,7 @@
 #include "common/types.h"
 
 #include <string>
+#include <map>
 
 class Client;
 class Seperator;
@@ -218,3 +219,5 @@ void command_zoneshutdown(Client *c, const Seperator *sep);
 void command_zonevariable(Client *c, const Seperator *sep);
 void command_zsave(Client *c, const Seperator *sep);
 void command_bot(Client*c, const Seperator *sep);
+
+void command_actor(Client *c, const Seperator *sep);

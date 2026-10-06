@@ -1,0 +1,47 @@
+/*	EQEmu: EQEmulator
+
+	Copyright (C) 2001-2026 EQEmu Development Team
+
+	This program is free software; you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation; either version 3 of the License, or
+	(at your option) any later version.
+
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with this program. If not, see <http://www.gnu.org/licenses/>.
+*/
+#include "zone/cli/tests/actor_lifecycle_scenario.h"
+#include <iostream>
+#include <stdexcept>
+void Check(bool ok) { if(!ok) throw std::runtime_error("actor command control failed"); }
+int main() {
+	try {
+		ActorScenario::Control c;
+		char executable[]="zone", command[]="tests:actor-lifecycle", assertion[]="--force-failure-after-create", cancel[]="--wait-for-cancellation-after-create", unknown[]="--zone=other";
+		char *args[]={executable,command,assertion,cancel};
+		Check(ActorScenario::Selected(2,args) && ActorScenario::Arguments(2,args,c) && c==ActorScenario::Control::None);
+		Check(ActorScenario::Arguments(3,args,c) && c==ActorScenario::Control::Assertion);
+		Check(!ActorScenario::Arguments(4,args,c));args[2]=cancel;
+		Check(ActorScenario::Arguments(3,args,c) && c==ActorScenario::Control::Cancel);args[2]=unknown;
+		Check(!ActorScenario::Arguments(3,args,c));
+		ActorScenario::Result r;Check(r.ExitCode()==2);r.status="passed";r.native_cleanup=true;Check(r.ExitCode()==2);
+		r.completed_cases={"create-duplicate","name-collision","native-processing","retire-recreate","external-removal-id-reuse","save-fresh-zone"};
+		r.cycles=3;r.ticks=3;r.id_reuse=true;r.save_restore=true;Check(r.ExitCode()==0);
+		std::cout<<"positive "<<r.ExitCode()<<" "<<r.Json()<<"\n";
+		r.control=ActorScenario::Control::Assertion;Check(r.ExitCode()==2);r.status="assertion-failed";Check(r.ExitCode()==1);
+		std::cout<<"assertion "<<r.ExitCode()<<" "<<r.Json()<<"\n";
+		r.control=ActorScenario::Control::Cancel;r.status="cancelled";Check(r.ExitCode()==2);
+		std::cout<<"cancel "<<r.ExitCode()<<" "<<r.Json()<<"\n";
+		r.control=ActorScenario::Control::None;r.status="refused";Check(r.ExitCode()==2);
+		std::cout<<"refused "<<r.ExitCode()<<" "<<r.Json()<<"\n";
+		r.status="assertion-failed";r.native_cleanup=false;Check(r.ExitCode()==2);
+		std::cout<<"unclean "<<r.ExitCode()<<" "<<r.Json()<<"\n";
+		r.native_cleanup=true;r.status="passed";r.completed_cases[0]=r.completed_cases[1];Check(r.ExitCode()==2);
+		return 0;
+	} catch(const std::exception &e) {std::cerr<<e.what()<<"\n";return 1;}
+}
