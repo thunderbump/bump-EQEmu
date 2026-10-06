@@ -480,6 +480,7 @@ static int ZoneMain(int argc, char **argv)
 		EQEmuLogSys::Instance()->CloseFileLogs(); safe_delete(QServ); safe_delete(Config);
 		actor_result.native_cleanup = !zone && entity_list.GetMobList().empty() && entity_list.GetNPCList().empty();
 		actor_result.shutdown += std::chrono::duration<double>(std::chrono::steady_clock::now() - shutdown_start).count();
+		actor_result.Finalize(actor_interrupted != 0);
 		return actor_result.ExitCode();
 	}
 
@@ -791,6 +792,16 @@ int main(int argc, char **argv)
 		actor_result.status = actor_interrupted ? "cancelled" : "refused";
 		actor_result.boot = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
 	}
+	// Commit one completion after cleanup. Pending/observed cancellation remains non-pass.
+#ifndef _WINDOWS
+	sigset_t completion_signals, pending;
+	sigemptyset(&completion_signals); sigaddset(&completion_signals, SIGINT); sigaddset(&completion_signals, SIGTERM);
+	if (sigprocmask(SIG_BLOCK, &completion_signals, nullptr) != 0) { actor_result.native_cleanup = false; }
+	sigpending(&pending);
+	actor_result.Finalize(actor_interrupted || sigismember(&pending, SIGINT) || sigismember(&pending, SIGTERM));
+#else
+	actor_result.Finalize(actor_interrupted != 0);
+#endif
 	std::cout << "EQEMU_ACTOR_RESULT " << actor_result.Json() << std::endl;
 	return actor_result.ExitCode();
 }

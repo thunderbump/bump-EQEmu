@@ -33,6 +33,11 @@ bool Arguments(int argc, char **argv, Control &control)
 	else return false;
 	return true;
 }
+void Result::Finalize(bool interrupted)
+{
+	if (interrupted) status = "cancelled";
+	else if (!native_cleanup) status = "refused";
+}
 int Result::ExitCode() const
 {
 	if (!native_cleanup) return 2;

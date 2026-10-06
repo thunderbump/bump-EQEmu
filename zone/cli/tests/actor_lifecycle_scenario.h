@@ -51,6 +51,7 @@ struct Result {
 	unsigned long long ticks = 0;
 	bool id_reuse = false, save_restore = false, native_cleanup = false;
 	double boot = 0, processing = 0, shutdown = 0;
+	void Finalize(bool interrupted);
 	int ExitCode() const;
 	std::string Json() const;
 };
