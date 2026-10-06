@@ -17,12 +17,32 @@
 */
 #pragma once
 #include <csignal>
+#include <functional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
 // Fixed standalone actor command; main owns initialization and final orderly shutdown.
 namespace ActorScenario {
 enum class Control { None, Assertion, Cancel };
+// Private scenario scope; the setter seam lets cheap controls verify restoration on every exit.
+class StateSavingScope {
+public:
+	StateSavingScope(std::function<bool(bool)> setter, bool original, bool &restored)
+		: setter(std::move(setter)), original(original), restored(restored)
+	{
+		restored = false;
+		if (!this->setter(true)) throw std::runtime_error("cannot enable native state-saving proof");
+	}
+	~StateSavingScope()
+	{
+		try { restored = setter(original); } catch (...) { restored = false; }
+	}
+private:
+	std::function<bool(bool)> setter;
+	bool original;
+	bool &restored;
+};
 struct Result {
 	Control control = Control::None;
 	std::string status = "refused";

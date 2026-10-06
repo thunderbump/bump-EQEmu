@@ -21,6 +21,17 @@
 void Check(bool ok) { if(!ok) throw std::runtime_error("actor command control failed"); }
 int main() {
 	try {
+		// Scope success, assertion unwinding and cancellation all restore the false baseline.
+		for (int mode=0; mode<3; ++mode) {
+			bool enabled=false, restored=false;
+			try {
+				ActorScenario::StateSavingScope scope([&](bool value) { enabled=value; return true; }, enabled, restored);
+				Check(enabled && !restored);
+				if (mode==1) throw std::runtime_error("forced assertion");
+				if (mode==2) throw std::runtime_error("observed cancellation");
+			} catch (const std::runtime_error &) { Check(mode!=0); }
+			Check(!enabled && restored);
+		}
 		ActorScenario::Control c;
 		char executable[]="zone", command[]="tests:actor-lifecycle", assertion[]="--force-failure-after-create", cancel[]="--wait-for-cancellation-after-create", unknown[]="--zone=other";
 		char *args[]={executable,command,assertion,cancel};

@@ -113,10 +113,11 @@ void Run(Result &r, volatile std::sig_atomic_t &interrupted)
 	const auto start = Clock::now();
 	std::vector<Actors::Handle> owned;
 	double boot_seconds = 0;
+	bool state_rule_restored = true;
 	auto boot = [&] { const auto began = Clock::now(); Boot(); boot_seconds += std::chrono::duration<double>(Clock::now() - began).count(); };
 	try {
 		Setup(!interrupted, "cancelled");
-		Setup(!RuleB(Zone, UseZoneController) && !RuleB(Bots, Enabled) && RuleB(Zone, StateSavingOnShutdown), "disposable fixture rules missing");
+		Setup(!RuleB(Zone, UseZoneController) && !RuleB(Bots, Enabled) && !RuleB(Zone, StateSavingOnShutdown), "disposable fixture rules missing");
 		auto spawns = content_db.QueryDatabase("SELECT COUNT(*) FROM spawn2 WHERE zone='poknowledge'");
 		Setup(spawns.Success() && spawns.RowCount() == 1 && std::string((*spawns.begin())[0]) == "0", "ambient fixture spawns not empty");
 		auto state = database.QueryDatabase("SELECT COUNT(*) FROM zone_state_spawns WHERE zone_id=202 AND instance_id=0");
@@ -197,6 +198,12 @@ void Run(Result &r, volatile std::sig_atomic_t &interrupted)
 			Require(entity_list.GetNPCList().empty(), "cycle native cleanup incomplete");
 			++r.cycles;
 		}
+		// Scope state saving to this proof only. Rebooting this same zone retains its already-active ruleset;
+		// verify after boot as well, so an unexpected native rules reload cannot masquerade as restore.
+		const int proof_ruleset = RuleManager::Instance()->GetActiveRulesetID();
+		StateSavingScope saving([](bool enabled) {
+			return RuleManager::Instance()->SetRule("Zone:StateSavingOnShutdown", enabled ? "true" : "false");
+		}, RuleB(Zone, StateSavingOnShutdown), state_rule_restored);
 		// Save one real ordinary NPC with deliberately nondefault positive HP and a persisted value.
 		auto created = actors.Create(definition);
 		if (created.outcome == Actors::Outcome::Created) owned.push_back(created.handle);
@@ -211,6 +218,7 @@ void Run(Result &r, volatile std::sig_atomic_t &interrupted)
 		zone->Shutdown(true);
 		r.shutdown += std::chrono::duration<double>(Clock::now() - reboot_shutdown).count();
 		Setup(!zone, "native reboot shutdown failed"); boot();
+		Setup(RuleManager::Instance()->GetActiveRulesetID() == proof_ruleset && RuleB(Zone, StateSavingOnShutdown), "native reboot changed state-saving proof rules");
 		Require(actors.Inspect(created.handle).state == Actors::State::Absent && !ActorNPC(definition), "actor restored across zone lifetime");
 		Require(entity_list.GetNPCList().size() == 1, "ordinary saved NPC not restored");
 		ordinary = entity_list.GetNPCList().begin()->second;
@@ -225,6 +233,9 @@ void Run(Result &r, volatile std::sig_atomic_t &interrupted)
 		r.status = interrupted ? "cancelled" : failure.assertion ? "assertion-failed" : "refused";
 	} catch (const std::exception &failure) {
 		std::cerr << "Actor scenario infrastructure: " << failure.what() << std::endl; r.status = "refused";
+	}
+	if (!state_rule_restored || RuleB(Zone, StateSavingOnShutdown)) {
+		std::cerr << "Actor state-saving rule restoration refused" << std::endl; r.status = "refused";
 	}
 	// Also run normal retirement after an assertion or cancellation. Final zone teardown stays in main.
 	try {
