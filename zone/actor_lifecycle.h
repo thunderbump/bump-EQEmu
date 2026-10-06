@@ -57,7 +57,6 @@ struct Snapshot {
 	uint16_t race = 0;
 	uint8_t gender = 0, texture = 0, class_id = 0, level = 0;
 	int64_t health = 0;
-	uint64_t native_ticks = 0;
 };
 struct Result {
 	Outcome outcome = Outcome::Refused;

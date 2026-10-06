@@ -73,7 +73,6 @@ struct Lifecycle::Impl {
 		s.display_name = npc->GetCleanName();
 		s.race = npc->GetRace(); s.gender = npc->GetGender(); s.texture = npc->GetTexture();
 		s.class_id = npc->GetClass(); s.level = npc->GetLevel(); s.health = npc->GetHP();
-		s.native_ticks = npc->actor_native_ticks;
 		return s;
 	}
 };

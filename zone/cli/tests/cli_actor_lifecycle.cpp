@@ -67,6 +67,12 @@ private:
 	std::queue<uint16> original;
 };
 
+// Backing diagnostics belong only to this native scenario, outside the public actor Snapshot.
+class ActorLifecycleScenario {
+public:
+	static uint64_t NativeTicks(const NPC *npc) { return npc->actor_native_ticks; }
+};
+
 namespace ActorScenario {
 namespace {
 using Clock = std::chrono::steady_clock;
@@ -149,9 +155,9 @@ void Run(Result &r, volatile std::sig_atomic_t &interrupted)
 			Case(r, "create-duplicate");
 			NewSpawn_Struct spawn{}; native->FillSpawnStruct(&spawn, nullptr);
 			Require(spawn.spawn.race == definition.race && spawn.spawn.gender == definition.gender && spawn.spawn.level == definition.level, "native spawn presentation mismatch");
-			const auto before = actors.Inspect(created.handle).native_ticks;
+			const auto before = ActorLifecycleScenario::NativeTicks(native);
 			native->Stun(1); std::this_thread::sleep_for(std::chrono::milliseconds(5)); Tick(interrupted);
-			const auto after = actors.Inspect(created.handle).native_ticks;
+			const auto after = ActorLifecycleScenario::NativeTicks(native);
 			Require(after > before && !native->IsStunned(), "native NPC processing did not advance"); r.ticks += after - before;
 			Case(r, "native-processing");
 			const auto retired_id = native->GetID();
@@ -225,7 +231,7 @@ void Run(Result &r, volatile std::sig_atomic_t &interrupted)
 		Require(ordinary->GetNPCTypeID() == 501 && ordinary->GetHP() == 23 && ordinary->GetEntityVariable("actor_scenario_positive") == "saved", "ordinary state not genuinely restored");
 		auto restarted = actors.Create(definition);
 		if (restarted.outcome == Actors::Outcome::Created) owned.push_back(restarted.handle);
-		Require(restarted.outcome == Actors::Outcome::Created && restarted.handle != created.handle && restarted.snapshot.definition == definition && restarted.snapshot.health == 100 && restarted.snapshot.native_ticks == 0, "fresh actor restored progress or lost identity");
+		Require(restarted.outcome == Actors::Outcome::Created && restarted.handle != created.handle && restarted.snapshot.definition == definition && restarted.snapshot.health == 100 && ActorLifecycleScenario::NativeTicks(ActorNPC(definition)) == 0, "fresh actor restored progress or lost identity");
 		actors.Retire(created.handle); Require(actors.Inspect(restarted.handle).state == Actors::State::Live, "old zone handle affected fresh actor");
 		r.save_restore = true; Case(r, "save-fresh-zone"); r.status = "passed";
 	} catch (const Failure &failure) {
