@@ -166,7 +166,8 @@ void Run(Result &r, volatile std::sig_atomic_t &interrupted)
 			entity_list.ScanCloseMobs(observer);
 			quest_manager.settimerMS("actor-owned-timer", 60000, native);
 			Require(observer->GetTarget() == native && observer->CheckAggro(native) &&
-				!quest_manager.GetTimers(native).empty() && MobMovementManager::Get().IsRegistered(native), "native owned references were not established");
+				!quest_manager.GetTimers(native).empty() && MobMovementManager::Get().IsRegistered(native) &&
+				entity_list.GetCloseMobList(observer).count(retired_id) == 1, "native owned references were not established");
 			Require(actors.Retire(created.handle).outcome == Actors::Outcome::RetirementRequested && actors.Inspect(created.handle).state == Actors::State::Retiring, "retirement not requested");
 			Require(actors.Create(definition).outcome == Actors::Outcome::Busy, "retiring key accepted recreation");
 			actors.Retire(created.handle); Tick(interrupted);
