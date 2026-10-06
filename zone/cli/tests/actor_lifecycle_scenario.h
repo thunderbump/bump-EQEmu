@@ -32,8 +32,15 @@ public:
 		: setter(std::move(setter)), original(original), restored(restored)
 	{
 		restored = false;
-		if (!this->setter(true)) throw std::runtime_error("cannot enable native state-saving proof");
+		try {
+			if (!this->setter(true)) throw std::runtime_error("cannot enable native state-saving proof");
+		} catch (...) {
+			try { restored = this->setter(original); } catch (...) { restored = false; }
+			throw;
+		}
 	}
+	StateSavingScope(const StateSavingScope &) = delete;
+	StateSavingScope &operator=(const StateSavingScope &) = delete;
 	~StateSavingScope()
 	{
 		try { restored = setter(original); } catch (...) { restored = false; }

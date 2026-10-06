@@ -795,9 +795,9 @@ int main(int argc, char **argv)
 	// Commit one completion after cleanup. Pending/observed cancellation remains non-pass.
 #ifndef _WINDOWS
 	sigset_t completion_signals, pending;
-	sigemptyset(&completion_signals); sigaddset(&completion_signals, SIGINT); sigaddset(&completion_signals, SIGTERM);
+	sigemptyset(&completion_signals); sigemptyset(&pending); sigaddset(&completion_signals, SIGINT); sigaddset(&completion_signals, SIGTERM);
 	if (sigprocmask(SIG_BLOCK, &completion_signals, nullptr) != 0) { actor_result.native_cleanup = false; }
-	sigpending(&pending);
+	if (sigpending(&pending) != 0) actor_result.native_cleanup = false;
 	actor_result.Finalize(actor_interrupted || sigismember(&pending, SIGINT) || sigismember(&pending, SIGTERM));
 #else
 	actor_result.Finalize(actor_interrupted != 0);

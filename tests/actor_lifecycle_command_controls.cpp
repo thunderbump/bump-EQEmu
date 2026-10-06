@@ -32,6 +32,11 @@ int main() {
 			} catch (const std::runtime_error &) { Check(mode!=0); }
 			Check(!enabled && restored);
 		}
+		bool restored_after_fault=false, fault_rule=false;
+		try {
+			ActorScenario::StateSavingScope scope([&](bool enabled) { fault_rule=enabled;return !enabled; }, false, restored_after_fault);
+			Check(false);
+		} catch(const std::runtime_error &) { Check(restored_after_fault && !fault_rule); }
 		ActorScenario::Control c;
 		char executable[]="zone", command[]="tests:actor-lifecycle", assertion[]="--force-failure-after-create", cancel[]="--wait-for-cancellation-after-create", unknown[]="--zone=other";
 		char *args[]={executable,command,assertion,cancel};
