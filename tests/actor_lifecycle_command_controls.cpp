@@ -18,6 +18,8 @@
 #include "zone/cli/tests/actor_lifecycle_scenario.h"
 #include <iostream>
 #include <stdexcept>
+static volatile std::sig_atomic_t observed_cleanup_signal = 0;
+void ObserveCleanupSignal(int signal) { observed_cleanup_signal = signal; }
 void Check(bool ok) { if(!ok) throw std::runtime_error("actor command control failed"); }
 int main() {
 	try {
@@ -32,11 +34,12 @@ int main() {
 			} catch (const std::runtime_error &) { Check(mode!=0); }
 			Check(!enabled && restored);
 		}
-		bool restored_after_fault=false, fault_rule=false;
+		bool restored_after_fault=false, fault_rule=false, setup_returned=false;
 		try {
 			ActorScenario::StateSavingScope scope([&](bool enabled) { fault_rule=enabled;return !enabled; }, false, restored_after_fault);
-			Check(false);
+			setup_returned=true;
 		} catch(const std::runtime_error &) { Check(restored_after_fault && !fault_rule); }
+		Check(!setup_returned);
 		ActorScenario::Control c;
 		char executable[]="zone", command[]="tests:actor-lifecycle", assertion[]="--force-failure-after-create", cancel[]="--wait-for-cancellation-after-create", unknown[]="--zone=other";
 		char *args[]={executable,command,assertion,cancel};
@@ -48,12 +51,14 @@ int main() {
 		ActorScenario::Result r;Check(r.ExitCode()==2);r.status="passed";r.native_cleanup=true;Check(r.ExitCode()==2);
 		r.completed_cases={"create-duplicate","name-collision","native-processing","retire-recreate","external-removal-id-reuse","save-fresh-zone"};
 		r.cycles=3;r.ticks=3;r.id_reuse=true;r.save_restore=true;Check(r.ExitCode()==0);
-		auto late_success=r; late_success.Finalize(true);
+		const auto prior_signal=std::signal(SIGTERM,ObserveCleanupSignal);Check(prior_signal!=SIG_ERR);
+		// Deliver a real signal at this synthetic command's cleanup/finalization seam.
+		auto late_success=r;Check(std::raise(SIGTERM)==0);late_success.Finalize(observed_cleanup_signal!=0);
 		Check(late_success.status=="cancelled" && late_success.native_cleanup && late_success.ExitCode()==2);
 		std::cout<<"late-success "<<late_success.ExitCode()<<" "<<late_success.Json()<<"\n";
 		std::cout<<"positive "<<r.ExitCode()<<" "<<r.Json()<<"\n";
 		r.control=ActorScenario::Control::Assertion;Check(r.ExitCode()==2);r.status="assertion-failed";Check(r.ExitCode()==1);
-		auto late_assertion=r; late_assertion.Finalize(true);
+		observed_cleanup_signal=0;auto late_assertion=r;Check(std::raise(SIGTERM)==0);late_assertion.Finalize(observed_cleanup_signal!=0);
 		Check(late_assertion.status=="cancelled" && late_assertion.native_cleanup && late_assertion.ExitCode()==2);
 		std::cout<<"late-assertion "<<late_assertion.ExitCode()<<" "<<late_assertion.Json()<<"\n";
 		std::cout<<"assertion "<<r.ExitCode()<<" "<<r.Json()<<"\n";
@@ -62,9 +67,10 @@ int main() {
 		r.control=ActorScenario::Control::None;r.status="refused";Check(r.ExitCode()==2);
 		std::cout<<"refused "<<r.ExitCode()<<" "<<r.Json()<<"\n";
 		r.status="assertion-failed";r.native_cleanup=false;Check(r.ExitCode()==2);
-		auto late_unclean=r;late_unclean.Finalize(true);Check(late_unclean.status=="cancelled" && !late_unclean.native_cleanup && late_unclean.ExitCode()==2);
+		auto late_unclean=r;late_unclean.Finalize(observed_cleanup_signal!=0);Check(late_unclean.status=="cancelled" && !late_unclean.native_cleanup && late_unclean.ExitCode()==2);
 		std::cout<<"unclean "<<r.ExitCode()<<" "<<r.Json()<<"\n";
 		r.native_cleanup=true;r.status="passed";r.completed_cases[0]=r.completed_cases[1];Check(r.ExitCode()==2);
+		std::signal(SIGTERM,prior_signal);
 		return 0;
 	} catch(const std::exception &e) {std::cerr<<e.what()<<"\n";return 1;}
 }
