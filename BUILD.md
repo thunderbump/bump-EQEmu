@@ -38,6 +38,33 @@ Similarly to Windows running CMake on Linux is simple it just uses a different g
 	cd build
 	cmake -G "Unix Makefiles" -DEQEMU_BUILD_TESTS=ON -DEQEMU_BUILD_LOGIN=ON ..
 
+### Bootstrap Rust bridge (zone)
+
+The zone target now links the bootstrap `actor-bridge` static library from
+`rust/actors`. This integration targets `x86_64-unknown-linux-gnu` with the
+repository's pinned Rust toolchain and locked dependencies. Cargo uses
+`--release --frozen --offline`; it cannot fetch dependencies or update the lockfile.
+
+Rust execution (including build scripts and proc macros) belongs only in the
+isolated validator guest, not on the host. The guest must supply its pinned
+Cargo via `CARGO` or `PATH`, and its pinned `RUSTC`, `RUSTDOC`, `CARGO_HOME` and
+offline dependency environment. CMake does not execute Cargo during configure.
+The build uses the guest's `CARGO_TARGET_DIR` when set, otherwise a `rust-target`
+directory under the zone build directory. Use an out-of-source build; Cargo
+outputs inside the source tree are rejected. No Rust toolchain or dependencies
+are installed by CMake.
+
+On every zone startup, including utility invocations, a scalar C ABI call to
+`eqemu_rust_bridge_v1` must return 42 or startup fails. This live reference keeps
+the bridge in the actual zone executable under linker dead stripping. It is
+only a bootstrap **link check**, not an actor control interface; it adds no
+actor policy, NPC hooks or gameplay behavior. Successful startup is silent and
+continues the existing native path without a runtime feature flag.
+
+Full enabled Rust checks and exact-zone symbol/hash qualification, native
+utilities, fresh-consumer checks and cleanup remain validator responsibilities;
+this integration alone is not evidence that those checks passed.
+
 ### Building
 
 ##### Windows

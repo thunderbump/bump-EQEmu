@@ -59,6 +59,11 @@
 
 #include <chrono>
 #include <csignal>
+#include <cstdint>
+#include <cstdio>
+
+// Scalar bootstrap link check, not an actor control interface.
+extern "C" std::uint32_t eqemu_rust_bridge_v1();
 
 #ifdef _CRTDBG_MAP_ALLOC
 #undef new
@@ -98,6 +103,12 @@ extern void MapOpcodes();
 bool CheckForCompatibleQuestPlugins();
 int main(int argc, char **argv)
 {
+	// A live call keeps the bridge in the final zone even with dead stripping.
+	if (eqemu_rust_bridge_v1() != 42) {
+		std::fputs("Rust bootstrap bridge link check failed (expected 42)\n", stderr);
+		return 1;
+	}
+
 	RegisterExecutablePlatform(ExePlatformZone);
 	EQEmuLogSys::Instance()->LoadLogSettingsDefaults();
 
