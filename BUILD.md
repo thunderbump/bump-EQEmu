@@ -40,22 +40,27 @@ Similarly to Windows running CMake on Linux is simple it just uses a different g
 
 ### Bootstrap Rust bridge (zone)
 
-The zone target now links the bootstrap `actor-bridge` static library from
-`rust/actors`. This integration targets `x86_64-unknown-linux-gnu` with the
-repository's pinned Rust toolchain and locked dependencies. Cargo uses
-`--release --frozen --offline`; it cannot fetch dependencies or update the lockfile.
+On native x86-64 Linux builds, the zone target links the bootstrap
+`actor-bridge` static library from `rust/actors`. This integration targets `x86_64-unknown-linux-gnu` with the
+repository's pinned Rust toolchain and locked dependencies. Other platforms
+(including Windows/MSVC) and cross builds retain the native-only zone path.
+Cargo uses `--release --frozen --offline`; it cannot fetch dependencies or update the lockfile.
 
 Rust execution (including build scripts and proc macros) belongs only in the
 isolated validator guest, not on the host. The guest must supply its pinned
 Cargo via `CARGO` or `PATH`, and its pinned `RUSTC`, `RUSTDOC`, `CARGO_HOME` and
 offline dependency environment. CMake does not execute Cargo during configure.
-The build uses the guest's `CARGO_TARGET_DIR` when set, otherwise a `rust-target`
-directory under the zone build directory. Use an out-of-source build; Cargo
-outputs inside the source tree are rejected. No Rust toolchain or dependencies
-are installed by CMake.
+The build uses the guest's `CARGO_TARGET_DIR` when set. Otherwise it uses
+`../.eqemu-rust-target/<hash-of-cmake-build-path>` beside the source tree, so
+`cmake -S . -B build` and the checked-in presets keep working without placing
+Cargo outputs in source. The source parent must be writable, or supply an
+external `CARGO_TARGET_DIR`. Cargo outputs inside the source tree are rejected.
+No Rust toolchain or dependencies are installed by CMake. The owner of the
+build must remove its external Cargo target directory during cleanup; CMake's
+clean target does not remove Cargo's retained incremental state.
 
-On every zone startup, including utility invocations, a scalar C ABI call to
-`eqemu_rust_bridge_v1` must return 42 or startup fails. This live reference keeps
+On every bridge-enabled zone startup, including utility invocations, a scalar
+C ABI call to `eqemu_rust_bridge_v1` must return 42 or startup fails. This live reference keeps
 the bridge in the actual zone executable under linker dead stripping. It is
 only a bootstrap **link check**, not an actor control interface; it adds no
 actor policy, NPC hooks or gameplay behavior. Successful startup is silent and

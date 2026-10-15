@@ -673,52 +673,8 @@ set_property(TARGET gm_commands_zone PROPERTY FOLDER libraries)
 
 add_executable(zone ${zone_sources} ${zone_headers})
 
-# Bootstrap link qualification only; this is not an actor control interface.
-# Use the guest's Cargo selection and inherit its pinned RUSTC/RUSTDOC,
-# CARGO_HOME and offline dependency environment. Never execute Cargo at configure.
-if(DEFINED ENV{CARGO} AND NOT "$ENV{CARGO}" STREQUAL "")
-    set(actor_cargo "$ENV{CARGO}")
-else()
-    find_program(actor_cargo NAMES cargo REQUIRED)
-endif()
-
-if(DEFINED ENV{CARGO_TARGET_DIR} AND NOT "$ENV{CARGO_TARGET_DIR}" STREQUAL "")
-    set(actor_target_dir "$ENV{CARGO_TARGET_DIR}")
-else()
-    set(actor_target_dir "${CMAKE_CURRENT_BINARY_DIR}/rust-target")
-endif()
-file(REAL_PATH "${actor_target_dir}" actor_target_dir BASE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
-file(REAL_PATH "${CMAKE_SOURCE_DIR}" actor_source_dir)
-string(FIND "${actor_target_dir}/" "${actor_source_dir}/" actor_target_in_source)
-if(actor_target_in_source EQUAL 0)
-    message(FATAL_ERROR "actor-bridge requires a Cargo target directory outside the source tree")
-endif()
-
-set(actor_archive "${actor_target_dir}/x86_64-unknown-linux-gnu/release/libactor_bridge.a")
-# Always let Cargo check its own inputs; its incremental build also handles
-# changes to build.rs, generated CXX code and the locked dependency graph.
-add_custom_target(actor_bridge_build
-    COMMAND "${CMAKE_COMMAND}" -E env
-        "CARGO_TARGET_DIR=${actor_target_dir}"
-        "CARGO_NET_OFFLINE=true"
-        "${actor_cargo}" build
-        --manifest-path "${CMAKE_SOURCE_DIR}/rust/actors/Cargo.toml"
-        --package actor-bridge --release --frozen --offline
-        --target x86_64-unknown-linux-gnu
-    BYPRODUCTS "${actor_archive}"
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    COMMENT "Building the bootstrap Rust bridge (offline, frozen)"
-    VERBATIM
-)
-add_library(actor_bridge STATIC IMPORTED)
-set_target_properties(actor_bridge PROPERTIES IMPORTED_LOCATION "${actor_archive}")
-add_dependencies(actor_bridge actor_bridge_build)
-
-# Native libraries required by the pinned Linux Rust staticlib.
-find_package(Threads REQUIRED)
-set_property(TARGET actor_bridge PROPERTY INTERFACE_LINK_LIBRARIES
-    "Threads::Threads;${CMAKE_DL_LIBS};m;rt;util")
-target_link_libraries(zone PRIVATE actor_bridge)
+include("${CMAKE_SOURCE_DIR}/cmake/ActorBridge.cmake")
+eqemu_link_actor_bridge(zone)
 
 install(TARGETS zone RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
 
