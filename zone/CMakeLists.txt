@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
 
 set(zone_sources
+    actor_lifecycle.cpp
+    cli/tests/cli_actor_lifecycle.cpp
+    cli/tests/actor_lifecycle_command.cpp
     aa.cpp
     aa_ability.cpp
     aggro.cpp
@@ -117,6 +120,8 @@ set(zone_sources
 )
 
 set(zone_headers
+    actor_lifecycle.h
+    cli/tests/actor_lifecycle_scenario.h
     aa.h
     aa_ability.h
     aggromanager.h
@@ -368,6 +373,7 @@ set(gm_command_sources
     bot_commands/bot_track.cpp
     bot_commands/bot_view_combos.cpp
     command.cpp
+    gm_commands/actor.cpp
     gm_commands/acceptrules.cpp
     gm_commands/advnpcspawn.cpp
     gm_commands/aggrozone.cpp

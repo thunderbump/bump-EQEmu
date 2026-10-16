@@ -725,6 +725,11 @@ void MobMovementManager::RemoveMob(Mob *mob)
 	_impl->Entries.erase(mob);
 }
 
+bool MobMovementManager::IsRegistered(Mob *mob) const
+{
+	return _impl->Entries.contains(mob);
+}
+
 void MobMovementManager::AddClient(Client *client)
 {
 	_impl->Clients.push_back(client);

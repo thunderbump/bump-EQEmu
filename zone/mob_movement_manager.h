@@ -61,6 +61,7 @@ public:
 	void Process();
 	void AddMob(Mob *mob);
 	void RemoveMob(Mob *mob);
+	bool IsRegistered(Mob *mob) const;
 	void AddClient(Client *client);
 	void RemoveClient(Client *client);
 

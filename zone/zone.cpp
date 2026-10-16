@@ -16,6 +16,7 @@
 	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 #include "zone.h"
+#include "actor_lifecycle.h"
 
 #include "common/data_verification.h"
 #include "common/eqemu_logsys.h"
@@ -959,6 +960,7 @@ Zone::Zone(uint32 in_zoneid, uint32 in_instanceid, const char* in_short_name)
   m_safe_points(0.0f, 0.0f, 0.0f, 0.0f),
   m_graveyard(0.0f, 0.0f, 0.0f, 0.0f)
 {
+	Actors::Lifecycle::Get().BeginZone();
 	zoneid = in_zoneid;
 	instanceid = in_instanceid;
 	instanceversion = database.GetInstanceVersion(instanceid);
@@ -1090,6 +1092,7 @@ Zone::Zone(uint32 in_zoneid, uint32 in_instanceid, const char* in_short_name)
 }
 
 Zone::~Zone() {
+	Actors::Lifecycle::Get().EndZone();
 	LogInfo("Zone destructor called for zone [{}]", short_name);
 
 	spawn2_list.Clear();

@@ -668,7 +668,26 @@ void EntityList::AddCorpse(Corpse *corpse, uint32 in_id)
 
 void EntityList::AddNPC(NPC *npc, bool send_spawn_packet, bool dont_queue)
 {
-	npc->SetID(GetFreeID());
+	AddNPC(std::unique_ptr<NPC>(npc), send_spawn_packet, dont_queue);
+}
+
+// Scoped construction custody transfers exactly once, after both indexes accept and before callbacks.
+void EntityList::AddNPC(std::unique_ptr<NPC> owned, bool send_spawn_packet, bool dont_queue)
+{
+	if (!owned) return;
+	const auto id = GetFreeID();
+	owned->SetID(id);
+	bool npc_indexed = false;
+	try {
+		if (!npc_list.emplace(id, owned.get()).second) throw std::runtime_error("NPC registration ID already occupied");
+		npc_indexed = true;
+		if (!mob_list.emplace(id, owned.get()).second) throw std::runtime_error("Mob registration ID already occupied");
+	} catch (...) {
+		if (npc_indexed) npc_list.erase(id);
+		if (!GetID(id)) free_ids.push(id);
+		throw; // owned also deletes the private NPCType, with no dangling native index
+	}
+	auto *npc = owned.release();
 
 	//If this is not set here we will despawn pets from new AC changes
 	auto owner_id = npc->GetOwnerID();
@@ -678,9 +697,6 @@ void EntityList::AddNPC(NPC *npc, bool send_spawn_packet, bool dont_queue)
 			owner->SetPetID(npc->GetID());
 		}
 	}
-
-	npc_list.emplace(std::pair<uint16, NPC *>(npc->GetID(), npc));
-	mob_list.emplace(std::pair<uint16, Mob *>(npc->GetID(), npc));
 
 	entity_list.ScanCloseMobs(npc);
 

@@ -27,6 +27,8 @@
 #include "zone/position.h"
 #include "zone/zonedump.h"
 
+
+#include <memory>
 #include <queue>
 #include <unordered_map>
 
@@ -134,8 +136,11 @@ private:
 	time_t spawn_timestamp;
 };
 
+class ActorIdReuseScope;
+
 class EntityList
 {
+	friend class ActorIdReuseScope;
 public:
 	struct Area {
 		int id;
@@ -284,6 +289,7 @@ public:
 	void	SendTraders(Client* client);
 	void	AddClient(Client*);
 	void	AddNPC(NPC*, bool send_spawn_packet = true, bool dont_queue = false);
+	void AddNPC(std::unique_ptr<NPC> npc, bool send_spawn_packet = true, bool dont_queue = false);
 	void	AddMerc(Merc*, bool SendSpawnPacket = true, bool dontqueue = false);
 	void	AddCorpse(Corpse* pc, uint32 in_id = 0xFFFFFFFF);
 	void	AddObject(Object*, bool SendSpawnPacket = true);
