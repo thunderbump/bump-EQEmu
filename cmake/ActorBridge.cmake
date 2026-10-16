@@ -7,7 +7,18 @@ function(eqemu_link_actor_bridge target)
         return()
     endif()
 
-    # Bootstrap link qualification only; this is not an actor control interface.
+    find_package(Threads REQUIRED)
+
+    if(TARGET actor_bridge)
+        get_target_property(actor_headers actor_bridge EQEMU_ACTOR_HEADERS)
+        target_link_libraries(${target} PRIVATE actor_bridge Threads::Threads)
+        target_include_directories(${target} PRIVATE "${actor_headers}")
+        target_compile_definitions(${target} PRIVATE EQEMU_RUST_BOOTSTRAP_BRIDGE)
+        add_dependencies(${target} actor_bridge_build)
+        return()
+    endif()
+
+    # Cargo alone compiles generated CXX code; native callers include its header.
     # Use the guest's Cargo selection and inherit its pinned RUSTC/RUSTDOC,
     # CARGO_HOME and offline dependency environment. Never execute Cargo at configure.
     if(DEFINED ENV{CARGO} AND NOT "$ENV{CARGO}" STREQUAL "")
@@ -46,17 +57,22 @@ function(eqemu_link_actor_bridge target)
             --target x86_64-unknown-linux-gnu
         BYPRODUCTS "${actor_archive}"
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-        COMMENT "Building the bootstrap Rust bridge (offline, frozen)"
+        COMMENT "Building the Rust actor bridge (offline, frozen)"
         VERBATIM
     )
-    add_library(actor_bridge STATIC IMPORTED)
+    add_library(actor_bridge STATIC IMPORTED GLOBAL)
     set_target_properties(actor_bridge PROPERTIES IMPORTED_LOCATION "${actor_archive}")
     add_dependencies(actor_bridge actor_bridge_build)
 
     # Native libraries required by the pinned Linux Rust staticlib.
-    find_package(Threads REQUIRED)
     set_property(TARGET actor_bridge PROPERTY INTERFACE_LINK_LIBRARIES
-        "Threads::Threads;${CMAKE_DL_LIBS};m;rt;util")
-    target_link_libraries(${target} PRIVATE actor_bridge)
+        "${CMAKE_DL_LIBS};m;rt;util")
+    # CXX exposes headers beside Cargo's build profiles; include both native
+    # and explicit-target layouts. Generated code remains compiled only by Cargo.
+    set(actor_headers "${actor_target_dir}/cxxbridge;${actor_target_dir}/x86_64-unknown-linux-gnu/cxxbridge")
+    set_target_properties(actor_bridge PROPERTIES EQEMU_ACTOR_HEADERS "${actor_headers}")
+    target_include_directories(${target} PRIVATE "${actor_headers}")
+    add_dependencies(${target} actor_bridge_build)
+    target_link_libraries(${target} PRIVATE actor_bridge Threads::Threads)
     target_compile_definitions(${target} PRIVATE EQEMU_RUST_BOOTSTRAP_BRIDGE)
 endfunction()

@@ -2,18 +2,250 @@
 
 #[cxx::bridge(namespace = "eqemu_proof")]
 mod ffi {
+    #[repr(u8)]
+    enum Kind {
+        Create,
+        Move,
+        Stop,
+        Retire,
+        Shutdown,
+        Admitted,
+        Completed,
+        Rejected,
+        Interrupted,
+    }
+    #[repr(u8)]
+    enum Status {
+        Ok,
+        ExcessInput,
+        Order,
+        Stale,
+        Busy,
+        Missing,
+        InvalidResult,
+        Closed,
+        Exhausted,
+        InvalidInput,
+    }
+    #[repr(u8)]
+    enum Event {
+        None,
+        Created,
+        MoveRequested,
+        StopRequested,
+        Admitted,
+        Completed,
+        Rejected,
+        Interrupted,
+        Retired,
+        Shutdown,
+    }
+    #[repr(u8)]
+    enum Phase {
+        Idle,
+        Requested,
+        Admitted,
+        Stopping,
+    }
+    struct Input {
+        kind: Kind,
+        epoch: u64,
+        generation: u64,
+        operation: u64,
+        x: i32,
+        y: i32,
+        z: i32,
+    }
+    struct Report {
+        status: Status,
+        event: Event,
+        epoch: u64,
+        generation: u64,
+        operation: u64,
+        x: i32,
+        y: i32,
+        z: i32,
+    }
+    struct Snapshot {
+        epoch: u64,
+        generation: u64,
+        alive: bool,
+        closed: bool,
+        phase: Phase,
+        operation: u64,
+        last_terminal: Event,
+        last_operation: u64,
+        sequence: u64,
+        tick: u64,
+    }
     extern "Rust" {
-        fn answer(value: u32) -> u32;
+        type Runtime;
+        fn construct(epoch: u64) -> Box<Runtime>;
+        fn advance(self: &mut Runtime, sequence: u64, tick: u64, inputs: Vec<Input>) -> Report;
+        fn inspect(self: &Runtime) -> Snapshot;
     }
 }
 
-fn answer(value: u32) -> u32 {
-    actor_core::answer(value)
+pub struct Runtime(actor_core::Runtime);
+
+// Fail-stop policy: never resume with possibly partially mutated state. No Rust
+// panic escapes to C++; no native callbacks or exceptions enter Rust.
+fn boundary<T>(f: impl FnOnce() -> T) -> T {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(value) => value,
+        Err(_) => std::process::abort(),
+    }
 }
 
-// SAFETY: This unique versioned symbol accepts no pointers and exposes only a
-// fixed-width scalar. The native qualification caller owns its invocation.
+fn construct(epoch: u64) -> Box<Runtime> {
+    boundary(|| Box::new(Runtime(actor_core::Runtime::new(epoch))))
+}
+
+fn map_status(value: actor_core::Status) -> ffi::Status {
+    match value {
+        actor_core::Status::Ok => ffi::Status::Ok,
+        actor_core::Status::ExcessInput => ffi::Status::ExcessInput,
+        actor_core::Status::Order => ffi::Status::Order,
+        actor_core::Status::Stale => ffi::Status::Stale,
+        actor_core::Status::Busy => ffi::Status::Busy,
+        actor_core::Status::Missing => ffi::Status::Missing,
+        actor_core::Status::InvalidResult => ffi::Status::InvalidResult,
+        actor_core::Status::Closed => ffi::Status::Closed,
+        actor_core::Status::Exhausted => ffi::Status::Exhausted,
+        actor_core::Status::InvalidInput => ffi::Status::InvalidInput,
+    }
+}
+
+fn map_event(value: actor_core::Event) -> ffi::Event {
+    match value {
+        actor_core::Event::None => ffi::Event::None,
+        actor_core::Event::Created => ffi::Event::Created,
+        actor_core::Event::MoveRequested => ffi::Event::MoveRequested,
+        actor_core::Event::StopRequested => ffi::Event::StopRequested,
+        actor_core::Event::Admitted => ffi::Event::Admitted,
+        actor_core::Event::Completed => ffi::Event::Completed,
+        actor_core::Event::Rejected => ffi::Event::Rejected,
+        actor_core::Event::Interrupted => ffi::Event::Interrupted,
+        actor_core::Event::Retired => ffi::Event::Retired,
+        actor_core::Event::Shutdown => ffi::Event::Shutdown,
+    }
+}
+
+fn map_phase(value: actor_core::Phase) -> ffi::Phase {
+    match value {
+        actor_core::Phase::Idle => ffi::Phase::Idle,
+        actor_core::Phase::Requested => ffi::Phase::Requested,
+        actor_core::Phase::Admitted => ffi::Phase::Admitted,
+        actor_core::Phase::Stopping => ffi::Phase::Stopping,
+    }
+}
+
+impl Runtime {
+    fn advance(&mut self, sequence: u64, tick: u64, inputs: Vec<ffi::Input>) -> ffi::Report {
+        boundary(|| {
+            // Check length before conversion: fixed work, no truncation of facts.
+            let report = if inputs.len() > 1 {
+                let dummy = actor_core::Input::new(actor_core::Kind::Create, 0, 0, 0);
+                self.0.advance(sequence, tick, &[dummy; 2])
+            } else if let Some(input) = inputs.first() {
+                let kind = match input.kind {
+                    ffi::Kind::Create => actor_core::Kind::Create,
+                    ffi::Kind::Move => actor_core::Kind::Move,
+                    ffi::Kind::Stop => actor_core::Kind::Stop,
+                    ffi::Kind::Retire => actor_core::Kind::Retire,
+                    ffi::Kind::Shutdown => actor_core::Kind::Shutdown,
+                    ffi::Kind::Admitted => actor_core::Kind::Admitted,
+                    ffi::Kind::Completed => actor_core::Kind::Completed,
+                    ffi::Kind::Rejected => actor_core::Kind::Rejected,
+                    ffi::Kind::Interrupted => actor_core::Kind::Interrupted,
+                    _ => {
+                        let s = self.0.inspect();
+                        return ffi::Report {
+                            status: ffi::Status::InvalidInput,
+                            event: ffi::Event::None,
+                            epoch: s.epoch,
+                            generation: s.generation,
+                            operation: input.operation,
+                            x: 0,
+                            y: 0,
+                            z: 0,
+                        };
+                    }
+                };
+                self.0.advance(
+                    sequence,
+                    tick,
+                    &[actor_core::Input {
+                        kind,
+                        epoch: input.epoch,
+                        generation: input.generation,
+                        operation: input.operation,
+                        point: [input.x, input.y, input.z],
+                    }],
+                )
+            } else {
+                self.0.advance(sequence, tick, &[])
+            };
+            ffi::Report {
+                status: map_status(report.status),
+                event: map_event(report.event),
+                epoch: report.epoch,
+                generation: report.generation,
+                operation: report.operation,
+                x: report.point[0],
+                y: report.point[1],
+                z: report.point[2],
+            }
+        })
+    }
+
+    fn inspect(&self) -> ffi::Snapshot {
+        boundary(|| {
+            let s = self.0.inspect();
+            ffi::Snapshot {
+                epoch: s.epoch,
+                generation: s.generation,
+                alive: s.alive,
+                closed: s.closed,
+                phase: map_phase(s.phase),
+                operation: s.operation,
+                last_terminal: map_event(s.last_terminal),
+                last_operation: s.last_operation,
+                sequence: s.sequence,
+                tick: s.tick,
+            }
+        })
+    }
+}
+
+// SAFETY: unique versioned, pointer-free C symbol retained for zone validation.
 #[unsafe(no_mangle)]
 pub extern "C" fn eqemu_rust_bridge_v1() -> u32 {
-    answer(41)
+    42
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn fault_child() {
+        if std::env::var_os("ACTOR_FAULT_CHILD").is_some() {
+            super::boundary(|| panic!("isolated boundary fault"));
+        }
+    }
+
+    #[test]
+    fn internal_fault_is_fail_stop() {
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "tests::fault_child", "--nocapture"])
+            .env("ACTOR_FAULT_CHILD", "1")
+            .status()
+            .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            assert_eq!(status.signal(), Some(6)); // SIGABRT, not an unwound test failure
+        }
+        #[cfg(not(unix))]
+        assert!(!status.success());
+    }
 }

@@ -7,6 +7,7 @@ set(tests_sources
 )
 
 set(tests_headers
+	actor_runtime_test.h
 	suite_runner.h
 	atobool_test.h
 	data_verification_test.h
@@ -30,28 +31,30 @@ target_link_libraries(tests_runner_controls cppunit)
 add_executable(tests_reporting_controls EXCLUDE_FROM_ALL reporting_controls.cpp suite_runner.h)
 target_link_libraries(tests_reporting_controls cppunit)
 
-target_link_libraries(tests common cppunit)
+target_link_libraries(tests PRIVATE common cppunit)
 target_include_directories(tests PRIVATE ..)
+include("${CMAKE_SOURCE_DIR}/cmake/ActorBridge.cmake")
+eqemu_link_actor_bridge(tests)
 
 install(TARGETS tests RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
 
 if(MSVC)
 	set_target_properties(tests PROPERTIES LINK_FLAGS_RELEASE "/OPT:REF /OPT:ICF")
-	target_link_libraries(tests "Ws2_32.lib")
+	target_link_libraries(tests PRIVATE "Ws2_32.lib")
 endif()
 
 if(MINGW)
-	target_link_libraries(tests "WS2_32")
+	target_link_libraries(tests PRIVATE "WS2_32")
 endif()
 
 if(UNIX)
-	target_link_libraries(tests "${CMAKE_DL_LIBS}")
-	target_link_libraries(tests "z")
-	target_link_libraries(tests "m")
+	target_link_libraries(tests PRIVATE "${CMAKE_DL_LIBS}")
+	target_link_libraries(tests PRIVATE "z")
+	target_link_libraries(tests PRIVATE "m")
 	if(NOT DARWIN)
-		target_link_libraries(tests "rt")
+		target_link_libraries(tests PRIVATE "rt")
 	endif()
-	target_link_libraries(tests "pthread")
+	target_link_libraries(tests PRIVATE "pthread")
 	add_definitions(-fPIC)
 endif()
 
