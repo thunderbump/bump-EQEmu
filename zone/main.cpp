@@ -62,8 +62,11 @@
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
 #include <cstdint>
 #include <cstdio>
+#include <utility>
 
-// Scalar bootstrap link check, not an actor control interface.
+#include "actor-bridge/src/lib.rs.h"
+
+// Retained qualification symbol, in addition to the real runtime below.
 extern "C" std::uint32_t eqemu_rust_bridge_v1();
 #endif
 
@@ -106,11 +109,34 @@ bool CheckForCompatibleQuestPlugins();
 int main(int argc, char **argv)
 {
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
-	// A live call keeps the bridge in the final zone even with dead stripping.
+	// Keep the versioned marker and exercise the owned runtime API at startup.
 	if (eqemu_rust_bridge_v1() != 42) {
 		std::fputs("Rust bootstrap bridge link check failed (expected 42)\n", stderr);
 		return 1;
 	}
+	{
+		// Logical plumbing only: this never creates a native NPC or movement body.
+		auto runtime = eqemu_proof::construct(1);
+		rust::Vec<eqemu_proof::Input> inputs;
+		inputs.push_back({eqemu_proof::Kind::Create, 1, 0, 0, 0, 0, 0});
+		auto created = runtime->advance(1, 0, std::move(inputs));
+		auto state = runtime->inspect();
+		if (created.status != eqemu_proof::Status::Ok || !state.alive) {
+			std::fputs("Rust logical actor startup failed\n", stderr);
+			return 1;
+		}
+		rust::Vec<eqemu_proof::Input> retire;
+		retire.push_back({eqemu_proof::Kind::Retire, 1, state.generation, 0, 0, 0, 0});
+		auto retired = runtime->advance(2, 0, std::move(retire));
+		rust::Vec<eqemu_proof::Input> shutdown;
+		shutdown.push_back({eqemu_proof::Kind::Shutdown, 1, state.generation, 0, 0, 0, 0});
+		auto closed = runtime->advance(3, 0, std::move(shutdown));
+		if (retired.event != eqemu_proof::Event::Retired ||
+			closed.event != eqemu_proof::Event::Shutdown || !runtime->inspect().closed) {
+			std::fputs("Rust logical actor shutdown failed\n", stderr);
+			return 1;
+		}
+	} // rust::Box releases the runtime here; no retained native pointers.
 #endif
 
 	RegisterExecutablePlatform(ExePlatformZone);

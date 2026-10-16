@@ -15,6 +15,7 @@
 	You should have received a copy of the GNU General Public License
 	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
+#include "tests/actor_runtime_test.h"
 #include "tests/atobool_test.h"
 #include "tests/data_verification_test.h"
 #include "tests/fixed_memory_test.h"
@@ -56,6 +57,9 @@ int main()
 		tests.add(new DataVerificationTest());
 		tests.add(new SkillsUtilsTest());
 		tests.add(new TaskStateTest());
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+		tests.add(new ActorRuntimeTest());
+#endif
 		return EQEmuTest::RunSuite(tests);
 	}
 	catch (std::exception &ex) {
