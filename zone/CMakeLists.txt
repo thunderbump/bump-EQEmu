@@ -673,6 +673,9 @@ set_property(TARGET gm_commands_zone PROPERTY FOLDER libraries)
 
 add_executable(zone ${zone_sources} ${zone_headers})
 
+include("${CMAKE_SOURCE_DIR}/cmake/ActorBridge.cmake")
+eqemu_link_actor_bridge(zone)
+
 install(TARGETS zone RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
 
 if(EQEMU_BUILD_PCH)

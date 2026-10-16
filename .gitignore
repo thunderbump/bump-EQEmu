@@ -45,6 +45,7 @@ cmake-build-debug/
 *.vcxproj.filters
 *.vcxproj.user
 *.cmake
+!cmake/ActorBridge.cmake
 *.ilk
 *.pdb
 *.sln
