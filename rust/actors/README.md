@@ -40,7 +40,7 @@ same API, including a fake native move-result trace. The pointer-free
 | Move | live, idle, fresh operation | MoveRequested / Requested |
 | Admitted (native input) | Requested | Admitted / Admitted |
 | Rejected (native input) | Requested | Rejected / idle |
-| Completed (native input) | Admitted | Completed / idle |
+| Completed (native input) | Admitted or Stopping | Completed / idle |
 | Stop | Admitted, matching operation | StopRequested / Stopping |
 | Interrupted (native input) | Admitted or Stopping | Interrupted / idle |
 | Retire | live and idle | Retired / logical tombstone |
@@ -49,9 +49,14 @@ same API, including a fake native move-result trace. The pointer-free
 Admission is not completion. Stop is a requested cancellation, not an assertion
 that a native body stopped. In this minimal protocol, stop before admission is
 refused; the adapter must first admit or reject the request. Once stop is
-requested, the adapter must report interruption, not completion. Duplicate,
-wrong-operation and out-of-phase results are `InvalidResult`. Unknown CXX enum
-values are `InvalidInput`. Missing/live/busy/closed conditions are typed refusals.
+requested, a correlated completion may still arrive: native may have finished
+and queued it before receiving the stop request. Both Completed and Interrupted
+are valid terminal outcomes while Stopping; the adapter reports what actually
+happened. Either clears pending work and preserves the truthful terminal fact.
+Late duplicate completion/interruption is refused, never rewritten as a second
+terminal event. Duplicate, wrong-operation and out-of-phase results are
+`InvalidResult`. Unknown CXX enum values are `InvalidInput`.
+Missing/live/busy/closed conditions are typed refusals.
 
 Retire and shutdown **refuse** active work instead of generating a burst of
 terminal/removal outputs. Finish/reject/interrupt the move, retire, then shut
@@ -91,15 +96,17 @@ no-pointer `unsafe(no_mangle)` symbol; CXX owns all generated unsafe glue.
 ## Test meaning and execution
 
 - Core unit tests and the doctest cover logical creation, admission, completion,
-  rejection, stop/interruption, retire/shutdown, ordinary refusals, stale epochs
-  and replacement identities, wrong operation/order, exhausted generations and
+  rejection, stop/interruption and stop racing queued completion (including
+  excess-input refusal/retry and late results), retire/shutdown, ordinary refusals,
+  stale epochs and replacement identities, wrong operation/order, exhausted generations and
   excess inputs while preserving inspectable terminal state. Busy refusals bound
   effects instead of silently dropping terminal/removal facts.
 - The bridge's isolated subprocess panic test expects process abort, not a Rust
   test failure unwinding through the boundary.
 - The registered native utility round trip constructs and releases a real CXX
-  box, exercises the move/result protocol, inspects it, and checks stale/overflow
-  refusals. It proves ABI/ownership and logical policy, not native mechanics.
+  box, exercises the move/result protocol including completion after stop,
+  inspects it, and checks stale/overflow refusals. It proves ABI/ownership and
+  logical policy, not native mechanics.
 - Zone startup uses the actual runtime API in addition to the retained marker.
   It is bounded plumbing only, with no world-connected gameplay claim.
 

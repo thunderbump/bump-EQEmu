@@ -37,6 +37,24 @@ private:
 		TEST_ASSERT(send(Kind::Admitted, 2).event == Event::Admitted);
 		TEST_ASSERT(send(Kind::Stop, 2).event == Event::StopRequested);
 		TEST_ASSERT(send(Kind::Interrupted, 2).event == Event::Interrupted);
+		TEST_ASSERT(send(Kind::Move, 3).event == Event::MoveRequested);
+		TEST_ASSERT(send(Kind::Admitted, 3).event == Event::Admitted);
+		// Native has queued completion before it receives the stop request.
+		auto admitted = runtime->inspect();
+		rust::Vec<Input> completed;
+		completed.push_back({Kind::Completed, admitted.epoch, admitted.generation, 3, 0, 0, 0});
+		TEST_ASSERT(send(Kind::Stop, 3).event == Event::StopRequested);
+		TEST_ASSERT(runtime->inspect().phase == Phase::Stopping);
+		TEST_ASSERT(send(Kind::Retire, 0).status == Status::Busy);
+		++sequence;
+		auto terminal = runtime->advance(sequence, sequence, std::move(completed));
+		TEST_ASSERT(terminal.status == Status::Ok && terminal.event == Event::Completed);
+		TEST_ASSERT(terminal.operation == 3);
+		TEST_ASSERT(runtime->inspect().phase == Phase::Idle);
+		TEST_ASSERT(runtime->inspect().operation == 0);
+		TEST_ASSERT(runtime->inspect().last_operation == 3);
+		TEST_ASSERT(send(Kind::Interrupted, 3).status == Status::InvalidResult);
+		TEST_ASSERT(send(Kind::Completed, 3).status == Status::InvalidResult);
 		TEST_ASSERT(send(Kind::Retire, 0).event == Event::Retired);
 		TEST_ASSERT(!runtime->inspect().alive);
 		TEST_ASSERT(send(Kind::Create, 0).event == Event::Created);
@@ -51,7 +69,7 @@ private:
 		++sequence;
 		TEST_ASSERT(runtime->advance(sequence, sequence, std::move(excess)).status == Status::ExcessInput);
 		TEST_ASSERT(runtime->inspect().alive);
-		TEST_ASSERT(runtime->inspect().last_terminal == Event::Interrupted);
+		TEST_ASSERT(runtime->inspect().last_terminal == Event::Completed);
 		TEST_ASSERT(send(Kind::Retire, 0).event == Event::Retired);
 		TEST_ASSERT(send(Kind::Shutdown, 0).event == Event::Shutdown);
 		TEST_ASSERT(runtime->inspect().closed);

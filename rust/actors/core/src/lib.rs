@@ -226,7 +226,9 @@ impl Runtime {
                 *event = match (kind, s.phase) {
                     (Kind::Admitted, Phase::Requested) => Event::Admitted,
                     (Kind::Rejected, Phase::Requested) => Event::Rejected,
-                    (Kind::Completed, Phase::Admitted) => Event::Completed,
+                    // Cancellation can race a completion already queued by native.
+                    // A stop request does not rewrite that terminal outcome.
+                    (Kind::Completed, Phase::Admitted | Phase::Stopping) => Event::Completed,
                     (Kind::Interrupted, Phase::Admitted | Phase::Stopping) => Event::Interrupted,
                     _ => return Status::InvalidResult,
                 };
@@ -264,7 +266,10 @@ mod tests {
         assert_eq!(send(&mut r, Kind::Move, 1).event, Event::MoveRequested);
         assert_eq!(send(&mut r, Kind::Shutdown, 0).status, Status::Busy);
         assert_eq!(send(&mut r, Kind::Stop, 1).status, Status::InvalidResult);
-        assert_eq!(send(&mut r, Kind::Completed, 1).status, Status::InvalidResult);
+        assert_eq!(
+            send(&mut r, Kind::Completed, 1).status,
+            Status::InvalidResult
+        );
         assert_eq!(send(&mut r, Kind::Admitted, 1).event, Event::Admitted);
         assert_eq!(send(&mut r, Kind::Completed, 1).event, Event::Completed);
         assert_eq!(r.inspect().last_operation, 1);
@@ -274,7 +279,6 @@ mod tests {
         assert_eq!(send(&mut r, Kind::Retire, 0).status, Status::Busy);
         assert_eq!(send(&mut r, Kind::Admitted, 2).status, Status::Ok);
         assert_eq!(send(&mut r, Kind::Stop, 2).event, Event::StopRequested);
-        assert_eq!(send(&mut r, Kind::Completed, 2).status, Status::InvalidResult);
         assert_eq!(send(&mut r, Kind::Interrupted, 2).event, Event::Interrupted);
         assert_eq!(send(&mut r, Kind::Retire, 0).event, Event::Retired);
         assert!(!r.inspect().alive);
@@ -305,7 +309,80 @@ mod tests {
         assert_eq!(r.advance(20, s.tick - 1, &[]).status, Status::Order);
         assert_eq!(r.advance(20, 20, &[input]).event, Event::MoveRequested);
         assert_eq!(send(&mut r, Kind::Move, 3).status, Status::Busy);
-        assert_eq!(send(&mut r, Kind::Admitted, 1).status, Status::InvalidResult);
+        assert_eq!(
+            send(&mut r, Kind::Admitted, 1).status,
+            Status::InvalidResult
+        );
+    }
+
+    #[test]
+    fn completion_queued_before_stop_remains_truthful() {
+        let mut r = Runtime::new(9);
+        send(&mut r, Kind::Create, 0);
+        send(&mut r, Kind::Move, 1);
+        send(&mut r, Kind::Admitted, 1);
+        // Native finishes and retains this result before receiving StopRequested.
+        let admitted = r.inspect();
+        let completed = Input::new(Kind::Completed, 9, admitted.generation, 1);
+        assert_eq!(send(&mut r, Kind::Stop, 1).event, Event::StopRequested);
+        let stopping = r.inspect();
+        assert_eq!(stopping.phase, Phase::Stopping);
+        assert_eq!(send(&mut r, Kind::Retire, 0).status, Status::Busy);
+        assert_eq!(send(&mut r, Kind::Shutdown, 0).status, Status::Busy);
+        assert_eq!(
+            send(&mut r, Kind::Completed, 2).status,
+            Status::InvalidResult
+        );
+        let sequence = stopping.sequence + 1;
+        let tick = stopping.tick + 1;
+        for (epoch, generation) in [(8, stopping.generation), (9, 0)] {
+            let stale = Input::new(Kind::Completed, epoch, generation, 1);
+            assert_eq!(r.advance(sequence, tick, &[stale]).status, Status::Stale);
+        }
+        assert_eq!(
+            r.advance(sequence, tick, &[completed; 2]).status,
+            Status::ExcessInput
+        );
+        assert_eq!(r.inspect().sequence, stopping.sequence);
+        assert_eq!(r.inspect().phase, Phase::Stopping);
+        assert_eq!(r.inspect().operation, 1);
+        // Retry the retained result alone with the unconsumed ordering inputs.
+        let report = r.advance(sequence, tick, &[completed]);
+        assert_eq!(report.status, Status::Ok);
+        assert_eq!(report.event, Event::Completed);
+        assert_eq!(report.operation, 1);
+        assert_eq!(r.inspect().phase, Phase::Idle);
+        assert_eq!(r.inspect().operation, 0);
+        assert_eq!(r.inspect().last_terminal, Event::Completed);
+        assert_eq!(r.inspect().last_operation, 1);
+        assert_eq!(
+            send(&mut r, Kind::Interrupted, 1).status,
+            Status::InvalidResult
+        );
+        assert_eq!(
+            send(&mut r, Kind::Completed, 1).status,
+            Status::InvalidResult
+        );
+        assert_eq!(send(&mut r, Kind::Move, 2).event, Event::MoveRequested);
+        assert_eq!(
+            send(&mut r, Kind::Interrupted, 1).status,
+            Status::InvalidResult
+        );
+        assert_eq!(send(&mut r, Kind::Admitted, 2).event, Event::Admitted);
+        assert_eq!(send(&mut r, Kind::Completed, 2).event, Event::Completed);
+        assert_eq!(send(&mut r, Kind::Retire, 0).event, Event::Retired);
+        assert_eq!(send(&mut r, Kind::Create, 0).event, Event::Created);
+        let replacement = r.inspect();
+        assert_eq!(
+            r.advance(replacement.sequence + 1, replacement.tick, &[completed])
+                .status,
+            Status::Stale
+        );
+        assert_eq!(r.inspect().last_terminal, Event::Completed);
+        assert_eq!(r.inspect().last_operation, 2);
+        assert_eq!(send(&mut r, Kind::Retire, 0).event, Event::Retired);
+        assert_eq!(send(&mut r, Kind::Shutdown, 0).event, Event::Shutdown);
+        assert!(r.inspect().closed);
     }
 
     #[test]
