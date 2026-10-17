@@ -1,12 +1,84 @@
-# Bounded logical actor proof
+# Bounded actor runtime and native body slice
 
 `core` is deterministic, dependency-free safe Rust (`forbid(unsafe_code)`).
 `bridge` exposes that policy as CXX-owned values and an opaque `rust::Box`.
-This is **not** native NPC creation, movement, position inspection or gameplay.
+The original logical protocol below remains available. `CreateBody` additionally
+requests one native NPC through the zone-owned adapter described below; no movement,
+position inspection or gameplay qualification is implied.
 The zone startup caller constructs, creates, inspects, retires and shuts down a
 logical actor, then releases the box. The registered `ActorRuntimeTest` uses the
 same API, including a fake native move-result trace. The pointer-free
 `eqemu_rust_bridge_v1` marker remains 42 for existing zone-link validation.
+
+## Native body lifetime slice (candidate; VM validation pending)
+
+`zone/actor_body.*` consumes `BodyRequested`/`RemovalRequested` effects after the
+owned Rust call returns. C++ alone allocates/registers NPCs, owns their type data,
+looks up entities, depops them and observes removal. The next serialized normal
+zone iteration supplies one owned native fact to Rust. There are no callbacks,
+mutable Rust reentry, retained entity pointers, result queues or alternate CLI.
+The normal zone loop drives both the adapter and the existing source registry.
+
+| Input | Body state / output |
+| --- | --- |
+| CreateBody | next generation, Requested / BodyRequested |
+| BodyPresent | Requested -> Present / BodyPresent |
+| BodyRejected | Requested -> Absent, logical tombstone / BodyRejected |
+| Retire | Present -> Removing / RemovalRequested (not Retired) |
+| BodyAbsent | Present or Removing -> Absent, logical tombstone / BodyAbsent |
+
+Presence is checked against **both** native NPC and mob registries. Absence is
+not inferred from `Depop`, logical retirement or a missing NPC index alone.
+Creation, retirement and shutdown refuse while admission/removal is pending.
+Travel is deliberately refused for native bodies in this slice. Native facts
+cannot be submitted as adapter commands. All facts/commands carry Rust epoch and
+generation, and every native lookup also checks the stamp stored in the NPC.
+Reused entity IDs are not capabilities. Adapter reconstruction allocates a fresh
+nonzero, process-local epoch without wrapping; the zone thread owns allocation.
+The legacy startup-only logical runtime reserves epoch zero and never owns native
+bodies.
+
+Shutdown closes adapter admission before zone shutdown work begins. The zone
+destructor clears the entity list, then observes native absence and closes Rust
+before releasing its box. A partial native registry or surviving owned body is
+not converted into a successful absence acknowledgement. Ordering exhaustion is
+fail-stop, not wraparound. Adapter teardown can also drain through ordinary
+entity processing (used by the registered test without unloading its fixture).
+
+### Explicit decision control
+
+NPC actor stamps enable an actor-only mode, independent of `AI_Stop` and
+`IsAIControlled`. Native `NPC::Process` remains active. Actor bodies cannot enter
+`Mob::AI_Process`, voluntary AI movement/waypoint setup, AI spell selection, or
+engaged/disengaged AI event decisions. Guard-facing and outgoing/incoming assists
+are gated outside AI processing; damage-triggered flee checks and tick fleeing
+are gated too. Ordinary unmarked NPCs take their existing paths. This body-only
+mode admits **no voluntary action**, including in unknown charm/fear/forced-control
+states; it does not guess that these states permit Rust actions. Native forced
+movement/status handling remains native, not reimplemented by the adapter.
+
+The candidate in-server case independently checks registration, native process
+counts, a real native stun timer expiring, ordinary-neighbor stun expiry and AI
+decision-loop entry, retire/absence, external depop/absence, forced native-ID
+reuse, generation refusal, and epoch refusal after runtime reconstruction with
+the same native ID **and generation**. It checks admission closure and actual
+native absence during teardown drain. A test-only free-ID reorder preserves the
+allocator's IDs and refuses registered IDs; it is compiled only with
+`EQEMU_BUILD_TESTS`. In an idle empty zone, the opt-in scenario temporarily uses
+the existing quest idle override so the **ordinary** entity loop processes both
+subjects, restoring the original setting on success, failure and deadline.
+Owned subjects are depopped on assertions/deadlines; the normal loop and fixture
+shutdown own destruction. The bounded complete-result interface is unchanged.
+
+Unproved: movement/routes and stop/stun/root travel effects, combat, spells/buffs,
+regen, charm/fear behavior, persistence, client delivery and all other gameplay.
+The stun test proves only native status/timer processing, not all mechanics.
+The registered drain test invokes production adapter teardown methods but does
+not itself unload the world-connected zone. The real zone shutdown hook asserts
+absence after entity-list clearing; actual fixture shutdown observation and
+exact-head VM checks/review are still required. No candidate builds or tests have
+been run on the implementation host. No additional environment service or Stack
+scenario selection is needed.
 
 ## Protocol and bounds
 
@@ -31,7 +103,7 @@ same API, including a fake native move-result trace. The pointer-free
   even across actor replacement. One pending move includes its operation and
   phase. Coordinates are owned integer request values, not an observed position.
   Results must carry the exact identity and pending operation. Report coordinates
-  are meaningful only for `MoveRequested`; other reports do not observe position.
+  are meaningful only for `MoveRequested` or `BodyRequested`; other reports do not observe position.
   A refusal has no event/effect, regardless of its echoed correlation fields.
 
 | Input | Preconditions | Output / new state |

@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
-//! One logical actor, one pending move, at most one input and one output per advance.
-//! Outputs describe protocol facts, never native position or body existence.
+//! One actor, one pending move, at most one input and one output per advance.
+//! Body existence is acknowledged only from later native facts; never from requests.
 //! ```
 //! use actor_core::{Input, Kind, Runtime, Status};
 //! let mut runtime = Runtime::new(7);
@@ -21,6 +21,10 @@ pub enum Kind {
     Completed,
     Rejected,
     Interrupted,
+    CreateBody,
+    BodyPresent,
+    BodyRejected,
+    BodyAbsent,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -72,6 +76,11 @@ pub enum Event {
     Interrupted,
     Retired,
     Shutdown,
+    BodyRequested,
+    BodyPresent,
+    BodyRejected,
+    RemovalRequested,
+    BodyAbsent,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -81,6 +90,16 @@ pub enum Phase {
     Requested,
     Admitted,
     Stopping,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Body {
+    Logical,
+    Requested,
+    Present,
+    Removing,
+    Absent,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -98,6 +117,7 @@ pub struct Snapshot {
     pub epoch: u64,
     pub generation: u64,
     pub alive: bool,
+    pub body: Body,
     pub closed: bool,
     pub phase: Phase,
     pub operation: u64,
@@ -119,6 +139,7 @@ impl Runtime {
                 epoch,
                 generation: 0,
                 alive: false,
+                body: Body::Logical,
                 closed: false,
                 phase: Phase::Idle,
                 operation: 0,
@@ -174,7 +195,7 @@ impl Runtime {
             return Status::Stale;
         }
         match input.kind {
-            Kind::Create => {
+            Kind::Create | Kind::CreateBody => {
                 if s.alive {
                     return Status::Busy;
                 }
@@ -183,7 +204,16 @@ impl Runtime {
                 };
                 s.generation = next;
                 s.alive = true;
-                *event = Event::Created;
+                s.body = if input.kind == Kind::CreateBody {
+                    Body::Requested
+                } else {
+                    Body::Logical
+                };
+                *event = if input.kind == Kind::CreateBody {
+                    Event::BodyRequested
+                } else {
+                    Event::Created
+                };
             }
             Kind::Shutdown => {
                 if s.alive {
@@ -193,7 +223,30 @@ impl Runtime {
                 *event = Event::Shutdown;
             }
             _ if !s.alive => return Status::Missing,
+            Kind::BodyPresent if s.body == Body::Requested => {
+                s.body = Body::Present;
+                *event = Event::BodyPresent;
+            }
+            Kind::BodyRejected if s.body == Body::Requested => {
+                s.body = Body::Absent;
+                s.alive = false;
+                *event = Event::BodyRejected;
+            }
+            Kind::BodyAbsent if matches!(s.body, Body::Present | Body::Removing) => {
+                s.body = Body::Absent;
+                s.alive = false;
+                s.phase = Phase::Idle;
+                s.operation = 0;
+                *event = Event::BodyAbsent;
+            }
+            Kind::BodyPresent | Kind::BodyRejected | Kind::BodyAbsent => {
+                return Status::InvalidResult;
+            }
             Kind::Move => {
+                // Body-only slice: travel is deliberately not admitted here.
+                if s.body != Body::Logical {
+                    return Status::Busy;
+                }
                 if s.phase != Phase::Idle {
                     return Status::Busy;
                 }
@@ -216,8 +269,15 @@ impl Runtime {
                 if s.phase != Phase::Idle {
                     return Status::Busy;
                 }
-                s.alive = false;
-                *event = Event::Retired;
+                if s.body == Body::Present {
+                    s.body = Body::Removing;
+                    *event = Event::RemovalRequested;
+                } else if s.body == Body::Logical {
+                    s.alive = false;
+                    *event = Event::Retired;
+                } else {
+                    return Status::Busy;
+                }
             }
             kind => {
                 if input.operation != s.operation || s.phase == Phase::Idle {
@@ -257,6 +317,81 @@ mod tests {
             s.tick + 1,
             &[Input::new(kind, s.epoch, s.generation, operation)],
         )
+    }
+
+    #[test]
+    fn native_body_facts_are_not_logical_lifetime_events() {
+        let mut r = Runtime::new(31);
+        assert_eq!(
+            send(&mut r, Kind::CreateBody, 0).event,
+            Event::BodyRequested
+        );
+        assert_eq!(r.inspect().body, Body::Requested);
+        assert_eq!(send(&mut r, Kind::Retire, 0).status, Status::Busy);
+        assert_eq!(send(&mut r, Kind::Shutdown, 0).status, Status::Busy);
+        assert_eq!(
+            send(&mut r, Kind::BodyAbsent, 0).status,
+            Status::InvalidResult
+        );
+        assert_eq!(send(&mut r, Kind::BodyPresent, 0).event, Event::BodyPresent);
+        assert_eq!(
+            send(&mut r, Kind::BodyPresent, 0).status,
+            Status::InvalidResult
+        );
+        assert_eq!(send(&mut r, Kind::Move, 1).status, Status::Busy);
+        assert_eq!(send(&mut r, Kind::Retire, 0).event, Event::RemovalRequested);
+        assert!(r.inspect().alive);
+        assert_eq!(r.inspect().body, Body::Removing);
+        assert_eq!(send(&mut r, Kind::CreateBody, 0).status, Status::Busy);
+        assert_eq!(
+            send(&mut r, Kind::BodyPresent, 0).status,
+            Status::InvalidResult
+        );
+        assert_eq!(send(&mut r, Kind::BodyAbsent, 0).event, Event::BodyAbsent);
+        assert!(!r.inspect().alive);
+        assert_eq!(send(&mut r, Kind::BodyAbsent, 0).status, Status::Missing);
+        assert_eq!(send(&mut r, Kind::Shutdown, 0).event, Event::Shutdown);
+    }
+
+    #[test]
+    fn admission_failure_external_removal_and_delayed_native_facts() {
+        let mut r = Runtime::new(32);
+        send(&mut r, Kind::CreateBody, 0);
+        assert_eq!(
+            send(&mut r, Kind::BodyRejected, 0).event,
+            Event::BodyRejected
+        );
+        assert!(!r.inspect().alive);
+        send(&mut r, Kind::CreateBody, 0);
+        let old = r.inspect();
+        send(&mut r, Kind::BodyPresent, 0);
+        // No retirement request: external native absence is an independent fact.
+        assert_eq!(send(&mut r, Kind::BodyAbsent, 0).event, Event::BodyAbsent);
+        send(&mut r, Kind::CreateBody, 0);
+        let current = r.inspect();
+        for kind in [
+            Kind::BodyPresent,
+            Kind::BodyRejected,
+            Kind::BodyAbsent,
+            Kind::Retire,
+        ] {
+            for (epoch, generation) in [(old.epoch, old.generation), (33, current.generation)] {
+                let report = r.advance(
+                    current.sequence + 1,
+                    current.tick + 1,
+                    &[Input::new(kind, epoch, generation, 0)],
+                );
+                assert_eq!(report.status, Status::Stale);
+                assert_eq!(report.event, Event::None);
+                assert_eq!(r.inspect().body, Body::Requested);
+                assert_eq!(r.inspect().sequence, current.sequence);
+            }
+        }
+        assert_eq!(send(&mut r, Kind::BodyPresent, 0).event, Event::BodyPresent);
+        send(&mut r, Kind::Retire, 0);
+        send(&mut r, Kind::BodyAbsent, 0);
+        send(&mut r, Kind::Shutdown, 0);
+        assert!(r.inspect().closed);
     }
 
     #[test]

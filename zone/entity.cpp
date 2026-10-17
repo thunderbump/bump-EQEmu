@@ -6012,3 +6012,22 @@ void EntityList::CheckToClearTraderAndBuyerTables()
 		);
 	}
 }
+
+#ifdef EQEMU_BUILD_TESTS
+// Deterministic ID reuse without overwriting a registered entity or losing IDs.
+bool EntityList::ReuseFreeIDForTest(uint16 id)
+{
+    if (!id || GetID(id)) { return false; }
+    auto remaining = free_ids;
+    std::queue<uint16> reordered;
+    reordered.push(id);
+    bool found = false;
+    while (!remaining.empty()) {
+        const auto next = remaining.front();
+        remaining.pop();
+        if (next == id) { found = true; } else { reordered.push(next); }
+    }
+    if (found) { free_ids.swap(reordered); }
+    return found;
+}
+#endif

@@ -54,6 +54,7 @@ extern Zone *zone;
 
 //NOTE: do NOT pass in beneficial and detrimental spell types into the same call here!
 bool NPC::AICastSpell(Mob* tar, uint8 iChance, uint32 iSpellTypes, bool bInnates) {
+	if (IsRustActor()) { return false; }
 	if (!tar)
 		return false;
 
@@ -963,6 +964,7 @@ void Mob::ProcessForcedMovement()
 }
 
 void Mob::AI_Process() {
+	if (IsNPC() && CastToNPC()->IsRustActor()) { return; }
 	if (!IsAIControlled())
 		return;
 
@@ -972,6 +974,8 @@ void Mob::AI_Process() {
 
 	if (IsCasting())
 		return;
+
+	if (IsNPC()) { CastToNPC()->RecordNativeDecisionPass(); }
 
 	bool engaged  = IsEngaged();
 	bool doranged = false;
@@ -1543,6 +1547,7 @@ void Mob::AI_Process() {
 }
 
 void NPC::AI_DoMovement() {
+	if (IsRustActor()) { return; }
 
 	float move_speed = GetMovespeed();
 
@@ -1679,6 +1684,7 @@ void NPC::AI_DoMovement() {
 }
 
 void NPC::AI_SetupNextWaypoint() {
+	if (IsRustActor()) { return; }
 	int32 spawn_id = GetSpawnPointID();
 	LinkedListIterator<Spawn2*> iterator(zone->spawn2_list);
 	iterator.Reset();
@@ -1746,6 +1752,7 @@ void NPC::AI_SetupNextWaypoint() {
  */
 void Mob::AI_Event_Engaged(Mob *attacker, bool yell_for_help)
 {
+	if (IsNPC() && CastToNPC()->IsRustActor()) { return; }
 	if (!IsAIControlled()) {
 		return;
 	}
@@ -1796,6 +1803,7 @@ void Mob::AI_Event_Engaged(Mob *attacker, bool yell_for_help)
 
 // Note: Hate list may not be actually clear until after this function call completes
 void Mob::AI_Event_NoLongerEngaged() {
+	if (IsNPC() && CastToNPC()->IsRustActor()) { return; }
 	if (!IsAIControlled()) {
 		return;
 	}
