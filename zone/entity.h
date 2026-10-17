@@ -564,6 +564,9 @@ public:
 	void	DepopAll(int NPCTypeID, bool StartSpawnTimer = true);
 
 	uint16 GetFreeID();
+#ifdef EQEMU_BUILD_TESTS
+	bool ReuseFreeIDForTest(uint16 id);
+#endif
 	void RefreshAutoXTargets(Client *c);
 	void RefreshClientXTargets(Client *c);
 	void SendAlternateAdvancementStats();

@@ -15,6 +15,7 @@
 	You should have received a copy of the GNU General Public License
 	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
+#include "zone/actor_body.h"
 #include "zone.h"
 
 #include "common/data_verification.h"
@@ -859,6 +860,9 @@ void Zone::Shutdown(bool quiet)
 	if (!is_zone_loaded) {
 		return;
 	}
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+	ActorBody::BeginTeardown();
+#endif
 
 	DataBucket::DeleteCachedBuckets(DataBucketLoadType::Zone, zone->GetZoneID(), zone->GetInstanceID());
 	// save and kick all clients
@@ -1090,6 +1094,9 @@ Zone::Zone(uint32 in_zoneid, uint32 in_instanceid, const char* in_short_name)
 }
 
 Zone::~Zone() {
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+	ActorBody::BeginTeardown();
+#endif
 	LogInfo("Zone destructor called for zone [{}]", short_name);
 
 	spawn2_list.Clear();
@@ -1104,6 +1111,9 @@ Zone::~Zone() {
 
 	zone_point_list.Clear();
 	entity_list.Clear();
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+	ActorBody::FinishTeardown();
+#endif
 	parse->ReloadQuests();
 	ClearBlockedSpells();
 

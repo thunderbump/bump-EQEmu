@@ -570,6 +570,7 @@ void NPC::SetTarget(Mob* mob) {
 
 bool NPC::Process()
 {
+	if (IsRustActor()) { ++actor_process_count_; }
 	if (p_depop)
 	{
 		Mob* owner = entity_list.GetMob(ownerid);
@@ -628,7 +629,7 @@ bool NPC::Process()
 
 		BuffProcess();
 
-		if (currently_fleeing) {
+		if (!IsRustActor() && currently_fleeing) {
 			ProcessFlee();
 		}
 
@@ -736,7 +737,7 @@ bool NPC::Process()
 			DoGravityEffect();
 	}
 
-	if(reface_timer->Check() && !IsEngaged() && IsPositionEqualWithinCertainZ(m_Position, m_GuardPoint, 5.0f)) {
+	if(!IsRustActor() && reface_timer->Check() && !IsEngaged() && IsPositionEqualWithinCertainZ(m_Position, m_GuardPoint, 5.0f)) {
 		RotateTo(m_GuardPoint.w);
 		reface_timer->Disable();
 	}
@@ -771,7 +772,7 @@ bool NPC::Process()
 			assist_cap_timer.Disable();
 	}
 
-	if (assist_timer.Check() && IsEngaged() && !Charmed() && !HasAssistAggro() &&
+	if (!IsRustActor() && assist_timer.Check() && IsEngaged() && !Charmed() && !HasAssistAggro() &&
 	    NPCAssistCap() < RuleI(Combat, NPCAssistCap)) {
 		// Some cases like flash of light used for aggro haven't set target
 		if (!GetTarget()) {
@@ -3489,6 +3490,7 @@ bool NPC::AICheckCloseBeneficialSpells(
  */
 void NPC::AIYellForHelp(Mob *sender, Mob *attacker)
 {
+	if (IsRustActor() || (sender && sender->IsNPC() && sender->CastToNPC()->IsRustActor())) { return; }
 	LogAIYellForHelp("Mob[{}] Target[{}]",
 		(sender == nullptr ? "NULL MOB" : GetCleanName()),
 		(attacker == nullptr ? "NULL TARGET" : attacker->GetCleanName())
@@ -3519,7 +3521,7 @@ void NPC::AIYellForHelp(Mob *sender, Mob *attacker)
 
 	for (auto &close_mob: sender->GetCloseMobList()) {
 		Mob *mob = close_mob.second;
-		if (!mob) {
+		if (!mob || (mob->IsNPC() && mob->CastToNPC()->IsRustActor())) {
 			continue;
 		}
 

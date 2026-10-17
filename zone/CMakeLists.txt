@@ -671,7 +671,7 @@ target_include_directories(gm_commands_zone PRIVATE ..)
 set_target_properties(gm_commands_zone PROPERTIES UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE 32)
 set_property(TARGET gm_commands_zone PROPERTY FOLDER libraries)
 
-add_executable(zone ${zone_sources} ${zone_headers})
+add_executable(zone ${zone_sources} ${zone_headers} actor_body.cpp actor_body.h)
 
 if(EQEMU_BUILD_TESTS)
     target_sources(zone PRIVATE inserver_tests.cpp inserver_tests.h)

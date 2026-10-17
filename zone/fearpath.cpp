@@ -53,6 +53,7 @@ int Mob::GetFleeRatio(Mob* other)
 //this is called whenever we are damaged to process possible fleeing
 void Mob::CheckFlee()
 {
+	if (IsNPC() && CastToNPC()->IsRustActor()) { return; }
 	if (IsPet() || IsCasting() || GetHP() == 0 || GetBodyType() == BodyType::Undead || (IsNPC() && CastToNPC()->IsUnderwaterOnly())) {
 		return;
 	}
@@ -221,6 +222,7 @@ void Mob::FleeInfo(Mob* client)
 
 void Mob::ProcessFlee()
 {
+	if (IsNPC() && CastToNPC()->IsRustActor()) { return; }
 	if (!flee_mode) {
 		return;
 	}
