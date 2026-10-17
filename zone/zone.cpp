@@ -16,6 +16,9 @@
 	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 #include "zone/actor_body.h"
+#ifdef EQEMU_BUILD_TESTS
+#include "zone/inserver_tests.h"
+#endif
 #include "zone.h"
 
 #include "common/data_verification.h"
@@ -862,6 +865,9 @@ void Zone::Shutdown(bool quiet)
 	}
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
 	ActorBody::BeginTeardown();
+#ifdef EQEMU_BUILD_TESTS
+	InserverTests::ObserveActorShutdown(InserverTests::ActorShutdownStage::AdmissionClosed);
+#endif
 #endif
 
 	DataBucket::DeleteCachedBuckets(DataBucketLoadType::Zone, zone->GetZoneID(), zone->GetInstanceID());
@@ -1112,6 +1118,9 @@ Zone::~Zone() {
 	zone_point_list.Clear();
 	entity_list.Clear();
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+#ifdef EQEMU_BUILD_TESTS
+	InserverTests::ObserveActorShutdown(InserverTests::ActorShutdownStage::EntitiesCleared);
+#endif
 	ActorBody::FinishTeardown();
 #endif
 	parse->ReloadQuests();

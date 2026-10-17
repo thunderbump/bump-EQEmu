@@ -1,4 +1,7 @@
 #include "actor_body.h"
+#ifdef EQEMU_BUILD_TESTS
+#include "zone/inserver_tests.h"
+#endif
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
 #include "zone/entity.h"
 #include "zone/npc.h"
@@ -139,7 +142,13 @@ void Process() { if (adapter) { adapter->Process(); } }
 void BeginTeardown() { if (adapter) { adapter->BeginTeardown(); } }
 void FinishTeardown()
 {
-    if (adapter) { adapter->FinishTeardown(); adapter.reset(); }
+    if (adapter) {
+        adapter->FinishTeardown();
+#ifdef EQEMU_BUILD_TESTS
+        InserverTests::ObserveActorShutdown(InserverTests::ActorShutdownStage::RuntimeClosed);
+#endif
+        adapter.reset();
+    }
 }
 } // namespace ActorBody
 #endif

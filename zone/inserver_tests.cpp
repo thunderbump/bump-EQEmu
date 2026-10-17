@@ -68,16 +68,25 @@ bool actor_idle_saved = false;
 bool actor_prior_idle_override = false;
 uint16 actor_neighbor_id = 0;
 NPC *actor_neighbor = nullptr; // compared only; never dereferenced after lookup
+bool actor_shutdown_armed = false;
+bool actor_shutdown_valid = false;
+unsigned actor_shutdown_stages = 0;
+uint16 actor_shutdown_id = 0;
+uint64 actor_shutdown_epoch = 0;
+uint64 actor_shutdown_generation = 0;
 
 void CleanupActorBody()
 {
-    ActorBody::Get().BeginTeardown();
+    // The final step destroys the zone and its adapter. Do not reconstruct it
+    // during scenario cleanup (or touch the destroyed zone's idle override).
+    actor_shutdown_armed = false;
+    if (zone) { ActorBody::Get().BeginTeardown(); }
     auto *neighbor = entity_list.GetNPCByID(actor_neighbor_id);
     if (neighbor && neighbor == actor_neighbor) { neighbor->Depop(false); }
     if (actor_idle_saved && zone) {
         zone->quest_idle_override = actor_prior_idle_override;
-        actor_idle_saved = false;
     }
+    actor_idle_saved = false;
 }
 
 Result ActorBodyLifetime()
@@ -262,7 +271,37 @@ Result ActorBodyLifetime()
         }
         adapter.FinishTeardown();
         if (!adapter.Inspect().closed) { return fail("reconstructed runtime did not shut down"); }
-        return {Outcome::Passed, "Rust body registered/processed; stun expired; ordinary AI retained; retire/external depop absent; reused-ID stale refusal; teardown drained"};
+        // Preserve the adapter-drain/epoch checks above, then use a fresh live
+        // body to exercise the real Zone::Shutdown -> ~Zone -> Clear path.
+        ActorBody::FinishTeardown();
+        {
+            auto &fresh = ActorBody::Get();
+            const auto initial = fresh.Inspect();
+            if (fresh.Send({Kind::CreateBody, initial.epoch, initial.generation, 0, 0, 0, 0}).event != Event::BodyRequested) {
+                return fail("real zone shutdown body request failed");
+            }
+        }
+        ++step;
+        break;
+    case 10:
+        if (state.body != Body::Present || !adapter.Body() || !adapter.Body()->ActorProcessCount()) {
+            return fail("real zone shutdown subject was not registered and processing");
+        }
+        actor_shutdown_id = adapter.NativeID();
+        actor_shutdown_epoch = state.epoch;
+        actor_shutdown_generation = state.generation;
+        actor_shutdown_stages = 0;
+        actor_shutdown_valid = true;
+        actor_shutdown_armed = true;
+        // Shutdown destroys both zone and adapter synchronously. Do not use
+        // the references captured above after this call, even on failure.
+        zone->Shutdown();
+        actor_shutdown_armed = false;
+        if (zone || is_zone_loaded || !actor_shutdown_valid || actor_shutdown_stages != 3 ||
+            entity_list.GetNPCByID(actor_shutdown_id) || entity_list.GetMob(actor_shutdown_id)) {
+            return fail("real zone shutdown missed admission/absence/Rust-close ordering");
+        }
+        return {Outcome::Passed, "Rust body processed; stun expired; ordinary AI retained; retire/external absence; reused-ID/epoch refusal; real zone shutdown closed admission, cleared body, then closed Rust"};
     }
     return {Outcome::Pending, ""};
 }
@@ -279,6 +318,8 @@ struct Scenario {
 constexpr std::array scenarios = {
 	Scenario{"native_beacon_lifetime", BeaconLifetime}
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+    // Destructive final scenario: publishes synchronously after real zone shutdown.
+    // Keep all scenarios that require a loaded zone before this one.
     , Scenario{"rust_native_actor_body_lifetime", ActorBodyLifetime, CleanupActorBody}
 #endif
 };
@@ -352,6 +393,39 @@ bool Publish()
 
 } // namespace
 
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+void ObserveActorShutdown(ActorShutdownStage stage)
+{
+    if (!actor_shutdown_armed) { return; }
+    using namespace eqemu_proof;
+    auto &adapter = ActorBody::Get();
+    const auto state = adapter.Inspect();
+    const bool native_absent = !entity_list.GetNPCByID(actor_shutdown_id) &&
+        !entity_list.GetMob(actor_shutdown_id);
+    bool valid = state.epoch == actor_shutdown_epoch && state.generation == actor_shutdown_generation;
+    switch (stage) {
+    case ActorShutdownStage::AdmissionClosed:
+        valid = valid && actor_shutdown_stages == 0 && !state.closed && state.alive &&
+            state.body == Body::Removing && adapter.Body() && !native_absent &&
+            adapter.Send({Kind::CreateBody, state.epoch, state.generation, 0, 0, 0, 0}).status == Status::Closed;
+        break;
+    case ActorShutdownStage::EntitiesCleared:
+        // The native indexes must be empty while Rust is still open. The
+        // following production FinishTeardown must observe absence and close.
+        valid = valid && actor_shutdown_stages == 1 && native_absent &&
+            !state.closed && state.alive && state.body == Body::Removing;
+        break;
+    case ActorShutdownStage::RuntimeClosed:
+        valid = valid && actor_shutdown_stages == 2 && native_absent &&
+            state.closed && !state.alive && state.body == Body::Absent &&
+            adapter.LastReport().event == Event::Shutdown;
+        break;
+    }
+    actor_shutdown_valid = actor_shutdown_valid && valid;
+    ++actor_shutdown_stages;
+}
+#endif
+
 bool Configure()
 {
 	const char *run = std::getenv("EQEMU_INSERVER_TEST_RUN");
@@ -406,6 +480,8 @@ void Process()
 		case_started_at = Timer::GetCurrentTime();
 	}
 	auto result = scenarios[current].process();
+	// A scenario may synchronously shut down the zone. Finish recording and
+	// publishing its result here; do not require another loaded-zone advance.
 	if (result.outcome == Outcome::Pending && Timer::GetCurrentTime() - case_started_at > 10000) {
 		result = {Outcome::Failed, "in-server scenario exceeded its 10 second deadline"};
 	}
