@@ -322,19 +322,31 @@ mod tests {
     #[test]
     fn native_body_facts_are_not_logical_lifetime_events() {
         let mut r = Runtime::new(31);
-        assert_eq!(send(&mut r, Kind::CreateBody, 0).event, Event::BodyRequested);
+        assert_eq!(
+            send(&mut r, Kind::CreateBody, 0).event,
+            Event::BodyRequested
+        );
         assert_eq!(r.inspect().body, Body::Requested);
         assert_eq!(send(&mut r, Kind::Retire, 0).status, Status::Busy);
         assert_eq!(send(&mut r, Kind::Shutdown, 0).status, Status::Busy);
-        assert_eq!(send(&mut r, Kind::BodyAbsent, 0).status, Status::InvalidResult);
+        assert_eq!(
+            send(&mut r, Kind::BodyAbsent, 0).status,
+            Status::InvalidResult
+        );
         assert_eq!(send(&mut r, Kind::BodyPresent, 0).event, Event::BodyPresent);
-        assert_eq!(send(&mut r, Kind::BodyPresent, 0).status, Status::InvalidResult);
+        assert_eq!(
+            send(&mut r, Kind::BodyPresent, 0).status,
+            Status::InvalidResult
+        );
         assert_eq!(send(&mut r, Kind::Move, 1).status, Status::Busy);
         assert_eq!(send(&mut r, Kind::Retire, 0).event, Event::RemovalRequested);
         assert!(r.inspect().alive);
         assert_eq!(r.inspect().body, Body::Removing);
         assert_eq!(send(&mut r, Kind::CreateBody, 0).status, Status::Busy);
-        assert_eq!(send(&mut r, Kind::BodyPresent, 0).status, Status::InvalidResult);
+        assert_eq!(
+            send(&mut r, Kind::BodyPresent, 0).status,
+            Status::InvalidResult
+        );
         assert_eq!(send(&mut r, Kind::BodyAbsent, 0).event, Event::BodyAbsent);
         assert!(!r.inspect().alive);
         assert_eq!(send(&mut r, Kind::BodyAbsent, 0).status, Status::Missing);
@@ -345,7 +357,10 @@ mod tests {
     fn admission_failure_external_removal_and_delayed_native_facts() {
         let mut r = Runtime::new(32);
         send(&mut r, Kind::CreateBody, 0);
-        assert_eq!(send(&mut r, Kind::BodyRejected, 0).event, Event::BodyRejected);
+        assert_eq!(
+            send(&mut r, Kind::BodyRejected, 0).event,
+            Event::BodyRejected
+        );
         assert!(!r.inspect().alive);
         send(&mut r, Kind::CreateBody, 0);
         let old = r.inspect();
