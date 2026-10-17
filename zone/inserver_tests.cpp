@@ -2,6 +2,7 @@
 
 #include "common/json/json.hpp"
 #include "common/timer.h"
+#include "common/rulesys.h"
 #include "zone/beacon.h"
 #include "zone/actor_body.h"
 #include "zone/npc.h"
@@ -75,10 +76,23 @@ uint16 actor_shutdown_id = 0;
 uint64 actor_shutdown_epoch = 0;
 uint64 actor_shutdown_generation = 0;
 
+// Only used around the synchronous shutdown/boot transition. Never persist the
+// override, and restore even when an assertion or Bootup fails.
+struct KeepZoneHostAlive {
+    const bool prior = RuleB(Zone, KillProcessOnDynamicShutdown);
+    bool Disable() {
+        return RuleManager::Instance()->SetRule("Zone:KillProcessOnDynamicShutdown", "false");
+    }
+    bool Restore() const {
+        return RuleManager::Instance()->SetRule("Zone:KillProcessOnDynamicShutdown", prior ? "true" : "false");
+    }
+    ~KeepZoneHostAlive() { Restore(); }
+};
+
 void CleanupActorBody()
 {
-    // The final step destroys the zone and its adapter. Do not reconstruct it
-    // during scenario cleanup (or touch the destroyed zone's idle override).
+    // Restore only the current zone's saved override; never retain a Zone or
+    // Adapter reference across the real shutdown/reboot transition.
     actor_shutdown_armed = false;
     if (zone) { ActorBody::Get().BeginTeardown(); }
     auto *neighbor = entity_list.GetNPCByID(actor_neighbor_id);
@@ -283,7 +297,7 @@ Result ActorBodyLifetime()
         }
         ++step;
         break;
-    case 10:
+    case 10: {
         if (state.body != Body::Present || !adapter.Body() || !adapter.Body()->ActorProcessCount()) {
             return fail("real zone shutdown subject was not registered and processing");
         }
@@ -293,15 +307,64 @@ Result ActorBodyLifetime()
         actor_shutdown_stages = 0;
         actor_shutdown_valid = true;
         actor_shutdown_armed = true;
-        // Shutdown destroys both zone and adapter synchronously. Do not use
-        // the references captured above after this call, even on failure.
-        zone->Shutdown();
-        actor_shutdown_armed = false;
-        if (zone || is_zone_loaded || !actor_shutdown_valid || actor_shutdown_stages != 3 ||
-            entity_list.GetNPCByID(actor_shutdown_id) || entity_list.GetMob(actor_shutdown_id)) {
-            return fail("real zone shutdown missed admission/absence/Rust-close ordering");
+        // Capture values, not references: Shutdown destroys zone and adapter.
+        const auto zone_id = zone->GetZoneID();
+        const auto instance_id = zone->GetInstanceID();
+        const bool is_static = zone->IsStaticZone();
+        const auto zone_server_id = zone->GetZoneServerId();
+        if (actor_idle_saved) { zone->quest_idle_override = actor_prior_idle_override; }
+        actor_idle_saved = false;
+        bool shutdown_ok = false;
+        bool booted = false;
+        bool restored = false;
+        {
+            KeepZoneHostAlive host;
+            if (!host.Disable()) { return fail("could not disable test host termination"); }
+            zone->Shutdown();
+            actor_shutdown_armed = false;
+            shutdown_ok = !zone && !is_zone_loaded && actor_shutdown_valid && actor_shutdown_stages == 3 &&
+                !entity_list.GetNPCByID(actor_shutdown_id) && !entity_list.GetMob(actor_shutdown_id);
+            // Recover the normal loaded-zone contract even if an assertion failed.
+            if (!zone && !is_zone_loaded) {
+                booted = Zone::Bootup(zone_id, instance_id, is_static);
+                if (booted && zone) { zone->SetZoneServerId(zone_server_id); }
+            }
+            restored = host.Restore();
         }
-        return {Outcome::Passed, "Rust body processed; stun expired; ordinary AI retained; retire/external absence; reused-ID/epoch refusal; real zone shutdown closed admission, cleared body, then closed Rust"};
+        if (!shutdown_ok) { return fail("real zone shutdown missed admission/absence/Rust-close ordering"); }
+        if (!booted || !zone || !is_zone_loaded) { return fail("replacement zone boot failed"); }
+        if (!restored) { return fail("could not restore test host termination rule"); }
+        actor_prior_idle_override = zone->quest_idle_override;
+        actor_idle_saved = true;
+        zone->quest_idle_override = true;
+        auto &fresh = ActorBody::Get();
+        const auto initial = fresh.Inspect();
+        if (initial.epoch == actor_shutdown_epoch || initial.alive || initial.closed ||
+            fresh.Send({Kind::CreateBody, initial.epoch, initial.generation, 0, 0, 0, 0}).event != Event::BodyRequested) {
+            return fail("replacement zone did not admit a fresh actor identity");
+        }
+        ++step;
+        break;
+    }
+    case 11:
+        if (state.body != Body::Present || !adapter.Body() || !adapter.Body()->ActorProcessCount() ||
+            state.epoch == actor_shutdown_epoch ||
+            command(Kind::Retire, actor_shutdown_generation, actor_shutdown_epoch).status != Status::Stale ||
+            adapter.Lookup(actor_shutdown_epoch, actor_shutdown_generation, adapter.NativeID())) {
+            return fail("replacement zone processing or old-zone identity refusal missing");
+        }
+        reused_id = adapter.NativeID();
+        if (command(Kind::Retire, state.generation, state.epoch).event != Event::RemovalRequested) {
+            return fail("replacement zone actor retirement failed");
+        }
+        ++step;
+        break;
+    case 12:
+        if (state.alive || state.body != Body::Absent || entity_list.GetNPCByID(reused_id) ||
+            entity_list.GetMob(reused_id)) {
+            return fail("replacement zone actor retirement did not establish absence");
+        }
+        return {Outcome::Passed, "Rust body processed; stun expired; ordinary AI retained; retire/external absence; reused-ID/epoch refusal; real shutdown admission/absence/Rust-close ordering; replacement zone processed and refused old identity"};
     }
     return {Outcome::Pending, ""};
 }
@@ -318,8 +381,7 @@ struct Scenario {
 constexpr std::array scenarios = {
 	Scenario{"native_beacon_lifetime", BeaconLifetime}
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
-    // Destructive final scenario: publishes synchronously after real zone shutdown.
-    // Keep all scenarios that require a loaded zone before this one.
+    // Exercises real shutdown, then boots a replacement in the same zone host.
     , Scenario{"rust_native_actor_body_lifetime", ActorBodyLifetime, CleanupActorBody}
 #endif
 };
