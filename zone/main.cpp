@@ -59,9 +59,13 @@
 
 #include <chrono>
 #include <csignal>
+#include <cstdio>
+#include <cstdlib>
+#ifdef EQEMU_BUILD_TESTS
+#include "zone/inserver_tests.h"
+#endif
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
 #include <cstdint>
-#include <cstdio>
 #include <utility>
 
 #include "actor-bridge/src/lib.rs.h"
@@ -108,6 +112,17 @@ extern void MapOpcodes();
 bool CheckForCompatibleQuestPlugins();
 int main(int argc, char **argv)
 {
+#ifdef EQEMU_BUILD_TESTS
+	if (!InserverTests::Configure()) {
+		return 1;
+	}
+#else
+	if (std::getenv("EQEMU_INSERVER_TEST_RUN") || std::getenv("EQEMU_INSERVER_TEST_RESULT") ||
+		std::getenv("EQEMU_INSERVER_TEST_CONTROL")) {
+		std::fputs("In-server tests require EQEMU_BUILD_TESTS\n", stderr);
+		return 1;
+	}
+#endif
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
 	// Keep the versioned marker and exercise the owned runtime API at startup.
 	if (eqemu_rust_bridge_v1() != 42) {
@@ -657,6 +672,9 @@ int main(int argc, char **argv)
 				if (quest_timers.Check()) {
 					quest_manager.Process();
 				}
+#ifdef EQEMU_BUILD_TESTS
+				InserverTests::Process();
+#endif
 			}
 		}
 
