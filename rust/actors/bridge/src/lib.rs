@@ -13,6 +13,10 @@ mod ffi {
         Completed,
         Rejected,
         Interrupted,
+        CreateBody,
+        BodyPresent,
+        BodyRejected,
+        BodyAbsent,
     }
     #[repr(u8)]
     enum Status {
@@ -39,6 +43,11 @@ mod ffi {
         Interrupted,
         Retired,
         Shutdown,
+        BodyRequested,
+        BodyPresent,
+        BodyRejected,
+        RemovalRequested,
+        BodyAbsent,
     }
     #[repr(u8)]
     enum Phase {
@@ -46,6 +55,14 @@ mod ffi {
         Requested,
         Admitted,
         Stopping,
+    }
+    #[repr(u8)]
+    enum Body {
+        Logical,
+        Requested,
+        Present,
+        Removing,
+        Absent,
     }
     struct Input {
         kind: Kind,
@@ -70,6 +87,7 @@ mod ffi {
         epoch: u64,
         generation: u64,
         alive: bool,
+        body: Body,
         closed: bool,
         phase: Phase,
         operation: u64,
@@ -128,6 +146,11 @@ fn map_event(value: actor_core::Event) -> ffi::Event {
         actor_core::Event::Interrupted => ffi::Event::Interrupted,
         actor_core::Event::Retired => ffi::Event::Retired,
         actor_core::Event::Shutdown => ffi::Event::Shutdown,
+        actor_core::Event::BodyRequested => ffi::Event::BodyRequested,
+        actor_core::Event::BodyPresent => ffi::Event::BodyPresent,
+        actor_core::Event::BodyRejected => ffi::Event::BodyRejected,
+        actor_core::Event::RemovalRequested => ffi::Event::RemovalRequested,
+        actor_core::Event::BodyAbsent => ffi::Event::BodyAbsent,
     }
 }
 
@@ -158,6 +181,10 @@ impl Runtime {
                     ffi::Kind::Completed => actor_core::Kind::Completed,
                     ffi::Kind::Rejected => actor_core::Kind::Rejected,
                     ffi::Kind::Interrupted => actor_core::Kind::Interrupted,
+                    ffi::Kind::CreateBody => actor_core::Kind::CreateBody,
+                    ffi::Kind::BodyPresent => actor_core::Kind::BodyPresent,
+                    ffi::Kind::BodyRejected => actor_core::Kind::BodyRejected,
+                    ffi::Kind::BodyAbsent => actor_core::Kind::BodyAbsent,
                     _ => {
                         let s = self.0.inspect();
                         return ffi::Report {
@@ -206,6 +233,13 @@ impl Runtime {
                 epoch: s.epoch,
                 generation: s.generation,
                 alive: s.alive,
+                body: match s.body {
+                    actor_core::Body::Logical => ffi::Body::Logical,
+                    actor_core::Body::Requested => ffi::Body::Requested,
+                    actor_core::Body::Present => ffi::Body::Present,
+                    actor_core::Body::Removing => ffi::Body::Removing,
+                    actor_core::Body::Absent => ffi::Body::Absent,
+                },
                 closed: s.closed,
                 phase: map_phase(s.phase),
                 operation: s.operation,

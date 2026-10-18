@@ -69,6 +69,7 @@
 #include <utility>
 
 #include "actor-bridge/src/lib.rs.h"
+#include "zone/actor_body.h"
 
 // Retained qualification symbol, in addition to the real runtime below.
 extern "C" std::uint32_t eqemu_rust_bridge_v1();
@@ -130,10 +131,11 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	{
-		// Logical plumbing only: this never creates a native NPC or movement body.
-		auto runtime = eqemu_proof::construct(1);
+		// Epoch zero is reserved for this startup-only logical runtime. Native
+		// zone adapters allocate distinct nonzero epochs across reconstruction.
+		auto runtime = eqemu_proof::construct(0);
 		rust::Vec<eqemu_proof::Input> inputs;
-		inputs.push_back({eqemu_proof::Kind::Create, 1, 0, 0, 0, 0, 0});
+		inputs.push_back({eqemu_proof::Kind::Create, 0, 0, 0, 0, 0, 0});
 		auto created = runtime->advance(1, 0, std::move(inputs));
 		auto state = runtime->inspect();
 		if (created.status != eqemu_proof::Status::Ok || !state.alive) {
@@ -141,10 +143,10 @@ int main(int argc, char **argv)
 			return 1;
 		}
 		rust::Vec<eqemu_proof::Input> retire;
-		retire.push_back({eqemu_proof::Kind::Retire, 1, state.generation, 0, 0, 0, 0});
+		retire.push_back({eqemu_proof::Kind::Retire, 0, state.generation, 0, 0, 0, 0});
 		auto retired = runtime->advance(2, 0, std::move(retire));
 		rust::Vec<eqemu_proof::Input> shutdown;
-		shutdown.push_back({eqemu_proof::Kind::Shutdown, 1, state.generation, 0, 0, 0, 0});
+		shutdown.push_back({eqemu_proof::Kind::Shutdown, 0, state.generation, 0, 0, 0, 0});
 		auto closed = runtime->advance(3, 0, std::move(shutdown));
 		if (retired.event != eqemu_proof::Event::Retired ||
 			closed.event != eqemu_proof::Event::Shutdown || !runtime->inspect().closed) {
@@ -672,6 +674,9 @@ int main(int argc, char **argv)
 				if (quest_timers.Check()) {
 					quest_manager.Process();
 				}
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+				ActorBody::Process();
+#endif
 #ifdef EQEMU_BUILD_TESTS
 				InserverTests::Process();
 #endif

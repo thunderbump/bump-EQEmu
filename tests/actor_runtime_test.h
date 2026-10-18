@@ -9,9 +9,36 @@
 // native adapter trace: no NPC bodies, position or gameplay claims.
 class ActorRuntimeTest : public Test::Suite {
 public:
-	ActorRuntimeTest() { TEST_ADD(ActorRuntimeTest::RoundTrip); }
+	ActorRuntimeTest() {
+		TEST_ADD(ActorRuntimeTest::RoundTrip);
+		TEST_ADD(ActorRuntimeTest::BodyFacts);
+	}
 
 private:
+	void BodyFacts()
+	{
+		using namespace eqemu_proof;
+		auto runtime = construct(32);
+		auto send = [&](Kind kind) {
+			const auto state = runtime->inspect();
+			rust::Vec<Input> inputs;
+			inputs.push_back({kind, state.epoch, state.generation, 0, 0, 0, 0});
+			return runtime->advance(state.sequence + 1, state.tick + 1, std::move(inputs));
+		};
+		TEST_ASSERT(send(Kind::CreateBody).event == Event::BodyRequested);
+		TEST_ASSERT(runtime->inspect().body == Body::Requested);
+		TEST_ASSERT(send(Kind::Retire).status == Status::Busy);
+		TEST_ASSERT(send(Kind::BodyPresent).event == Event::BodyPresent);
+		TEST_ASSERT(send(Kind::Retire).event == Event::RemovalRequested);
+		TEST_ASSERT(runtime->inspect().alive && runtime->inspect().body == Body::Removing);
+		TEST_ASSERT(send(Kind::Shutdown).status == Status::Busy);
+		TEST_ASSERT(send(Kind::BodyAbsent).event == Event::BodyAbsent);
+		TEST_ASSERT(!runtime->inspect().alive);
+		TEST_ASSERT(send(Kind::CreateBody).event == Event::BodyRequested);
+		TEST_ASSERT(send(Kind::BodyRejected).event == Event::BodyRejected);
+		TEST_ASSERT(send(Kind::Shutdown).event == Event::Shutdown);
+	}
+
 	void RoundTrip()
 	{
 		using namespace eqemu_proof;
