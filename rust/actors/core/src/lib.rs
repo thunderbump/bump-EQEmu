@@ -365,7 +365,10 @@ mod tests {
         send(&mut r, Kind::BodyPresent, 0);
         for terminal in [Kind::Completed, Kind::Interrupted] {
             let operation = r.high_operation + 1;
-            assert_eq!(send(&mut r, Kind::Move, operation).event, Event::MoveRequested);
+            assert_eq!(
+                send(&mut r, Kind::Move, operation).event,
+                Event::MoveRequested
+            );
             assert_eq!(
                 send(&mut r, Kind::Completed, operation).status,
                 Status::InvalidResult
