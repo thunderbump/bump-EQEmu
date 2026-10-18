@@ -9,8 +9,11 @@
 #include "zone/entity.h"
 #include "zone/worldserver.h"
 #include "zone/zone.h"
+#include "zone/mob_movement_manager.h"
+#include <cmath>
 
 #include <array>
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -208,6 +211,9 @@ Result ActorBodyLifetime()
         auto *replacement = adapter.Body();
         if (!replacement || state.body != Body::Present ||
             command(Kind::Retire, old_generation, epoch).status != Status::Stale ||
+            command(Kind::Move, old_generation, epoch).status != Status::Stale ||
+            command(Kind::Move, state.generation, epoch + 1).status != Status::Stale ||
+            adapter.Inspect().phase != Phase::Idle || replacement->IsMoving() ||
             command(Kind::Retire, state.generation, epoch + 1).status != Status::Stale ||
             adapter.Lookup(epoch, old_generation, reused_id) ||
             adapter.Lookup(epoch + 1, state.generation, reused_id) ||
@@ -368,6 +374,230 @@ Result ActorBodyLifetime()
     }
     return {Outcome::Pending, ""};
 }
+// Each case runs through the ordinary world loop. These are conservative
+// candidate bounds, NOT measured qualification values; retain per-case native
+// telemetry so Operations can establish the VM baseline before acceptance.
+enum class TravelCase { Arrival, Stop, Stun, Root, Blocked, External, Suspended };
+template<TravelCase mode>
+Result ActorTravel()
+{
+    using namespace eqemu_proof;
+    static unsigned step = 0;
+    static uint32 began = 0, last_at = 0, acted_at = 0, settled_at = 0, terminal_at = 0;
+    static unsigned moving_samples = 0;
+    static glm::vec3 origin, previous, settled, action_position;
+    static int32 tx = 0, ty = 0, tz = 0;
+    static uint16 native_id = 0;
+    static float distance = 0, max_step = 0;
+    auto &adapter = ActorBody::Get();
+    const auto state = adapter.Inspect();
+    auto *body = adapter.Body();
+    const auto now = Timer::GetCurrentTime();
+    auto command = [&](Kind kind, uint64 operation = 1) {
+        return adapter.Send({kind, state.epoch, state.generation, operation, tx, ty, tz});
+    };
+    auto diagnostic = [&](const char *reason) {
+        char text[256];
+        std::snprintf(text, sizeof(text),
+            "%s stage=%u ms=%u action_ms=%u native_distance=%.2f max_step=%.2f phase=%u terminal=%u op=%llu",
+            reason, step, now - began, acted_at ? (terminal_at ? terminal_at : now) - acted_at : 0,
+            distance, max_step, static_cast<unsigned>(ActorBody::Get().Inspect().phase),
+            static_cast<unsigned>(ActorBody::Get().Inspect().last_terminal),
+            static_cast<unsigned long long>(ActorBody::Get().Inspect().last_operation));
+        // Retain before cleanup, including failures and external-depop cases.
+        std::fprintf(stderr, "actor travel case=%u %s\n", static_cast<unsigned>(mode), text);
+        return std::string(text);
+    };
+    auto fail = [&](const char *why) { return Result{Outcome::Failed, diagnostic(why)}; };
+    if (step && now - began > 7500) { return fail("native travel deadline"); }
+    if (step && body) {
+        const glm::vec3 position(body->GetX(), body->GetY(), body->GetZ());
+        const auto delta = glm::distance(position, previous);
+        max_step = std::max(max_step, delta);
+        distance += delta;
+        // Observe real samples, not request coordinates. Bound frame displacement
+        // by native speed and elapsed time; a teleport is never accepted as travel.
+        const float bound = (now - last_at) * 0.001f * body->GetRunspeed() * 0.4f * 1.45f + 2.0f;
+        if (delta > bound || delta > 8 || now - last_at > 250 || body->NativeDecisionCount()) {
+            return fail("unobservable sample gap, jump or competing AI");
+        }
+        if (delta > 0.05f) { ++moving_samples; }
+        if (step == 4 && mode != TravelCase::External && glm::distance(position, action_position) > 0.05f) {
+            return fail("native drift after stop/control action");
+        }
+        previous = position;
+        last_at = now;
+    }
+    switch (step) {
+    case 0: {
+        // Prior case cleanup closes admission. Drain it through the real loop
+        // before reconstructing; never recycle a still-live body/runtime.
+        if (state.alive) { return {Outcome::Pending, ""}; }
+        ActorBody::FinishTeardown();
+        auto &fresh = ActorBody::Get();
+        const auto initial = fresh.Inspect();
+        actor_prior_idle_override = zone->quest_idle_override;
+        actor_idle_saved = true;
+        zone->quest_idle_override = true;
+        const auto safe = zone->GetSafePoint();
+        tx = static_cast<int32>(std::lround(safe.x));
+        ty = static_cast<int32>(std::lround(safe.y));
+        tz = static_cast<int32>(std::lround(safe.z));
+        if (fresh.Send({Kind::CreateBody, initial.epoch, initial.generation, 0, tx, ty, tz}).event != Event::BodyRequested) {
+            return fail("travel body creation refused");
+        }
+        body = fresh.Body();
+        native_id = fresh.NativeID();
+        if (!body || !zone->zonemap) { return fail("native body/map missing"); }
+        origin = previous = glm::vec3(body->GetX(), body->GetY(), body->GetZ());
+        last_at = began = now;
+        tx += 40;
+        const auto ground = zone->zonemap->FindBestZ(glm::vec3(tx, ty, tz + 20), nullptr);
+        if (ground == BEST_Z_INVALID) { return fail("short route endpoint has no native ground"); }
+        tz = static_cast<int32>(std::lround(ground + body->GetZOffset()));
+        if constexpr (mode == TravelCase::Blocked) {
+            // Require a real map obstruction within the admitted locality bound,
+            // not merely an out-of-range request or a synthetic Rust rejection.
+            bool found = false;
+            for (unsigned direction = 0; direction < 16 && !found; ++direction) {
+                const float angle = direction * 6.2831853f / 16;
+                const int32 x = static_cast<int32>(std::lround(origin.x + 60 * std::cos(angle)));
+                const int32 y = static_cast<int32>(std::lround(origin.y + 60 * std::sin(angle)));
+                const auto floor = zone->zonemap->FindBestZ(glm::vec3(x, y, origin.z + 20), nullptr);
+                if (floor == BEST_Z_INVALID) { continue; }
+                const int32 z = static_cast<int32>(std::lround(floor + body->GetZOffset()));
+                if (std::abs(z - origin.z) <= 6 &&
+                    !zone->zonemap->CheckLoS(origin, glm::vec3(x, y, z))) {
+                    tx = x; ty = y; tz = z; found = true;
+                }
+            }
+            if (!found) { return fail("no measured local map obstruction; route qualification required"); }
+        }
+        std::fprintf(stderr, "actor travel case=%u start=(%.2f,%.2f,%.2f) end=(%d,%d,%d) "
+            "candidate_bounds arrival_xy=2 z=6 action_ms=1000 drift=0.05 window_ms=400 total_ms=7500\n",
+            static_cast<unsigned>(mode), origin.x, origin.y, origin.z, tx, ty, tz);
+        auto *type = new NPCType{};
+        std::strcpy(type->name, "ActorTravelNeighbor");
+        type->current_hp = type->max_hp = 100;
+        type->race = type->class_ = type->level = 1;
+        type->gender = 2;
+        type->size = 6;
+        type->bodytype = 11;
+        type->untargetable = 1;
+        type->skip_global_loot = true;
+        auto *neighbor = new NPC(type, nullptr, glm::vec4(origin + glm::vec3(0, 20, 0), 0), GravityBehavior::Flying);
+        neighbor->GiveNPCTypeData(type);
+        entity_list.AddNPC(neighbor, false);
+        actor_neighbor_id = neighbor->GetID();
+        actor_neighbor = neighbor;
+        neighbor->Stun(200);
+        step = 1;
+        break;
+    }
+    case 1:
+        if (state.body != Body::Present) { break; }
+        if (!body) { return fail("native body disappeared before travel admission"); }
+        if constexpr (mode == TravelCase::Suspended) {
+            body->Mesmerize();
+            if (!body->IsMezzed()) { return fail("native forced-control suspension missing"); }
+        }
+        if (command(Kind::Move).event != Event::MoveRequested || adapter.Inspect().phase != Phase::Requested) {
+            return fail("move request/admission conflated");
+        }
+        step = 2;
+        break;
+    case 2:
+        if (state.phase == Phase::Requested) { break; }
+        if constexpr (mode == TravelCase::Blocked || mode == TravelCase::Suspended) {
+            if (state.last_terminal != Event::Rejected || state.last_operation != 1 ||
+                !body || body->IsMoving() || glm::distance(previous, origin) > 0.05f) {
+                return fail("blocked/control-suspended request moved or lacked rejection");
+            }
+            settled = previous;
+            settled_at = now;
+            step = 5;
+        } else {
+            if (state.phase != Phase::Admitted || !body) { return fail("clear route was not admitted"); }
+            step = 3;
+        }
+        break;
+    case 3:
+        if (!body) { return fail("body vanished before deliberate action"); }
+        if constexpr (mode == TravelCase::Arrival) {
+            if (state.phase != Phase::Idle) { break; }
+            if (state.last_terminal != Event::Completed || state.last_operation != 1 ||
+                distance < 20 || moving_samples < 3 || std::hypot(body->GetX() - tx, body->GetY() - ty) > 2 ||
+                std::abs(body->GetZ() - tz) > 6 || body->IsMoving()) {
+                return fail("arrival disagrees with native travel");
+            }
+            std::fprintf(stderr, "actor native arrival ms=%u samples=%u xy_error=%.3f z_error=%.3f pos=(%.3f,%.3f,%.3f)\n",
+                now - began, moving_samples, std::hypot(body->GetX() - tx, body->GetY() - ty),
+                std::abs(body->GetZ() - tz), previous.x, previous.y, previous.z);
+            settled = previous;
+            settled_at = now;
+            step = 5;
+        } else {
+            if (distance < 4 || !body->IsMoving()) { break; }
+            if (command(Kind::Stop, 2).status != Status::InvalidResult ||
+                adapter.Send({Kind::Move, state.epoch, state.generation - 1, 2, tx, ty, tz}).status != Status::Stale ||
+                command(Kind::Completed).status != Status::InvalidInput) {
+                return fail("wrong operation/stale identity/caller native fact accepted");
+            }
+            if constexpr (mode == TravelCase::Stop) {
+                if (command(Kind::Stop).event != Event::StopRequested) { return fail("stop not requested"); }
+            } else if constexpr (mode == TravelCase::Stun) {
+                body->Stun(1500);
+                if (!body->IsStunned()) { return fail("native stun not armed"); }
+            } else if constexpr (mode == TravelCase::Root) {
+                // Real native spell effects, not a Rust declaration or mock root.
+                if (!body->SpellEffect(body, 230) || !body->IsRooted()) { return fail("native Root spell failed"); }
+            } else if constexpr (mode == TravelCase::External) {
+                body->Depop(false);
+            }
+            action_position = previous;
+            acted_at = now;
+            step = 4;
+        }
+        break;
+    case 4:
+        if (now - acted_at > 1000) { return fail("native stop/interruption deadline"); }
+        if (state.phase != Phase::Idle || (body && body->IsMoving())) { break; }
+        if (state.last_terminal != Event::Interrupted || state.last_operation != 1) {
+            return fail("native interruption missing or wrong operation");
+        }
+        if constexpr (mode == TravelCase::External) {
+            if (state.alive || entity_list.GetMob(native_id) || entity_list.GetNPCByID(native_id)) { break; }
+        } else if (!body) { return fail("interrupted body disappeared"); }
+        terminal_at = now;
+        std::fprintf(stderr, "actor native terminal case=%u latency_ms=%u samples=%u pos=(%.3f,%.3f,%.3f)\n",
+            static_cast<unsigned>(mode), now - acted_at, moving_samples, previous.x, previous.y, previous.z);
+        settled = previous;
+        settled_at = now;
+        step = 5;
+        break;
+    case 5: {
+        if (body && (glm::distance(previous, settled) > 0.05f || body->IsMoving())) {
+            return fail("post-terminal native drift");
+        }
+        if (now - settled_at < 400) { break; }
+        auto *neighbor = entity_list.GetNPCByID(actor_neighbor_id);
+        if (!neighbor || neighbor != actor_neighbor || neighbor->IsRustActor() ||
+            neighbor->IsStunned() || !neighbor->NativeDecisionCount()) {
+            return fail("ordinary neighbor control/status regressed");
+        }
+        if (state.alive && command(Kind::Retire, 0).event != Event::RemovalRequested) {
+            return fail("travel retirement refused");
+        }
+        step = 6;
+        break;
+    }
+    case 6:
+        if (state.alive || body || entity_list.GetMob(native_id) || entity_list.GetNPCByID(native_id)) { break; }
+        return {Outcome::Passed, diagnostic("native route/control observed; provisional bounds")};
+    }
+    return {Outcome::Pending, ""};
+}
+
 #endif
 
 struct Scenario {
@@ -383,6 +613,13 @@ constexpr std::array scenarios = {
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
     // Exercises real shutdown, then boots a replacement in the same zone host.
     , Scenario{"rust_native_actor_body_lifetime", ActorBodyLifetime, CleanupActorBody}
+    , Scenario{"rust_native_actor_arrival", ActorTravel<TravelCase::Arrival>, CleanupActorBody}
+    , Scenario{"rust_native_actor_stop", ActorTravel<TravelCase::Stop>, CleanupActorBody}
+    , Scenario{"rust_native_actor_stun", ActorTravel<TravelCase::Stun>, CleanupActorBody}
+    , Scenario{"rust_native_actor_root", ActorTravel<TravelCase::Root>, CleanupActorBody}
+    , Scenario{"rust_native_actor_blocked", ActorTravel<TravelCase::Blocked>, CleanupActorBody}
+    , Scenario{"rust_native_actor_external_depop", ActorTravel<TravelCase::External>, CleanupActorBody}
+    , Scenario{"rust_native_actor_control_suspended", ActorTravel<TravelCase::Suspended>, CleanupActorBody}
 #endif
 };
 

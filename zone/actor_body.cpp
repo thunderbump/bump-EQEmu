@@ -5,6 +5,8 @@
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
 #include "zone/entity.h"
 #include "zone/npc.h"
+#include "zone/mob_movement_manager.h"
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
@@ -58,7 +60,7 @@ eqemu_proof::Report Adapter::Send(eqemu_proof::Input input)
     using namespace eqemu_proof;
     // Native facts are not caller commands. Admission closes before teardown.
     if (closing_ || (input.kind != Kind::CreateBody && input.kind != Kind::Retire &&
-        input.kind != Kind::Shutdown)) {
+        input.kind != Kind::Shutdown && input.kind != Kind::Move && input.kind != Kind::Stop)) {
         Report refused{};
         refused.status = closing_ ? Status::Closed : Status::InvalidInput;
         return refused;
@@ -74,6 +76,7 @@ eqemu_proof::Report Adapter::Send(eqemu_proof::Input input)
         type->level = 1;
         type->gender = 2;
         type->size = 6;
+        type->runspeed = 1.25f;
         type->bodytype = 11;
         type->untargetable = 1;
         type->skip_global_loot = true;
@@ -85,6 +88,18 @@ eqemu_proof::Report Adapter::Send(eqemu_proof::Input input)
         // Do not AI_Stop or clear IsAIControlled: the explicit gate owns decisions.
         entity_list.AddNPC(npc, false);
         id_ = npc->GetID();
+    } else if (report.event == Event::MoveRequested) {
+        target_x_ = report.x;
+        target_y_ = report.y;
+        target_z_ = report.z;
+    } else if (report.event == Event::StopRequested) {
+        if (auto *npc = Body()) {
+            auto &movement = MobMovementManager::Get();
+            // A native completion already latched before Stop remains truthful.
+            if (movement.InspectActorTravel(npc) == MobMovementManager::ActorTravel::Moving) {
+                movement.StopNavigation(npc);
+            }
+        }
     } else if (report.event == Event::RemovalRequested) {
         if (auto *npc = Body()) { npc->Depop(false); }
     }
@@ -96,6 +111,28 @@ void Adapter::Process()
     using namespace eqemu_proof;
     const auto state = Inspect();
     if (state.closed || !state.alive) { return; }
+    if (state.body == eqemu_proof::Body::Present && state.phase != Phase::Idle) {
+        auto *npc = Body();
+        auto &movement = MobMovementManager::Get();
+        if (state.phase == Phase::Requested) {
+            const bool admitted = !closing_ && npc &&
+                movement.NavigateActorTo(npc, target_x_, target_y_, target_z_);
+            Advance({admitted ? Kind::Admitted : Kind::Rejected,
+                state.epoch, state.generation, state.operation, 0, 0, 0});
+        } else {
+            const auto travel = npc ? movement.InspectActorTravel(npc) :
+                MobMovementManager::ActorTravel::Interrupted;
+            if (travel == MobMovementManager::ActorTravel::Moving || (npc && npc->IsMoving())) { return; }
+            // Empty native command queue is not alone proof of arrival. Observe
+            // the real body coordinates, never the Rust request/snapshot.
+            const bool arrived = npc && travel == MobMovementManager::ActorTravel::Completed &&
+                std::hypot(npc->GetX() - target_x_, npc->GetY() - target_y_) <= 2.0f &&
+                std::abs(npc->GetZ() - target_z_) <= 6.0f;
+            Advance({arrived ? Kind::Completed : Kind::Interrupted,
+                state.epoch, state.generation, state.operation, 0, 0, 0});
+        }
+        return; // retain exactly one owned fact per normal zone advance
+    }
     // Observe registration/absence on a later serialized zone advance, not while
     // applying the request. Depop is NOT absence: wait for the entity loop.
     if (state.body == eqemu_proof::Body::Requested) {
@@ -116,8 +153,20 @@ void Adapter::Process()
 void Adapter::BeginTeardown()
 {
     closing_ = true;
-    const auto state = Inspect();
-    if (state.body == eqemu_proof::Body::Present) {
+    auto state = Inspect();
+    if (state.phase == eqemu_proof::Phase::Requested) {
+        Advance({eqemu_proof::Kind::Rejected, state.epoch, state.generation, state.operation, 0, 0, 0});
+    } else if (state.phase != eqemu_proof::Phase::Idle) {
+        if (auto *npc = Body()) {
+            auto &movement = MobMovementManager::Get();
+            if (movement.InspectActorTravel(npc) == MobMovementManager::ActorTravel::Moving) {
+                movement.StopNavigation(npc);
+            }
+        }
+        Process(); // truthful latched completion, or wait for native stop/absence
+    }
+    state = Inspect();
+    if (state.body == eqemu_proof::Body::Present && state.phase == eqemu_proof::Phase::Idle) {
         Advance({eqemu_proof::Kind::Retire, state.epoch, state.generation, 0, 0, 0, 0});
     }
     if (auto *npc = Body()) { npc->Depop(false); }
@@ -125,6 +174,9 @@ void Adapter::BeginTeardown()
 
 void Adapter::FinishTeardown()
 {
+    // At most one pending terminal, then absence. Both are serialized owned
+    // facts, never an implicit eviction when a body disappears during travel.
+    Process();
     Process(); // observes actual absence after EntityList::Clear or native drain
     const auto state = Inspect();
     if (state.alive || Body()) { std::abort(); }

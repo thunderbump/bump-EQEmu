@@ -22,6 +22,8 @@
 #include "common/misc_functions.h"
 #include "zone/client.h"
 #include "zone/mob.h"
+#include "zone/npc.h"
+#include <cmath>
 #include "zone/position.h"
 #include "zone/water_map.h"
 #include "zone/zone.h"
@@ -568,7 +570,7 @@ public:
 
 	virtual bool Process(MobMovementManager *mob_movement_manager, Mob *mob)
 	{
-		if (!mob->IsAIControlled()) {
+		if (!mob->IsAIControlled() && !(mob->IsNPC() && mob->CastToNPC()->IsRustActor())) {
 			return true;
 		}
 
@@ -661,6 +663,7 @@ struct NavigateTo {
 struct MobMovementEntry {
 	std::deque<std::unique_ptr<IMovementCommand>> Commands;
 	NavigateTo                                    NavTo;
+	MobMovementManager::ActorTravel actor_travel = MobMovementManager::ActorTravel::Idle;
 };
 
 void AdjustRoute(std::list<IPathfinder::IPathNode> &nodes, Mob *who)
@@ -701,6 +704,11 @@ void MobMovementManager::Process()
 	for (auto &iter : _impl->Entries) {
 		auto &ent      = iter.second;
 		auto &commands = ent.Commands;
+        // Check forced control before executing ANY queued displacement. Ordinary
+        // NPCs do not enter this lane. Interruptions latch until the next request.
+        if (ent.actor_travel == ActorTravel::Moving && !ActorControlAllowsTravel(iter.first)) {
+            StopNavigation(iter.first);
+        }
 
 		while (true != commands.empty()) {
 			auto &cmd = commands.front();
@@ -712,6 +720,9 @@ void MobMovementManager::Process()
 
 			commands.pop_front();
 		}
+        if (ent.actor_travel == ActorTravel::Moving && commands.empty()) {
+            ent.actor_travel = ActorTravel::Completed;
+        }
 	}
 }
 
@@ -760,13 +771,19 @@ void MobMovementManager::Teleport(Mob *who, float x, float y, float z, float hea
 	auto iter = _impl->Entries.find(who);
 	auto &ent = (*iter);
 
+    const bool interrupted_actor = ent.second.actor_travel == ActorTravel::Moving;
+    if (interrupted_actor) {
+        ent.second.actor_travel = ActorTravel::Interrupted;
+    }
 	ent.second.Commands.clear();
 
 	PushTeleportTo(ent.second, x, y, z, heading);
+    if (interrupted_actor) { PushStopMoving(ent.second); }
 }
 
 void MobMovementManager::NavigateTo(Mob *who, float x, float y, float z, MobMovementMode mode)
 {
+    if (who->IsNPC() && who->CastToNPC()->IsRustActor()) { return; }
 	if (IsPositionEqualWithinCertainZ(glm::vec3(x, y, z), glm::vec3(who->GetX(), who->GetY(), who->GetZ()), 6.0f)) {
 		return;
 	}
@@ -801,11 +818,74 @@ void MobMovementManager::NavigateTo(Mob *who, float x, float y, float z, MobMove
 	}
 }
 
+bool MobMovementManager::ActorControlAllowsTravel(Mob *who)
+{
+    return who && who->IsNPC() && who->CastToNPC()->IsRustActor() &&
+        who->IsAIControlled() && !who->IsStunned() && !who->IsRooted() &&
+        !who->IsPseudoRooted() && !who->IsMezzed() && !who->IsFeared() &&
+        !who->IsBlind() && !who->IsCasting() && who->GetAppearance() == eaStanding &&
+        !who->Charmed() && !who->GetOwnerID() && !who->IsEngaged() &&
+        who->GetHP() > 0 && who->GetRunspeed() > 0;
+}
+
+MobMovementManager::ActorTravel MobMovementManager::InspectActorTravel(Mob *who) const
+{
+    const auto iter = _impl->Entries.find(who);
+    return iter == _impl->Entries.end() ? ActorTravel::Idle : iter->second.actor_travel;
+}
+
+bool MobMovementManager::NavigateActorTo(Mob *who, float x, float y, float z)
+{
+    const auto iter = _impl->Entries.find(who);
+    if (!ActorControlAllowsTravel(who) || iter == _impl->Entries.end() || !zone ||
+        !zone->zonemap || !zone->pathing || !zone->watermap ||
+        !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) { return false; }
+    auto &ent = iter->second;
+    if (!ent.Commands.empty() || ent.actor_travel == ActorTravel::Moving) { return false; }
+    const glm::vec3 start(who->GetX(), who->GetY(), who->GetZ()), end(x, y, z);
+    // Intentionally local: the first proof does not admit detours, water,
+    // portals or partial routes. Native map/navmesh remain authoritative.
+    const auto distance = glm::distance(start, end);
+    if (distance < 4.0f || distance > 80.0f || std::abs(z - start.z) > 6.0f ||
+        !zone->zonemap->CheckLoS(start, end)) { return false; }
+    PathfinderOptions opts;
+    opts.offset = who->GetZOffset();
+    opts.flags = PathingNotDisabled ^ PathingZoneLine;
+    bool partial = false, stuck = false;
+    auto route = zone->pathing->FindPath(start, end, partial, stuck, opts);
+    if (partial || stuck || route.size() < 2 || route.size() > 32) { return false; }
+    // Test teleport BEFORE inspecting pos (a teleport marker may have no pos).
+    for (const auto &node : route) { if (node.teleport) { return false; } }
+    AdjustRoute(route, who);
+    auto previous = start;
+    float length = 0;
+    for (const auto &node : route) {
+        if (!std::isfinite(node.pos.x) || !std::isfinite(node.pos.y) ||
+            !std::isfinite(node.pos.z) || zone->watermap->InLiquid(node.pos) ||
+            !zone->zonemap->CheckLoS(previous, node.pos)) { return false; }
+        length += glm::distance(previous, node.pos);
+        previous = node.pos;
+    }
+    if (zone->watermap->InLiquid(start) || glm::distance(previous, end) > 6.0f ||
+        length > distance * 1.5f) { return false; }
+    // Reuse native interpolation/packets/collision observations; never invoke
+    // generic stuck handling (which may teleport). No logical position writes.
+    for (const auto &node : route) {
+        PushMoveTo(ent, node.pos.x, node.pos.y, node.pos.z, MovementRunning);
+    }
+    PushStopMoving(ent);
+    ent.actor_travel = ActorTravel::Moving;
+    return true;
+}
+
 void MobMovementManager::StopNavigation(Mob *who)
 {
 	auto iter = _impl->Entries.find(who);
 	auto &ent = (*iter);
 	auto &nav = ent.second.NavTo;
+    if (ent.second.actor_travel == ActorTravel::Moving) {
+        ent.second.actor_travel = ActorTravel::Interrupted;
+    }
 
 	nav.navigate_to_x       = 0.0;
 	nav.navigate_to_y       = 0.0;

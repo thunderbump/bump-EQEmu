@@ -3,14 +3,14 @@
 `core` is deterministic, dependency-free safe Rust (`forbid(unsafe_code)`).
 `bridge` exposes that policy as CXX-owned values and an opaque `rust::Box`.
 The original logical protocol below remains available. `CreateBody` additionally
-requests one native NPC through the zone-owned adapter described below; no movement,
-position inspection or gameplay qualification is implied.
+requests one native NPC through the zone-owned adapter described below. The R2
+candidate adds bounded native travel; qualification remains pending (see below).
 The zone startup caller constructs, creates, inspects, retires and shuts down a
 logical actor, then releases the box. The registered `ActorRuntimeTest` uses the
 same API, including a fake native move-result trace. The pointer-free
 `eqemu_rust_bridge_v1` marker remains 42 for existing zone-link validation.
 
-## Native body lifetime slice (candidate; VM validation pending)
+## Native body lifetime slice (R1 accepted; retain regressions)
 
 `zone/actor_body.*` consumes `BodyRequested`/`RemovalRequested` effects after the
 owned Rust call returns. C++ alone allocates/registers NPCs, owns their type data,
@@ -30,7 +30,7 @@ The normal zone loop drives both the adapter and the existing source registry.
 Presence is checked against **both** native NPC and mob registries. Absence is
 not inferred from `Depop`, logical retirement or a missing NPC index alone.
 Creation, retirement and shutdown refuse while admission/removal is pending.
-Travel is deliberately refused for native bodies in this slice. Native facts
+Travel now requests later native admission for Present bodies only. Native facts
 cannot be submitted as adapter commands. All facts/commands carry Rust epoch and
 generation, and every native lookup also checks the stamp stored in the NPC.
 Reused entity IDs are not capabilities. Adapter reconstruction allocates a fresh
@@ -53,8 +53,9 @@ NPC actor stamps enable an actor-only mode, independent of `AI_Stop` and
 engaged/disengaged AI event decisions. Guard-facing and outgoing/incoming assists
 are gated outside AI processing; damage-triggered flee checks and tick fleeing
 are gated too. Ordinary unmarked NPCs take their existing paths. This body-only
-mode admits **no voluntary action**, including in unknown charm/fear/forced-control
-states; it does not guess that these states permit Rust actions. Native forced
+mode bypasses native voluntary AI. The R2 movement lane admits only explicitly
+checked free-control bodies; charm/fear/other suspended states do not permit
+Rust movement. Native forced
 movement/status handling remains native, not reimplemented by the adapter.
 
 The candidate in-server case independently checks registration, native process
@@ -70,15 +71,106 @@ subjects, restoring the original setting on success, failure and deadline.
 Owned subjects are depopped on assertions/deadlines; the normal loop and fixture
 shutdown own destruction. The bounded complete-result interface is unchanged.
 
-Unproved: movement/routes and stop/stun/root travel effects, combat, spells/buffs,
+R1 alone did not prove movement/routes or stop/stun/root travel effects.
+Still unproved by this candidate until VM qualification: travel, combat, spells/buffs,
 regen, charm/fear behavior, persistence, client delivery and all other gameplay.
 The stun test proves only native status/timer processing, not all mechanics.
-The registered drain test invokes production adapter teardown methods but does
-not itself unload the world-connected zone. The real zone shutdown hook asserts
-absence after entity-list clearing; actual fixture shutdown observation and
-exact-head VM checks/review are still required. No candidate builds or tests have
-been run on the implementation host. No additional environment service or Stack
-scenario selection is needed.
+The accepted R1 run exercised actual zone teardown/replacement as well as the
+registered drain test. Retain those regressions; R1 acceptance does not qualify
+this movement candidate. No candidate builds or tests have been run on the
+implementation host. No additional environment service or Stack scenario
+selection is needed.
+
+## Native movement candidate (R2; qualification pending)
+
+`Adapter::Send` accepts Move/Stop requests, not native results. Rust allows one
+fresh operation for a Present body, returns MoveRequested, and later consumes a
+correlated Admitted or Rejected fact. Coordinates remain requests, not evidence.
+The adapter resolves the stamped body on every access; the movement manager owns
+native commands and erases its entry on native destruction. No entity pointer is
+retained in Rust or in the adapter. External absence must first reject requested
+work or interrupt admitted work, then acknowledge BodyAbsent; absence cannot
+silently erase a pending operation. Teardown likewise drains terminal/absence
+facts before releasing Rust.
+
+The source-owned movement-manager lane validates a short, dry, direct route
+against native maps and navmesh. It refuses missing map/nav/water data, partial
+or stuck routes, teleport/portal nodes, water, long detours and out-of-scope
+routes. It queues existing native MoveTo/StopMoving commands, never generic stuck
+handling, Teleport or logical-coordinate position writes. Generic voluntary
+NavigateTo is barred for actor bodies; ordinary NPC behavior is unchanged.
+A forced native Teleport cancels this lane rather than counting as completion.
+Movement remains native interpolation, speed, packets, position updates and
+normal world processing, not Rust mechanics or a second AI.
+
+Admission and every movement-manager frame require an AI-controlled, living,
+standing, unowned/unengaged actor without stun, root (including pseudo/permanent
+root), mez, fear, blindness, charm or casting. Unsupported/control-blocked states
+reject new travel or interrupt queued travel; there is no automatic resume or
+fallback action. Stop clears queued displacement through native StopNavigation.
+The adapter waits for native nonmoving state and the latched movement result;
+Completed additionally requires observed native arrival. A completion already
+latched before Stop is not rewritten as cancellation. Retire still refuses active
+work; the normal loop observes actual absence after depop.
+
+### Source coverage and candidate bounds
+
+The existing complete registry retains R1 lifetime, reused-ID, generation/epoch,
+ordinary-neighbor and real zone-replacement cases. Seven additional normal-world
+cases cover arrival, deliberate stop, native timed stun, native Root spell effect,
+a real local map obstruction, external depop during travel, and rejected admission
+under native mez/control suspension. Each uses one body,
+one operation and a neighboring ordinary NPC (native stun expiry and AI decision
+entry). Cases independently sample real coordinates/moving flags/AI counters,
+check plausible per-frame displacement, no displacement after stop/control
+action and post-terminal stability, and require
+native retirement/absence. Root uses the fixture spell data's spell 230 and fails
+if it does not really root. Missing route/status/outcome is failure, not skip.
+The blocked case must find a nearby real obstruction; an out-of-range request is
+not used as a substitute. Core/CXX tests cover out-of-phase/wrong-operation facts,
+duplicate results, pending disappearance, and truthful completion after Stop.
+The adapter refuses caller-injected native facts and stale move identities.
+
+Current constants are **provisional safety/test bounds, not measured evidence**:
+
+| Bound | Candidate value |
+| --- | --- |
+| Locality | 4–80 units, vertical difference <= 6, <= 32 nav nodes |
+| Detour | native route length <= 1.5 times direct distance |
+| Test clear route | rounded fixture safe point to +40 X; native ground Z + body offset |
+| Arrival | XY <= 2, Z <= 6 |
+| Stop/interruption terminal | <= 1000 ms from action |
+| Post-terminal drift | <= 0.05 units over >= 400 ms |
+| Case deadline | 7500 ms (existing registry 10000 ms outer gate unchanged) |
+| Sample jump limit | native speed * elapsed seconds * 0.4 * 1.45 + 2 units; <= 8 units absolute |
+| Observability | <= 250 ms sample gap; arrival requires >= 3 displaced samples |
+
+Before teardown, stderr records native route endpoints, candidate bounds, elapsed
+and action/terminal times, native arrival error/position, displaced sample count,
+sampled distance, maximum step, phase and terminal correlation.
+The bounded suite diagnostic also retains final native measurements, including
+failures. No readiness, completion, cleanup or host-process preservation gate was
+relaxed. Scoped idle override restoration and normal-loop owned depop cleanup
+remain in place.
+
+### Required qualification and locality decision
+
+**Not yet accepted.** Run the existing ordinary isolated VM/GitHub pipeline at the
+exact repaired head, retaining native diagnostics before teardown. Operations
+must first measure the short clear route, its native speed/frame behavior,
+arrival error, stop/root/stun latency and drift on the fixture baseline; record
+those measurements and finalize the above bounds before accepting scenario
+results. The safe-point route and nearby obstruction are candidate probes, not a
+claim of a measured known-clear route. If either is unsuitable, select a measured
+local route in EQEmu, not by changing Stack or the installed validator. Require
+all ordinary checks, complete native suite, native/database/VM cleanup and review;
+a crash, missing terminal or cleanup failure is non-pass. No host Cargo/native
+execution or fixture run was performed for this implementation.
+
+Decision: **keep locality narrow; do not expand mechanics or population** pending
+that evidence. Combat, followers, persistence, inventory, dialogue, cross-zone
+movement and unqualified forced-control mechanics remain deferred. No new
+pipeline lifecycle, client dependency, external service or dependency was added.
 
 ## Protocol and bounds
 
