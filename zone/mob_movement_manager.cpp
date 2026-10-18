@@ -576,7 +576,11 @@ public:
 
 		if (mob->IsMoving()) {
 			mob->SetMoving(false);
-			if (RuleB(Map, FixZWhenPathing)) {
+            // Actor travel must stop at the last independently observed native
+            // position. FixZ can snap the interpolated route height here, after
+            // the stop/control action, even though no movement remains queued.
+            // Keep ordinary NPC ground correction unchanged.
+			if (RuleB(Map, FixZWhenPathing) && !(mob->IsNPC() && mob->CastToNPC()->IsRustActor())) {
 				mob->FixZ();
 			}
 			mob_movement_manager->SendCommandToClients(mob, 0.0, 0.0, 0.0, 0.0, 0, ClientRangeCloseMedium);

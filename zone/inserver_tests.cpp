@@ -377,7 +377,7 @@ Result ActorBodyLifetime()
 // Each case runs through the ordinary world loop. These are conservative
 // candidate bounds, NOT measured qualification values; retain per-case native
 // telemetry so Operations can establish the VM baseline before acceptance.
-enum class TravelCase { Arrival, Stop, Stun, Root, Blocked, External, Suspended };
+enum class TravelCase { Arrival, Stop, StopQueued, Stun, Root, Blocked, External, Suspended };
 template<TravelCase mode>
 Result ActorTravel()
 {
@@ -423,6 +423,9 @@ Result ActorTravel()
         }
         if (delta > 0.05f) { ++moving_samples; }
         if (step == 4 && mode != TravelCase::External && glm::distance(position, action_position) > 0.05f) {
+            std::fprintf(stderr, "actor stop drift case=%u action=(%.3f,%.3f,%.3f) observed=(%.3f,%.3f,%.3f)\n",
+                static_cast<unsigned>(mode), action_position.x, action_position.y, action_position.z,
+                position.x, position.y, position.z);
             return fail("native drift after stop/control action");
         }
         previous = position;
@@ -522,7 +525,19 @@ Result ActorTravel()
             step = 5;
         } else {
             if (state.phase != Phase::Admitted || !body) { return fail("clear route was not admitted"); }
-            step = 3;
+            if constexpr (mode == TravelCase::StopQueued) {
+                // Admission runs after the movement manager in the ordinary
+                // loop: cancel retained commands before their first execution.
+                if (body->IsMoving() || glm::distance(previous, origin) > 0.05f ||
+                    command(Kind::Stop).event != Event::StopRequested) {
+                    return fail("stop before first native movement failed");
+                }
+                action_position = previous;
+                acted_at = now;
+                step = 4;
+            } else {
+                step = 3;
+            }
         }
         break;
     case 3:
@@ -619,6 +634,7 @@ constexpr std::array scenarios = {
     , Scenario{"rust_native_actor_body_lifetime", ActorBodyLifetime, CleanupActorBody}
     , Scenario{"rust_native_actor_arrival", ActorTravel<TravelCase::Arrival>, CleanupActorBody}
     , Scenario{"rust_native_actor_stop", ActorTravel<TravelCase::Stop>, CleanupActorBody}
+    , Scenario{"rust_native_actor_stop_queued", ActorTravel<TravelCase::StopQueued>, CleanupActorBody}
     , Scenario{"rust_native_actor_stun", ActorTravel<TravelCase::Stun>, CleanupActorBody}
     , Scenario{"rust_native_actor_root", ActorTravel<TravelCase::Root>, CleanupActorBody}
     , Scenario{"rust_native_actor_blocked", ActorTravel<TravelCase::Blocked>, CleanupActorBody}

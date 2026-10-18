@@ -108,6 +108,9 @@ standing, unowned/unengaged actor without stun, root (including pseudo/permanent
 root), mez, fear, blindness, charm or casting. Unsupported/control-blocked states
 reject new travel or interrupt queued travel; there is no automatic resume or
 fallback action. Stop clears queued displacement through native StopNavigation.
+The native stop command preserves the actor's last position instead of applying
+an extra FixZ height snap after cancellation; ordinary NPC stop correction is
+unchanged. This also applies to native control interruption and teardown stops.
 The adapter waits for native nonmoving state and the latched movement result;
 Completed additionally requires observed native arrival. A completion already
 latched before Stop is not rewritten as cancellation. Retire still refuses active
@@ -116,8 +119,9 @@ work; the normal loop observes actual absence after depop.
 ### Source coverage and candidate bounds
 
 The existing complete registry retains R1 lifetime, reused-ID, generation/epoch,
-ordinary-neighbor and real zone-replacement cases. Seven additional normal-world
-cases cover arrival, deliberate stop, native timed stun, native Root spell effect,
+ordinary-neighbor and real zone-replacement cases. Eight additional normal-world
+cases cover arrival, deliberate stop (both moving and admitted before the first
+movement tick), native timed stun, native Root spell effect,
 a real local map obstruction, external depop during travel, and rejected admission
 under native mez/control suspension. Each uses one body,
 one operation and a neighboring ordinary NPC (native stun expiry and AI decision
