@@ -452,7 +452,10 @@ Result ActorTravel()
         origin = previous = glm::vec3(body->GetX(), body->GetY(), body->GetZ());
         last_at = began = now;
         tx += 40;
-        const auto ground = zone->zonemap->FindBestZ(glm::vec3(tx, ty, tz + 20), nullptr);
+        // FindBestZ adjusts its input height; keep that mutation in a probe,
+        // separate from the requested endpoint and observed native position.
+        glm::vec3 ground_probe(tx, ty, tz + 20);
+        const auto ground = zone->zonemap->FindBestZ(ground_probe, nullptr);
         if (ground == BEST_Z_INVALID) { return fail("short route endpoint has no native ground"); }
         tz = static_cast<int32>(std::lround(ground + body->GetZOffset()));
         if constexpr (mode == TravelCase::Blocked) {
@@ -463,7 +466,8 @@ Result ActorTravel()
                 const float angle = direction * 6.2831853f / 16;
                 const int32 x = static_cast<int32>(std::lround(origin.x + 60 * std::cos(angle)));
                 const int32 y = static_cast<int32>(std::lround(origin.y + 60 * std::sin(angle)));
-                const auto floor = zone->zonemap->FindBestZ(glm::vec3(x, y, origin.z + 20), nullptr);
+                glm::vec3 floor_probe(x, y, origin.z + 20);
+                const auto floor = zone->zonemap->FindBestZ(floor_probe, nullptr);
                 if (floor == BEST_Z_INVALID) { continue; }
                 const int32 z = static_cast<int32>(std::lround(floor + body->GetZOffset()));
                 if (std::abs(z - origin.z) <= 6 &&
