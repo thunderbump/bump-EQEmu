@@ -1,0 +1,3 @@
+#!/bin/sh
+# Optional in approved isolated development environments. Never starts the worker VM.
+exec python3 utils/scripts/dev-format.py --staged
