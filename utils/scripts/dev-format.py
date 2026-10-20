@@ -81,9 +81,16 @@ def receipt_path(root):
 	return Path(git(root, "rev-parse", "--path-format=absolute", "--git-path", "eqemu-format-check.json").decode().strip())
 
 
-def staged_check(root):
-	if os.environ.get("GIT_INDEX_FILE"):
+def verify_index_path(root, git_directory, requested):
+	"""Git exports GIT_INDEX_FILE even for ordinary commits and linked worktrees."""
+	if requested and (root / requested).resolve() != (git_directory / "index").resolve():
 		raise ValueError("Alternate Git indexes/commit --only are unsupported by this optional hook; use the ordinary staged index")
+
+
+def staged_check(root):
+	# Unlike --git-path index, the Git directory is independent of GIT_INDEX_FILE.
+	git_directory = Path(git(root, "rev-parse", "--absolute-git-dir").decode().strip())
+	verify_index_path(root, git_directory, os.environ.get("GIT_INDEX_FILE"))
 	git(root, "diff", "--no-ext-diff", "--no-textconv", "--cached", "--check")
 	names = git(root, "diff", "--no-ext-diff", "--no-textconv", "--cached", "--name-only", "-z").decode().split("\0")
 	if not any(rust_trigger(name) for name in names if name):

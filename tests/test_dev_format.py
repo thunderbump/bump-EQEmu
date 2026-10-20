@@ -98,6 +98,21 @@ class FormatterReceiptTests(unittest.TestCase):
 			with self.assertRaises(ValueError):
 				FORMAT.client_path(root, str(link))
 
+	def test_normal_exported_index_and_linked_worktree_index_are_allowed(self):
+		with tempfile.TemporaryDirectory() as tmp:
+			root = Path(tmp) / "checkout"
+			git_directory = root / ".git"
+			for requested in (None, "", ".git/index", str(git_directory / "index")):
+				FORMAT.verify_index_path(root, git_directory, requested)
+			linked = Path(tmp) / "linked"
+			linked_git_directory = git_directory / "worktrees/linked"
+			FORMAT.verify_index_path(linked, linked_git_directory, str(linked_git_directory / "index"))
+			for requested in (".git/index.lock", str(root / "temporary-index")):
+				with self.assertRaises(ValueError):
+					FORMAT.verify_index_path(root, git_directory, requested)
+			with self.assertRaises(ValueError):
+				FORMAT.verify_index_path(linked, linked_git_directory, str(git_directory / "index"))
+
 
 if __name__ == "__main__":
 	unittest.main()
