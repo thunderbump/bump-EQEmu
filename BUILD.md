@@ -70,6 +70,69 @@ Full enabled Rust checks and exact-zone symbol/hash qualification, native
 utilities, fresh-consumer checks and cleanup remain validator responsibilities;
 this integration alone is not evidence that those checks passed.
 
+### Early Rust formatting
+
+The developer command uses the same pinned formatter, workspace scope and
+configuration as the isolated validator. It sends the current working snapshot
+to the dedicated worker. It does not run Cargo or repository build scripts on
+the implementation host. The reviewed snapshot-capable worker/client must be
+installed and activated first; an older installation cannot provide this operation.
+
+In an approved isolated development environment, configure the absolute path to
+the reviewed installed client once per checkout:
+
+```sh
+git config --local eqemu.formatterClient /absolute/reviewed/installation/scripts/format-worker-snapshot
+```
+
+The path is operator configuration, outside this checkout. Do not point it at
+candidate source. The command also accepts `--client /absolute/path` for one
+explicit invocation. From the repository root:
+
+```sh
+python3 utils/scripts/dev-format.py
+git diff
+python3 utils/scripts/dev-format.py --check
+```
+
+The first command can boot a disposable worker VM. It applies only verified
+formatting changes to captured Rust files whose input bytes remain unchanged.
+It never stages files, modifies native code, adds files or removes files. Review
+and stage the changes yourself. Check mode can also boot a VM; it changes no
+source and saves a successful result under the checkout's private Git directory.
+A formatting result alone does not create a check receipt. Neither operation is
+full build, test or gameplay acceptance.
+
+#### Optional pre-commit check
+
+Enable this hook only in an approved isolated development environment, after
+reviewing the checked-out hook/helper. AFK does not install or depend on it.
+Inspect any existing hook configuration before replacing it:
+
+```sh
+git config --get core.hooksPath
+git config --local core.hooksPath .githooks
+```
+
+To remove this local override, run `git config --local --unset core.hooksPath`.
+If you replaced a prior value, restore that value instead.
+
+The hook checks staged whitespace errors and conflict markers using Git's
+`diff --cached --check`. For Rust/config changes it then checks that a prior
+successful isolated check matches the current formatter identity, snapshot and
+the actual index bytes. Its frontend calls are identity-only. It never boots a
+VM, formats, builds, installs tools, stages or discards files. Native-only and
+documentation-only changes need no formatter receipt.
+
+Partial staging of formatter inputs is deliberately unsupported. Stage all
+intended Rust/config changes and deletions, then run the explicit `--check`
+command before committing. Untracked formatter inputs, stale receipts, changed
+tools, missing setup and alternate Git indexes, including `git commit --only`,
+produce a refusal with instructions. Unrelated native changes can remain unstaged.
+Receipts are editable local convenience data, not an acceptance credential.
+Bypassed or missing hooks do not bypass AFK's independent pre-publication
+formatting or final exact-head, check-only validation.
+
 ### Building
 
 ##### Windows
