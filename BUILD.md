@@ -97,6 +97,8 @@ python3 utils/scripts/dev-format.py --check
 
 The first command can boot a disposable worker VM. It applies only verified
 formatting changes to captured Rust files whose input bytes remain unchanged.
+The trusted installed frontend validates and applies the result; this repository
+does not maintain a second snapshot policy or formatter-output writer.
 It never stages files, modifies native code, adds files or removes files. Review
 and stage the changes yourself. Check mode can also boot a VM; it changes no
 source and saves a successful result under the checkout's private Git directory.
