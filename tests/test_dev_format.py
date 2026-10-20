@@ -113,6 +113,26 @@ class FormatterReceiptTests(unittest.TestCase):
 			with self.assertRaises(ValueError):
 				FORMAT.verify_index_path(linked, linked_git_directory, str(git_directory / "index"))
 
+	def test_staged_rename_out_of_rust_scope_still_requires_receipt(self):
+		# Trusted Git fixture only. Every Git invocation disables hooks; no hook,
+		# Cargo command or candidate executable is invoked by this regression.
+		with tempfile.TemporaryDirectory() as tmp:
+			root = Path(tmp)
+			FORMAT.git(root, "init", "--quiet")
+			source = root / "rust/actors/core/Cargo.toml"
+			source.parent.mkdir(parents=True)
+			source.write_text("fixture manifest content\n")
+			FORMAT.git(root, "add", "rust/actors/core/Cargo.toml")
+			FORMAT.git(root, "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+				"-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "fixture")
+			FORMAT.git(root, "mv", "rust/actors/core/Cargo.toml", "rust/actors/core/saved-manifest.txt")
+			renamed = FORMAT.git(root, "diff", "--cached", "--find-renames", "--name-only", "-z").decode().split("\0")
+			self.assertFalse(any(FORMAT.rust_trigger(name) for name in renamed if name))
+			names = FORMAT.staged_names(root)
+			self.assertIn("rust/actors/core/Cargo.toml", names)
+			self.assertIn("rust/actors/core/saved-manifest.txt", names)
+			self.assertTrue(any(FORMAT.rust_trigger(name) for name in names if name))
+
 
 if __name__ == "__main__":
 	unittest.main()

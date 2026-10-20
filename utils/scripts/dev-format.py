@@ -87,12 +87,17 @@ def verify_index_path(root, git_directory, requested):
 		raise ValueError("Alternate Git indexes/commit --only are unsupported by this optional hook; use the ordinary staged index")
 
 
+def staged_names(root):
+	# A rename out of the Rust scope must still expose its deleted input path.
+	return git(root, "diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--cached", "--name-only", "-z").decode().split("\0")
+
+
 def staged_check(root):
 	# Unlike --git-path index, the Git directory is independent of GIT_INDEX_FILE.
 	git_directory = Path(git(root, "rev-parse", "--absolute-git-dir").decode().strip())
 	verify_index_path(root, git_directory, os.environ.get("GIT_INDEX_FILE"))
 	git(root, "diff", "--no-ext-diff", "--no-textconv", "--cached", "--check")
-	names = git(root, "diff", "--no-ext-diff", "--no-textconv", "--cached", "--name-only", "-z").decode().split("\0")
+	names = staged_names(root)
 	if not any(rust_trigger(name) for name in names if name):
 		return
 	client = client_path(root, None)
