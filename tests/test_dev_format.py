@@ -1,9 +1,11 @@
 """Trusted receipt/path fixtures only. Never execute hooks, Cargo or a VM."""
 
 import importlib.util
+import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 SPEC = importlib.util.spec_from_file_location(
@@ -79,6 +81,29 @@ class FormatterReceiptTests(unittest.TestCase):
 		for data in (b" " * (FORMAT.RESULT_LIMIT + 1), b"[]"):
 			with self.assertRaises(ValueError):
 				FORMAT.load_json(data)
+
+	def test_large_supported_unicode_snapshot_metadata_uses_separate_bound(self):
+		# Stay inside the shared policy's 512-entry and 240-character path bounds.
+		paths = ["rust/actors/" + "é" * 210 + str(number) + ".rs" for number in range(511)]
+		files = [dict(path="rust/actors/Cargo.toml", mode="100644", bytes=0, sha256="a" * 64)]
+		files += [dict(path=name, mode="100644", bytes=0, sha256="a" * 64) for name in paths]
+		metadata = dict(version=1, scope="working-snapshot-input", files=files,
+			deleted=["rust/actors/" + "é" * 210 + "d" + str(number) + ".rs" for number in range(512)],
+			indexed_paths=[entry["path"] for entry in files])
+		encoded = json.dumps(metadata).encode()
+		self.assertGreater(len(encoded), FORMAT.RESULT_LIMIT)
+		self.assertLess(len(encoded), FORMAT.SNAPSHOT_IDENTITY_LIMIT)
+		with patch.object(FORMAT.subprocess, "check_output", return_value=encoded):
+			self.assertEqual(FORMAT.call_client("not-executed", "--snapshot-identity"), metadata)
+			with self.assertRaises(ValueError):
+				FORMAT.call_client("not-executed", "--identity")
+		with self.assertRaises(ValueError):
+			FORMAT.load_json(encoded)  # Ordinary result/receipt bound stays unchanged.
+
+	def test_snapshot_metadata_over_five_mib_is_rejected(self):
+		with patch.object(FORMAT.subprocess, "check_output", return_value=b" " * (FORMAT.SNAPSHOT_IDENTITY_LIMIT + 1)):
+			with self.assertRaises(ValueError):
+				FORMAT.call_client("not-executed", "--snapshot-identity")
 
 	def test_client_path_requires_explicit_outside_executable(self):
 		with tempfile.TemporaryDirectory() as tmp:

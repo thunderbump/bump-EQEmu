@@ -12,10 +12,13 @@ import tempfile
 
 
 RESULT_LIMIT = 1536 * 1024
+# Snapshot metadata can contain files, deletions and indexed paths, each with
+# escaped Unicode names. It has a separate bound from formatter-result bytes.
+SNAPSHOT_IDENTITY_LIMIT = 5 * 1024 * 1024
 
 
-def load_json(data):
-	if len(data) > RESULT_LIMIT:
+def load_json(data, limit=RESULT_LIMIT):
+	if len(data) > limit:
 		raise ValueError("Formatter JSON exceeds size limit")
 	value = json.loads(data)
 	if not isinstance(value, dict):
@@ -74,7 +77,8 @@ def client_path(root, requested):
 
 
 def call_client(client, *args):
-	return load_json(subprocess.check_output([client, *args], timeout=60))
+	limit = SNAPSHOT_IDENTITY_LIMIT if "--snapshot-identity" in args else RESULT_LIMIT
+	return load_json(subprocess.check_output([client, *args], timeout=60), limit=limit)
 
 
 def receipt_path(root):
