@@ -674,7 +674,7 @@ set_property(TARGET gm_commands_zone PROPERTY FOLDER libraries)
 add_executable(zone ${zone_sources} ${zone_headers} actor_body.cpp actor_body.h)
 
 if(EQEMU_BUILD_TESTS)
-    target_sources(zone PRIVATE inserver_tests.cpp inserver_tests.h)
+    target_sources(zone PRIVATE inserver_tests.cpp inserver_tests.h inserver_test_progress.h)
     target_compile_definitions(zone PRIVATE EQEMU_BUILD_TESTS)
 endif()
 
