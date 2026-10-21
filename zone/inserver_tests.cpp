@@ -1,4 +1,5 @@
 #include "inserver_tests.h"
+#include "inserver_test_progress.h"
 
 #include "common/json/json.hpp"
 #include "common/timer.h"
@@ -14,6 +15,7 @@
 
 #include <array>
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -718,6 +720,7 @@ size_t current = 0;
 size_t started = 0;
 bool case_started = false;
 uint32 case_started_at = 0;
+std::chrono::steady_clock::time_point progress_started_at;
 nlohmann::json results = nlohmann::json::array();
 
 bool ValidRunId(const std::string &value)
@@ -881,6 +884,8 @@ void Process()
 		case_started = true;
 		++started;
 		case_started_at = Timer::GetCurrentTime();
+		progress_started_at = std::chrono::steady_clock::now();
+		EmitCaseProgress(stderr, run_id, scenarios[current].name, 0);
 	}
 	auto result = scenarios[current].process();
 	// A scenario may synchronously shut down the zone. Finish recording and
@@ -891,12 +896,16 @@ void Process()
 	if (result.outcome == Outcome::Pending) {
 		return;
 	}
-	if (scenarios[current].cleanup) { scenarios[current].cleanup(); }
 	// Qualification uses the same real scenario and then proves an assertion
 	// failure reaches the VM caller. It cannot replace native execution.
 	if (assertion_control && result.outcome == Outcome::Passed) {
 		result = {Outcome::Failed, "deliberate in-server assertion control after native processing"};
 	}
+	EmitCaseProgress(stderr, run_id, scenarios[current].name,
+		std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::steady_clock::now() - progress_started_at).count(),
+		result.outcome == Outcome::Passed, result.diagnostic);
+	if (scenarios[current].cleanup) { scenarios[current].cleanup(); }
 	results.push_back({
 		{"name", scenarios[current].name}, {"passed", result.outcome == Outcome::Passed},
 		{"diagnostic", result.diagnostic.substr(0, 256)}

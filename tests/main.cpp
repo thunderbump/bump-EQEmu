@@ -21,6 +21,7 @@
 #include "tests/fixed_memory_test.h"
 #include "tests/fixed_memory_variable_test.h"
 #include "tests/hextoi_32_64_test.h"
+#include "tests/inserver_test_progress_test.h"
 #include "tests/ipc_mutex_test.h"
 #include "tests/memory_mapped_file_test.h"
 #include "tests/skills_util_test.h"
@@ -53,6 +54,7 @@ int main()
 		tests.add(new FixedMemoryVariableHashTest());
 		tests.add(new atoboolTest());
 		tests.add(new hextoi_32_64_Test());
+		tests.add(new InserverTestProgressTest());
 		tests.add(new StringUtilTest());
 		tests.add(new DataVerificationTest());
 		tests.add(new SkillsUtilsTest());
