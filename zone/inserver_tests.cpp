@@ -72,6 +72,8 @@ bool actor_idle_saved = false;
 bool actor_prior_idle_override = false;
 uint16 actor_neighbor_id = 0;
 NPC *actor_neighbor = nullptr; // compared only; never dereferenced after lookup
+bool actor_latched_stop_armed = false;
+bool actor_latched_stop_valid = false;
 bool actor_shutdown_armed = false;
 bool actor_shutdown_valid = false;
 unsigned actor_shutdown_stages = 0;
@@ -97,6 +99,7 @@ void CleanupActorBody()
     // Restore only the current zone's saved override; never retain a Zone or
     // Adapter reference across the real shutdown/reboot transition.
     actor_shutdown_armed = false;
+    actor_latched_stop_armed = false;
     if (zone) { ActorBody::Get().BeginTeardown(); }
     auto *neighbor = entity_list.GetNPCByID(actor_neighbor_id);
     if (neighbor && neighbor == actor_neighbor) { neighbor->Depop(false); }
@@ -377,7 +380,7 @@ Result ActorBodyLifetime()
 // Each case runs through the ordinary world loop. These are conservative
 // candidate bounds, NOT measured qualification values; retain per-case native
 // telemetry so Operations can establish the VM baseline before acceptance.
-enum class TravelCase { Arrival, Stop, StopQueued, Stun, Root, Blocked, External, Suspended };
+enum class TravelCase { Arrival, LatchedStop, Stop, StopQueued, Stun, Root, Blocked, External, Reused, Suspended };
 template<TravelCase mode>
 Result ActorTravel()
 {
@@ -388,6 +391,7 @@ Result ActorTravel()
     static glm::vec3 origin, previous, settled, action_position;
     static int32 tx = 0, ty = 0, tz = 0;
     static uint16 native_id = 0;
+    static uint64 old_epoch = 0, old_generation = 0;
     static float distance = 0, max_step = 0;
     auto &adapter = ActorBody::Get();
     const auto state = adapter.Inspect();
@@ -422,7 +426,7 @@ Result ActorTravel()
             return fail("unobservable sample gap, jump or competing AI");
         }
         if (delta > 0.05f) { ++moving_samples; }
-        if (step == 4 && mode != TravelCase::External && glm::distance(position, action_position) > 0.05f) {
+        if (step == 4 && mode != TravelCase::External && mode != TravelCase::Reused && glm::distance(position, action_position) > 0.05f) {
             std::fprintf(stderr, "actor stop drift case=%u action=(%.3f,%.3f,%.3f) observed=(%.3f,%.3f,%.3f)\n",
                 static_cast<unsigned>(mode), action_position.x, action_position.y, action_position.z,
                 position.x, position.y, position.z);
@@ -451,6 +455,8 @@ Result ActorTravel()
         }
         body = fresh.Body();
         native_id = fresh.NativeID();
+        old_epoch = fresh.Inspect().epoch;
+        old_generation = fresh.Inspect().generation;
         if (!body || !zone->zonemap) { return fail("native body/map missing"); }
         origin = previous = glm::vec3(body->GetX(), body->GetY(), body->GetZ());
         last_at = began = now;
@@ -536,14 +542,23 @@ Result ActorTravel()
                 acted_at = now;
                 step = 4;
             } else {
+                if constexpr (mode == TravelCase::LatchedStop) {
+                    actor_latched_stop_valid = false;
+                    actor_latched_stop_armed = true;
+                }
                 step = 3;
             }
         }
         break;
     case 3:
         if (!body) { return fail("body vanished before deliberate action"); }
-        if constexpr (mode == TravelCase::Arrival) {
+        if constexpr (mode == TravelCase::Arrival || mode == TravelCase::LatchedStop) {
             if (state.phase != Phase::Idle) { break; }
+            if constexpr (mode == TravelCase::LatchedStop) {
+                if (actor_latched_stop_armed || !actor_latched_stop_valid) {
+                    return fail("completion-before-stop interposition missing or changed native latch");
+                }
+            }
             if (state.last_terminal != Event::Completed || state.last_operation != 1 ||
                 distance < 20 || moving_samples < 3 || std::hypot(body->GetX() - tx, body->GetY() - ty) > 2 ||
                 std::abs(body->GetZ() - tz) > 6 || body->IsMoving()) {
@@ -570,7 +585,7 @@ Result ActorTravel()
             } else if constexpr (mode == TravelCase::Root) {
                 // Real native spell effects, not a Rust declaration or mock root.
                 if (!body->SpellEffect(body, 230) || !body->IsRooted()) { return fail("native Root spell failed"); }
-            } else if constexpr (mode == TravelCase::External) {
+            } else if constexpr (mode == TravelCase::External || mode == TravelCase::Reused) {
                 body->Depop(false);
             }
             action_position = previous;
@@ -584,17 +599,66 @@ Result ActorTravel()
         if (state.last_terminal != Event::Interrupted || state.last_operation != 1) {
             return fail("native interruption missing or wrong operation");
         }
-        if constexpr (mode == TravelCase::External) {
+        if constexpr (mode == TravelCase::External || mode == TravelCase::Reused) {
             if (state.alive || entity_list.GetMob(native_id) || entity_list.GetNPCByID(native_id)) { break; }
         } else if (!body) { return fail("interrupted body disappeared"); }
         terminal_at = now;
         std::fprintf(stderr, "actor native terminal case=%u latency_ms=%u samples=%u pos=(%.3f,%.3f,%.3f)\n",
             static_cast<unsigned>(mode), now - acted_at, moving_samples, previous.x, previous.y, previous.z);
+        if constexpr (mode == TravelCase::Reused) {
+            if (!entity_list.ReuseFreeIDForTest(native_id) ||
+                adapter.Send({Kind::CreateBody, state.epoch, state.generation, 0,
+                    static_cast<int32>(origin.x), static_cast<int32>(origin.y), static_cast<int32>(origin.z)}).event != Event::BodyRequested ||
+                adapter.NativeID() != native_id) {
+                return fail("travel replacement did not reuse native ID");
+            }
+            // The old native movement entry must be gone, not transferred to
+            // this body even if its allocation address or entity ID is reused.
+            previous = origin;
+            last_at = now;
+            step = 7;
+            break;
+        }
+        settled = previous;
+        settled_at = now;
+        step = 5;
+        break;
+    case 7:
+        if (state.body != Body::Present) { break; }
+        if (!body || state.generation == old_generation ||
+            adapter.Lookup(old_epoch, old_generation, native_id) ||
+            MobMovementManager::Get().InspectActorTravel(body) != MobMovementManager::ActorTravel::Idle ||
+            body->IsMoving() || glm::distance(previous, origin) > 0.05f ||
+            adapter.Send({Kind::Stop, old_epoch, old_generation, 1, 0, 0, 0}).status != Status::Stale ||
+            adapter.Send({Kind::Move, old_epoch, old_generation, 2, tx, ty, tz}).status != Status::Stale ||
+            command(Kind::Move, 2).event != Event::MoveRequested) {
+            return fail("old travel reached replacement or fresh move refused");
+        }
+        step = 8;
+        break;
+    case 8:
+        // Reject stale cancellation while a replacement really has pending
+        // travel, not only while it is idle. No test-driven movement ticks.
+        if (!body || adapter.Send({Kind::Stop, old_epoch, old_generation, 2, 0, 0, 0}).status != Status::Stale ||
+            adapter.Send({Kind::Move, state.epoch + 1, state.generation, 3, tx, ty, tz}).status != Status::Stale) {
+            return fail("stale command accepted during replacement movement");
+        }
+        if (state.phase != Phase::Idle) { break; }
+        if (state.last_terminal != Event::Completed || state.last_operation != 2 || body->IsMoving() ||
+            std::hypot(body->GetX() - tx, body->GetY() - ty) > 2 || std::abs(body->GetZ() - tz) > 6) {
+            return fail("replacement travel interrupted by old identity or pending work");
+        }
         settled = previous;
         settled_at = now;
         step = 5;
         break;
     case 5: {
+        const auto expected_terminal = (mode == TravelCase::Arrival || mode == TravelCase::LatchedStop || mode == TravelCase::Reused)
+            ? Event::Completed : (mode == TravelCase::Blocked || mode == TravelCase::Suspended) ? Event::Rejected : Event::Interrupted;
+        if (state.phase != Phase::Idle || state.last_terminal != expected_terminal ||
+            state.last_operation != (mode == TravelCase::Reused ? 2u : 1u)) {
+            return fail("terminal correlation changed after settlement");
+        }
         if (body && (glm::distance(previous, settled) > 0.05f || body->IsMoving())) {
             return fail("post-terminal native drift");
         }
@@ -612,7 +676,7 @@ Result ActorTravel()
     }
     case 6:
         if (state.alive || body || entity_list.GetMob(native_id) || entity_list.GetNPCByID(native_id)) { break; }
-        return {Outcome::Passed, diagnostic("native route/control observed; provisional bounds")};
+        return {Outcome::Passed, diagnostic("native route/control observed")};
     }
     return {Outcome::Pending, ""};
 }
@@ -633,6 +697,8 @@ constexpr std::array scenarios = {
     // Exercises real shutdown, then boots a replacement in the same zone host.
     , Scenario{"rust_native_actor_body_lifetime", ActorBodyLifetime, CleanupActorBody}
     , Scenario{"rust_native_actor_arrival", ActorTravel<TravelCase::Arrival>, CleanupActorBody}
+    , Scenario{"rust_native_actor_latched_stop", ActorTravel<TravelCase::LatchedStop>, CleanupActorBody}
+    , Scenario{"rust_native_actor_reused_travel", ActorTravel<TravelCase::Reused>, CleanupActorBody}
     , Scenario{"rust_native_actor_stop", ActorTravel<TravelCase::Stop>, CleanupActorBody}
     , Scenario{"rust_native_actor_stop_queued", ActorTravel<TravelCase::StopQueued>, CleanupActorBody}
     , Scenario{"rust_native_actor_stun", ActorTravel<TravelCase::Stun>, CleanupActorBody}
@@ -713,6 +779,24 @@ bool Publish()
 } // namespace
 
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+void BeforeActorFacts()
+{
+    if (!actor_latched_stop_armed) { return; }
+    auto &adapter = ActorBody::Get();
+    auto *body = adapter.Body();
+    auto &movement = MobMovementManager::Get();
+    if (!body || movement.InspectActorTravel(body) != MobMovementManager::ActorTravel::Completed) { return; }
+    using namespace eqemu_proof;
+    const auto state = adapter.Inspect();
+    const auto position = glm::vec3(body->GetX(), body->GetY(), body->GetZ());
+    const auto report = adapter.Send({Kind::Stop, state.epoch, state.generation, state.operation, 0, 0, 0});
+    actor_latched_stop_valid = state.phase == Phase::Admitted && !body->IsMoving() &&
+        report.event == Event::StopRequested && adapter.Inspect().phase == Phase::Stopping &&
+        movement.InspectActorTravel(body) == MobMovementManager::ActorTravel::Completed &&
+        glm::distance(position, glm::vec3(body->GetX(), body->GetY(), body->GetZ())) == 0;
+    actor_latched_stop_armed = false;
+}
+
 void ObserveActorShutdown(ActorShutdownStage stage)
 {
     if (!actor_shutdown_armed) { return; }

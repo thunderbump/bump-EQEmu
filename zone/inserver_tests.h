@@ -13,6 +13,8 @@ void Process();
 // These never perform teardown on behalf of the production path.
 enum class ActorShutdownStage { AdmissionClosed, EntitiesCleared, RuntimeClosed };
 void ObserveActorShutdown(ActorShutdownStage stage);
+// Test-only command interposition after native movement, before fact delivery.
+void BeforeActorFacts();
 #endif
 
 } // namespace InserverTests

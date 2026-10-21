@@ -135,6 +135,19 @@ not used as a substitute. Core/CXX tests cover out-of-phase/wrong-operation fact
 duplicate results, pending disappearance, and truthful completion after Stop.
 The adapter refuses caller-injected native facts and stale move identities.
 
+Two additional native regressions cover the adapter boundary rather than injected
+Rust facts. `rust_native_actor_latched_stop` interposes a real Stop after the
+normal movement manager latches Completed but before the adapter consumes it;
+it requires StopRequested/Stopping, an unchanged native latch and position,
+then exactly the correlated Completed outcome and post-terminal stability.
+The test-only pre-fact hook never drives movement or injects results.
+`rust_native_actor_reused_travel` externally depops a moving body, waits for
+Interrupted and actual absence, reuses its native ID, and verifies that the new
+body has no retained navigation. It rejects old-generation Move/Stop and wrong-
+epoch commands while replacement travel is pending, then requires real arrival
+for the replacement's fresh operation. Both retain ordinary-neighbor and cleanup
+assertions. Terminal identity/outcome must remain stable through the settle window.
+
 Current constants are **provisional safety/test bounds, not measured evidence**:
 
 | Bound | Candidate value |
@@ -156,6 +169,33 @@ The bounded suite diagnostic also retains final native measurements, including
 failures. No readiness, completion, cleanup or host-process preservation gate was
 relaxed. Scoped idle override restoration and normal-loop owned depop cleanup
 remain in place.
+
+### Reported VM observations (not route qualification)
+
+The GitHub fixture report for head `9a29de1fa692fee5fca6ddc07e025529b44fd972`,
+job `06485b651fda4efb` (2026-10-21), reports all 10 selected native scenarios
+complete with zero failures, 81 utilities passing and native/database cleanup.
+Its bounded scenario diagnostics report:
+
+| Scenario | Total time | Action-to-terminal | Sampled distance | Maximum step |
+| --- | --- | --- | --- | --- |
+| Arrival | 1828 ms | n/a | 40.18 | 1.66 |
+| Stop | 705 ms | 32 ms | 4.70 | 0.95 |
+| Stop before first tick | 545 ms | 32 ms | 0.00 | 0.00 |
+| Stun | 707 ms | 32 ms | 4.72 | 0.95 |
+| Root | 705 ms | 32 ms | 4.72 | 0.95 |
+
+These are observations from one reported run, not independently inspected raw
+route measurements or a repeatability baseline. Passing the existing assertions
+bounds drift by 0.05 over at least 400 ms and arrival by XY 2 / Z 6; it does not
+supply exact drift or arrival error. The bounded evidence does not include actual
+route endpoint coordinates, per-frame timing or exact arrival error, so it cannot
+safely finalize a known-clear route or tighter measured tolerances. Retain the
+constants above as provisional until those diagnostics are available. The earlier
+same-head job `ac69f13d2a314aac` separately failed on zone responsiveness before
+suite completion; its retained logs do not identify a movement source defect.
+The jobs used different validator versions and are not interchangeable.
+Neither run covers the two newly added regressions or this edited tree.
 
 ### Required qualification and locality decision
 
