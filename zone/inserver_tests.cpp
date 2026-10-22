@@ -390,7 +390,7 @@ Result ActorTravel()
     static unsigned step = 0;
     static uint32 began = 0, last_at = 0, acted_at = 0, settled_at = 0, terminal_at = 0;
     static unsigned moving_samples = 0;
-    static glm::vec3 origin, previous, settled, action_position;
+    static glm::vec3 origin, previous, settled, action_position, replacement_origin;
     static int32 tx = 0, ty = 0, tz = 0;
     static uint16 native_id = 0;
     static uint64 old_epoch = 0, old_generation = 0;
@@ -614,9 +614,19 @@ Result ActorTravel()
                 adapter.NativeID() != native_id) {
                 return fail("travel replacement did not reuse native ID");
             }
-            // The old native movement entry must be gone, not transferred to
-            // this body even if its allocation address or entity ID is reused.
-            previous = origin;
+            // CreateBody takes integer coordinates, whereas origin is a native
+            // float observation. Truncating origin (notably negative Z) need not
+            // reproduce it. Establish the replacement's native baseline now,
+            // before its first normal-loop processing; do not count spawning as
+            // travel or excuse any later displacement as coordinate conversion.
+            auto *replacement = adapter.Body();
+            if (!replacement || replacement->IsMoving() ||
+                MobMovementManager::Get().InspectActorTravel(replacement) != MobMovementManager::ActorTravel::Idle) {
+                return fail("replacement inherited navigation at creation");
+            }
+            replacement_origin = previous = glm::vec3(replacement->GetX(), replacement->GetY(), replacement->GetZ());
+            std::fprintf(stderr, "actor replacement old=(%.3f,%.3f,%.3f) native=(%.3f,%.3f,%.3f)\n",
+                origin.x, origin.y, origin.z, replacement_origin.x, replacement_origin.y, replacement_origin.z);
             last_at = now;
             step = 7;
             break;
@@ -630,11 +640,16 @@ Result ActorTravel()
         if (!body || state.generation == old_generation ||
             adapter.Lookup(old_epoch, old_generation, native_id) ||
             MobMovementManager::Get().InspectActorTravel(body) != MobMovementManager::ActorTravel::Idle ||
-            body->IsMoving() || glm::distance(previous, origin) > 0.05f ||
-            adapter.Send({Kind::Stop, old_epoch, old_generation, 1, 0, 0, 0}).status != Status::Stale ||
+            body->IsMoving() || glm::distance(previous, replacement_origin) > 0.05f) {
+            return fail("replacement moved before fresh request");
+        }
+        // Keep observing the idle replacement through normal movement ticks,
+        // so delayed old work cannot hide behind its fresh navigation request.
+        if (now - terminal_at < 400) { break; }
+        if (adapter.Send({Kind::Stop, old_epoch, old_generation, 1, 0, 0, 0}).status != Status::Stale ||
             adapter.Send({Kind::Move, old_epoch, old_generation, 2, tx, ty, tz}).status != Status::Stale ||
             command(Kind::Move, 2).event != Event::MoveRequested) {
-            return fail("old travel reached replacement or fresh move refused");
+            return fail("replacement stale rejection or fresh request failed");
         }
         step = 8;
         break;

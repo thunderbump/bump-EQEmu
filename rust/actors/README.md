@@ -146,7 +146,12 @@ Interrupted and actual absence, reuses its native ID, and verifies that the new
 body has no retained navigation. It rejects old-generation Move/Stop and wrong-
 epoch commands while replacement travel is pending, then requires real arrival
 for the replacement's fresh operation. Both retain ordinary-neighbor and cleanup
-assertions. Terminal identity/outcome must remain stable through the settle window.
+assertions. The reused-ID case samples the replacement's native position
+immediately after creation and requires it to remain idle within 0.05 units for
+at least 400 ms before fresh travel. It does not compare that position with the
+old body's float origin: CreateBody uses integer coordinates, so reconstructing
+from a native observation can change the spawn position through truncation.
+Terminal identity/outcome must remain stable through the settle window.
 
 Current constants are **provisional safety/test bounds, not measured evidence**:
 
@@ -196,6 +201,23 @@ same-head job `ac69f13d2a314aac` separately failed on zone responsiveness before
 suite completion; its retained logs do not identify a movement source defect.
 The jobs used different validator versions and are not interchangeable.
 Neither run covers the two newly added regressions or this edited tree.
+
+A separate retained current-head report for `15ca92c249ad044cd3a1b9d332d94133d1623d40`,
+job `ae29a2eee3864010`, completed all 12 scenarios with one failure in
+`rust_native_actor_reused_travel` at stage 7. Arrival, latched completion-before-
+Stop, stop, queued stop, stun and root reported passing assertions. The run
+reported native/database/VM cleanup complete; it is still a failed suite, not
+acceptance. The reused-ID test incorrectly compared the replacement with the
+old native origin after truncating that fractional origin to integer CreateBody
+coordinates. The corrected scenario observes the new native baseline before
+any processing and checks idle stability across normal-loop ticks, then still
+requires stale refusal and fresh correlated arrival. This repair has not been
+confirmed by a native run. The distinct operator-stopped job `83d884ca808a42ca`
+is not a scenario failure or substitute validation.
+
+This evidence includes a candidate endpoint trace, but not complete exact
+arrival/drift measurements or a repeatability baseline. It therefore does not
+finalize the provisional route or bounds above.
 
 ### Required qualification and locality decision
 
