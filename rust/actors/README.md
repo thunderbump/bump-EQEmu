@@ -163,17 +163,58 @@ Current constants are **provisional safety/test bounds, not measured evidence**:
 | Arrival | XY <= 2, Z <= 6 |
 | Stop/interruption terminal | <= 1000 ms from action |
 | Post-terminal drift | <= 0.05 units over >= 400 ms |
-| Case deadline | 7500 ms (existing registry 10000 ms outer gate unchanged) |
+| Attempt deadline | 7500 ms; all repetitions share the unchanged 10000 ms registry deadline |
 | Sample jump limit | native speed * elapsed seconds * 0.4 * 1.45 + 2 units; <= 8 units absolute |
 | Observability | <= 250 ms sample gap; arrival requires >= 3 displaced samples |
 
-Before teardown, stderr records native route endpoints, candidate bounds, elapsed
-and action/terminal times, native arrival error/position, displaced sample count,
-sampled distance, maximum step, phase and terminal correlation.
-The bounded suite diagnostic also retains final native measurements, including
-failures. No readiness, completion, cleanup or host-process preservation gate was
-relaxed. Scoped idle override restoration and normal-loop owned depop cleanup
-remain in place.
+The source-owned suite collects three observations each for arrival, deliberate
+Stop, stun and root, and one for the other movement scenarios. Each repetition
+runs the same real route, verifies normal-loop retirement and actual absence,
+restores the idle override, then reconstructs the runtime and creates a fresh
+body. All repetitions share the existing 10-second case deadline; a failed
+attempt fails that scenario immediately. The suite still selects 12 scenarios.
+No native movement processing is called by the test.
+
+Successful movement diagnostics use this compact `m1` notation within the
+existing 256-byte diagnostic and 4096-byte suite report limits:
+
+```text
+m1 r=start_x,start_y,start_z>target_x,target_y,target_z v=native_runspeed p=settled_x,settled_y,settled_z m=sample;sample;sample
+sample = total_ms,arrival_xy_error,arrival_z_error,action_terminal_ms,max_drift,settle_ms,distance,max_step,max_gap_ms,max_action_drift
+```
+
+`r` retains the observed native spawn position and requested map-derived endpoint.
+Repeats must have identical native origins and requested endpoints. `p` is the
+last repetition's sampled settled native position. Arrival errors are measured
+at settlement for arrival, latched completion and replacement arrival; other
+cases use `-`. Action latency is `-` when no action-to-terminal interval was
+measured. `max_drift` is the largest sampled displacement from the terminal
+settlement position across the full `settle_ms` window. It is meaningful only
+when that window contains a native body; external depop has no post-terminal
+body to sample. Distance and maximum
+step come from native position samples; `max_gap_ms` is the largest sampling
+interval while a body exists. `max_action_drift` separately retains the largest
+observed displacement from the action position before terminal settlement for
+Stop, queued Stop, stun and root. Total time includes the settle and retirement
+checks. Coordinates, speed, distance and step display two decimal places;
+arrival errors and drift display three. Assertions retain native float precision,
+so a displayed zero drift means less than 0.0005 units, not mathematical zero.
+The complete report supplies the native run ID; the caller's existing report
+and private evidence envelope supply candidate and worker-run attribution.
+
+Failures retain the reason, stage, repeat number, terminal correlation, route
+and current measurement before cleanup. Before terminal settlement, the latency
+field shows elapsed action age. If unusually large coordinates exceed the
+budget, the diagnostic explicitly marks the route `omitted-size` and keeps the
+current measurements and terminal correlation. Stderr also retains per-attempt measurements and route traces.
+A successful diagnostic that cannot fit fails explicitly rather than silently
+truncating measurements. No report budget, readiness, completion, cleanup or
+host-process preservation gate was relaxed. Scoped idle override restoration
+and normal-loop owned depop cleanup remain in place.
+
+These repeated observations have not yet been collected in a native VM run for
+this change. They add evidence collection, not qualified tolerances. Inspect the
+exact-head result before changing the provisional bounds or accepting this proof.
 
 ### Reported VM observations (not route qualification)
 
@@ -211,8 +252,12 @@ acceptance. The reused-ID test incorrectly compared the replacement with the
 old native origin after truncating that fractional origin to integer CreateBody
 coordinates. The corrected scenario observes the new native baseline before
 any processing and checks idle stability across normal-loop ticks, then still
-requires stale refusal and fresh correlated arrival. This repair has not been
-confirmed by a native run. The distinct operator-stopped job `83d884ca808a42ca`
+requires stale refusal and fresh correlated arrival. A later exact-head run for
+`51079559b044d60873ec7946b1d8b71800771819`,
+job `9fc6d93884154e9b`, reported 85 utilities and all 12 native scenarios passing
+with cleanup complete. That confirms the repair against the existing assertions;
+it does not qualify the route or this new repeated-measurement collection. The
+distinct operator-stopped job `83d884ca808a42ca`
 is not a scenario failure or substitute validation.
 
 This evidence includes a candidate endpoint trace, but not complete exact

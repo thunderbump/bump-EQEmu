@@ -394,31 +394,66 @@ Result ActorTravel()
     static int32 tx = 0, ty = 0, tz = 0;
     static uint16 native_id = 0;
     static uint64 old_epoch = 0, old_generation = 0;
-    static float distance = 0, max_step = 0;
+    static float distance = 0, max_step = 0, max_drift = 0, max_action_drift = 0;
+    static uint32 max_gap = 0, observed_window = 0;
+    static unsigned repetition = 0;
+    static std::string route, observations;
+    static glm::vec3 baseline_origin;
+    static std::array<int32, 3> baseline_target;
+    constexpr unsigned repetitions = mode == TravelCase::Arrival || mode == TravelCase::Stop ||
+        mode == TravelCase::Stun || mode == TravelCase::Root ? 3 : 1;
     auto &adapter = ActorBody::Get();
     const auto state = adapter.Inspect();
     auto *body = adapter.Body();
     const auto now = Timer::GetCurrentTime();
+    static const auto case_began = now;
     auto command = [&](Kind kind, uint64 operation = 1) {
         return adapter.Send({kind, state.epoch, state.generation, operation, tx, ty, tz});
     };
+    auto measurement = [&] {
+        char text[160];
+        const bool arrived = mode == TravelCase::Arrival || mode == TravelCase::LatchedStop || mode == TravelCase::Reused;
+        // Display precision only. All assertions below use native float values.
+        char error[40];
+        if (arrived && settled_at) {
+            std::snprintf(error, sizeof(error), "%.3f,%.3f", std::hypot(settled.x - tx, settled.y - ty), std::abs(settled.z - tz));
+        } else {
+            std::snprintf(error, sizeof(error), "-,-");
+        }
+        char latency[16];
+        if (acted_at) {
+            std::snprintf(latency, sizeof(latency), "%u", (terminal_at ? terminal_at : now) - acted_at);
+        } else {
+            std::snprintf(latency, sizeof(latency), "-");
+        }
+        const auto written = std::snprintf(text, sizeof(text), "%u,%s,%s,%.3f,%u,%.2f,%.2f,%u,%.3f",
+            now - began, error, latency, max_drift, observed_window, distance, max_step, max_gap, max_action_drift);
+        return written >= 0 && static_cast<size_t>(written) < sizeof(text) ? std::string(text) : std::string("omitted-size");
+    };
     auto diagnostic = [&](const char *reason) {
-        char text[256];
-        std::snprintf(text, sizeof(text),
-            "%s stage=%u ms=%u action_ms=%u native_distance=%.2f max_step=%.2f phase=%u terminal=%u op=%llu",
-            reason, step, now - began, acted_at ? (terminal_at ? terminal_at : now) - acted_at : 0,
-            distance, max_step, static_cast<unsigned>(ActorBody::Get().Inspect().phase),
-            static_cast<unsigned>(ActorBody::Get().Inspect().last_terminal),
-            static_cast<unsigned long long>(ActorBody::Get().Inspect().last_operation));
-        // Retain before cleanup, including failures and external-depop cases.
-        std::fprintf(stderr, "actor travel case=%u %s\n", static_cast<unsigned>(mode), text);
-        return std::string(text);
+        char text[128];
+        std::snprintf(text, sizeof(text), "%.56s stage=%u repeat=%u/%u ", reason, step,
+            std::min(repetition + 1, repetitions), repetitions);
+        const auto snapshot = ActorBody::Get().Inspect();
+        char terminal[64];
+        std::snprintf(terminal, sizeof(terminal), " phase=%u terminal=%u op=%llu",
+            static_cast<unsigned>(snapshot.phase), static_cast<unsigned>(snapshot.last_terminal),
+            static_cast<unsigned long long>(snapshot.last_operation));
+        const auto detail = std::string(text) + terminal + " " + route + " m=" + measurement();
+        std::fprintf(stderr, "actor travel case=%u %s\n", static_cast<unsigned>(mode), detail.c_str());
+        // Keep the current measurement and terminal correlation if unusually
+        // large coordinates cannot fit. Mark the omitted route explicitly.
+        return detail.size() <= 256 ? detail : std::string(text) + terminal + " r=omitted-size m=" + measurement();
     };
     auto fail = [&](const char *why) { return Result{Outcome::Failed, diagnostic(why)}; };
+    // The registry keeps its independent outer gate. Capture measurements here
+    // first when all repetitions exhaust that same 10-second case allowance.
+    if (now - case_began > 10000) { return fail("in-server scenario deadline"); }
     if (step && now - began > 7500) { return fail("native travel deadline"); }
     if (step && body) {
         const glm::vec3 position(body->GetX(), body->GetY(), body->GetZ());
         const auto delta = glm::distance(position, previous);
+        max_gap = std::max(max_gap, now - last_at);
         max_step = std::max(max_step, delta);
         distance += delta;
         // Observe real samples, not request coordinates. Bound frame displacement
@@ -428,7 +463,10 @@ Result ActorTravel()
             return fail("unobservable sample gap, jump or competing AI");
         }
         if (delta > 0.05f) { ++moving_samples; }
-        if (step == 4 && mode != TravelCase::External && mode != TravelCase::Reused && glm::distance(position, action_position) > 0.05f) {
+        if (step == 4 && mode != TravelCase::External && mode != TravelCase::Reused) {
+            max_action_drift = std::max(max_action_drift, glm::distance(position, action_position));
+        }
+        if (step == 4 && mode != TravelCase::External && mode != TravelCase::Reused && max_action_drift > 0.05f) {
             std::fprintf(stderr, "actor stop drift case=%u action=(%.3f,%.3f,%.3f) observed=(%.3f,%.3f,%.3f)\n",
                 static_cast<unsigned>(mode), action_position.x, action_position.y, action_position.z,
                 position.x, position.y, position.z);
@@ -461,6 +499,10 @@ Result ActorTravel()
         old_generation = fresh.Inspect().generation;
         if (!body || !zone->zonemap) { return fail("native body/map missing"); }
         origin = previous = glm::vec3(body->GetX(), body->GetY(), body->GetZ());
+        moving_samples = 0;
+        distance = max_step = max_drift = max_action_drift = 0;
+        max_gap = observed_window = 0;
+        acted_at = settled_at = terminal_at = 0;
         last_at = began = now;
         tx += 40;
         // FindBestZ adjusts its input height; keep that mutation in a probe,
@@ -487,6 +529,16 @@ Result ActorTravel()
                 }
             }
             if (!found) { return fail("no measured local map obstruction; route qualification required"); }
+        }
+        if (!repetition) {
+            baseline_origin = origin;
+            baseline_target = {tx, ty, tz};
+            char text[128];
+            std::snprintf(text, sizeof(text), "r=%.2f,%.2f,%.2f>%d,%d,%d v=%.2f",
+                origin.x, origin.y, origin.z, tx, ty, tz, body->GetRunspeed());
+            route = text;
+        } else if (origin != baseline_origin || baseline_target != std::array<int32, 3>{tx, ty, tz}) {
+            return fail("repeat route changed");
         }
         std::fprintf(stderr, "actor travel case=%u start=(%.2f,%.2f,%.2f) end=(%d,%d,%d) "
             "candidate_bounds arrival_xy=2 z=6 action_ms=1000 drift=0.05 window_ms=400 total_ms=7500\n",
@@ -676,6 +728,8 @@ Result ActorTravel()
             state.last_operation != (mode == TravelCase::Reused ? 2u : 1u)) {
             return fail("terminal correlation changed after settlement");
         }
+        if (body) { max_drift = std::max(max_drift, glm::distance(previous, settled)); }
+        observed_window = now - settled_at;
         if (body && (glm::distance(previous, settled) > 0.05f || body->IsMoving())) {
             return fail("post-terminal native drift");
         }
@@ -691,9 +745,26 @@ Result ActorTravel()
         step = 6;
         break;
     }
-    case 6:
+    case 6: {
         if (state.alive || body || entity_list.GetMob(native_id) || entity_list.GetNPCByID(native_id)) { break; }
-        return {Outcome::Passed, diagnostic("native route/control observed")};
+        const auto sample = measurement();
+        if (sample == "omitted-size") { return fail("measurement sample exceeds buffer"); }
+        std::fprintf(stderr, "actor measurement case=%u repeat=%u sample=%s\n",
+            static_cast<unsigned>(mode), repetition + 1, sample.c_str());
+        observations += (observations.empty() ? "" : ";") + sample;
+        if (++repetition < repetitions) {
+            // Retire and actual absence were checked above. Restore the scoped
+            // idle override before the next ordinary-loop reconstruction.
+            CleanupActorBody();
+            step = 0;
+            return {Outcome::Pending, ""};
+        }
+        char position[80];
+        std::snprintf(position, sizeof(position), " p=%.2f,%.2f,%.2f", settled.x, settled.y, settled.z);
+        const auto summary = "m1 " + route + position + " m=" + observations;
+        if (summary.size() > 256) { return fail("measurement diagnostic exceeds256 bytes"); }
+        return {Outcome::Passed, summary};
+    }
     }
     return {Outcome::Pending, ""};
 }
