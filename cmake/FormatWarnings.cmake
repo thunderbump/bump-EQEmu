@@ -17,11 +17,27 @@ function(eqemu_apply_format_warnings target)
     endif()
 endfunction()
 
+# CMake regexes are byte-oriented: GCC's UTF-8 quotes are not single
+# characters to '.'. Normalize only those delimiters, not the evidence text.
+function(eqemu_format_control_rejected compiled output result)
+    string(REPLACE "‘" "'" normalized "${output}")
+    string(REPLACE "’" "'" normalized "${normalized}")
+    set(rejected FALSE)
+    if(NOT compiled AND normalized MATCHES "-Werror(=format|,-Wformat)"
+       AND normalized MATCHES "expects argument of type .double.|format specifies type .double."
+       AND normalized MATCHES "int")
+        set(rejected TRUE)
+    endif()
+    set(${result} "${rejected}" PARENT_SCOPE)
+endfunction()
+
 function(eqemu_check_format_warnings)
     if(NOT EQEMU_FORMAT_WARNINGS_SUPPORTED)
         message(STATUS "Format gate: unsupported compiler/frontend; no policy or controls applied")
         return()
     endif()
+
+    include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/format_controls/diagnostics.cmake")
 
     # Compile only: no executable, linker, or runtime requirement. Rebuild on
     # every configure, including after compiler/options/control-source changes.
@@ -49,9 +65,8 @@ function(eqemu_check_format_warnings)
         else()
             # A missing header, unsupported switch, or unrelated compiler error
             # must NOT count as successful rejection of the regression.
-            if(compiled OR NOT output MATCHES "-Werror(=format|,-Wformat)"
-               OR NOT output MATCHES "expects argument of type .double.|format specifies type .double."
-               OR NOT output MATCHES "int")
+            eqemu_format_control_rejected("${compiled}" "${output}" rejected)
+            if(NOT rejected)
                 message(FATAL_ERROR "Format gate: unsafe control did not fail for the expected int/double format diagnostic:\n${output}")
             endif()
             string(REGEX MATCH "[^\n]*(expects argument of type|format specifies type)[^\n]*" diagnostic "${output}")

@@ -63,6 +63,11 @@ no control executable is linked or run, and CTest is not required. The
 int/double mismatch diagnostic, while the explicit-double equivalent must
 compile. An unrelated failure does not satisfy the negative control. Results
 are rebuilt on every configure rather than reused from a cached probe.
+The diagnostic matcher normalizes UTF-8 curly quotation delimiters to ASCII
+before checking the format group and int/double evidence; original logs remain
+unchanged. Configure also exercises this production matcher against ASCII/UTF-8
+GCC and Clang diagnostic samples, successful-compilation results, and unrelated
+or partial errors. These checks do not replace the compiler controls.
 Configure prints both outcomes and the mismatch diagnostic; complete compiler
 output is retained under `CMakeFiles/eqemu-format-controls/{safe,unsafe}.log`
 in the build directory. A failed control stops configuration.

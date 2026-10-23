@@ -47,6 +47,7 @@ cmake-build-debug/
 *.cmake
 !cmake/ActorBridge.cmake
 !cmake/FormatWarnings.cmake
+!cmake/format_controls/diagnostics.cmake
 *.ilk
 *.pdb
 *.sln
