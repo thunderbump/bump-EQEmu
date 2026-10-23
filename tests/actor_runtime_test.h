@@ -12,9 +12,54 @@ public:
 	ActorRuntimeTest() {
 		TEST_ADD(ActorRuntimeTest::RoundTrip);
 		TEST_ADD(ActorRuntimeTest::BodyFacts);
+		TEST_ADD(ActorRuntimeTest::PatrolLoop);
 	}
 
 private:
+	void PatrolLoop()
+	{
+		using namespace eqemu_proof;
+		auto runtime = construct(78);
+		auto send = [&](Kind kind) {
+			const auto s = runtime->inspect();
+			rust::Vec<Input> inputs;
+			inputs.push_back({kind, s.epoch, s.generation, s.operation, 40, 0, 0});
+			return runtime->advance(s.sequence + 1, s.tick + 1, std::move(inputs));
+		};
+		auto idle = [&]() {
+			const auto s = runtime->inspect();
+			return runtime->advance(s.sequence + 1, s.tick + 1, {});
+		};
+		TEST_ASSERT(send(Kind::CreateBody).event == Event::BodyRequested);
+		// A=40, B=0. Values travel through the actual owned-value bridge.
+		{
+			const auto s = runtime->inspect();
+			rust::Vec<Input> inputs;
+			inputs.push_back({Kind::StartPatrol, s.epoch, s.generation, 0, 0, 0, 0});
+			TEST_ASSERT(runtime->advance(s.sequence + 1, s.tick + 1, std::move(inputs)).status == Status::Ok);
+		}
+		TEST_ASSERT(send(Kind::BodyPresent).event == Event::BodyPresent);
+		for (uint64_t op = 1; op <= 2; ++op) {
+			const auto request = idle();
+			TEST_ASSERT(request.event == Event::MoveRequested && request.operation == op);
+			TEST_ASSERT(request.x == (op == 1 ? 0 : 40));
+			TEST_ASSERT(send(Kind::Admitted).event == Event::Admitted);
+			TEST_ASSERT(send(Kind::Completed).event == Event::Completed);
+			TEST_ASSERT(runtime->inspect().last_operation == op);
+		}
+		TEST_ASSERT(send(Kind::Pause).status == Status::Ok);
+		TEST_ASSERT(idle().event == Event::None);
+		TEST_ASSERT(runtime->inspect().patrol == Patrol::Paused);
+		TEST_ASSERT(send(Kind::Resume).status == Status::Ok);
+		TEST_ASSERT(idle().operation == 3);
+		TEST_ASSERT(send(Kind::Rejected).event == Event::Rejected);
+		TEST_ASSERT(idle().event == Event::None);
+		TEST_ASSERT(send(Kind::Retire).status == Status::Ok);
+		TEST_ASSERT(idle().event == Event::RemovalRequested);
+		TEST_ASSERT(send(Kind::BodyAbsent).event == Event::BodyAbsent);
+		TEST_ASSERT(send(Kind::Shutdown).event == Event::Shutdown);
+	}
+
 	void BodyFacts()
 	{
 		using namespace eqemu_proof;

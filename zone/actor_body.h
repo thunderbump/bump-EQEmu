@@ -13,6 +13,9 @@ class Adapter {
 public:
     Adapter();
     eqemu_proof::Report Send(eqemu_proof::Input input);
+    // Opt-in only: creates at A and configures B once. Normal Process drives legs.
+    eqemu_proof::Report StartPatrol(int32_t ax, int32_t ay, int32_t az,
+        int32_t bx, int32_t by, int32_t bz);
     void Process();
     void BeginTeardown();
     void FinishTeardown(); // after EntityList::Clear or observed native teardown drain
@@ -22,7 +25,8 @@ public:
     eqemu_proof::Snapshot Inspect() const { return runtime_->inspect(); }
     eqemu_proof::Report LastReport() const { return last_; }
 private:
-    eqemu_proof::Report Advance(eqemu_proof::Input input);
+    eqemu_proof::Report Advance(eqemu_proof::Input input, bool empty = false);
+    void Apply(const eqemu_proof::Report &report);
     rust::Box<eqemu_proof::Runtime> runtime_;
     eqemu_proof::Report last_{};
     uint16_t id_ = 0;

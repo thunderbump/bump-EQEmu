@@ -382,7 +382,7 @@ Result ActorBodyLifetime()
 // Each case runs through the ordinary world loop. These are conservative
 // candidate bounds, NOT measured qualification values; retain per-case native
 // telemetry so Operations can establish the VM baseline before acceptance.
-enum class TravelCase { Arrival, LatchedStop, Stop, StopQueued, Stun, Root, Blocked, External, Reused, Suspended };
+enum class TravelCase { Arrival, LatchedStop, Stop, StopQueued, Stun, Root, Blocked, External, Reused, Suspended, Patrol };
 template<TravelCase mode>
 Result ActorTravel()
 {
@@ -390,6 +390,10 @@ Result ActorTravel()
     static unsigned step = 0;
     static uint32 began = 0, last_at = 0, acted_at = 0, settled_at = 0, terminal_at = 0;
     static unsigned moving_samples = 0;
+    static unsigned patrol_legs = 0;
+    static uint64 paused_operation = 0;
+    static std::string leg_observations;
+    static bool patrol_shutdown_checked = false;
     static glm::vec3 origin, previous, settled, action_position, replacement_origin;
     static int32 tx = 0, ty = 0, tz = 0;
     static uint16 native_id = 0;
@@ -568,6 +572,11 @@ Result ActorTravel()
             body->Mesmerize();
             if (!body->IsMezzed()) { return fail("native forced-control suspension missing"); }
         }
+        if constexpr (mode == TravelCase::Patrol) {
+            if (command(Kind::StartPatrol, 0).status != Status::Ok) { return fail("patrol configuration refused"); }
+            step = 10;
+            break;
+        }
         if (command(Kind::Move).event != Event::MoveRequested || adapter.Inspect().phase != Phase::Requested) {
             return fail("move request/admission conflated");
         }
@@ -721,6 +730,87 @@ Result ActorTravel()
         settled_at = now;
         step = 5;
         break;
+    case 10:
+        if (!body) { return fail("patrol body lost"); }
+        if (state.last_operation > patrol_legs) {
+            const auto target = patrol_legs == 0 ? glm::vec3(tx, ty, tz) : origin;
+            if (state.last_operation != patrol_legs + 1 || state.last_terminal != Event::Completed ||
+                distance < 20 || moving_samples < 3 ||
+                std::hypot(previous.x - target.x, previous.y - target.y) > 2 ||
+                std::abs(previous.z - target.z) > 6) { return fail("patrol native leg failed"); }
+            char leg[96];
+            std::snprintf(leg, sizeof(leg), "L%u:%llu,%u,%.2f,%.2f,%.2f,%.2f;", patrol_legs + 1,
+                static_cast<unsigned long long>(state.last_operation), now - began,
+                previous.x, previous.y, previous.z, distance);
+            leg_observations += leg;
+            std::fprintf(stderr, "actor patrol %s\n", leg);
+            ++patrol_legs;
+            distance = 0;
+            moving_samples = 0;
+        }
+        if (patrol_legs == 2 && distance >= 4 && body->IsMoving()) {
+            body->Stun(1500);
+            if (!body->IsStunned()) { return fail("patrol native stun missing"); }
+            acted_at = now;
+            action_position = previous;
+            step = 11;
+        }
+        break;
+    case 11:
+        max_action_drift = std::max(max_action_drift, glm::distance(previous, action_position));
+        if (max_action_drift > 0.05f) { return fail("patrol interruption drift"); }
+        if (state.phase != Phase::Idle) {
+            if (now - acted_at > 1000) { return fail("patrol interruption deadline"); }
+            break;
+        }
+        if (!body || state.patrol != Patrol::Paused || state.last_terminal != Event::Interrupted) {
+            return fail("patrol interruption not paused");
+        }
+        terminal_at = now;
+        paused_operation = state.last_operation;
+        settled = previous;
+        settled_at = now;
+        step = 12;
+        break;
+    case 12:
+        max_drift = std::max(max_drift, glm::distance(previous, settled));
+        observed_window = now - settled_at;
+        if (!body || state.patrol != Patrol::Paused || state.phase != Phase::Idle ||
+            state.last_operation != paused_operation || body->IsMoving() || max_drift > 0.05f) {
+            return fail("patrol paused window moved or retried");
+        }
+        // Temporary stun must expire, then remain quiet for a full 400ms.
+        if (now - acted_at < 1900 || body->IsStunned()) { break; }
+        if (command(Kind::Resume, 0).status != Status::Ok) { return fail("patrol resume refused"); }
+        distance = 0;
+        moving_samples = 0;
+        step = 13;
+        break;
+    case 13:
+        if (!body || state.patrol != Patrol::Running) { return fail("resumed patrol lost"); }
+        if (distance < 4 || moving_samples < 3 || !body->IsMoving()) { break; }
+        if (command(Kind::Retire, 0).status != Status::Ok || adapter.Inspect().patrol != Patrol::Retiring) {
+            return fail("active patrol retirement refused");
+        }
+        step = 6;
+        break;
+    case 14:
+        if (state.phase != Phase::Admitted || !body || !body->IsMoving() || distance < 4) { break; }
+        adapter.BeginTeardown();
+        step = 15;
+        break;
+    case 15:
+        if (state.alive || body) { break; }
+        if (state.patrol != Patrol::Retiring || state.last_operation != 1 ||
+            state.last_terminal != Event::Interrupted ||
+            command(Kind::Resume, 0).status != Status::Closed) {
+            return fail("active patrol teardown lost terminal or reopened admission");
+        }
+        adapter.FinishTeardown();
+        if (!adapter.Inspect().closed) { return fail("active patrol teardown did not close"); }
+        patrol_shutdown_checked = true;
+        step = 6;
+        break;
     case 5: {
         const auto expected_terminal = (mode == TravelCase::Arrival || mode == TravelCase::LatchedStop || mode == TravelCase::Reused)
             ? Event::Completed : (mode == TravelCase::Blocked || mode == TravelCase::Suspended) ? Event::Rejected : Event::Interrupted;
@@ -747,6 +837,27 @@ Result ActorTravel()
     }
     case 6: {
         if (state.alive || body || entity_list.GetMob(native_id) || entity_list.GetNPCByID(native_id)) { break; }
+        if constexpr (mode == TravelCase::Patrol) {
+            if (!patrol_shutdown_checked) {
+                if (state.last_terminal != Event::Interrupted || state.last_operation <= paused_operation ||
+                    command(Kind::Resume, 0).status == Status::Ok) {
+                    return fail("patrol retirement lost terminal or resumed");
+                }
+                ActorBody::FinishTeardown();
+                auto &fresh = ActorBody::Get();
+                if (fresh.StartPatrol(static_cast<int32>(origin.x), static_cast<int32>(origin.y),
+                    static_cast<int32>(origin.z), tx, ty, tz).status != Status::Ok || !fresh.Body()) {
+                    return fail("shutdown patrol opt-in failed");
+                }
+                native_id = fresh.NativeID();
+                body = fresh.Body();
+                previous = glm::vec3(body->GetX(), body->GetY(), body->GetZ());
+                last_at = now;
+                distance = 0;
+                step = 14;
+                break;
+            }
+        }
         const auto sample = measurement();
         if (sample == "omitted-size") { return fail("measurement sample exceeds buffer"); }
         std::fprintf(stderr, "actor measurement case=%u repeat=%u sample=%s\n",
@@ -761,7 +872,9 @@ Result ActorTravel()
         }
         char position[80];
         std::snprintf(position, sizeof(position), " p=%.2f,%.2f,%.2f", settled.x, settled.y, settled.z);
-        const auto summary = "m1 " + route + position + " m=" + observations;
+        const auto summary = mode == TravelCase::Patrol ?
+            "patrol " + leg_observations + " resume/retire m=" + sample :
+            "m1 " + route + position + " m=" + observations;
         if (summary.size() > 256) { return fail("measurement diagnostic exceeds256 bytes"); }
         return {Outcome::Passed, summary};
     }
@@ -784,6 +897,7 @@ constexpr std::array scenarios = {
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
     // Exercises real shutdown, then boots a replacement in the same zone host.
     , Scenario{"rust_native_actor_body_lifetime", ActorBodyLifetime, CleanupActorBody}
+    , Scenario{"rust_native_actor_patrol", ActorTravel<TravelCase::Patrol>, CleanupActorBody}
     , Scenario{"rust_native_actor_arrival", ActorTravel<TravelCase::Arrival>, CleanupActorBody}
     , Scenario{"rust_native_actor_latched_stop", ActorTravel<TravelCase::LatchedStop>, CleanupActorBody}
     , Scenario{"rust_native_actor_reused_travel", ActorTravel<TravelCase::Reused>, CleanupActorBody}
