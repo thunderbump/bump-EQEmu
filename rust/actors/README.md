@@ -184,6 +184,8 @@ sample = total_ms,arrival_xy_error,arrival_z_error,action_terminal_ms,max_drift,
 ```
 
 `r` retains the observed native spawn position and requested map-derived endpoint.
+`v` is the effective native run-speed value at the first route observation,
+before the move request. It is not a measured travel velocity.
 Repeats must have identical native origins and requested endpoints. `p` is the
 last repetition's sampled settled native position. Arrival errors are measured
 at settlement for arrival, latched completion and replacement arrival; other

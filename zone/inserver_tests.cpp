@@ -535,7 +535,7 @@ Result ActorTravel()
             baseline_target = {tx, ty, tz};
             char text[128];
             std::snprintf(text, sizeof(text), "r=%.2f,%.2f,%.2f>%d,%d,%d v=%.2f",
-                origin.x, origin.y, origin.z, tx, ty, tz, body->GetRunspeed());
+                origin.x, origin.y, origin.z, tx, ty, tz, static_cast<double>(body->GetRunspeed()));
             route = text;
         } else if (origin != baseline_origin || baseline_target != std::array<int32, 3>{tx, ty, tz}) {
             return fail("repeat route changed");
