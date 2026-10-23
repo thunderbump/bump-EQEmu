@@ -132,6 +132,11 @@ option(EQEMU_BUILD_LOGIN "Build the login server." ON)
 option(EQEMU_BUILD_TESTS "Build utility tests." OFF)
 option(EQEMU_BUILD_CLIENT_FILES "Build Client Import/Export Data Programs." ON)
 
+include(FormatWarnings)
+if(EQEMU_BUILD_TESTS)
+	eqemu_check_format_warnings()
+endif()
+
 if(PerlLibs_FOUND)
 	option(EQEMU_BUILD_PERL "Build Perl parser." ON)
 

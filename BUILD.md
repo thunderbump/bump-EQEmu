@@ -38,6 +38,52 @@ Similarly to Windows running CMake on Linux is simple it just uses a different g
 	cd build
 	cmake -G "Unix Makefiles" -DEQEMU_BUILD_TESTS=ON -DEQEMU_BUILD_LOGIN=ON ..
 
+### Narrow C++ format-warning gate
+
+`cmake/FormatWarnings.cmake` defines the explicit policy `-Wformat
+-Werror=format` for GNU, Clang and AppleClang with a GNU-style frontend.
+It enables the compiler's basic printf/scanf-family format diagnostics and
+makes that diagnostic group fatal, including literal format/argument type
+mismatches. It does not enable `-Wall`, `-Wextra`, `-Wformat=2`, or broad
+`-Werror`. Nonliteral format analysis and broader warning policies are deferred.
+
+The policy is **PRIVATE to the zone executable's C++ compilations**, including
+`zone/actor_body.cpp`, `zone/mob.cpp`, and (with tests enabled)
+`zone/inserver_tests.cpp`. It also checks headers as seen by those compilations;
+it is not applied globally or propagated to common, gm_commands_zone,
+lua_zone, perl_zone, or vendor targets. Unsupported compilers/frontends
+(including MSVC and clang-cl) retain their existing flags, without this gate's
+coverage. Unannotated variadic wrappers such as `EQEmuLogSys::Out` are not
+automatically checked. This is not a memory-safety guarantee.
+
+With `EQEMU_BUILD_TESTS=ON`, every normal CMake configure compiles two tiny
+static-library controls using the selected C++ compiler and the same policy;
+no control executable is linked or run, and CTest is not required. The
+`std::snprintf("v=%.2f", int)` control must fail with the format group's
+int/double mismatch diagnostic, while the explicit-double equivalent must
+compile. An unrelated failure does not satisfy the negative control. Results
+are rebuilt on every configure rather than reused from a cached probe.
+Configure prints both outcomes and the mismatch diagnostic; complete compiler
+output is retained under `CMakeFiles/eqemu-format-controls/{safe,unsafe}.log`
+in the build directory. A failed control stops configuration.
+
+Production verification is separate from these controls: in an isolated native
+build configured with `CMAKE_EXPORT_COMPILE_COMMANDS=ON`, inspect the entries
+for `zone/actor_body.cpp`, `zone/mob.cpp` and `zone/inserver_tests.cpp` for both
+flags, then require the default build to succeed. Also confirm that dependency
+compile commands do not acquire this policy. Controls alone do not establish
+production enforcement or replace the full utility/in-server suite.
+
+Initial scope is zone-wide; no warning suppressions or unrelated format cleanup
+were added. The development quick-check cannot configure/build this CMake
+scope, so inherited warning noise, generated production commands, and native
+timing have not yet been measured. Full isolated validation must supply those
+results. If substantial unrelated zone diagnostics appear, explicitly narrow
+the policy to actor/in-server translation units and document measured findings
+rather than mass-cleaning or suppressing them. Later expansion to other targets
+or diagnostics requires a separate noise/coverage decision; logger annotations
+and analyzer/sanitizer work remain out of scope.
+
 ### Bootstrap Rust bridge (zone)
 
 On native x86-64 Linux builds, the zone target links the bootstrap
