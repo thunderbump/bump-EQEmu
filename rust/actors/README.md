@@ -4,7 +4,8 @@
 `bridge` exposes that policy as CXX-owned values and an opaque `rust::Box`.
 The original logical protocol below remains available. `CreateBody` additionally
 requests one native NPC through the zone-owned adapter described below. The R2
-candidate adds bounded native travel; qualification remains pending (see below).
+implementation adds bounded native travel with a limited measured fixture-route
+calibration (see below).
 The zone startup caller constructs, creates, inspects, retires and shuts down a
 logical actor, then releases the box. The registered `ActorRuntimeTest` uses the
 same API, including a fake native move-result trace. The pointer-free
@@ -72,8 +73,9 @@ Owned subjects are depopped on assertions/deadlines; the normal loop and fixture
 shutdown own destruction. The bounded complete-result interface is unchanged.
 
 R1 alone did not prove movement/routes or stop/stun/root travel effects.
-Still unproved by this candidate until VM qualification: travel, combat, spells/buffs,
-regen, charm/fear behavior, persistence, client delivery and all other gameplay.
+R2's limited travel calibration is recorded below. Combat, general spells/buffs,
+regen, charm/fear behavior, persistence, client delivery and other gameplay remain
+unqualified.
 The stun test proves only native status/timer processing, not all mechanics.
 The accepted R1 run exercised actual zone teardown/replacement as well as the
 registered drain test. Retain those regressions; R1 acceptance does not qualify
@@ -81,7 +83,7 @@ this movement candidate. No candidate builds or tests have been run on the
 implementation host. No additional environment service or Stack scenario
 selection is needed.
 
-## Native movement candidate (R2; qualification pending)
+## Native movement (R2; limited fixture-route calibration)
 
 `Adapter::Send` accepts Move/Stop requests, not native results. Rust allows one
 fresh operation for a Present body, returns MoveRequested, and later consumes a
@@ -116,7 +118,7 @@ Completed additionally requires observed native arrival. A completion already
 latched before Stop is not rewritten as cancellation. Retire still refuses active
 work; the normal loop observes actual absence after depop.
 
-### Source coverage and candidate bounds
+### Source coverage and retained bounds
 
 The existing complete registry retains R1 lifetime, reused-ID, generation/epoch,
 ordinary-neighbor and real zone-replacement cases. Eight additional normal-world
@@ -153,13 +155,15 @@ old body's float origin: CreateBody uses integer coordinates, so reconstructing
 from a native observation can change the spawn position through truncation.
 Terminal identity/outcome must remain stable through the settle window.
 
-Current constants are **provisional safety/test bounds, not measured evidence**:
+The following **conservative safety/test bounds are retained unchanged** for the
+limited fixture-route calibration recorded below. Bounds are acceptance limits,
+not measurements or guarantees for other routes.
 
-| Bound | Candidate value |
+| Bound | Retained value |
 | --- | --- |
 | Locality | 4–80 units, vertical difference <= 6, <= 32 nav nodes |
 | Detour | native route length <= 1.5 times direct distance |
-| Test clear route | rounded fixture safe point to +40 X; native ground Z + body offset |
+| Test clear route | public PoK fixture: (-285, -148, -158.90) to requested (-245, -148, -156); native ground Z + body offset |
 | Arrival | XY <= 2, Z <= 6 |
 | Stop/interruption terminal | <= 1000 ms from action |
 | Post-terminal drift | <= 0.05 units over >= 400 ms |
@@ -214,76 +218,90 @@ truncating measurements. No report budget, readiness, completion, cleanup or
 host-process preservation gate was relaxed. Scoped idle override restoration
 and normal-loop owned depop cleanup remain in place.
 
-These repeated observations have not yet been collected in a native VM run for
-this change. They add evidence collection, not qualified tolerances. Inspect the
-exact-head result before changing the provisional bounds or accepting this proof.
+### Accepted limited fixture-route calibration
 
-### Reported VM observations (not route qualification)
+Calibration attribution (not validation of subsequent edits):
 
-The GitHub fixture report for head `9a29de1fa692fee5fca6ddc07e025529b44fd972`,
-job `06485b651fda4efb` (2026-10-21), reports all 10 selected native scenarios
-complete with zero failures, 81 utilities passing and native/database cleanup.
-Its bounded scenario diagnostics report:
+- Candidate: `093a3b3128d3a02a12be060c20fbfc24bd87308f`.
+- Fixture job: `45184ffa0e974a90`, finished 2026-10-23 at 04:00:17 UTC.
+- Worker run: `291c45bb3feb4fafb16212afe651aed2`;
+  native suite run: `725e1b407f049388b90fa7ae91b4d22c`.
+- The PR reports all 10 checks and 85 utilities passing. The inspected private
+  normal-world success artifact records exit 0, all 12 selected native scenarios
+  completed with zero failures, finalized suite success, and normal-world,
+  database and VM cleanup complete. Macroscope was skipped, not passed.
 
-| Scenario | Total time | Action-to-terminal | Sampled distance | Maximum step |
-| --- | --- | --- | --- | --- |
-| Arrival | 1828 ms | n/a | 40.18 | 1.66 |
-| Stop | 705 ms | 32 ms | 4.70 | 0.95 |
-| Stop before first tick | 545 ms | 32 ms | 0.00 | 0.00 |
-| Stun | 707 ms | 32 ms | 4.72 | 0.95 |
-| Root | 705 ms | 32 ms | 4.72 | 0.95 |
+The PR's calibration follow-through records independent Spec/Standards acceptance
+of this baseline for the short public Plane of Knowledge (`poknowledge`) fixture
+route. The native observations below support that limited calibration, not a
+blanket approval of the PR or later heads.
 
-These are observations from one reported run, not independently inspected raw
-route measurements or a repeatability baseline. Passing the existing assertions
-bounds drift by 0.05 over at least 400 ms and arrival by XY 2 / Z 6; it does not
-supply exact drift or arrival error. The bounded evidence does not include actual
-route endpoint coordinates, per-frame timing or exact arrival error, so it cannot
-safely finalize a known-clear route or tighter measured tolerances. Retain the
-constants above as provisional until those diagnostics are available. The earlier
-same-head job `ac69f13d2a314aac` separately failed on zone responsiveness before
-suite completion; its retained logs do not identify a movement source defect.
-The jobs used different validator versions and are not interchangeable.
-Neither run covers the two newly added regressions or this edited tree.
+The repeated clear route starts at observed native position
+**(-285.00, -148.00, -158.90)** and requests **(-245, -148, -156)**.
+All three arrival repetitions settled at displayed errors XY **0.000**, Z
+**0.250** units; the last settled position was **(-245.00, -148.00, -156.25)**.
+The effective native run-speed value was **50.00**, not a measured velocity.
+Sampled arrival distance was **40.18** units, maximum steps **1.50–1.69** units,
+and maximum sample gap **34 ms**. No teleport fallback counts as travel.
 
-A separate retained current-head report for `15ca92c249ad044cd3a1b9d332d94133d1623d40`,
-job `ae29a2eee3864010`, completed all 12 scenarios with one failure in
-`rust_native_actor_reused_travel` at stage 7. Arrival, latched completion-before-
-Stop, stop, queued stop, stun and root reported passing assertions. The run
-reported native/database/VM cleanup complete; it is still a failed suite, not
-acceptance. The reused-ID test incorrectly compared the replacement with the
-old native origin after truncating that fractional origin to integer CreateBody
-coordinates. The corrected scenario observes the new native baseline before
-any processing and checks idle stability across normal-loop ticks, then still
-requires stale refusal and fresh correlated arrival. A later exact-head run for
-`51079559b044d60873ec7946b1d8b71800771819`,
-job `9fc6d93884154e9b`, reported 85 utilities and all 12 native scenarios passing
-with cleanup complete. That confirms the repair against the existing assertions;
-it does not qualify the route or this new repeated-measurement collection. The
-distinct operator-stopped job `83d884ca808a42ca`
-is not a scenario failure or substitute validation.
+| Scenario | Repetitions | Total times (ms) | Action-to-terminal (ms) | Max post-terminal drift (units) | Settle windows (ms) |
+| --- | --- | --- | --- | --- | --- |
+| Arrival | 3 | 1837, 1850, 1847 | n/a | 0.000 each | 419, 422, 419 |
+| Deliberate Stop | 3 | 713, 716, 708 | 32, 33, 33 | 0.000 each | 420, 422, 418 |
+| Native stun | 3 | 709, 713, 712 | 32, 33, 32 | 0.000 each | 420, 423, 423 |
+| Native root | 3 | 709, 710, 710 | 33, 32, 32 | 0.000 each | 420, 419, 420 |
+| Stop before first tick | 1 | 549 | 32 | 0.000 | 420 |
 
-This evidence includes a candidate endpoint trace, but not complete exact
-arrival/drift measurements or a repeatability baseline. It therefore does not
-finalize the provisional route or bounds above.
+Stop, stun and root also each recorded **0.000** maximum action-to-terminal
+drift in all repetitions; queued Stop recorded the same and zero sampled travel.
+Displayed drift/errors use three decimal places: zero means less than 0.0005
+units, not mathematical zero. Total times include settlement and retirement,
+not just travel. The maximum sample gaps across movement scenarios were
+33–34 ms.
 
-### Required qualification and locality decision
+The single latched-completion-before-Stop case took 1843 ms, with XY/Z errors
+0.000/0.250 and 0.000 drift over 417 ms; its truthful Completed outcome was
+preserved. Reused-ID travel took 2522 ms, including 64 ms to interruption of the
+old body, idle replacement observation and fresh arrival; final XY/Z errors
+were 0.000/0.250, with 0.000 drift over 422 ms. External depop took 65 ms to
+terminal/absence; its reported zero drift is not post-terminal body evidence.
+The blocked probe requested **(-230, -125, -156)** from the same origin and was
+rejected with zero sampled travel, as was control-suspended admission on the
+clear route. These single cases are not three-repetition baselines.
 
-**Not yet accepted.** Run the existing ordinary isolated VM/GitHub pipeline at the
-exact repaired head, retaining native diagnostics before teardown. Operations
-must first measure the short clear route, its native speed/frame behavior,
-arrival error, stop/root/stun latency and drift on the fixture baseline; record
-those measurements and finalize the above bounds before accepting scenario
-results. The safe-point route and nearby obstruction are candidate probes, not a
-claim of a measured known-clear route. If either is unsuitable, select a measured
-local route in EQEmu, not by changing Stack or the installed validator. Require
-all ordinary checks, complete native suite, native/database/VM cleanup and review;
-a crash, missing terminal or cleanup failure is non-pass. No host Cargo/native
-execution or fixture run was performed for this implementation.
+The existing arrival XY <= 2 / Z <= 6, action-to-terminal <= 1000 ms and drift
+<= 0.05 over >= 400 ms limits remain unchanged. The observations lie comfortably
+inside them; three fresh-body repetitions within **one VM** do not justify
+fitting tighter thresholds or general timing/reliability guarantees. The locality,
+route, jump, sampling and deadline gates above remain conservative safeguards,
+not qualification of the entire 4–80-unit envelope or arbitrary navmesh paths.
 
-Decision: **keep locality narrow; do not expand mechanics or population** pending
-that evidence. Combat, followers, persistence, inventory, dialogue, cross-zone
-movement and unqualified forced-control mechanics remain deferred. No new
-pipeline lifecycle, client dependency, external service or dependency was added.
+Earlier runs remain historical and distinct: `06485b651fda4efb` passed the older
+10-case suite at `9a29de1fa692fee5fca6ddc07e025529b44fd972`, while same-head
+`ac69f13d2a314aac` failed responsiveness before suite completion. At
+`15ca92c249ad044cd3a1b9d332d94133d1623d40`, `ae29a2eee3864010` failed the
+reused-ID coordinate-baseline assertion; `9fc6d93884154e9b` later passed all
+12 cases at `51079559b044d60873ec7946b1d8b71800771819` after its repair, without
+this repeated calibration. Operator-stopped `83d884ca808a42ca` is not a scenario
+failure. `734b3050208e4b61` reported a native UDP timeout at
+`9b6e63a93e8716f9265a4d45130e45547fea4b25`. None substitutes for the attributed
+calibration run or validates a subsequent edited head.
+
+### Locality and validation decision
+
+**Accept the measured baseline only for this short public PoK fixture route;
+keep locality narrow and do not expand mechanics or population.** Three
+fresh-body repetitions in one VM are not independent VM runs, general route
+qualification or a reliability guarantee. Combat, followers, persistence,
+inventory, dialogue, cross-zone movement and unqualified forced-control mechanics
+remain deferred. No new pipeline lifecycle, client dependency, external service
+or dependency was added.
+
+The caller must validate and review the resulting documentation head through the
+existing ordinary isolated VM/GitHub pipeline. Require all ordinary checks, a
+complete native suite and native/database/VM cleanup; crashes, missing terminals
+or cleanup failures remain non-pass. No host Cargo/native execution or fixture
+run was performed for this documentation repair.
 
 ## Protocol and bounds
 
@@ -391,5 +409,6 @@ Do not run Cargo, rustc, build scripts, macros, tests, native binaries or a zone
 on the implementation host. The ordinary isolated fixture owns offline locked
 format/Clippy/unit/doctest checks, native build, final-zone symbol/hash checks and
 registered native utilities. No dependencies or locked versions were added.
-Candidate validation is pending until that fixture runs; no incremental-build,
-fresh-consumer, body/movement or gameplay qualification is asserted here.
+The attributed fixture result above validates its exact candidate only; later
+edits still require caller-owned exact-head validation and review. No general
+incremental-build, fresh-consumer or broader gameplay qualification is asserted.
