@@ -675,6 +675,9 @@ int main(int argc, char **argv)
 					quest_manager.Process();
 				}
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+#ifdef EQEMU_BUILD_TESTS
+                InserverTests::BeforeActorFacts();
+#endif
 				ActorBody::Process();
 #endif
 #ifdef EQEMU_BUILD_TESTS

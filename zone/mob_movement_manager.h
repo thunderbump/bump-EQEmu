@@ -69,6 +69,12 @@ public:
 	void NavigateTo(Mob *who, float x, float y, float z, MobMovementMode mode = MovementRunning);
 	void StopNavigation(Mob *who);
 
+	// Narrow native-actor lane: complete short dry routes only, no stuck/warp fallback.
+	enum class ActorTravel { Idle, Moving, Completed, Interrupted };
+	bool NavigateActorTo(Mob *who, float x, float y, float z);
+	ActorTravel InspectActorTravel(Mob *who) const;
+	static bool ActorControlAllowsTravel(Mob *who);
+
 	void SendCommandToClients(
 		Mob *mob,
 		float delta_x,

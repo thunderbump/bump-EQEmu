@@ -19,16 +19,27 @@ private:
 	{
 		using namespace eqemu_proof;
 		auto runtime = construct(32);
-		auto send = [&](Kind kind) {
+		auto send = [&](Kind kind, std::uint64_t operation = 0) {
 			const auto state = runtime->inspect();
 			rust::Vec<Input> inputs;
-			inputs.push_back({kind, state.epoch, state.generation, 0, 0, 0, 0});
+			inputs.push_back({kind, state.epoch, state.generation, operation, 0, 0, 0});
 			return runtime->advance(state.sequence + 1, state.tick + 1, std::move(inputs));
 		};
 		TEST_ASSERT(send(Kind::CreateBody).event == Event::BodyRequested);
 		TEST_ASSERT(runtime->inspect().body == Body::Requested);
 		TEST_ASSERT(send(Kind::Retire).status == Status::Busy);
 		TEST_ASSERT(send(Kind::BodyPresent).event == Event::BodyPresent);
+		TEST_ASSERT(send(Kind::Move, 1).event == Event::MoveRequested);
+		TEST_ASSERT(send(Kind::Completed, 1).status == Status::InvalidResult);
+		TEST_ASSERT(send(Kind::Admitted, 2).status == Status::InvalidResult);
+		TEST_ASSERT(send(Kind::Admitted, 1).event == Event::Admitted);
+		TEST_ASSERT(send(Kind::BodyAbsent).status == Status::Busy);
+		TEST_ASSERT(send(Kind::Stop, 1).event == Event::StopRequested);
+		// Preserve the merged truthful completion-after-stop rule for bodies too.
+		TEST_ASSERT(send(Kind::Completed, 1).event == Event::Completed);
+		TEST_ASSERT(send(Kind::Interrupted, 1).status == Status::InvalidResult);
+		TEST_ASSERT(runtime->inspect().last_terminal == Event::Completed);
+		TEST_ASSERT(runtime->inspect().last_operation == 1);
 		TEST_ASSERT(send(Kind::Retire).event == Event::RemovalRequested);
 		TEST_ASSERT(runtime->inspect().alive && runtime->inspect().body == Body::Removing);
 		TEST_ASSERT(send(Kind::Shutdown).status == Status::Busy);

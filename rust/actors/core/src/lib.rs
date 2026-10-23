@@ -233,6 +233,9 @@ impl Runtime {
                 *event = Event::BodyRejected;
             }
             Kind::BodyAbsent if matches!(s.body, Body::Present | Body::Removing) => {
+                if s.phase != Phase::Idle {
+                    return Status::Busy;
+                }
                 s.body = Body::Absent;
                 s.alive = false;
                 s.phase = Phase::Idle;
@@ -243,8 +246,8 @@ impl Runtime {
                 return Status::InvalidResult;
             }
             Kind::Move => {
-                // Body-only slice: travel is deliberately not admitted here.
-                if s.body != Body::Logical {
+                // Native admission remains a later, correlated fact.
+                if !matches!(s.body, Body::Logical | Body::Present) {
                     return Status::Busy;
                 }
                 if s.phase != Phase::Idle {
@@ -338,7 +341,8 @@ mod tests {
             send(&mut r, Kind::BodyPresent, 0).status,
             Status::InvalidResult
         );
-        assert_eq!(send(&mut r, Kind::Move, 1).status, Status::Busy);
+        assert_eq!(send(&mut r, Kind::Move, 1).event, Event::MoveRequested);
+        assert_eq!(send(&mut r, Kind::Rejected, 1).event, Event::Rejected);
         assert_eq!(send(&mut r, Kind::Retire, 0).event, Event::RemovalRequested);
         assert!(r.inspect().alive);
         assert_eq!(r.inspect().body, Body::Removing);
@@ -351,6 +355,60 @@ mod tests {
         assert!(!r.inspect().alive);
         assert_eq!(send(&mut r, Kind::BodyAbsent, 0).status, Status::Missing);
         assert_eq!(send(&mut r, Kind::Shutdown, 0).event, Event::Shutdown);
+    }
+
+    #[test]
+    fn native_travel_preserves_correlation_and_terminal_before_absence() {
+        let mut r = Runtime::new(41);
+        send(&mut r, Kind::CreateBody, 0);
+        assert_eq!(send(&mut r, Kind::Move, 1).status, Status::Busy);
+        send(&mut r, Kind::BodyPresent, 0);
+        for terminal in [Kind::Completed, Kind::Interrupted] {
+            let operation = r.high_operation + 1;
+            assert_eq!(
+                send(&mut r, Kind::Move, operation).event,
+                Event::MoveRequested
+            );
+            assert_eq!(
+                send(&mut r, Kind::Completed, operation).status,
+                Status::InvalidResult
+            );
+            assert_eq!(
+                send(&mut r, Kind::Admitted, operation + 1).status,
+                Status::InvalidResult
+            );
+            send(&mut r, Kind::Admitted, operation);
+            assert_eq!(send(&mut r, Kind::BodyAbsent, 0).status, Status::Busy);
+            assert_eq!(send(&mut r, Kind::Retire, 0).status, Status::Busy);
+            send(&mut r, Kind::Stop, operation);
+            assert_eq!(send(&mut r, terminal, operation).status, Status::Ok);
+            assert_eq!(r.inspect().last_operation, operation);
+            assert_eq!(
+                send(&mut r, terminal, operation).status,
+                Status::InvalidResult
+            );
+            assert_eq!(
+                send(&mut r, Kind::Move, operation).status,
+                Status::InvalidInput
+            );
+        }
+        send(&mut r, Kind::BodyAbsent, 0);
+        assert!(!r.inspect().alive);
+        assert_eq!(r.inspect().last_terminal, Event::Interrupted);
+        let retired = r.inspect();
+        send(&mut r, Kind::CreateBody, 0);
+        send(&mut r, Kind::BodyPresent, 0);
+        for kind in [Kind::Move, Kind::Stop, Kind::Completed, Kind::Interrupted] {
+            let current = r.inspect();
+            let report = r.advance(
+                current.sequence + 1,
+                current.tick + 1,
+                &[Input::new(kind, retired.epoch, retired.generation, 3)],
+            );
+            assert_eq!(report.status, Status::Stale);
+            assert_eq!(r.inspect().phase, Phase::Idle);
+            assert_eq!(r.inspect().sequence, current.sequence);
+        }
     }
 
     #[test]

@@ -27,6 +27,7 @@ private:
     eqemu_proof::Report last_{};
     uint16_t id_ = 0;
     bool closing_ = false;
+    int32_t target_x_ = 0, target_y_ = 0, target_z_ = 0;
 };
 Adapter &Get();
 void Process();
