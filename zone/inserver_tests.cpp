@@ -21,6 +21,7 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <utility>
 
 extern EntityList entity_list;
 extern WorldServer worldserver;
@@ -908,6 +909,279 @@ Result ActorTravel()
     return {Outcome::Pending, ""};
 }
 
+// Subjects are owned by this scenario; cleanup checks lifetime, not pointer/ID alone.
+std::array<std::pair<uint16, uint64>, 4> approach_subjects{};
+void CleanupApproach()
+{
+    CleanupActorBody();
+    for (const auto &subject : approach_subjects) {
+        auto *npc = entity_list.GetNPCByID(subject.first);
+        if (npc && npc->NativeIncarnation() == subject.second) { npc->Depop(false); }
+    }
+}
+
+Result ActorApproach()
+{
+    using namespace eqemu_proof;
+    static unsigned step = 0, samples = 0;
+    static uint32 began = 0, stage_at = 0, last_at = 0, action_at = 0, stop_ms = 0;
+    static glm::vec3 origin, previous, quiet;
+    static float travelled = 0, drift = 0, arrival_xy = 0, arrival_z = 0;
+    static uint64 selected = 0, operation = 0, old_incarnation = 0;
+    static uint16 reused = 0;
+    const auto now = Timer::GetCurrentTime();
+    auto &adapter = ActorBody::Get();
+    const auto state = adapter.Inspect();
+    auto *body = adapter.Body();
+    auto command = [&](Kind kind) {
+        return adapter.Send({kind, state.epoch, state.generation, 0, 0, 0, 0});
+    };
+    auto subject = [&](size_t i) -> NPC * {
+        auto *npc = entity_list.GetNPCByID(approach_subjects[i].first);
+        return npc && npc->NativeIncarnation() == approach_subjects[i].second ? npc : nullptr;
+    };
+    auto fail = [&](const char *why) -> Result {
+        char text[256];
+        std::snprintf(text, sizeof(text), "approach %s s=%u ms=%u samples=%u d=%.2f drift=%.3f",
+            why, step, now - began, samples, travelled, drift);
+        return {Outcome::Failed, text};
+    };
+    // Keep setup evidence in the case result: console tails may omit an early
+    // failure. One bounded record distinguishes map/locality from placement.
+    char spawn_diagnostic[160]{};
+    auto spawn = [&](size_t i, float offset) -> NPC * {
+        auto *type = new NPCType{};
+        std::strcpy(type->name, "ActorApproachSubject");
+        type->current_hp = type->max_hp = 100;
+        type->race = type->class_ = type->level = 1;
+        type->gender = 2;
+        type->size = 6;
+        type->bodytype = 11;
+        type->skip_global_loot = true;
+        glm::vec3 probe(origin.x + offset, origin.y, origin.z + 20);
+        const auto ground = zone->zonemap->FindBestZ(probe, nullptr);
+        // As in the retained travel fixture, use native ground plus the body
+        // offset, not the safe point's Z. The short route has a real slope.
+        // Subjects have the same race/size as the actor; verify that offset below.
+        const auto z = ground + body->GetZOffset();
+        if (ground == BEST_Z_INVALID || !std::isfinite(z) || std::abs(z - origin.z) > 6) {
+            const char *reason = ground == BEST_Z_INVALID ? "map" :
+                !std::isfinite(z) ? "nonfinite" : "local-z";
+            std::snprintf(spawn_diagnostic, sizeof(spawn_diagnostic),
+                "subject %zu %s xy=%.2f,%.2f origin-z=%.3f ground=%.3f offset=%.3f z=%.3f",
+                i, reason, origin.x + offset, origin.y, origin.z, ground, body->GetZOffset(), z);
+            delete type;
+            return nullptr;
+        }
+        auto *npc = new NPC(type, nullptr, glm::vec4(origin.x + offset, origin.y, z, 0), GravityBehavior::Flying);
+        npc->GiveNPCTypeData(type);
+        entity_list.AddNPC(npc, false);
+        approach_subjects[i] = {npc->GetID(), npc->NativeIncarnation()};
+        // Check the actual initial placement without moving an observed subject.
+        if (std::abs(npc->GetZ() - (ground + npc->GetZOffset())) > 0.05f) {
+            std::snprintf(spawn_diagnostic, sizeof(spawn_diagnostic),
+                "subject %zu placement ground=%.3f actor-offset=%.3f subject-offset=%.3f requested=%.3f actual=%.3f",
+                i, ground, body->GetZOffset(), npc->GetZOffset(), z, npc->GetZ());
+            return nullptr;
+        }
+        return npc;
+    };
+    auto start = [&] {
+        return adapter.StartApproach({approach_subjects[1].first,
+            approach_subjects[2].first, approach_subjects[0].first});
+    };
+    if (step && now - began > 9500) { return fail("deadline"); }
+    if (step && step < 14 && (!subject(0) || !subject(2) || (step <= 9 && !subject(1)))) {
+        return fail("unexpected subject absence");
+    }
+    if (step && body) {
+        const glm::vec3 p(body->GetX(), body->GetY(), body->GetZ());
+        const auto delta = glm::distance(p, previous);
+        const auto gap = now - last_at;
+        const float bound = gap * 0.001f * body->GetRunspeed() * 0.4f * 1.45f + 2;
+        if (gap > 250 || delta > 8 || delta > bound || body->NativeDecisionCount()) { return fail("sampling/AI"); }
+        travelled += delta;
+        if (delta > 0.05f) { ++samples; }
+        previous = p;
+        last_at = now;
+    }
+    switch (step) {
+    case 0: {
+        if (state.alive) { return {Outcome::Pending, ""}; }
+        ActorBody::FinishTeardown();
+        auto &fresh = ActorBody::Get();
+        const auto s = fresh.Inspect();
+        actor_prior_idle_override = zone->quest_idle_override;
+        actor_idle_saved = true;
+        zone->quest_idle_override = true;
+        const auto safe = zone->GetSafePoint();
+        if (fresh.Send({Kind::CreateBody, s.epoch, s.generation, 0,
+            static_cast<int32>(std::lround(safe.x)), static_cast<int32>(std::lround(safe.y)),
+            static_cast<int32>(std::lround(safe.z))}).status != Status::Ok) { return fail("create"); }
+        body = fresh.Body();
+        if (!body || !zone->zonemap) { return fail("body/map"); }
+        origin = previous = glm::vec3(body->GetX(), body->GetY(), body->GetZ());
+        began = stage_at = last_at = now;
+        for (size_t i = 0; i < 3; ++i) {
+            auto *npc = spawn(i, i == 0 ? 20 : i == 1 ? 26 : 8);
+            if (!npc) { return fail(spawn_diagnostic); }
+            npc->SetTargetable(false);
+        }
+        step = 1;
+        break;
+    }
+    case 1:
+        if (state.body != Body::Present) { break; }
+        if (adapter.StartApproach({approach_subjects[0].first, approach_subjects[0].first}).status != Status::InvalidInput ||
+            adapter.StartApproach(std::vector<uint16_t>(5, approach_subjects[0].first)).status != Status::InvalidInput ||
+            command(Kind::StartApproach).status != Status::InvalidInput) { return fail("scope/command boundary"); }
+        if (start().status != Status::Ok) { return fail("opt-in"); }
+        stage_at = now;
+        step = 2;
+        break;
+    case 2:
+        if (!body || state.approach != Approach::Observing || state.operation ||
+            glm::distance(previous, origin) > 0.05f) { return fail("no-target idle"); }
+        if (now - stage_at < 100) { break; }
+        subject(0)->SetTargetable(true);
+        subject(1)->SetTargetable(true);
+        step = 3;
+        break;
+    case 3:
+        if (state.approach == Approach::Observing) { break; }
+        if (!body || state.target != approach_subjects[0].second) { return fail("nearest/exclusion"); }
+        if (state.approach == Approach::Paused) { return fail("route refusal"); }
+        if (state.approach != Approach::Reached) { break; }
+        arrival_xy = std::hypot(previous.x - (origin.x + 18), previous.y - origin.y);
+        arrival_z = std::abs(previous.z - std::lround(subject(0)->GetZ()));
+        if (state.last_terminal != Event::Completed || samples < 3 || travelled < 10 ||
+            arrival_xy > 2 || arrival_z > 6 ||
+            std::hypot(previous.x - subject(0)->GetX(), previous.y - subject(0)->GetY()) > 5 ||
+            std::abs(previous.z - subject(0)->GetZ()) > 6) {
+            return fail("real arrival");
+        }
+        quiet = previous;
+        operation = state.last_operation;
+        stage_at = now;
+        step = 4;
+        break;
+    case 4:
+        if (!body || state.approach != Approach::Reached || state.operation ||
+            state.last_operation != operation || glm::distance(previous, quiet) > 0.05f) { return fail("reached quiet"); }
+        if (now - stage_at < 400) { break; }
+        if (command(Kind::Retire).status != Status::Ok) { return fail("retire reached"); }
+        step = 5;
+        break;
+    case 5: {
+        if (state.alive) { break; }
+        if (adapter.Send({Kind::CreateBody, state.epoch, state.generation, 0,
+            static_cast<int32>(std::lround(origin.x)), static_cast<int32>(std::lround(origin.y)),
+            static_cast<int32>(std::lround(origin.z))}).status != Status::Ok) { return fail("replacement actor"); }
+        body = adapter.Body();
+        if (!body) { return fail("replacement missing"); }
+        previous = glm::vec3(body->GetX(), body->GetY(), body->GetZ());
+        last_at = now;
+        step = 6;
+        break;
+    }
+    case 6:
+        if (state.body != Body::Present) { break; }
+        if (start().status != Status::Ok) { return fail("second opt-in"); }
+        step = 7;
+        break;
+    case 7:
+        if (state.approach == Approach::Paused) { return fail("second route refusal"); }
+        if (!body || state.approach != Approach::Travelling || !body->IsMoving() ||
+            glm::distance(previous, origin) < 2) { break; }
+        if (state.target != approach_subjects[0].second) { return fail("second choice"); }
+        selected = state.target;
+        operation = state.operation;
+        subject(0)->SetTargetable(false); // actual native ineligibility, not a fact injection
+        action_at = now;
+        stage_at = 0;
+        step = 8;
+        break;
+    case 8:
+        if (!stage_at && now - action_at > 1000) { return fail("ineligibility stop deadline"); }
+        if (state.phase != Phase::Idle) { break; }
+        if (!body || state.approach != Approach::Paused || state.last_operation != operation ||
+            state.last_terminal != Event::Interrupted || body->IsMoving()) { return fail("ineligibility pause"); }
+        if (!stage_at) { stage_at = now; quiet = previous; stop_ms = std::max(stop_ms, now - action_at); }
+        drift = std::max(drift, glm::distance(previous, quiet));
+        if (drift > 0.05f) { return fail("ineligibility quiet drift"); }
+        if (now - stage_at < 400) { break; }
+        if (command(Kind::Resume).status != Status::Ok) { return fail("fresh resume"); }
+        step = 9;
+        break;
+    case 9:
+        if (state.approach == Approach::Paused) { return fail("resume route refusal"); }
+        if (!body || state.approach != Approach::Travelling || !body->IsMoving() ||
+            glm::distance(previous, quiet) < 2) { break; }
+        if (state.target != approach_subjects[1].second || state.target == selected) { return fail("fresh reselection"); }
+        operation = state.operation;
+        reused = approach_subjects[1].first;
+        old_incarnation = approach_subjects[1].second;
+        subject(1)->Depop(false);
+        action_at = now;
+        stage_at = 0;
+        step = 10;
+        break;
+    case 10:
+        if (!stage_at && now - action_at > 1000) { return fail("disappearance stop deadline"); }
+        if (state.phase != Phase::Idle || entity_list.GetMob(reused)) { break; }
+        if (!body || state.approach != Approach::Paused || state.last_operation != operation ||
+            state.last_terminal != Event::Interrupted || body->IsMoving()) { return fail("disappearance pause"); }
+        stop_ms = std::max(stop_ms, now - action_at);
+        if (!entity_list.ReuseFreeIDForTest(reused)) { return fail("reuse allocation"); }
+        if (!spawn(3, 14)) { return fail(spawn_diagnostic); }
+        if (approach_subjects[3].first != reused ||
+            approach_subjects[3].second == old_incarnation) { return fail("reuse lifetime"); }
+        subject(3)->SetTargetable(true);
+        quiet = previous;
+        stage_at = now;
+        step = 11;
+        break;
+    case 11:
+        drift = std::max(drift, glm::distance(previous, quiet));
+        if (!body || drift > 0.05f || state.approach != Approach::Paused || state.operation ||
+            state.last_operation != operation) { return fail("reuse paused stability"); }
+        if (now - stage_at < 400) { break; }
+        if (command(Kind::Resume).status != Status::Ok) { return fail("reuse resume"); }
+        stage_at = now;
+        step = 12;
+        break;
+    case 12:
+        if (!body || state.approach != Approach::Observing || state.operation ||
+            glm::distance(previous, quiet) > 0.05f) { return fail("reused ID inherited scope"); }
+        if (now - stage_at < 100) { break; }
+        subject(0)->SetTargetable(true);
+        step = 13;
+        break;
+    case 13:
+        if (state.approach == Approach::Paused) { return fail("teardown route refusal"); }
+        if (state.approach != Approach::Travelling || !body || !body->IsMoving()) { break; }
+        if (state.target != approach_subjects[0].second) { return fail("reuse changed authority"); }
+        operation = state.operation;
+        adapter.BeginTeardown();
+        if (adapter.Inspect().approach != Approach::Retiring || command(Kind::Resume).status != Status::Closed) {
+            return fail("teardown admission");
+        }
+        step = 14;
+        break;
+    case 14: {
+        if (state.alive) { break; }
+        if (state.last_operation != operation || state.approach != Approach::Retiring) { return fail("teardown terminal"); }
+        adapter.FinishTeardown();
+        if (!adapter.Inspect().closed || adapter.Body()) { return fail("teardown absence"); }
+        char text[200];
+        std::snprintf(text, sizeof(text), "approach n=%u d=%.2f xy=%.3f z=%.3f drift=%.3f stop=%u idle/reached/invalid/resume/reuse/drain ms=%u",
+            samples, travelled, arrival_xy, arrival_z, drift, stop_ms, now - began);
+        return {Outcome::Passed, text};
+    }
+    default: return fail("invalid stage");
+    }
+    return {Outcome::Pending, ""};
+}
 #endif
 
 struct Scenario {
@@ -925,6 +1199,7 @@ constexpr std::array scenarios = {
     // Exercises real shutdown, then boots a replacement in the same zone host.
     , Scenario{"rust_native_actor_body_lifetime", ActorBodyLifetime, CleanupActorBody}
     , Scenario{"rust_native_actor_patrol", ActorTravel<TravelCase::Patrol>, CleanupActorBody}
+    , Scenario{"rust_native_actor_approach", ActorApproach, CleanupApproach}
     , Scenario{"rust_native_actor_arrival", ActorTravel<TravelCase::Arrival>, CleanupActorBody}
     , Scenario{"rust_native_actor_latched_stop", ActorTravel<TravelCase::LatchedStop>, CleanupActorBody}
     , Scenario{"rust_native_actor_reused_travel", ActorTravel<TravelCase::Reused>, CleanupActorBody}

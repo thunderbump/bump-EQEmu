@@ -28,6 +28,7 @@ pub enum Kind {
     StartPatrol,
     Pause,
     Resume,
+    StartApproach,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -129,6 +130,9 @@ pub struct Snapshot {
     pub sequence: u64,
     pub tick: u64,
     pub patrol: Patrol,
+    pub approach: Approach,
+    pub goal: u64,
+    pub target: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -140,11 +144,48 @@ pub enum Patrol {
     Retiring,
 }
 
+/// One-shot state; Paused never retries without an explicit Resume.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Approach {
+    Disabled,
+    Observing,
+    Travelling,
+    Reached,
+    Paused,
+    Retiring,
+}
+
+/// Complete owned native facts. Positions are millimetres; no native pointers.
+#[derive(Clone, Copy, Debug)]
+pub struct Candidate {
+    pub incarnation: u64,
+    pub point: [i32; 3],
+    pub present: bool,
+    pub alive: bool,
+    pub targetable: bool,
+    pub owned: bool,
+    pub engaged: bool,
+    pub actor: bool,
+    pub client: bool,
+    pub self_body: bool,
+}
+
+pub struct Observation<'a> {
+    pub epoch: u64,
+    pub generation: u64,
+    pub goal: u64,
+    pub actor: [i32; 3],
+    pub candidates: &'a [Candidate],
+}
+
 pub struct Runtime {
     state: Snapshot,
     high_operation: u64,
     endpoints: [[i32; 3]; 2],
     next_endpoint: usize,
+    target_point: [i32; 3],
+    near_target: bool,
 }
 
 impl Runtime {
@@ -163,10 +204,15 @@ impl Runtime {
                 sequence: 0,
                 tick: 0,
                 patrol: Patrol::Disabled,
+                approach: Approach::Disabled,
+                goal: 0,
+                target: 0,
             },
             high_operation: 0,
             endpoints: [[0; 3]; 2],
             next_endpoint: 1,
+            target_point: [0; 3],
+            near_target: false,
         }
     }
 
@@ -210,6 +256,112 @@ impl Runtime {
         report
     }
 
+    /// A complete fresh scope (including absent members), at most four entries.
+    /// Selection radius: XY 30, Z 6 units. Arrival: XY 5, Z 6. Drift from
+    /// selection: XY 1, Z 1. Reached is latched, not a pursuit policy.
+    pub fn observe(&mut self, sequence: u64, tick: u64, observation: Observation<'_>) -> Report {
+        let s = self.state;
+        let mut out = Report {
+            status: Status::Ok,
+            event: Event::None,
+            epoch: s.epoch,
+            generation: s.generation,
+            operation: 0,
+            point: [0; 3],
+        };
+        out.status = if s.closed {
+            Status::Closed
+        } else if sequence <= s.sequence || tick < s.tick {
+            Status::Order
+        } else if observation.epoch != s.epoch
+            || observation.generation != s.generation
+            || observation.goal != s.goal
+        {
+            Status::Stale
+        } else if !s.alive || s.body != Body::Present {
+            Status::Missing
+        } else if observation.candidates.len() > 4
+            || !valid_point(observation.actor)
+            || observation.candidates.iter().enumerate().any(|(i, c)| {
+                c.incarnation == 0
+                    || !valid_point(c.point)
+                    || observation.candidates[..i]
+                        .iter()
+                        .any(|p| p.incarnation == c.incarnation)
+            })
+        {
+            Status::InvalidInput
+        } else {
+            Status::Ok
+        };
+        if out.status != Status::Ok {
+            return out;
+        }
+        self.state.sequence = sequence;
+        self.state.tick = tick;
+        if s.approach == Approach::Travelling {
+            let target = observation
+                .candidates
+                .iter()
+                .find(|c| c.incarnation == s.target);
+            if let Some(c) =
+                target.filter(|c| eligible(c) && within(c.point, self.target_point, 1000, 1000))
+            {
+                self.near_target = within(observation.actor, c.point, 5000, 6000);
+            } else {
+                self.near_target = false;
+                self.state.approach = Approach::Paused;
+                if s.phase == Phase::Admitted {
+                    self.state.phase = Phase::Stopping;
+                    out.event = Event::StopRequested;
+                    out.operation = s.operation;
+                }
+            }
+        } else if s.approach == Approach::Observing && s.phase == Phase::Idle {
+            let selected = observation
+                .candidates
+                .iter()
+                .filter(|c| eligible(c) && within(observation.actor, c.point, 30000, 6000))
+                .min_by_key(|c| (distance_xy(observation.actor, c.point), c.incarnation));
+            if let Some(c) = selected {
+                self.state.target = c.incarnation;
+                self.target_point = c.point;
+                self.near_target = within(observation.actor, c.point, 5000, 6000);
+                if self.near_target {
+                    self.state.approach = Approach::Reached;
+                } else {
+                    let Some(operation) = self.high_operation.checked_add(1) else {
+                        self.state.approach = Approach::Paused;
+                        out.status = Status::Exhausted;
+                        return out;
+                    };
+                    // Stop two units short; integer native destination rounding plus
+                    // native XY<=2 arrival tolerance fits the XY<=5 goal radius.
+                    let dx = f64::from(c.point[0]) - f64::from(observation.actor[0]);
+                    let dy = f64::from(c.point[1]) - f64::from(observation.actor[1]);
+                    let length = dx.hypot(dy);
+                    let scale = if length > 2000.0 {
+                        2000.0 / length
+                    } else {
+                        0.0
+                    };
+                    out.point = [
+                        ((f64::from(c.point[0]) - dx * scale) / 1000.0).round() as i32,
+                        ((f64::from(c.point[1]) - dy * scale) / 1000.0).round() as i32,
+                        (f64::from(c.point[2]) / 1000.0).round() as i32,
+                    ];
+                    self.high_operation = operation;
+                    self.state.operation = operation;
+                    self.state.phase = Phase::Requested;
+                    self.state.approach = Approach::Travelling;
+                    out.operation = operation;
+                    out.event = Event::MoveRequested;
+                }
+            }
+        }
+        out
+    }
+
     // Terminal facts are returned intact; only a later empty advance may
     // allocate a new operation. No queue or unbounded policy work.
     fn idle(&mut self, report: &mut Report) -> Status {
@@ -217,7 +369,7 @@ impl Runtime {
         if !s.alive || s.phase != Phase::Idle || s.body != Body::Present {
             return Status::Ok;
         }
-        if s.patrol == Patrol::Retiring {
+        if s.patrol == Patrol::Retiring || s.approach == Approach::Retiring {
             s.body = Body::Removing;
             report.event = Event::RemovalRequested;
         } else if s.patrol == Patrol::Running {
@@ -250,6 +402,8 @@ impl Runtime {
                 };
                 s.generation = next;
                 s.patrol = Patrol::Disabled;
+                s.approach = Approach::Disabled;
+                s.target = 0;
                 self.endpoints[0] = input.point;
                 self.next_endpoint = 1;
                 s.alive = true;
@@ -296,6 +450,7 @@ impl Runtime {
             }
             Kind::StartPatrol => {
                 if s.patrol != Patrol::Disabled
+                    || s.approach != Approach::Disabled
                     || s.phase != Phase::Idle
                     || !matches!(s.body, Body::Requested | Body::Present)
                 {
@@ -306,6 +461,48 @@ impl Runtime {
                 }
                 self.endpoints[1] = input.point;
                 s.patrol = Patrol::Running;
+            }
+            Kind::StartApproach => {
+                if s.patrol != Patrol::Disabled
+                    || s.approach != Approach::Disabled
+                    || s.phase != Phase::Idle
+                    || s.body != Body::Present
+                {
+                    return Status::Busy;
+                }
+                let Some(goal) = s.goal.checked_add(1) else {
+                    return Status::Exhausted;
+                };
+                s.goal = goal;
+                s.approach = Approach::Observing;
+            }
+            Kind::Resume if s.approach != Approach::Disabled => {
+                if s.approach != Approach::Paused
+                    || s.phase != Phase::Idle
+                    || s.body != Body::Present
+                {
+                    return Status::Busy;
+                }
+                let Some(goal) = s.goal.checked_add(1) else {
+                    return Status::Exhausted;
+                };
+                s.goal = goal;
+                s.target = 0;
+                self.near_target = false;
+                s.approach = Approach::Observing;
+            }
+            Kind::Pause if s.approach != Approach::Disabled => {
+                if !matches!(
+                    s.approach,
+                    Approach::Observing | Approach::Travelling | Approach::Paused
+                ) {
+                    return Status::Busy;
+                }
+                s.approach = Approach::Paused;
+                if s.phase == Phase::Admitted {
+                    s.phase = Phase::Stopping;
+                    *event = Event::StopRequested;
+                }
             }
             Kind::Resume => {
                 if s.patrol != Patrol::Paused || s.phase != Phase::Idle || s.body != Body::Present {
@@ -325,7 +522,7 @@ impl Runtime {
                 }
             }
             Kind::Move => {
-                if s.patrol != Patrol::Disabled {
+                if s.patrol != Patrol::Disabled || s.approach != Approach::Disabled {
                     return Status::Busy;
                 }
                 // Native admission remains a later, correlated fact.
@@ -348,10 +545,20 @@ impl Runtime {
                     return Status::InvalidResult;
                 }
                 s.phase = Phase::Stopping;
+                if s.approach == Approach::Travelling {
+                    s.approach = Approach::Paused;
+                }
                 if s.patrol == Patrol::Running {
                     s.patrol = Patrol::Paused;
                 }
                 *event = Event::StopRequested;
+            }
+            Kind::Retire if s.approach != Approach::Disabled => {
+                s.approach = Approach::Retiring;
+                if s.phase == Phase::Admitted {
+                    s.phase = Phase::Stopping;
+                    *event = Event::StopRequested;
+                }
             }
             Kind::Retire if s.patrol != Patrol::Disabled => {
                 s.patrol = Patrol::Retiring;
@@ -397,6 +604,13 @@ impl Runtime {
                             s.patrol = Patrol::Paused;
                         }
                     }
+                    if s.approach == Approach::Travelling {
+                        s.approach = if *event == Event::Completed && self.near_target {
+                            Approach::Reached
+                        } else {
+                            Approach::Paused
+                        };
+                    }
                     s.last_terminal = *event;
                     s.last_operation = s.operation;
                     s.operation = 0;
@@ -406,6 +620,29 @@ impl Runtime {
         }
         Status::Ok
     }
+}
+
+fn valid_point(p: [i32; 3]) -> bool {
+    p.iter().all(|v| v.unsigned_abs() <= 1_000_000_000)
+}
+fn distance_xy(a: [i32; 3], b: [i32; 3]) -> i128 {
+    let x = i128::from(a[0]) - i128::from(b[0]);
+    let y = i128::from(a[1]) - i128::from(b[1]);
+    x * x + y * y
+}
+fn within(a: [i32; 3], b: [i32; 3], xy: i32, z: i32) -> bool {
+    distance_xy(a, b) <= i128::from(xy) * i128::from(xy)
+        && (i64::from(a[2]) - i64::from(b[2])).abs() <= i64::from(z)
+}
+fn eligible(c: &Candidate) -> bool {
+    c.present
+        && c.alive
+        && c.targetable
+        && !c.owned
+        && !c.engaged
+        && !c.actor
+        && !c.client
+        && !c.self_body
 }
 
 #[cfg(test)]
@@ -419,6 +656,246 @@ mod tests {
             s.tick + 1,
             &[Input::new(kind, s.epoch, s.generation, operation)],
         )
+    }
+
+    fn approach() -> Runtime {
+        let mut r = Runtime::new(88);
+        send(&mut r, Kind::CreateBody, 0);
+        send(&mut r, Kind::BodyPresent, 0);
+        assert_eq!(send(&mut r, Kind::StartApproach, 0).status, Status::Ok);
+        r
+    }
+
+    fn candidate(incarnation: u64, x: i32) -> Candidate {
+        Candidate {
+            incarnation,
+            point: [x, 0, 0],
+            present: true,
+            alive: true,
+            targetable: true,
+            owned: false,
+            engaged: false,
+            actor: false,
+            client: false,
+            self_body: false,
+        }
+    }
+
+    fn observe(r: &mut Runtime, actor: [i32; 3], candidates: &[Candidate]) -> Report {
+        let s = r.inspect();
+        r.observe(
+            s.sequence + 1,
+            s.tick + 1,
+            Observation {
+                epoch: s.epoch,
+                generation: s.generation,
+                goal: s.goal,
+                actor,
+                candidates,
+            },
+        )
+    }
+
+    #[test]
+    fn approach_idle_selection_ties_and_exclusions() {
+        for reversed in [false, true] {
+            let mut r = approach();
+            for _ in 0..8 {
+                assert_eq!(observe(&mut r, [0; 3], &[]).event, Event::None);
+                assert_eq!(idle(&mut r).event, Event::None);
+            }
+            let mut scope = [
+                candidate(9, 18000),
+                candidate(7, -18000),
+                candidate(3, 25000),
+            ];
+            if reversed {
+                scope.reverse();
+            }
+            let request = observe(&mut r, [0; 3], &scope);
+            assert_eq!(request.event, Event::MoveRequested);
+            assert_eq!(r.inspect().target, 7);
+            assert_eq!(request.point, [-16, 0, 0]);
+            assert_eq!(send(&mut r, Kind::Move, 100).status, Status::Busy);
+            assert_eq!(send(&mut r, Kind::StartPatrol, 0).status, Status::Busy);
+            assert_eq!(send(&mut r, Kind::StartApproach, 0).status, Status::Busy);
+        }
+        for exclusion in 0..11 {
+            let mut r = approach();
+            let mut c = candidate(1, 10000);
+            match exclusion {
+                0 => c.present = false,
+                1 => c.alive = false,
+                2 => c.targetable = false,
+                3 => c.owned = true,
+                4 => c.engaged = true,
+                5 => c.actor = true,
+                6 => c.client = true,
+                7 => c.self_body = true,
+                8 => c.point[0] = 30001,
+                9 => c.point[2] = 6001,
+                _ => c.point[0] = -30001,
+            }
+            assert_eq!(observe(&mut r, [0; 3], &[c]).event, Event::None);
+            let eligible = candidate(1, 10000);
+            assert_eq!(
+                observe(&mut r, [0; 3], &[eligible]).event,
+                Event::MoveRequested
+            );
+        }
+    }
+
+    #[test]
+    fn approach_arrival_is_native_correlated_and_quiet() {
+        let mut r = approach();
+        let c = candidate(10, 20000);
+        let request = observe(&mut r, [0; 3], &[c]);
+        assert_eq!(
+            send(&mut r, Kind::Completed, request.operation).status,
+            Status::InvalidResult
+        );
+        send(&mut r, Kind::Admitted, request.operation);
+        assert_eq!(observe(&mut r, [18000, 0, 0], &[c]).event, Event::None);
+        assert_eq!(r.inspect().approach, Approach::Travelling);
+        send(&mut r, Kind::Completed, request.operation);
+        assert_eq!(r.inspect().approach, Approach::Reached);
+        for _ in 0..8 {
+            assert_eq!(observe(&mut r, [18000, 0, 0], &[]).event, Event::None);
+            assert_eq!(idle(&mut r).event, Event::None);
+        }
+        assert_eq!(send(&mut r, Kind::Resume, 0).status, Status::Busy);
+        // Native completion at a position outside the goal radius is not success.
+        let mut r = approach();
+        observe(&mut r, [0; 3], &[c]);
+        send(&mut r, Kind::Admitted, 1);
+        send(&mut r, Kind::Completed, 1);
+        assert_eq!(r.inspect().last_terminal, Event::Completed);
+        assert_eq!(r.inspect().approach, Approach::Paused);
+    }
+
+    #[test]
+    fn approach_invalidation_drains_and_resume_requires_fresh_facts() {
+        for reason in 0..9 {
+            for terminal in [Kind::Completed, Kind::Interrupted] {
+                let mut r = approach();
+                let c = candidate(10, 20000);
+                observe(&mut r, [0; 3], &[c]);
+                send(&mut r, Kind::Admitted, 1);
+                let mut changed = c;
+                match reason {
+                    0 => changed.present = false,
+                    1 => changed.alive = false,
+                    2 => changed.owned = true,
+                    3 => changed.engaged = true,
+                    4 => changed.targetable = false,
+                    5 => changed.point[0] += 1001,
+                    6 => changed.point[2] += 1001,
+                    7 => changed.incarnation += 1,
+                    _ => (),
+                }
+                let facts = if reason == 8 {
+                    &[][..]
+                } else {
+                    std::slice::from_ref(&changed)
+                };
+                assert_eq!(
+                    observe(&mut r, [18000, 0, 0], facts).event,
+                    Event::StopRequested
+                );
+                assert_eq!(send(&mut r, Kind::Resume, 0).status, Status::Busy);
+                assert_eq!(send(&mut r, terminal, 1).status, Status::Ok);
+                assert_eq!(r.inspect().approach, Approach::Paused);
+                for _ in 0..8 {
+                    assert_eq!(observe(&mut r, [0; 3], &[c]).event, Event::None);
+                    assert_eq!(idle(&mut r).event, Event::None);
+                }
+                let goal = r.inspect().goal;
+                assert_eq!(send(&mut r, Kind::Resume, 0).status, Status::Ok);
+                assert!(r.inspect().goal > goal);
+                assert_eq!(idle(&mut r).event, Event::None);
+                assert_eq!(observe(&mut r, [0; 3], &[]).event, Event::None);
+                assert_eq!(observe(&mut r, [0; 3], &[c]).operation, 2);
+                assert_eq!(
+                    send(&mut r, Kind::Completed, 1).status,
+                    Status::InvalidResult
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn approach_protocol_bounds_refusal_pause_and_retirement() {
+        let mut r = approach();
+        let c = candidate(1, 20000);
+        for candidates in [
+            &[c; 5][..],
+            &[c; 2][..],
+            &[candidate(0, 0)][..],
+            &[candidate(1, i32::MAX)][..],
+        ] {
+            let sequence = r.inspect().sequence;
+            assert_eq!(
+                observe(&mut r, [0; 3], candidates).status,
+                Status::InvalidInput
+            );
+            assert_eq!(r.inspect().sequence, sequence);
+        }
+        let s = r.inspect();
+        for (epoch, generation, goal) in [
+            (s.epoch + 1, s.generation, s.goal),
+            (s.epoch, s.generation + 1, s.goal),
+            (s.epoch, s.generation, s.goal + 1),
+        ] {
+            assert_eq!(
+                r.observe(
+                    s.sequence + 1,
+                    s.tick,
+                    Observation {
+                        epoch,
+                        generation,
+                        goal,
+                        actor: [0; 3],
+                        candidates: &[c],
+                    }
+                )
+                .status,
+                Status::Stale
+            );
+        }
+        assert_eq!(
+            r.observe(
+                s.sequence,
+                s.tick,
+                Observation {
+                    epoch: s.epoch,
+                    generation: s.generation,
+                    goal: s.goal,
+                    actor: [0; 3],
+                    candidates: &[c],
+                }
+            )
+            .status,
+            Status::Order
+        );
+        observe(&mut r, [0; 3], &[c]);
+        send(&mut r, Kind::Pause, 0);
+        send(&mut r, Kind::Rejected, 1);
+        assert_eq!(r.inspect().approach, Approach::Paused);
+        send(&mut r, Kind::Resume, 0);
+        observe(&mut r, [0; 3], &[c]);
+        send(&mut r, Kind::Rejected, 2);
+        assert_eq!(r.inspect().approach, Approach::Paused);
+        send(&mut r, Kind::Resume, 0);
+        observe(&mut r, [0; 3], &[c]);
+        send(&mut r, Kind::Admitted, 3);
+        assert_eq!(send(&mut r, Kind::Retire, 0).event, Event::StopRequested);
+        send(&mut r, Kind::Completed, 3);
+        assert_eq!(r.inspect().approach, Approach::Retiring);
+        assert_eq!(send(&mut r, Kind::Resume, 0).status, Status::Busy);
+        assert_eq!(idle(&mut r).event, Event::RemovalRequested);
+        send(&mut r, Kind::BodyAbsent, 0);
+        send(&mut r, Kind::Shutdown, 0);
+        assert_eq!(observe(&mut r, [0; 3], &[c]).status, Status::Closed);
     }
 
     #[test]

@@ -108,12 +108,16 @@ class NPC : public Mob
 {
 private:
     friend class ActorBody::Adapter;
+    static uint64 NewNativeIncarnation();
+    const uint64 native_incarnation_ = NewNativeIncarnation();
     uint64 actor_epoch_ = 0;
     uint64 actor_generation_ = 0;
     uint64 actor_process_count_ = 0;
     uint64 native_decision_count_ = 0;
 public:
     // Independent of IsAIControlled: native mechanics continue, voluntary AI does not.
+    // Process-local, nonwrapping lifetime identity; independent of address/ID/tick.
+    uint64 NativeIncarnation() const { return native_incarnation_; }
     bool IsRustActor() const { return actor_epoch_ != 0; }
     bool MatchesRustActor(uint64 epoch, uint64 generation) const {
         return IsRustActor() && actor_epoch_ == epoch && actor_generation_ == generation;
