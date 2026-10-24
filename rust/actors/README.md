@@ -11,6 +11,54 @@ logical actor, then releases the box. The registered `ActorRuntimeTest` uses the
 same API, including a fake native move-result trace. The pointer-free
 `eqemu_rust_bridge_v1` marker remains 42 for existing zone-link validation.
 
+## Opt-in two-point patrol (current candidate; not yet native-qualified)
+
+`ActorBody::Adapter::StartPatrol(ax, ay, az, bx, by, bz)` creates one body
+at A and configures B once. No ordinary zone starts a patrol automatically.
+The owned-value equivalent is `CreateBody(A)` followed by `StartPatrol(B)`;
+all controls carry the current epoch/generation. Endpoints must be distinct,
+nearby and admissible to the existing native lane. Native admission remains a
+later fact, not a successful start guarantee.
+
+Rust stores two endpoints, the next endpoint, and `Patrol` state. Only an empty
+advance selects one fresh operation. Presence precedes the first B request;
+correlated Completed flips the endpoint, and a **later** empty advance requests
+the opposite leg. Terminal reports and `last_terminal/last_operation` remain
+visible before the next request. Every adapter advance (commands, facts and idle
+policy steps) consumes effects through the same native handler.
+
+`Send(Pause)` disables scheduling and stops admitted travel through the ordinary
+native StopNavigation lane. Requested-but-not-admitted travel is rejected on the
+next normal advance without navigation. Interrupted or Rejected also enters
+Paused. No timer or control expiry resumes policy: `Send(Resume)` is required,
+and a subsequent refusal pauses again without retries. Stop on admitted patrol
+travel also pauses. Manual Move is Busy while a patrol is enabled; manual-only
+actors retain the original protocol.
+
+`Send(Retire)` latches Retiring even during active travel, stops/drains the
+operation, preserves its native terminal, then requests removal on a later idle
+advance. Actual absence is required before shutdown. Resume cannot reopen a
+retiring, absent or closed actor. Teardown disables scheduling before draining;
+external absence never respawns. Identity checks protect replacement bodies.
+
+Source coverage adds deterministic core tests, a CXX contract test, and
+`rust_native_actor_patrol` in the complete native registry. The native case
+configures the route once, samples A-to-B and B-to-A independently, interrupts
+the third leg with a real timed stun, observes a quiet window through expiry,
+explicitly resumes real travel, retires to actual absence, then exercises active
+patrol adapter teardown with a fresh epoch. Existing zone-shutdown, native-ID
+reuse and ordinary-neighbor regressions remain selected. Per-leg operation,
+elapsed time, native position and sampled distance are retained with bounded
+latency/drift/sample diagnostics. Existing gates and deadlines are unchanged.
+
+**Measured loop result: pending caller-owned current-head native fixtures.**
+The advisory development check ran Rust tests and Clippy successfully on an
+intermediate snapshot; it could not build native objects for the changed bridge
+and header scope. This is not native acceptance. No A-to-B-to-A travel result,
+complete-report budget observation or cleanup qualification is claimed yet.
+Qualification remains one actor on the short public PoK route, not population,
+combat, followers, general navigation, persistence or performance.
+
 ## Native body lifetime slice (R1 accepted; retain regressions)
 
 `zone/actor_body.*` consumes `BodyRequested`/`RemovalRequested` effects after the
@@ -115,8 +163,9 @@ an extra FixZ height snap after cancellation; ordinary NPC stop correction is
 unchanged. This also applies to native control interruption and teardown stops.
 The adapter waits for native nonmoving state and the latched movement result;
 Completed additionally requires observed native arrival. A completion already
-latched before Stop is not rewritten as cancellation. Retire still refuses active
-work; the normal loop observes actual absence after depop.
+latched before Stop is not rewritten as cancellation. Manual-only Retire still
+refuses active work; enabled patrol retirement drains it as described above.
+The normal loop observes actual absence after depop.
 
 ### Source coverage and retained bounds
 
@@ -176,7 +225,7 @@ Stop, stun and root, and one for the other movement scenarios. Each repetition
 runs the same real route, verifies normal-loop retirement and actual absence,
 restores the idle override, then reconstructs the runtime and creates a fresh
 body. All repetitions share the existing 10-second case deadline; a failed
-attempt fails that scenario immediately. The suite still selects 12 scenarios.
+attempt fails that scenario immediately. The current suite selects 13 scenarios including the opt-in patrol candidate.
 No native movement processing is called by the test.
 
 Successful movement diagnostics use this compact `m1` notation within the

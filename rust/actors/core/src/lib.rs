@@ -25,6 +25,9 @@ pub enum Kind {
     BodyPresent,
     BodyRejected,
     BodyAbsent,
+    StartPatrol,
+    Pause,
+    Resume,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -125,11 +128,23 @@ pub struct Snapshot {
     pub last_operation: u64,
     pub sequence: u64,
     pub tick: u64,
+    pub patrol: Patrol,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Patrol {
+    Disabled,
+    Running,
+    Paused,
+    Retiring,
 }
 
 pub struct Runtime {
     state: Snapshot,
     high_operation: u64,
+    endpoints: [[i32; 3]; 2],
+    next_endpoint: usize,
 }
 
 impl Runtime {
@@ -147,8 +162,11 @@ impl Runtime {
                 last_operation: 0,
                 sequence: 0,
                 tick: 0,
+                patrol: Patrol::Disabled,
             },
             high_operation: 0,
+            endpoints: [[0; 3]; 2],
+            next_endpoint: 1,
         }
     }
 
@@ -158,7 +176,7 @@ impl Runtime {
 
     /// Sequence must strictly increase; ticks may stay equal but cannot decrease.
     /// Refusals do not consume ordering inputs or mutate state. Empty advances
-    /// consume ordering inputs only. No queued outputs: caller owns each report.
+    /// may select one patrol effect. No queued outputs: caller owns each report.
     pub fn advance(&mut self, sequence: u64, tick: u64, inputs: &[Input]) -> Report {
         let mut report = Report {
             status: Status::Ok,
@@ -179,14 +197,42 @@ impl Runtime {
             report.point = input.point;
             self.apply(*input, &mut report.event)
         } else {
-            Status::Ok
+            self.idle(&mut report)
         };
         if report.status == Status::Ok {
             self.state.sequence = sequence;
             self.state.tick = tick;
         }
         report.generation = self.state.generation;
+        if report.event == Event::StopRequested {
+            report.operation = self.state.operation;
+        }
         report
+    }
+
+    // Terminal facts are returned intact; only a later empty advance may
+    // allocate a new operation. No queue or unbounded policy work.
+    fn idle(&mut self, report: &mut Report) -> Status {
+        let s = &mut self.state;
+        if !s.alive || s.phase != Phase::Idle || s.body != Body::Present {
+            return Status::Ok;
+        }
+        if s.patrol == Patrol::Retiring {
+            s.body = Body::Removing;
+            report.event = Event::RemovalRequested;
+        } else if s.patrol == Patrol::Running {
+            let Some(operation) = self.high_operation.checked_add(1) else {
+                s.patrol = Patrol::Paused;
+                return Status::Exhausted;
+            };
+            self.high_operation = operation;
+            s.operation = operation;
+            s.phase = Phase::Requested;
+            report.operation = operation;
+            report.point = self.endpoints[self.next_endpoint];
+            report.event = Event::MoveRequested;
+        }
+        Status::Ok
     }
 
     fn apply(&mut self, input: Input, event: &mut Event) -> Status {
@@ -203,6 +249,9 @@ impl Runtime {
                     return Status::Exhausted;
                 };
                 s.generation = next;
+                s.patrol = Patrol::Disabled;
+                self.endpoints[0] = input.point;
+                self.next_endpoint = 1;
                 s.alive = true;
                 s.body = if input.kind == Kind::CreateBody {
                     Body::Requested
@@ -245,7 +294,40 @@ impl Runtime {
             Kind::BodyPresent | Kind::BodyRejected | Kind::BodyAbsent => {
                 return Status::InvalidResult;
             }
+            Kind::StartPatrol => {
+                if s.patrol != Patrol::Disabled
+                    || s.phase != Phase::Idle
+                    || !matches!(s.body, Body::Requested | Body::Present)
+                {
+                    return Status::Busy;
+                }
+                if input.point == self.endpoints[0] {
+                    return Status::InvalidInput;
+                }
+                self.endpoints[1] = input.point;
+                s.patrol = Patrol::Running;
+            }
+            Kind::Resume => {
+                if s.patrol != Patrol::Paused || s.phase != Phase::Idle || s.body != Body::Present {
+                    // A draining or retired goal is never resumable.
+                    return Status::Busy;
+                }
+                s.patrol = Patrol::Running;
+            }
+            Kind::Pause => {
+                if !matches!(s.patrol, Patrol::Running | Patrol::Paused) {
+                    return Status::Busy;
+                }
+                s.patrol = Patrol::Paused;
+                if s.phase == Phase::Admitted {
+                    s.phase = Phase::Stopping;
+                    *event = Event::StopRequested;
+                }
+            }
             Kind::Move => {
+                if s.patrol != Patrol::Disabled {
+                    return Status::Busy;
+                }
                 // Native admission remains a later, correlated fact.
                 if !matches!(s.body, Body::Logical | Body::Present) {
                     return Status::Busy;
@@ -266,7 +348,17 @@ impl Runtime {
                     return Status::InvalidResult;
                 }
                 s.phase = Phase::Stopping;
+                if s.patrol == Patrol::Running {
+                    s.patrol = Patrol::Paused;
+                }
                 *event = Event::StopRequested;
+            }
+            Kind::Retire if s.patrol != Patrol::Disabled => {
+                s.patrol = Patrol::Retiring;
+                if s.phase == Phase::Admitted {
+                    s.phase = Phase::Stopping;
+                    *event = Event::StopRequested;
+                }
             }
             Kind::Retire => {
                 if s.phase != Phase::Idle {
@@ -298,6 +390,13 @@ impl Runtime {
                 if *event == Event::Admitted {
                     s.phase = Phase::Admitted;
                 } else {
+                    if s.patrol != Patrol::Disabled {
+                        if *event == Event::Completed {
+                            self.next_endpoint ^= 1;
+                        } else if s.patrol == Patrol::Running {
+                            s.patrol = Patrol::Paused;
+                        }
+                    }
                     s.last_terminal = *event;
                     s.last_operation = s.operation;
                     s.operation = 0;
@@ -576,6 +675,139 @@ mod tests {
         assert_eq!(send(&mut r, Kind::Retire, 0).event, Event::Retired);
         assert_eq!(send(&mut r, Kind::Shutdown, 0).event, Event::Shutdown);
         assert!(r.inspect().closed);
+    }
+
+    fn idle(r: &mut Runtime) -> Report {
+        let s = r.inspect();
+        r.advance(s.sequence + 1, s.tick + 1, &[])
+    }
+
+    fn patrol() -> Runtime {
+        let mut r = Runtime::new(77);
+        send(&mut r, Kind::CreateBody, 0);
+        let s = r.inspect();
+        let mut start = Input::new(Kind::StartPatrol, s.epoch, s.generation, 0);
+        start.point = [40, 0, 0];
+        assert_eq!(
+            r.advance(s.sequence + 1, s.tick, &[start]).status,
+            Status::Ok
+        );
+        assert_eq!(idle(&mut r).event, Event::None);
+        send(&mut r, Kind::BodyPresent, 0);
+        r
+    }
+
+    #[test]
+    fn patrol_alternates_only_after_correlated_native_completion() {
+        let mut r = patrol();
+        for operation in 1..=4 {
+            let request = idle(&mut r);
+            assert_eq!(request.event, Event::MoveRequested);
+            assert_eq!(request.operation, operation);
+            assert_eq!(
+                request.point,
+                if operation % 2 == 1 {
+                    [40, 0, 0]
+                } else {
+                    [0; 3]
+                }
+            );
+            assert_eq!(idle(&mut r).event, Event::None);
+            assert_eq!(send(&mut r, Kind::Move, 90).status, Status::Busy);
+            assert_eq!(
+                send(&mut r, Kind::Completed, operation).status,
+                Status::InvalidResult
+            );
+            assert_eq!(
+                send(&mut r, Kind::Admitted, operation + 1).status,
+                Status::InvalidResult
+            );
+            send(&mut r, Kind::Admitted, operation);
+            let terminal = send(&mut r, Kind::Completed, operation);
+            assert_eq!(terminal.event, Event::Completed);
+            assert_eq!(terminal.operation, operation);
+            assert_eq!(r.inspect().phase, Phase::Idle);
+            assert_eq!(r.inspect().last_operation, operation);
+        }
+    }
+
+    #[test]
+    fn patrol_pause_refusal_and_late_completion_are_quiet() {
+        let mut r = patrol();
+        idle(&mut r);
+        send(&mut r, Kind::Pause, 0);
+        // Requested cancellation is acknowledged as refusal, never admission.
+        send(&mut r, Kind::Rejected, 1);
+        for _ in 0..20 {
+            assert_eq!(idle(&mut r).event, Event::None);
+        }
+        assert_eq!(send(&mut r, Kind::Resume, 0).status, Status::Ok);
+        assert_eq!(idle(&mut r).operation, 2);
+        send(&mut r, Kind::Rejected, 2);
+        assert_eq!(r.inspect().patrol, Patrol::Paused);
+        for _ in 0..20 {
+            assert_eq!(idle(&mut r).event, Event::None);
+        }
+        send(&mut r, Kind::Resume, 0);
+        idle(&mut r);
+        send(&mut r, Kind::Admitted, 3);
+        assert_eq!(send(&mut r, Kind::Pause, 0).event, Event::StopRequested);
+        assert_eq!(send(&mut r, Kind::Completed, 3).event, Event::Completed);
+        assert_eq!(idle(&mut r).event, Event::None);
+        send(&mut r, Kind::Resume, 0);
+        assert_eq!(idle(&mut r).point, [0; 3]);
+        send(&mut r, Kind::Admitted, 4);
+        send(&mut r, Kind::Interrupted, 4);
+        assert_eq!(r.inspect().patrol, Patrol::Paused);
+        for _ in 0..20 {
+            assert_eq!(idle(&mut r).event, Event::None);
+        }
+    }
+
+    #[test]
+    fn patrol_retirement_and_external_absence_cannot_resume() {
+        for admitted in [false, true] {
+            let mut r = patrol();
+            idle(&mut r);
+            if admitted {
+                send(&mut r, Kind::Admitted, 1);
+            }
+            assert_eq!(send(&mut r, Kind::Retire, 0).status, Status::Ok);
+            assert_eq!(send(&mut r, Kind::Resume, 0).status, Status::Busy);
+            let terminal = if admitted {
+                Kind::Completed
+            } else {
+                Kind::Rejected
+            };
+            assert_eq!(send(&mut r, terminal, 1).status, Status::Ok);
+            assert_eq!(r.inspect().last_operation, 1);
+            assert_eq!(idle(&mut r).event, Event::RemovalRequested);
+            assert!(r.inspect().alive);
+            send(&mut r, Kind::BodyAbsent, 0);
+            assert_eq!(send(&mut r, Kind::Resume, 0).status, Status::Missing);
+            send(&mut r, Kind::Shutdown, 0);
+            assert_eq!(idle(&mut r).status, Status::Closed);
+        }
+        let mut r = patrol();
+        let old = r.inspect();
+        send(&mut r, Kind::BodyAbsent, 0);
+        for _ in 0..20 {
+            assert_eq!(idle(&mut r).event, Event::None);
+        }
+        send(&mut r, Kind::CreateBody, 0);
+        send(&mut r, Kind::BodyPresent, 0);
+        let s = r.inspect();
+        assert_eq!(
+            r.advance(
+                s.sequence + 1,
+                s.tick,
+                &[Input::new(Kind::Resume, old.epoch, old.generation, 0)]
+            )
+            .status,
+            Status::Stale
+        );
+        assert_eq!(r.inspect().patrol, Patrol::Disabled);
+        assert_eq!(idle(&mut r).event, Event::None);
     }
 
     #[test]

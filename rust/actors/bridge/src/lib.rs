@@ -17,6 +17,9 @@ mod ffi {
         BodyPresent,
         BodyRejected,
         BodyAbsent,
+        StartPatrol,
+        Pause,
+        Resume,
     }
     #[repr(u8)]
     enum Status {
@@ -83,6 +86,13 @@ mod ffi {
         y: i32,
         z: i32,
     }
+    #[repr(u8)]
+    enum Patrol {
+        Disabled,
+        Running,
+        Paused,
+        Retiring,
+    }
     struct Snapshot {
         epoch: u64,
         generation: u64,
@@ -95,6 +105,7 @@ mod ffi {
         last_operation: u64,
         sequence: u64,
         tick: u64,
+        patrol: Patrol,
     }
     extern "Rust" {
         type Runtime;
@@ -185,6 +196,9 @@ impl Runtime {
                     ffi::Kind::BodyPresent => actor_core::Kind::BodyPresent,
                     ffi::Kind::BodyRejected => actor_core::Kind::BodyRejected,
                     ffi::Kind::BodyAbsent => actor_core::Kind::BodyAbsent,
+                    ffi::Kind::StartPatrol => actor_core::Kind::StartPatrol,
+                    ffi::Kind::Pause => actor_core::Kind::Pause,
+                    ffi::Kind::Resume => actor_core::Kind::Resume,
                     _ => {
                         let s = self.0.inspect();
                         return ffi::Report {
@@ -247,6 +261,12 @@ impl Runtime {
                 last_operation: s.last_operation,
                 sequence: s.sequence,
                 tick: s.tick,
+                patrol: match s.patrol {
+                    actor_core::Patrol::Disabled => ffi::Patrol::Disabled,
+                    actor_core::Patrol::Running => ffi::Patrol::Running,
+                    actor_core::Patrol::Paused => ffi::Patrol::Paused,
+                    actor_core::Patrol::Retiring => ffi::Patrol::Retiring,
+                },
             }
         })
     }

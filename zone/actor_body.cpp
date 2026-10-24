@@ -44,14 +44,15 @@ NPC *Adapter::Body() const
     return Lookup(state.epoch, state.generation, id_);
 }
 
-eqemu_proof::Report Adapter::Advance(eqemu_proof::Input input)
+eqemu_proof::Report Adapter::Advance(eqemu_proof::Input input, bool empty)
 {
     const auto state = Inspect();
     if (state.sequence == std::numeric_limits<uint64_t>::max() ||
         state.tick == std::numeric_limits<uint64_t>::max()) { std::abort(); }
     rust::Vec<eqemu_proof::Input> inputs;
-    inputs.push_back(input);
+    if (!empty) { inputs.push_back(input); }
     last_ = runtime_->advance(state.sequence + 1, state.tick + 1, std::move(inputs));
+    Apply(last_);
     return last_;
 }
 
@@ -60,13 +61,35 @@ eqemu_proof::Report Adapter::Send(eqemu_proof::Input input)
     using namespace eqemu_proof;
     // Native facts are not caller commands. Admission closes before teardown.
     if (closing_ || (input.kind != Kind::CreateBody && input.kind != Kind::Retire &&
-        input.kind != Kind::Shutdown && input.kind != Kind::Move && input.kind != Kind::Stop)) {
+        input.kind != Kind::Shutdown && input.kind != Kind::Move && input.kind != Kind::Stop &&
+        input.kind != Kind::StartPatrol && input.kind != Kind::Pause && input.kind != Kind::Resume)) {
         Report refused{};
         refused.status = closing_ ? Status::Closed : Status::InvalidInput;
         return refused;
     }
-    auto report = Advance(input);
+    return Advance(input);
+}
+
+eqemu_proof::Report Adapter::StartPatrol(int32_t ax, int32_t ay, int32_t az,
+    int32_t bx, int32_t by, int32_t bz)
+{
+    using namespace eqemu_proof;
+    auto state = Inspect();
+    if (ax == bx && ay == by && az == bz) {
+        Report refused{};
+        refused.status = Status::InvalidInput;
+        return refused;
+    }
+    auto report = Send({Kind::CreateBody, state.epoch, state.generation, 0, ax, ay, az});
     if (report.status != Status::Ok) { return report; }
+    state = Inspect();
+    return Send({Kind::StartPatrol, state.epoch, state.generation, 0, bx, by, bz});
+}
+
+void Adapter::Apply(const eqemu_proof::Report &report)
+{
+    using namespace eqemu_proof;
+    if (report.status != Status::Ok) { return; }
     if (report.event == Event::BodyRequested) {
         auto *type = new NPCType{};
         std::strcpy(type->name, "RustActorBody");
@@ -81,7 +104,7 @@ eqemu_proof::Report Adapter::Send(eqemu_proof::Input input)
         type->untargetable = 1;
         type->skip_global_loot = true;
         auto *npc = new NPC(type, nullptr,
-            glm::vec4(input.x, input.y, input.z, 0), GravityBehavior::Flying);
+            glm::vec4(report.x, report.y, report.z, 0), GravityBehavior::Flying);
         npc->GiveNPCTypeData(type);
         npc->actor_epoch_ = report.epoch;
         npc->actor_generation_ = report.generation;
@@ -103,7 +126,6 @@ eqemu_proof::Report Adapter::Send(eqemu_proof::Input input)
     } else if (report.event == Event::RemovalRequested) {
         if (auto *npc = Body()) { npc->Depop(false); }
     }
-    return report;
 }
 
 void Adapter::Process()
@@ -115,7 +137,8 @@ void Adapter::Process()
         auto *npc = Body();
         auto &movement = MobMovementManager::Get();
         if (state.phase == Phase::Requested) {
-            const bool admitted = !closing_ && npc &&
+            const bool admitted = !closing_ &&
+                (state.patrol == Patrol::Disabled || state.patrol == Patrol::Running) && npc &&
                 movement.NavigateActorTo(npc, target_x_, target_y_, target_z_);
             Advance({admitted ? Kind::Admitted : Kind::Rejected,
                 state.epoch, state.generation, state.operation, 0, 0, 0});
@@ -147,6 +170,8 @@ void Adapter::Process()
     } else if ((state.body == eqemu_proof::Body::Present || state.body == eqemu_proof::Body::Removing) && !Body()) {
         Advance({Kind::BodyAbsent, state.epoch, state.generation, 0, 0, 0, 0});
         id_ = 0;
+    } else {
+        Advance({}, true);
     }
 }
 
@@ -154,6 +179,10 @@ void Adapter::BeginTeardown()
 {
     closing_ = true;
     auto state = Inspect();
+    if (state.alive && state.patrol != eqemu_proof::Patrol::Disabled) {
+        Advance({eqemu_proof::Kind::Retire, state.epoch, state.generation, 0, 0, 0, 0});
+        state = Inspect();
+    }
     if (state.phase == eqemu_proof::Phase::Requested) {
         Advance({eqemu_proof::Kind::Rejected, state.epoch, state.generation, state.operation, 0, 0, 0});
     } else if (state.phase != eqemu_proof::Phase::Idle) {
