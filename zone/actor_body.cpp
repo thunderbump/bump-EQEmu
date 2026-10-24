@@ -142,7 +142,8 @@ void Adapter::Observe()
             valid = position(npc, fact.x, fact.y, fact.z) && valid;
             fact.alive = npc->GetHP() > 0 && !npc->IsCorpse();
             fact.targetable = npc->IsTargetable();
-            fact.owned = npc->GetOwnerID() != 0 || npc->GetPetType() != 0 ||
+            // Zero is Familiar, not "no pet"; ordinary NPCs use None (255).
+            fact.owned = npc->GetOwnerID() != 0 || npc->GetPetType() != PetType::None ||
                 npc->GetSwarmInfo() != nullptr;
             fact.engaged = npc->IsEngaged();
             fact.actor = npc->IsRustActor();

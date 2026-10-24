@@ -90,7 +90,8 @@ operation/goal identities. Existing manual/patrol tests remain intact.
 
 `rust_native_actor_approach` adds an EQEmu-owned public PoK scenario: three ordinary
 owned NPC subjects, initially no target, two newly eligible alternatives and a
-closer untargetable exclusion; production scope opt-in; independently sampled
+closer untargetable exclusion followed by a targetable familiar (native pet type
+zero) exclusion; production scope opt-in; independently sampled
 ordinary native travel and arrival; >=400ms reached quiet; actual untargetability
 and disappearance during subsequent travel; <=1000ms stop and >=400ms quiet
 with <=0.05 drift; fresh explicit resume; forced native ID reuse without scope
@@ -103,7 +104,7 @@ six-unit local Z bound fail setup. Arrival checks both the rounded destination
 Z and actual subject Z. This also applies to the ID-reuse subject spawn.
 Its 9500ms internal deadline
 fits the unchanged 10000ms per-case gate: short <=26-unit local legs plus bounded
-100ms idle and 400ms quiet windows. Diagnostics remain <=256 bytes and the whole
+100–200ms idle and 400ms quiet windows. Diagnostics remain <=256 bytes and the whole
 suite retains its existing 4096-byte fail-closed report limit. The format/name,
 patrol, lifetime, ordinary-neighbor, movement and cleanup regressions are unchanged.
 
@@ -133,7 +134,22 @@ and retains the <=0.05 placement check for initial and reused-ID subjects.
 Native mechanics and all locality, sampling, drift and arrival bounds remain
 unchanged. The existing production-path scenario is the regression; no passing
 movement observation for this repair is claimed. Exact-current-head full native
-fixtures and independent review remain caller-owned acceptance gates. This is a bounded noncombat
+fixtures and independent review remain caller-owned acceptance gates.
+
+**Reported follow-up (`e2df6fa3`, job `1f3be537fab943c7`): failed.**
+Fourteen of 15 in-server cases passed; approach timed out at step 3 after
+9522ms with zero movement samples. VM, normal-world and database cleanup were
+reported complete. This is distinct from the earlier placement failure.
+Source tracing found native ownership translation used `GetPetType() != 0`:
+ordinary NPCs default to `PetType::None` (255), while zero means Familiar.
+The adapter now compares against the named None sentinel, preserving owner-ID
+and swarm checks. The production-path scenario asserts ordinary subject defaults,
+then observes a targetable closer familiar during an additional 100ms no-target
+window before enabling two ordinary candidates. It retains all movement, arrival,
+stop and quiet bounds and the existing 9500ms deadline. Repaired native behavior
+remains unmeasured pending caller-owned fixtures.
+
+This is a bounded noncombat
 observation/movement slice, not population, hunting, combat, general pursuit or
 navigation, persistence, or a performance guarantee. PoK combat policy is unchanged.
 

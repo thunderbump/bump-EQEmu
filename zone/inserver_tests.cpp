@@ -1031,6 +1031,7 @@ Result ActorApproach()
         for (size_t i = 0; i < 3; ++i) {
             auto *npc = spawn(i, i == 0 ? 20 : i == 1 ? 26 : 8);
             if (!npc) { return fail(spawn_diagnostic); }
+            if (npc->GetPetType() != PetType::None || npc->GetOwnerID()) { return fail("ordinary subject ownership"); }
             npc->SetTargetable(false);
         }
         step = 1;
@@ -1049,6 +1050,13 @@ Result ActorApproach()
         if (!body || state.approach != Approach::Observing || state.operation ||
             glm::distance(previous, origin) > 0.05f) { return fail("no-target idle"); }
         if (now - stage_at < 100) { break; }
+        // Exercise the native pet-type boundary through real observations:
+        // Familiar is zero, while an ordinary non-pet is None (255).
+        // Keep all other subjects untargetable for a second idle window, so
+        // misclassifying this closer familiar causes an observable failure.
+        subject(2)->SetPetType(PetType::Familiar);
+        subject(2)->SetTargetable(true);
+        if (now - stage_at < 200) { break; }
         subject(0)->SetTargetable(true);
         subject(1)->SetTargetable(true);
         step = 3;
