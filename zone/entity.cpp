@@ -3244,7 +3244,9 @@ char *EntityList::MakeNameUnique(char *name)
 			//make a copy of name before snprintf--misanthropicfiend
 			char temp_name[64];
 			strn0cpy(temp_name, name, 64);
-			snprintf(name, 64, "%s%03d", temp_name, i);
+			// name[61] is cleared above: preserve that bound explicitly so
+			// the compiler can prove room for the three-digit suffix and NUL.
+			snprintf(name, 64, "%.61s%03d", temp_name, i);
 			#endif
 			return name;
 		}

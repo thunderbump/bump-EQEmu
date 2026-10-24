@@ -79,15 +79,27 @@ flags, then require the default build to succeed. Also confirm that dependency
 compile commands do not acquire this policy. Controls alone do not establish
 production enforcement or replace the full utility/in-server suite.
 
-Initial scope is zone-wide; no warning suppressions or unrelated format cleanup
-were added. The development quick-check cannot configure/build this CMake
-scope, so inherited warning noise, generated production commands, and native
-timing have not yet been measured. Full isolated validation must supply those
-results. If substantial unrelated zone diagnostics appear, explicitly narrow
-the policy to actor/in-server translation units and document measured findings
-rather than mass-cleaning or suppressing them. Later expansion to other targets
-or diagnostics requires a separate noise/coverage decision; logger annotations
-and analyzer/sanitizer work remain out of scope.
+Initial scope remains zone-wide, without warning suppressions. The isolated
+fixture for `367c7a4b501740a0b5167539cb915d4de05cf687` completed native
+configuration, then stopped during native build on one reported GCC 13
+`-Werror=format-truncation` diagnostic in `EntityList::MakeNameUnique`.
+Its `entity.cpp` compile command contained both policy flags. GCC's format
+group includes truncation diagnostics, not just argument-type mismatches.
+The formatter now explicitly limits the copied prefix to the existing 61-byte
+name limit, leaving the same three-digit suffix and terminator; no behavior
+change or warning suppression is intended. The automatic in-server suite
+checks the production function with empty, short, 60-, 61- and 63-byte inputs,
+including its return pointer and buffer boundary.
+
+That stopped build does not establish a complete warning count, actor/in-server
+compile-command verification, timing, or full-suite success. Development quick
+checks cannot configure/build this CMake scope; full isolated validation must
+supply those results for the repaired snapshot. If substantial unrelated zone
+diagnostics appear, explicitly narrow the policy to actor/in-server translation
+units and document measured findings rather than mass-cleaning or suppressing
+them. Later expansion to other targets or diagnostics requires a separate
+noise/coverage decision; logger annotations and analyzer/sanitizer work remain
+out of scope.
 
 ### Bootstrap Rust bridge (zone)
 

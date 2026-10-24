@@ -37,6 +37,30 @@ struct Result {
 	std::string diagnostic;
 };
 
+// Exercise the production formatter without depending on ambient zone names.
+// No entities are registered or retained by this scenario.
+Result UniqueNameBounds()
+{
+	EntityList empty_entities;
+	for (const size_t length : {size_t{0}, size_t{8}, size_t{60}, size_t{61}, size_t{63}}) {
+		struct {
+			char name[64];
+			char guard[8];
+		} buffer;
+		std::memset(&buffer, 'Z', sizeof(buffer));
+		std::memset(buffer.name, 'A', length);
+		buffer.name[length] = '\0';
+		const std::string expected = std::string(std::min(length, size_t{61}), 'A') + "000";
+		char *result = empty_entities.MakeNameUnique(buffer.name);
+		if (result != buffer.name ||
+		    std::memcmp(buffer.name, expected.c_str(), expected.size() + 1) != 0 ||
+		    std::string(buffer.guard, sizeof(buffer.guard)) != std::string(8, 'Z')) {
+			return {Outcome::Failed, "unique-name prefix/suffix bound or return buffer changed"};
+		}
+	}
+	return {Outcome::Passed, "unique-name empty, short and boundary prefixes preserve suffix and NUL"};
+}
+
 // This scenario observes registration and native timer-driven removal. It does
 // not call Beacon::Process or EntityList::BeaconProcess on the test's behalf.
 Result BeaconLifetime()
@@ -781,6 +805,7 @@ struct Scenario {
 // does not select names or interpret actor mechanics.
 constexpr std::array scenarios = {
 	Scenario{"native_beacon_lifetime", BeaconLifetime}
+	, Scenario{"native_unique_name_bounds", UniqueNameBounds}
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
     // Exercises real shutdown, then boots a replacement in the same zone host.
     , Scenario{"rust_native_actor_body_lifetime", ActorBodyLifetime, CleanupActorBody}
