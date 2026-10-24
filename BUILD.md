@@ -38,6 +38,85 @@ Similarly to Windows running CMake on Linux is simple it just uses a different g
 	cd build
 	cmake -G "Unix Makefiles" -DEQEMU_BUILD_TESTS=ON -DEQEMU_BUILD_LOGIN=ON ..
 
+### Narrow C++ format-warning gate
+
+`cmake/FormatWarnings.cmake` defines the explicit policy `-Wformat
+-Werror=format` for GNU, Clang and AppleClang with a GNU-style frontend.
+It enables the compiler's basic printf/scanf-family format diagnostics and
+makes that diagnostic group fatal, including literal format/argument type
+mismatches. It does not enable `-Wall`, `-Wextra`, `-Wformat=2`, or broad
+`-Werror`. Nonliteral format analysis and broader warning policies are deferred.
+
+The policy is **PRIVATE to the zone executable's C++ compilations**, including
+`zone/actor_body.cpp`, `zone/mob.cpp`, and (with tests enabled)
+`zone/inserver_tests.cpp`. It also checks headers as seen by those compilations;
+it is not applied globally or propagated to common, gm_commands_zone,
+lua_zone, perl_zone, or vendor targets. Unsupported compilers/frontends
+(including MSVC and clang-cl) retain their existing flags, without this gate's
+coverage. Unannotated variadic wrappers such as `EQEmuLogSys::Out` are not
+automatically checked. This is not a memory-safety guarantee.
+
+With `EQEMU_BUILD_TESTS=ON`, every normal CMake configure compiles two tiny
+static-library controls using the selected C++ compiler and the same policy;
+no control executable is linked or run, and CTest is not required. The
+`std::snprintf("v=%.2f", int)` control must fail with the format group's
+int/double mismatch diagnostic, while the explicit-double equivalent must
+compile. An unrelated failure does not satisfy the negative control. Results
+are rebuilt on every configure rather than reused from a cached probe.
+Compiler controls temporarily use `LC_ALL=C` so GCC's translated diagnostics
+cannot invalidate the English diagnostic checks. The caller's locale setting is
+restored immediately after each compile, including rejected compilations, before
+result handling; production compilation does not inherit this override.
+Automatic configure-time regressions also compile through this same helper with
+an initially unset and a non-English `LC_ALL`, checking safe compilation,
+int/double rejection and locale restoration. The non-English locale does not
+need to be installed because the compiler must see `C`. These extra compile-only
+probes retain output in `CMakeFiles/eqemu-format-controls/locale-*.log`.
+The diagnostic matcher normalizes UTF-8 curly quotation delimiters to ASCII
+before checking the format group and int/double evidence; original logs remain
+unchanged. Configure also exercises this production matcher against ASCII/UTF-8
+GCC and Clang diagnostic samples, successful-compilation results, and unrelated
+or partial errors. These checks do not replace the compiler controls.
+Configure prints both outcomes and the mismatch diagnostic; complete compiler
+output is retained under `CMakeFiles/eqemu-format-controls/{safe,unsafe}.log`
+in the build directory. A failed control stops configuration.
+
+Production verification is separate from these controls: in an isolated native
+build configured with `CMAKE_EXPORT_COMPILE_COMMANDS=ON`, inspect the entries
+for `zone/actor_body.cpp`, `zone/mob.cpp` and `zone/inserver_tests.cpp` for both
+flags, then require the default build to succeed. Also confirm that dependency
+compile commands do not acquire this policy. Controls alone do not establish
+production enforcement or replace the full utility/in-server suite.
+
+Initial scope remains zone-wide, without warning suppressions. The isolated
+fixture for `367c7a4b501740a0b5167539cb915d4de05cf687` completed native
+configuration, then stopped during native build on one reported GCC 13
+`-Werror=format-truncation` diagnostic in `EntityList::MakeNameUnique`.
+Its `entity.cpp` compile command contained both policy flags. GCC's format
+group includes truncation diagnostics, not just argument-type mismatches.
+The subsequent fixture for `d7891a4c11a830e2ed289fc225e9151be75acf0a`
+also completed native configuration but stopped on the same diagnostic: even
+an explicit 61-byte prefix plus three suffix digits and NUL needs 65 bytes.
+The formatter now builds the suffix separately and copies it into the remaining
+space with `strn0cpy`, avoiding overlapping format arguments on all platforms.
+This preserves the legacy 63-byte output limit, including truncation of the last
+suffix digit at a 61-byte prefix; repairing that uniqueness limitation would be
+a separate behavior change. No warning suppression is added. The automatic
+in-server suite checks empty, short, 59-, 60-, 61-, 62- and 63-byte inputs,
+including return-pointer identity, NUL termination and the buffer boundary.
+Its boundary expectations now reflect the actual legacy truncation instead of
+expecting a 65-byte result in a 64-byte buffer.
+
+That stopped build does not establish a complete warning count, actor/in-server
+compile-command verification, timing, or full-suite success. Development quick
+checks cannot configure/build this CMake scope; full isolated validation must
+supply those results for the repaired snapshot. If substantial unrelated zone
+diagnostics appear, explicitly narrow the policy to actor/in-server translation
+units and document measured findings rather than mass-cleaning or suppressing
+them. Later expansion to other targets or diagnostics requires a separate
+noise/coverage decision; logger annotations and analyzer/sanitizer work remain
+out of scope.
+
 ### Bootstrap Rust bridge (zone)
 
 On native x86-64 Linux builds, the zone target links the bootstrap

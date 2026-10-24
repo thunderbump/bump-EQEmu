@@ -3237,15 +3237,14 @@ char *EntityList::MakeNameUnique(char *name)
 	}
 	for (int i=0; i < 300; i++) {
 		if (!used[i]) {
-			#ifdef _WINDOWS
-			snprintf(name, 64, "%s%03d", name, i);
-			#else
-			//glibc clears destination of snprintf
-			//make a copy of name before snprintf--misanthropicfiend
-			char temp_name[64];
-			strn0cpy(temp_name, name, 64);
-			snprintf(name, 64, "%s%03d", temp_name, i);
-			#endif
+			// Format separately to avoid overlapping snprintf arguments. Keep
+			// the legacy 61-byte prefix and 63-byte total: at the longest
+			// prefix the final suffix digit is intentionally truncated, just
+			// as it was by snprintf(name, 64, "%s%03d", ...).
+			// Twelve bytes also cover any signed 32-bit int plus its NUL.
+			char suffix[12];
+			snprintf(suffix, sizeof(suffix), "%03d", i);
+			strn0cpy(name + len, suffix, 64 - len);
 			return name;
 		}
 	}

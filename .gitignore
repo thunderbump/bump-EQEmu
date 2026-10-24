@@ -46,6 +46,9 @@ cmake-build-debug/
 *.vcxproj.user
 *.cmake
 !cmake/ActorBridge.cmake
+!cmake/FormatWarnings.cmake
+!cmake/format_controls/diagnostics.cmake
+!cmake/format_controls/locales.cmake
 *.ilk
 *.pdb
 *.sln
