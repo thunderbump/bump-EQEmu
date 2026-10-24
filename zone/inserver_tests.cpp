@@ -946,6 +946,9 @@ Result ActorApproach()
             why, step, now - began, samples, travelled, drift);
         return {Outcome::Failed, text};
     };
+    // Keep setup evidence in the case result: console tails may omit an early
+    // failure. One bounded record distinguishes map/locality from placement.
+    char spawn_diagnostic[160]{};
     auto spawn = [&](size_t i, float offset) -> NPC * {
         auto *type = new NPCType{};
         std::strcpy(type->name, "ActorApproachSubject");
@@ -962,6 +965,11 @@ Result ActorApproach()
         // Subjects have the same race/size as the actor; verify that offset below.
         const auto z = ground + body->GetZOffset();
         if (ground == BEST_Z_INVALID || !std::isfinite(z) || std::abs(z - origin.z) > 6) {
+            const char *reason = ground == BEST_Z_INVALID ? "map" :
+                !std::isfinite(z) ? "nonfinite" : "local-z";
+            std::snprintf(spawn_diagnostic, sizeof(spawn_diagnostic),
+                "subject %zu %s xy=%.2f,%.2f origin-z=%.3f ground=%.3f offset=%.3f z=%.3f",
+                i, reason, origin.x + offset, origin.y, origin.z, ground, body->GetZOffset(), z);
             delete type;
             return nullptr;
         }
@@ -970,7 +978,12 @@ Result ActorApproach()
         entity_list.AddNPC(npc, false);
         approach_subjects[i] = {npc->GetID(), npc->NativeIncarnation()};
         // Check the actual initial placement without moving an observed subject.
-        if (std::abs(npc->GetZ() - (ground + npc->GetZOffset())) > 0.05f) { return nullptr; }
+        if (std::abs(npc->GetZ() - (ground + npc->GetZOffset())) > 0.05f) {
+            std::snprintf(spawn_diagnostic, sizeof(spawn_diagnostic),
+                "subject %zu placement ground=%.3f actor-offset=%.3f subject-offset=%.3f requested=%.3f actual=%.3f",
+                i, ground, body->GetZOffset(), npc->GetZOffset(), z, npc->GetZ());
+            return nullptr;
+        }
         return npc;
     };
     auto start = [&] {
@@ -1011,7 +1024,7 @@ Result ActorApproach()
         began = stage_at = last_at = now;
         for (size_t i = 0; i < 3; ++i) {
             auto *npc = spawn(i, i == 0 ? 20 : i == 1 ? 26 : 8);
-            if (!npc) { return fail("subject ground"); }
+            if (!npc) { return fail(spawn_diagnostic); }
             npc->SetTargetable(false);
         }
         step = 1;
@@ -1120,7 +1133,8 @@ Result ActorApproach()
             state.last_terminal != Event::Interrupted || body->IsMoving()) { return fail("disappearance pause"); }
         stop_ms = std::max(stop_ms, now - action_at);
         if (!entity_list.ReuseFreeIDForTest(reused)) { return fail("reuse allocation"); }
-        if (!spawn(3, 14) || approach_subjects[3].first != reused ||
+        if (!spawn(3, 14)) { return fail(spawn_diagnostic); }
+        if (approach_subjects[3].first != reused ||
             approach_subjects[3].second == old_incarnation) { return fail("reuse lifetime"); }
         subject(3)->SetTargetable(true);
         quiet = previous;

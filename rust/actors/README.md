@@ -114,11 +114,22 @@ so approach/invalidation/reuse behavior was not qualified. That run reported
 VM, normal-world and database cleanup complete. Setup incorrectly required
 subject ground plus offset to match safe-point Z within one unit; the repair
 constructs grounded subjects instead, without widening movement/arrival gates.
-An advisory repair-snapshot check completed Rust format/dependency/Clippy/tests
-and cleanup; native compilation was unavailable for the changed header/bridge
-scope. No repaired native approach measurement is claimed. Exact-current-head
-full native fixtures and independent review remain caller-owned acceptance
-gates. This is a bounded noncombat
+**Reported follow-up fixture result (`4fae3bbe`): failed.** Rust format,
+dependency, Clippy, tests and doctests, native configure/build/link, and all 87
+utilities completed. Fourteen of 15 in-server cases passed, including patrol;
+approach again failed at subject-ground setup with zero travel samples. That
+run reported VM, normal-world and database cleanup complete. This is a distinct
+run, not qualification of the earlier candidate or of subsequent edits.
+
+The generic setup diagnostic did not identify which subject or guard failed
+(invalid map height, nonfinite/local Z, or post-registration placement mismatch).
+The next caller-owned fixture will retain a bounded diagnostic in the case result
+with subject index, failure category and relevant native heights/offsets, for both
+initial subjects and the reused-ID spawn. No geometry fix is inferred from the
+missing measurements: all placement, locality, sampling and arrival assertions
+remain unchanged. The existing production-path scenario is the regression;
+no new passing movement observation is claimed. Exact-current-head full native
+fixtures and independent review remain caller-owned acceptance gates. This is a bounded noncombat
 observation/movement slice, not population, hunting, combat, general pursuit or
 navigation, persistence, or a performance guarantee. PoK combat policy is unchanged.
 
