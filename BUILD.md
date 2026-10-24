@@ -63,6 +63,15 @@ no control executable is linked or run, and CTest is not required. The
 int/double mismatch diagnostic, while the explicit-double equivalent must
 compile. An unrelated failure does not satisfy the negative control. Results
 are rebuilt on every configure rather than reused from a cached probe.
+Compiler controls temporarily use `LC_ALL=C` so GCC's translated diagnostics
+cannot invalidate the English diagnostic checks. The caller's locale setting is
+restored immediately after each compile, including rejected compilations, before
+result handling; production compilation does not inherit this override.
+Automatic configure-time regressions also compile through this same helper with
+an initially unset and a non-English `LC_ALL`, checking safe compilation,
+int/double rejection and locale restoration. The non-English locale does not
+need to be installed because the compiler must see `C`. These extra compile-only
+probes retain output in `CMakeFiles/eqemu-format-controls/locale-*.log`.
 The diagnostic matcher normalizes UTF-8 curly quotation delimiters to ASCII
 before checking the format group and int/double evidence; original logs remain
 unchanged. Configure also exercises this production matcher against ASCII/UTF-8
