@@ -85,11 +85,18 @@ configuration, then stopped during native build on one reported GCC 13
 `-Werror=format-truncation` diagnostic in `EntityList::MakeNameUnique`.
 Its `entity.cpp` compile command contained both policy flags. GCC's format
 group includes truncation diagnostics, not just argument-type mismatches.
-The formatter now explicitly limits the copied prefix to the existing 61-byte
-name limit, leaving the same three-digit suffix and terminator; no behavior
-change or warning suppression is intended. The automatic in-server suite
-checks the production function with empty, short, 60-, 61- and 63-byte inputs,
-including its return pointer and buffer boundary.
+The subsequent fixture for `d7891a4c11a830e2ed289fc225e9151be75acf0a`
+also completed native configuration but stopped on the same diagnostic: even
+an explicit 61-byte prefix plus three suffix digits and NUL needs 65 bytes.
+The formatter now builds the suffix separately and copies it into the remaining
+space with `strn0cpy`, avoiding overlapping format arguments on all platforms.
+This preserves the legacy 63-byte output limit, including truncation of the last
+suffix digit at a 61-byte prefix; repairing that uniqueness limitation would be
+a separate behavior change. No warning suppression is added. The automatic
+in-server suite checks empty, short, 59-, 60-, 61-, 62- and 63-byte inputs,
+including return-pointer identity, NUL termination and the buffer boundary.
+Its boundary expectations now reflect the actual legacy truncation instead of
+expecting a 65-byte result in a 64-byte buffer.
 
 That stopped build does not establish a complete warning count, actor/in-server
 compile-command verification, timing, or full-suite success. Development quick

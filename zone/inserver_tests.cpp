@@ -42,7 +42,7 @@ struct Result {
 Result UniqueNameBounds()
 {
 	EntityList empty_entities;
-	for (const size_t length : {size_t{0}, size_t{8}, size_t{60}, size_t{61}, size_t{63}}) {
+	for (const size_t length : {size_t{0}, size_t{8}, size_t{59}, size_t{60}, size_t{61}, size_t{62}, size_t{63}}) {
 		struct {
 			char name[64];
 			char guard[8];
@@ -50,7 +50,9 @@ Result UniqueNameBounds()
 		std::memset(&buffer, 'Z', sizeof(buffer));
 		std::memset(buffer.name, 'A', length);
 		buffer.name[length] = '\0';
-		const std::string expected = std::string(std::min(length, size_t{61}), 'A') + "000";
+		// The legacy 64-byte output truncates the last suffix digit when
+		// the prefix reaches 61 bytes. Never compare beyond name[63].
+		const std::string expected = (std::string(std::min(length, size_t{61}), 'A') + "000").substr(0, 63);
 		char *result = empty_entities.MakeNameUnique(buffer.name);
 		if (result != buffer.name ||
 		    std::memcmp(buffer.name, expected.c_str(), expected.size() + 1) != 0 ||
@@ -58,7 +60,7 @@ Result UniqueNameBounds()
 			return {Outcome::Failed, "unique-name prefix/suffix bound or return buffer changed"};
 		}
 	}
-	return {Outcome::Passed, "unique-name empty, short and boundary prefixes preserve suffix and NUL"};
+	return {Outcome::Passed, "unique-name empty, short and boundary prefixes preserve bounded suffix and NUL"};
 }
 
 // This scenario observes registration and native timer-driven removal. It does
