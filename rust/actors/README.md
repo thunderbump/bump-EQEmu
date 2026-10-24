@@ -96,19 +96,29 @@ and disappearance during subsequent travel; <=1000ms stop and >=400ms quiet
 with <=0.05 drift; fresh explicit resume; forced native ID reuse without scope
 authority; active-mode teardown. It never supplies perception, chooses a target
 command, steps movement or manufactures a terminal. It retains native XY<=2/Z<=6
-arrival, <=250ms sample gaps and displacement bounds. Its 9500ms internal deadline
+arrival, <=250ms sample gaps and displacement bounds. Subjects are constructed
+at independently queried native ground heights plus their race/size Z offset,
+not at the safe point's Z; invalid ground or elevations outside the existing
+six-unit local Z bound fail setup. Arrival checks both the rounded destination
+Z and actual subject Z. This also applies to the ID-reuse subject spawn.
+Its 9500ms internal deadline
 fits the unchanged 10000ms per-case gate: short <=26-unit local legs plus bounded
 100ms idle and 400ms quiet windows. Diagnostics remain <=256 bytes and the whole
 suite retains its existing 4096-byte fail-closed report limit. The format/name,
 patrol, lifetime, ordinary-neighbor, movement and cleanup regressions are unchanged.
 
-**Measured native result: pending.** Two advisory isolated snapshots passed
-Rust tests/dependency checks/Clippy but reported formatting differences. The last
-check identified two remaining layout changes, now applied but not rerun; native
-header/bridge compilation was unavailable in both checks. Current-head
-format/Rust/native build, linked utilities, complete normal-world suite, cleanup
-and independent review remain caller-owned acceptance gates. No new native
-travel or cleanup measurement is claimed here. This is a bounded noncombat
+**Reported baseline fixture result (`35bdd733`): failed.** Rust checks, native
+build/link and 87 utilities completed successfully; 14 of 15 in-server cases
+passed. Approach failed at subject-ground setup before any travel samples,
+so approach/invalidation/reuse behavior was not qualified. That run reported
+VM, normal-world and database cleanup complete. Setup incorrectly required
+subject ground plus offset to match safe-point Z within one unit; the repair
+constructs grounded subjects instead, without widening movement/arrival gates.
+An advisory repair-snapshot check completed Rust format/dependency/Clippy/tests
+and cleanup; native compilation was unavailable for the changed header/bridge
+scope. No repaired native approach measurement is claimed. Exact-current-head
+full native fixtures and independent review remain caller-owned acceptance
+gates. This is a bounded noncombat
 observation/movement slice, not population, hunting, combat, general pursuit or
 navigation, persistence, or a performance guarantee. PoK combat policy is unchanged.
 

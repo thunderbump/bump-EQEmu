@@ -957,13 +957,20 @@ Result ActorApproach()
         type->skip_global_loot = true;
         glm::vec3 probe(origin.x + offset, origin.y, origin.z + 20);
         const auto ground = zone->zonemap->FindBestZ(probe, nullptr);
-        auto *npc = new NPC(type, nullptr, glm::vec4(origin.x + offset, origin.y, origin.z, 0), GravityBehavior::Flying);
+        // As in the retained travel fixture, use native ground plus the body
+        // offset, not the safe point's Z. The short route has a real slope.
+        // Subjects have the same race/size as the actor; verify that offset below.
+        const auto z = ground + body->GetZOffset();
+        if (ground == BEST_Z_INVALID || !std::isfinite(z) || std::abs(z - origin.z) > 6) {
+            delete type;
+            return nullptr;
+        }
+        auto *npc = new NPC(type, nullptr, glm::vec4(origin.x + offset, origin.y, z, 0), GravityBehavior::Flying);
         npc->GiveNPCTypeData(type);
         entity_list.AddNPC(npc, false);
         approach_subjects[i] = {npc->GetID(), npc->NativeIncarnation()};
-        // The qualified short route is locally level. Fail rather than move a
-        // subject or invent facts when that environmental assumption is false.
-        if (ground == BEST_Z_INVALID || std::abs(ground + npc->GetZOffset() - origin.z) > 1) { return nullptr; }
+        // Check the actual initial placement without moving an observed subject.
+        if (std::abs(npc->GetZ() - (ground + npc->GetZOffset())) > 0.05f) { return nullptr; }
         return npc;
     };
     auto start = [&] {
@@ -1033,10 +1040,11 @@ Result ActorApproach()
         if (state.approach == Approach::Paused) { return fail("route refusal"); }
         if (state.approach != Approach::Reached) { break; }
         arrival_xy = std::hypot(previous.x - (origin.x + 18), previous.y - origin.y);
-        arrival_z = std::abs(previous.z - origin.z);
+        arrival_z = std::abs(previous.z - std::lround(subject(0)->GetZ()));
         if (state.last_terminal != Event::Completed || samples < 3 || travelled < 10 ||
             arrival_xy > 2 || arrival_z > 6 ||
-            std::hypot(previous.x - subject(0)->GetX(), previous.y - subject(0)->GetY()) > 5) {
+            std::hypot(previous.x - subject(0)->GetX(), previous.y - subject(0)->GetY()) > 5 ||
+            std::abs(previous.z - subject(0)->GetZ()) > 6) {
             return fail("real arrival");
         }
         quiet = previous;
