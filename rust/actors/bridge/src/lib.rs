@@ -20,6 +20,7 @@ mod ffi {
         StartPatrol,
         Pause,
         Resume,
+        StartApproach,
     }
     #[repr(u8)]
     enum Status {
@@ -93,6 +94,38 @@ mod ffi {
         Paused,
         Retiring,
     }
+    #[repr(u8)]
+    enum Approach {
+        Disabled,
+        Observing,
+        Travelling,
+        Reached,
+        Paused,
+        Retiring,
+    }
+    struct Candidate {
+        incarnation: u64,
+        x: i32,
+        y: i32,
+        z: i32,
+        present: bool,
+        alive: bool,
+        targetable: bool,
+        owned: bool,
+        engaged: bool,
+        actor: bool,
+        client: bool,
+        self_body: bool,
+    }
+    struct Observation {
+        epoch: u64,
+        generation: u64,
+        goal: u64,
+        x: i32,
+        y: i32,
+        z: i32,
+        candidates: Vec<Candidate>,
+    }
     struct Snapshot {
         epoch: u64,
         generation: u64,
@@ -106,12 +139,21 @@ mod ffi {
         sequence: u64,
         tick: u64,
         patrol: Patrol,
+        approach: Approach,
+        goal: u64,
+        target: u64,
     }
     extern "Rust" {
         type Runtime;
         fn construct(epoch: u64) -> Box<Runtime>;
         fn advance(self: &mut Runtime, sequence: u64, tick: u64, inputs: Vec<Input>) -> Report;
         fn inspect(self: &Runtime) -> Snapshot;
+        fn observe(
+            self: &mut Runtime,
+            sequence: u64,
+            tick: u64,
+            observation: Observation,
+        ) -> Report;
     }
 }
 
@@ -199,6 +241,7 @@ impl Runtime {
                     ffi::Kind::StartPatrol => actor_core::Kind::StartPatrol,
                     ffi::Kind::Pause => actor_core::Kind::Pause,
                     ffi::Kind::Resume => actor_core::Kind::Resume,
+                    ffi::Kind::StartApproach => actor_core::Kind::StartApproach,
                     _ => {
                         let s = self.0.inspect();
                         return ffi::Report {
@@ -240,6 +283,62 @@ impl Runtime {
         })
     }
 
+    fn observe(&mut self, sequence: u64, tick: u64, observation: ffi::Observation) -> ffi::Report {
+        boundary(|| {
+            let mut candidates = Vec::new();
+            // Oversize input is rejected whole, never silently truncated.
+            if observation.candidates.len() <= 4 {
+                for c in observation.candidates {
+                    candidates.push(actor_core::Candidate {
+                        incarnation: c.incarnation,
+                        point: [c.x, c.y, c.z],
+                        present: c.present,
+                        alive: c.alive,
+                        targetable: c.targetable,
+                        owned: c.owned,
+                        engaged: c.engaged,
+                        actor: c.actor,
+                        client: c.client,
+                        self_body: c.self_body,
+                    });
+                }
+            } else {
+                let s = self.0.inspect();
+                return ffi::Report {
+                    status: ffi::Status::InvalidInput,
+                    event: ffi::Event::None,
+                    epoch: s.epoch,
+                    generation: s.generation,
+                    operation: 0,
+                    x: 0,
+                    y: 0,
+                    z: 0,
+                };
+            }
+            let r = self.0.observe(
+                sequence,
+                tick,
+                actor_core::Observation {
+                    epoch: observation.epoch,
+                    generation: observation.generation,
+                    goal: observation.goal,
+                    actor: [observation.x, observation.y, observation.z],
+                    candidates: &candidates,
+                },
+            );
+            ffi::Report {
+                status: map_status(r.status),
+                event: map_event(r.event),
+                epoch: r.epoch,
+                generation: r.generation,
+                operation: r.operation,
+                x: r.point[0],
+                y: r.point[1],
+                z: r.point[2],
+            }
+        })
+    }
+
     fn inspect(&self) -> ffi::Snapshot {
         boundary(|| {
             let s = self.0.inspect();
@@ -261,6 +360,16 @@ impl Runtime {
                 last_operation: s.last_operation,
                 sequence: s.sequence,
                 tick: s.tick,
+                approach: match s.approach {
+                    actor_core::Approach::Disabled => ffi::Approach::Disabled,
+                    actor_core::Approach::Observing => ffi::Approach::Observing,
+                    actor_core::Approach::Travelling => ffi::Approach::Travelling,
+                    actor_core::Approach::Reached => ffi::Approach::Reached,
+                    actor_core::Approach::Paused => ffi::Approach::Paused,
+                    actor_core::Approach::Retiring => ffi::Approach::Retiring,
+                },
+                goal: s.goal,
+                target: s.target,
                 patrol: match s.patrol {
                     actor_core::Patrol::Disabled => ffi::Patrol::Disabled,
                     actor_core::Patrol::Running => ffi::Patrol::Running,

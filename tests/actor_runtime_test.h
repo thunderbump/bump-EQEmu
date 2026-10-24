@@ -13,9 +13,59 @@ public:
 		TEST_ADD(ActorRuntimeTest::RoundTrip);
 		TEST_ADD(ActorRuntimeTest::BodyFacts);
 		TEST_ADD(ActorRuntimeTest::PatrolLoop);
+		TEST_ADD(ActorRuntimeTest::ApproachOnce);
 	}
 
 private:
+	void ApproachOnce()
+	{
+		using namespace eqemu_proof;
+		auto runtime = construct(89);
+		auto send = [&](Kind kind) {
+			const auto s = runtime->inspect();
+			rust::Vec<Input> inputs;
+			inputs.push_back({kind, s.epoch, s.generation, s.operation, 0, 0, 0});
+			return runtime->advance(s.sequence + 1, s.tick + 1, std::move(inputs));
+		};
+		auto observe = [&](bool present, int32_t actor_x) {
+			const auto s = runtime->inspect();
+			Observation facts{};
+			facts.epoch = s.epoch;
+			facts.generation = s.generation;
+			facts.goal = s.goal;
+			facts.x = actor_x;
+			Candidate target{};
+			target.incarnation = 17;
+			target.x = 20000;
+			target.present = present;
+			target.alive = target.targetable = true;
+			facts.candidates.push_back(target);
+			return runtime->observe(s.sequence + 1, s.tick + 1, std::move(facts));
+		};
+		TEST_ASSERT(send(Kind::CreateBody).event == Event::BodyRequested);
+		TEST_ASSERT(send(Kind::BodyPresent).event == Event::BodyPresent);
+		TEST_ASSERT(send(Kind::StartApproach).status == Status::Ok);
+		TEST_ASSERT(observe(false, 0).event == Event::None);
+		const auto request = observe(true, 0);
+		TEST_ASSERT(request.event == Event::MoveRequested && request.x == 18);
+		TEST_ASSERT(runtime->inspect().target == 17);
+		TEST_ASSERT(send(Kind::Admitted).event == Event::Admitted);
+		TEST_ASSERT(observe(false, 1000).event == Event::StopRequested);
+		TEST_ASSERT(send(Kind::Completed).event == Event::Completed);
+		TEST_ASSERT(runtime->inspect().approach == Approach::Paused);
+		TEST_ASSERT(observe(true, 1000).event == Event::None);
+		const auto goal = runtime->inspect().goal;
+		TEST_ASSERT(send(Kind::Resume).status == Status::Ok);
+		TEST_ASSERT(runtime->inspect().goal > goal);
+		TEST_ASSERT(observe(true, 1000).operation > request.operation);
+		TEST_ASSERT(send(Kind::Admitted).event == Event::Admitted);
+		TEST_ASSERT(observe(true, 18000).event == Event::None);
+		TEST_ASSERT(send(Kind::Completed).event == Event::Completed);
+		TEST_ASSERT(runtime->inspect().approach == Approach::Reached);
+		TEST_ASSERT(observe(false, 18000).event == Event::None);
+		TEST_ASSERT(send(Kind::Move).status == Status::Busy);
+	}
+
 	void PatrolLoop()
 	{
 		using namespace eqemu_proof;
