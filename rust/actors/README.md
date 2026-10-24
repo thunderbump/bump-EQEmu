@@ -121,14 +121,18 @@ approach again failed at subject-ground setup with zero travel samples. That
 run reported VM, normal-world and database cleanup complete. This is a distinct
 run, not qualification of the earlier candidate or of subsequent edits.
 
-The generic setup diagnostic did not identify which subject or guard failed
-(invalid map height, nonfinite/local Z, or post-registration placement mismatch).
-The next caller-owned fixture will retain a bounded diagnostic in the case result
-with subject index, failure category and relevant native heights/offsets, for both
-initial subjects and the reused-ID spawn. No geometry fix is inferred from the
-missing measurements: all placement, locality, sampling and arrival assertions
-remain unchanged. The existing production-path scenario is the regression;
-no new passing movement observation is claimed. Exact-current-head full native
+**Reported diagnostic fixture result (`916b9929`): failed.** Fourteen of 15
+in-server cases passed; approach failed before travel at subject 0 placement:
+requested Z -157.250, actual -157.150, ground -161.000, both offsets 3.750.
+That run reported VM, normal-world and database cleanup complete. Source tracing
+identifies the 0.1 difference: zero-initialized `NPCType::flymode` overrides the
+constructor's flying argument, then `NPC::AI_Start` calls `SendTo`, whose ground
+fallback adds 0.1 Z. The subject helper now sets the type's -1 sentinel to honor
+its explicit flying constructor mode. It asserts that mode after registration
+and retains the <=0.05 placement check for initial and reused-ID subjects.
+Native mechanics and all locality, sampling, drift and arrival bounds remain
+unchanged. The existing production-path scenario is the regression; no passing
+movement observation for this repair is claimed. Exact-current-head full native
 fixtures and independent review remain caller-owned acceptance gates. This is a bounded noncombat
 observation/movement slice, not population, hunting, combat, general pursuit or
 navigation, persistence, or a performance guarantee. PoK combat policy is unchanged.

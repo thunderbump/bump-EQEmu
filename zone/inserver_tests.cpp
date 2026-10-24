@@ -952,6 +952,10 @@ Result ActorApproach()
     auto spawn = [&](size_t i, float offset) -> NPC * {
         auto *type = new NPCType{};
         std::strcpy(type->name, "ActorApproachSubject");
+        // A zero-initialized type explicitly overrides the constructor's flying
+        // mode with ground gravity. Honor the authored constructor mode instead:
+        // AI_Start calls SendTo, whose ground fallback adds 0.1 to initial Z.
+        type->flymode = -1;
         type->current_hp = type->max_hp = 100;
         type->race = type->class_ = type->level = 1;
         type->gender = 2;
@@ -978,10 +982,12 @@ Result ActorApproach()
         entity_list.AddNPC(npc, false);
         approach_subjects[i] = {npc->GetID(), npc->NativeIncarnation()};
         // Check the actual initial placement without moving an observed subject.
-        if (std::abs(npc->GetZ() - (ground + npc->GetZOffset())) > 0.05f) {
+        if (npc->GetFlyMode() != GravityBehavior::Flying ||
+            std::abs(npc->GetZ() - (ground + npc->GetZOffset())) > 0.05f) {
             std::snprintf(spawn_diagnostic, sizeof(spawn_diagnostic),
-                "subject %zu placement ground=%.3f actor-offset=%.3f subject-offset=%.3f requested=%.3f actual=%.3f",
-                i, ground, body->GetZOffset(), npc->GetZOffset(), z, npc->GetZ());
+                "subject %zu placement ground=%.3f actor-offset=%.3f subject-offset=%.3f requested=%.3f actual=%.3f fly=%d",
+                i, ground, body->GetZOffset(), npc->GetZOffset(), z, npc->GetZ(),
+                static_cast<int>(npc->GetFlyMode()));
             return nullptr;
         }
         return npc;
