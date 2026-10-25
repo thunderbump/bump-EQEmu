@@ -48,6 +48,8 @@
 #include "zone/zone.h"
 
 #include <cstdio>
+#include <cstdlib>
+#include <limits>
 #include <string>
 #include <utility>
 
@@ -55,6 +57,14 @@ extern Zone* zone;
 extern QueryServ* QServ;
 extern volatile bool is_zone_loaded;
 extern EntityList entity_list;
+
+uint64 NPC::NewNativeIncarnation()
+{
+    // NPC construction is zone-thread owned. Fail closed rather than reuse authority.
+    static uint64 next = 0;
+    if (next == std::numeric_limits<uint64>::max()) { std::abort(); }
+    return ++next;
+}
 
 NPC::NPC(const NPCType *npc_type_data, Spawn2 *in_respawn, const glm::vec4 &position, GravityBehavior iflymode, bool IsCorpse)
 	: Mob(

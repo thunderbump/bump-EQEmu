@@ -86,6 +86,81 @@ eqemu_proof::Report Adapter::StartPatrol(int32_t ax, int32_t ay, int32_t az,
     return Send({Kind::StartPatrol, state.epoch, state.generation, 0, bx, by, bz});
 }
 
+eqemu_proof::Report Adapter::StartApproach(const std::vector<uint16_t> &scope)
+{
+    using namespace eqemu_proof;
+    Report refused{};
+    refused.status = closing_ ? Status::Closed : Status::InvalidInput;
+    if (closing_ || scope.size() > scope_.size()) { return refused; }
+    std::array<Subject, 4> subjects{};
+    for (size_t i = 0; i < scope.size(); ++i) {
+        auto *npc = entity_list.GetNPCByID(scope[i]);
+        if (!npc || entity_list.GetMob(scope[i]) != npc) { return refused; }
+        for (size_t j = 0; j < i; ++j) {
+            if (scope[i] == scope[j]) { return refused; }
+        }
+        subjects[i] = {scope[i], npc->NativeIncarnation()};
+    }
+    const auto state = Inspect();
+    // Only this production opt-in can install scope. Send cannot inject facts
+    // or start this mode without validated registered native instances.
+    auto report = Advance({Kind::StartApproach, state.epoch, state.generation, 0, 0, 0, 0});
+    if (report.status == Status::Ok) { scope_ = subjects; scope_size_ = scope.size(); }
+    return report;
+}
+
+void Adapter::Observe()
+{
+    using namespace eqemu_proof;
+    const auto state = Inspect();
+    if (closing_ || state.body != eqemu_proof::Body::Present ||
+        (state.approach != Approach::Observing && state.approach != Approach::Travelling)) { return; }
+    auto *body = Body();
+    if (!body) { return; } // pending terminal/actual absence has priority below
+    Observation observation{};
+    observation.epoch = state.epoch;
+    observation.generation = state.generation;
+    observation.goal = state.goal;
+    auto position = [](NPC *npc, int32_t &x, int32_t &y, int32_t &z) {
+        const double px = npc->GetX(), py = npc->GetY(), pz = npc->GetZ();
+        if (!std::isfinite(px) || !std::isfinite(py) || !std::isfinite(pz) ||
+            std::abs(px) > 1000000 || std::abs(py) > 1000000 || std::abs(pz) > 1000000) { return false; }
+        x = static_cast<int32_t>(std::lround(px * 1000));
+        y = static_cast<int32_t>(std::lround(py * 1000));
+        z = static_cast<int32_t>(std::lround(pz * 1000));
+        return true;
+    };
+    bool valid = position(body, observation.x, observation.y, observation.z);
+    for (size_t i = 0; i < scope_size_; ++i) {
+        Candidate fact{};
+        const auto &subject = scope_[i];
+        fact.incarnation = subject.incarnation;
+        auto *npc = entity_list.GetNPCByID(subject.id);
+        fact.present = npc && entity_list.GetMob(subject.id) == npc &&
+            npc->NativeIncarnation() == subject.incarnation;
+        if (fact.present) {
+            valid = position(npc, fact.x, fact.y, fact.z) && valid;
+            fact.alive = npc->GetHP() > 0 && !npc->IsCorpse();
+            fact.targetable = npc->IsTargetable();
+            // Zero is Familiar, not "no pet"; ordinary NPCs use None (255).
+            fact.owned = npc->GetOwnerID() != 0 || npc->GetPetType() != PetType::None ||
+                npc->GetSwarmInfo() != nullptr;
+            fact.engaged = npc->IsEngaged();
+            fact.actor = npc->IsRustActor();
+            fact.self_body = npc == body;
+        }
+        observation.candidates.push_back(fact); // absence is explicit, never omitted
+    }
+    if (!valid) {
+        Advance({Kind::Pause, state.epoch, state.generation, 0, 0, 0, 0});
+        return;
+    }
+    if (state.sequence == std::numeric_limits<uint64_t>::max() ||
+        state.tick == std::numeric_limits<uint64_t>::max()) { std::abort(); }
+    last_ = runtime_->observe(state.sequence + 1, state.tick + 1, std::move(observation));
+    Apply(last_);
+}
+
 void Adapter::Apply(const eqemu_proof::Report &report)
 {
     using namespace eqemu_proof;
@@ -131,14 +206,16 @@ void Adapter::Apply(const eqemu_proof::Report &report)
 void Adapter::Process()
 {
     using namespace eqemu_proof;
+    if (Inspect().closed || !Inspect().alive) { return; }
+    Observe(); // bounded fresh perception cannot be starved by active travel
     const auto state = Inspect();
-    if (state.closed || !state.alive) { return; }
     if (state.body == eqemu_proof::Body::Present && state.phase != Phase::Idle) {
         auto *npc = Body();
         auto &movement = MobMovementManager::Get();
         if (state.phase == Phase::Requested) {
             const bool admitted = !closing_ &&
-                (state.patrol == Patrol::Disabled || state.patrol == Patrol::Running) && npc &&
+                (state.patrol == Patrol::Disabled || state.patrol == Patrol::Running) &&
+                (state.approach == Approach::Disabled || state.approach == Approach::Travelling) && npc &&
                 movement.NavigateActorTo(npc, target_x_, target_y_, target_z_);
             Advance({admitted ? Kind::Admitted : Kind::Rejected,
                 state.epoch, state.generation, state.operation, 0, 0, 0});
@@ -179,7 +256,8 @@ void Adapter::BeginTeardown()
 {
     closing_ = true;
     auto state = Inspect();
-    if (state.alive && state.patrol != eqemu_proof::Patrol::Disabled) {
+    if (state.alive && (state.patrol != eqemu_proof::Patrol::Disabled ||
+        state.approach != eqemu_proof::Approach::Disabled)) {
         Advance({eqemu_proof::Kind::Retire, state.epoch, state.generation, 0, 0, 0, 0});
         state = Inspect();
     }

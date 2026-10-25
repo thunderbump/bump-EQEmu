@@ -11,6 +11,148 @@ logical actor, then releases the box. The registered `ActorRuntimeTest` uses the
 same API, including a fake native move-result trace. The pointer-free
 `eqemu_rust_bridge_v1` marker remains 42 for existing zone-link validation.
 
+## Opt-in one-shot native approach (candidate; native qualification pending)
+
+Create a body with the existing `Send(CreateBody)` interface, wait for actual
+`Body::Present`, then call `Adapter::StartApproach(std::vector<uint16_t>{...})`.
+The vector is an authored scope of **zero to four distinct registered NPC
+instances**, not a winner, position, eligibility flag or movement command.
+Unknown IDs, clients, duplicate IDs and oversize scopes are rejected whole.
+Ordinary zones do not opt in automatically. There is no new service or command.
+Manual Move and patrol start refuse while approach is enabled (and vice versa).
+The scope is immutable for this body's one-shot goal: it cannot acquire an NPC
+merely because that NPC later reuses a scoped entity ID. To author a different
+scope, retire the body and explicitly create/start a new one.
+
+On each ordinary adapter Process while Observing or Travelling, C++ resolves
+only these four-or-fewer identities against both native registries. It copies a
+complete owned snapshot including explicit absence, actor/subject positions,
+HP/presence, targetability, ownership (including swarm owner), engagement and
+Rust-body identity. No pointers cross CXX. Native facts and StartApproach cannot
+be supplied through Send. NPC construction assigns a process-local monotonic
+nonzero 64-bit incarnation, independent of entity ID, address, spawn timestamp
+and tick. It never wraps (exhaustion is fail-stop), survives adapter reconstruction,
+and needs no retained pointer/map or destruction callback. Process restart cannot
+retain old in-memory actors or messages. All candidate references use ID **and**
+incarnation; actor epochs/generations, goal counters and fresh operation counters
+independently protect replacements and resumes.
+
+Safe Rust owns eligibility and selection: exclude self, other Rust actor bodies,
+clients, absent/dead/untargetable/owned/engaged candidates; choose nearest by XY
+within **30 XY units and 6 Z units**, then smaller incarnation on ties, regardless
+of input order. Observations use millimetre integer coordinates (rounded from
+finite native coordinates, bounded to +/-1,000,000 units), at most four entries,
+with duplicate/zero incarnations rejected. Snapshot sequence strictly increases,
+tick cannot decrease, and epoch/generation/goal must match. A rejected snapshot
+cannot advance policy or preserve new authority; production coordinate failure
+explicitly pauses/drains instead of using partial observations. Scope absence is
+never truncation or a cached eligible fact.
+
+Rust retains the selected incarnation and original observed position. It chooses
+an integer destination two XY units short of the target along the observed line.
+The existing native short dry local lane still owns geometry/admission, speed,
+ordinary movement and actual arrival (XY <=2, Z <=6 from that destination).
+The approach success check additionally requires fresh actual body-to-target
+**XY <=5, Z <=6**. The XY radius includes two-unit standoff, integer rounding
+and native arrival tolerance; the Z check is independently strict, so a native
+completion outside the target radius pauses rather than inventing success.
+A body initially inside this radius can latch Reached from native observations
+without unnecessary travel. There is no pursuit or fallback route/target retry.
+
+Transitions:
+
+* Observing without an eligible subject is quiet; bounded fresh snapshots can
+  discover an initially ineligible scoped NPC becoming eligible.
+* Travelling retains one operation and one target. Before consuming movement
+  facts, refresh perception. Absence/ineligibility or drift from the selected
+  position beyond **1 XY or 1 Z unit** pauses and stops/drains native travel.
+  Requested travel is rejected before admission. Native rejection/interruption
+  also pauses, with no timer-based restart or automatic alternative target.
+* Completed remains a truthful native terminal even after invalidation/pause;
+  only a still-valid target and fresh actual arrival can latch Reached. Reached
+  stays observable and quiet even if the subject later changes; no attack,
+  aggro, casting, looting or automatic second selection occurs.
+* Explicit `Send(Resume)` only accepts Paused after the operation drains. It
+  increments the goal identity, clears selection, and waits for a new complete
+  observation before reselecting. Reached/Retiring/absent/closed cannot resume.
+* Pause/Stop disable approach scheduling. Retire and zone teardown disable it
+  before native drain, retain the terminal and require actual absence before
+  shutdown. Process does at most one bounded perception advance plus one native
+  terminal/presence/absence or idle advance; travel cannot starve perception and
+  perception cannot starve a terminal. There are no queues, workers or I/O.
+
+Deterministic Rust tests cover idle/new eligibility, ordering-independent nearest
+and tie selection, exclusions, native-correlated quiet arrival, invalidation,
+incarnation replacement, drift, explicit fresh resume, refusal/pause, bounds,
+stale actor/goal/snapshot identities, terminal races and retirement/shutdown.
+The CXX utility contract exercises owned observation conversion and resumed
+operation/goal identities. Existing manual/patrol tests remain intact.
+
+`rust_native_actor_approach` adds an EQEmu-owned public PoK scenario: three ordinary
+owned NPC subjects, initially no target, two newly eligible alternatives and a
+closer untargetable exclusion followed by a targetable familiar (native pet type
+zero) exclusion; production scope opt-in; independently sampled
+ordinary native travel and arrival; >=400ms reached quiet; actual untargetability
+and disappearance during subsequent travel; <=1000ms stop and >=400ms quiet
+with <=0.05 drift; fresh explicit resume; forced native ID reuse without scope
+authority; active-mode teardown. It never supplies perception, chooses a target
+command, steps movement or manufactures a terminal. It retains native XY<=2/Z<=6
+arrival, <=250ms sample gaps and displacement bounds. Subjects are constructed
+at independently queried native ground heights plus their race/size Z offset,
+not at the safe point's Z; invalid ground or elevations outside the existing
+six-unit local Z bound fail setup. Arrival checks both the rounded destination
+Z and actual subject Z. This also applies to the ID-reuse subject spawn.
+Its 9500ms internal deadline
+fits the unchanged 10000ms per-case gate: short <=26-unit local legs plus bounded
+100–200ms idle and 400ms quiet windows. Diagnostics remain <=256 bytes and the whole
+suite retains its existing 4096-byte fail-closed report limit. The format/name,
+patrol, lifetime, ordinary-neighbor, movement and cleanup regressions are unchanged.
+
+**Reported baseline fixture result (`35bdd733`): failed.** Rust checks, native
+build/link and 87 utilities completed successfully; 14 of 15 in-server cases
+passed. Approach failed at subject-ground setup before any travel samples,
+so approach/invalidation/reuse behavior was not qualified. That run reported
+VM, normal-world and database cleanup complete. Setup incorrectly required
+subject ground plus offset to match safe-point Z within one unit; the repair
+constructs grounded subjects instead, without widening movement/arrival gates.
+**Reported follow-up fixture result (`4fae3bbe`): failed.** Rust format,
+dependency, Clippy, tests and doctests, native configure/build/link, and all 87
+utilities completed. Fourteen of 15 in-server cases passed, including patrol;
+approach again failed at subject-ground setup with zero travel samples. That
+run reported VM, normal-world and database cleanup complete. This is a distinct
+run, not qualification of the earlier candidate or of subsequent edits.
+
+**Reported diagnostic fixture result (`916b9929`): failed.** Fourteen of 15
+in-server cases passed; approach failed before travel at subject 0 placement:
+requested Z -157.250, actual -157.150, ground -161.000, both offsets 3.750.
+That run reported VM, normal-world and database cleanup complete. Source tracing
+identifies the 0.1 difference: zero-initialized `NPCType::flymode` overrides the
+constructor's flying argument, then `NPC::AI_Start` calls `SendTo`, whose ground
+fallback adds 0.1 Z. The subject helper now sets the type's -1 sentinel to honor
+its explicit flying constructor mode. It asserts that mode after registration
+and retains the <=0.05 placement check for initial and reused-ID subjects.
+Native mechanics and all locality, sampling, drift and arrival bounds remain
+unchanged. The existing production-path scenario is the regression; no passing
+movement observation for this repair is claimed. Exact-current-head full native
+fixtures and independent review remain caller-owned acceptance gates.
+
+**Reported follow-up (`e2df6fa3`, job `1f3be537fab943c7`): failed.**
+Fourteen of 15 in-server cases passed; approach timed out at step 3 after
+9522ms with zero movement samples. VM, normal-world and database cleanup were
+reported complete. This is distinct from the earlier placement failure.
+Source tracing found native ownership translation used `GetPetType() != 0`:
+ordinary NPCs default to `PetType::None` (255), while zero means Familiar.
+The adapter now compares against the named None sentinel, preserving owner-ID
+and swarm checks. The production-path scenario asserts ordinary subject defaults,
+then observes a targetable closer familiar during an additional 100ms no-target
+window before enabling two ordinary candidates. It retains all movement, arrival,
+stop and quiet bounds and the existing 9500ms deadline. Repaired native behavior
+remains unmeasured pending caller-owned fixtures.
+
+This is a bounded noncombat
+observation/movement slice, not population, hunting, combat, general pursuit or
+navigation, persistence, or a performance guarantee. PoK combat policy is unchanged.
+
 ## Opt-in two-point patrol (current candidate; not yet native-qualified)
 
 `ActorBody::Adapter::StartPatrol(ax, ay, az, bx, by, bz)` creates one body
