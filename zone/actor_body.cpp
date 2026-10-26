@@ -6,6 +6,8 @@
 #include "zone/entity.h"
 #include "zone/npc.h"
 #include "zone/mob_movement_manager.h"
+#include "zone/zone.h"
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -14,6 +16,7 @@
 #include <utility>
 
 extern EntityList entity_list;
+extern Zone *zone;
 namespace ActorBody {
 namespace {
 uint64_t next_epoch = 0;
@@ -60,7 +63,7 @@ eqemu_proof::Report Adapter::Send(eqemu_proof::Input input)
 {
     using namespace eqemu_proof;
     // Native facts are not caller commands. Admission closes before teardown.
-    if (closing_ || (input.kind != Kind::CreateBody && input.kind != Kind::Retire &&
+    if (closing_ || (input.kind != Kind::CreateBody && input.kind != Kind::CreateMeleeBody && input.kind != Kind::Retire &&
         input.kind != Kind::Shutdown && input.kind != Kind::Move && input.kind != Kind::Stop &&
         input.kind != Kind::StartPatrol && input.kind != Kind::Pause && input.kind != Kind::Resume)) {
         Report refused{};
@@ -88,6 +91,16 @@ eqemu_proof::Report Adapter::StartPatrol(int32_t ax, int32_t ay, int32_t az,
 
 eqemu_proof::Report Adapter::StartApproach(const std::vector<uint16_t> &scope)
 {
+    return StartGoal(scope, false);
+}
+
+eqemu_proof::Report Adapter::StartMelee(const std::vector<uint16_t> &scope)
+{
+    return StartGoal(scope, true);
+}
+
+eqemu_proof::Report Adapter::StartGoal(const std::vector<uint16_t> &scope, bool melee)
+{
     using namespace eqemu_proof;
     Report refused{};
     refused.status = closing_ ? Status::Closed : Status::InvalidInput;
@@ -104,7 +117,7 @@ eqemu_proof::Report Adapter::StartApproach(const std::vector<uint16_t> &scope)
     const auto state = Inspect();
     // Only this production opt-in can install scope. Send cannot inject facts
     // or start this mode without validated registered native instances.
-    auto report = Advance({Kind::StartApproach, state.epoch, state.generation, 0, 0, 0, 0});
+    auto report = Advance({melee ? Kind::StartMelee : Kind::StartApproach, state.epoch, state.generation, 0, 0, 0, 0});
     if (report.status == Status::Ok) { scope_ = subjects; scope_size_ = scope.size(); }
     return report;
 }
@@ -114,7 +127,8 @@ void Adapter::Observe()
     using namespace eqemu_proof;
     const auto state = Inspect();
     if (closing_ || state.body != eqemu_proof::Body::Present ||
-        (state.approach != Approach::Observing && state.approach != Approach::Travelling)) { return; }
+        (state.approach != Approach::Observing && state.approach != Approach::Travelling &&
+         !(state.melee && state.approach == Approach::Reached))) { return; }
     auto *body = Body();
     if (!body) { return; } // pending terminal/actual absence has priority below
     Observation observation{};
@@ -140,7 +154,7 @@ void Adapter::Observe()
             npc->NativeIncarnation() == subject.incarnation;
         if (fact.present) {
             valid = position(npc, fact.x, fact.y, fact.z) && valid;
-            fact.alive = npc->GetHP() > 0 && !npc->IsCorpse();
+            fact.alive = npc->GetHP() > 0 && !npc->IsCorpse() && !npc->GetDepop();
             fact.targetable = npc->IsTargetable();
             // Zero is Familiar, not "no pet"; ordinary NPCs use None (255).
             fact.owned = npc->GetOwnerID() != 0 || npc->GetPetType() != PetType::None ||
@@ -148,6 +162,12 @@ void Adapter::Observe()
             fact.engaged = npc->IsEngaged();
             fact.actor = npc->IsRustActor();
             fact.self_body = npc == body;
+            fact.type_id = npc->GetNPCTypeID();
+            fact.level = npc->GetLevel();
+            fact.service = npc->GetClass() != 1 || npc->GetBodyType() != 21 ||
+                npc->MerchantType != 0 || npc->IsQuestNPC();
+            if (state.melee && state.target == fact.incarnation && npc->GetHateListCount() == 1 &&
+                npc->CheckAggro(body)) { fact.engaged = false; }
         }
         observation.candidates.push_back(fact); // absence is explicit, never omitted
     }
@@ -178,6 +198,15 @@ void Adapter::Apply(const eqemu_proof::Report &report)
         type->bodytype = 11;
         type->untargetable = 1;
         type->skip_global_loot = true;
+        if (Inspect().combat_body) {
+            // Explicit ordinary melee body; original noncombat profile is unchanged.
+            type->bodytype = 1;
+            type->untargetable = 0;
+            type->min_dmg = 2;
+            type->max_dmg = 6;
+            type->attack_delay = 2000;
+            type->STR = type->STA = type->DEX = type->AGI = 75;
+        }
         auto *npc = new NPC(type, nullptr,
             glm::vec4(report.x, report.y, report.z, 0), GravityBehavior::Flying);
         npc->GiveNPCTypeData(type);
@@ -186,6 +215,18 @@ void Adapter::Apply(const eqemu_proof::Report &report)
         // Do not AI_Stop or clear IsAIControlled: the explicit gate owns decisions.
         entity_list.AddNPC(npc, false);
         id_ = npc->GetID();
+    } else if (report.event == Event::AttackRequested) {
+        const auto state = Inspect();
+        combat_ = {};
+        combat_.epoch = state.epoch;
+        combat_.generation = state.generation;
+        combat_.goal = state.goal;
+        combat_.operation = state.operation;
+        combat_.target = state.target;
+        if (auto *body = Body()) { combat_.actor_incarnation = body->NativeIncarnation(); }
+        for (size_t i = 0; i < scope_size_; ++i) {
+            if (scope_[i].incarnation == state.target) { combat_.id = scope_[i].id; }
+        }
     } else if (report.event == Event::MoveRequested) {
         target_x_ = report.x;
         target_y_ = report.y;
@@ -193,8 +234,11 @@ void Adapter::Apply(const eqemu_proof::Report &report)
     } else if (report.event == Event::StopRequested) {
         if (auto *npc = Body()) {
             auto &movement = MobMovementManager::Get();
-            // A native completion already latched before Stop remains truthful.
-            if (movement.InspectActorTravel(npc) == MobMovementManager::ActorTravel::Moving) {
+            // Attack can queue FaceTarget rotation without an actor travel goal.
+            // Drain it on combat pause too, even before IsMoving becomes true.
+            // StopNavigation preserves an already latched travel completion.
+            if (Inspect().attacking ||
+                movement.InspectActorTravel(npc) == MobMovementManager::ActorTravel::Moving) {
                 movement.StopNavigation(npc);
             }
         }
@@ -203,11 +247,120 @@ void Adapter::Apply(const eqemu_proof::Report &report)
     }
 }
 
+void Adapter::CombatFact(eqemu_proof::Kind kind, uint32_t damage)
+{
+    const auto state = Inspect();
+    if (state.sequence == std::numeric_limits<uint64_t>::max() ||
+        state.tick == std::numeric_limits<uint64_t>::max()) { std::abort(); }
+    eqemu_proof::CombatFact fact{};
+    fact.epoch = combat_.epoch;
+    fact.generation = combat_.generation;
+    fact.goal = combat_.goal;
+    fact.operation = combat_.operation;
+    fact.target = combat_.target;
+    fact.kind = kind;
+    fact.damage = damage;
+    last_ = runtime_->combat(state.sequence + 1, state.tick + 1, fact);
+    Apply(last_);
+    if (last_.status == eqemu_proof::Status::Ok && !Inspect().attacking) {
+        // Every accepted combat terminal owns cancellation, including terminals
+        // that never passed through StopRequested. Never act on a reused body.
+        if (auto *body = Body(); body && body->NativeIncarnation() == combat_.actor_incarnation) {
+            MobMovementManager::Get().StopNavigation(body);
+            body->SetTarget(nullptr);
+        }
+        combat_.operation = 0;
+    }
+}
+
+bool Adapter::CombatAllowed(NPC *body, NPC *target) const
+{
+    const auto state = Inspect();
+    if (!state.attacking || state.epoch != combat_.epoch || state.generation != combat_.generation ||
+        state.goal != combat_.goal || state.operation != combat_.operation || state.target != combat_.target) { return false; }
+    if (!zone || zone->GetZoneID() != 2 || zone->GetInstanceVersion() != 0 ||
+        !zone->CanDoCombat() || !body || !target || !state.combat_body ||
+        entity_list.GetNPCByID(combat_.id) != target || entity_list.GetMob(combat_.id) != target ||
+        target->NativeIncarnation() != combat_.target ||
+        target->GetNPCTypeID() != 2011 || target->GetLevel() != 1 ||
+        target->GetClass() != 1 || target->GetBodyType() != 21 ||
+        target->IsRustActor() || !target->IsTargetable() || target->GetHP() <= 0 || target->GetDepop() ||
+        target->MerchantType || target->IsQuestNPC() ||
+        target->GetOwnerID() || target->GetPetType() != PetType::None || target->GetSwarmInfo() ||
+        entity_list.GetNPCByID(id_) != body || entity_list.GetMob(id_) != body ||
+        body->NativeIncarnation() != combat_.actor_incarnation || !body->IsTargetable() ||
+        !body->IsAIControlled() || body->GetHP() <= 0 || body->GetDepop() || body->IsStunned() ||
+        body->IsMezzed() || body->IsFeared() || body->IsBlind() || body->IsRooted() ||
+        body->IsPseudoRooted() || body->IsCasting() || body->Charmed() || body->GetOwnerID() ||
+        body->GetPetType() != PetType::None || body->GetSwarmInfo() ||
+        body->IsMeleeDisabled() || body->DivineAura() || body->GetAppearance() != eaStanding ||
+        MobMovementManager::Get().InspectActorCombatMotion(body) ==
+            MobMovementManager::ActorCombatMotion::Unsupported) { return false; }
+    // Only mutual contention is permitted. Even a lower-hate third party stops us.
+    if ((body->IsEngaged() && (body->GetHateListCount() != 1 || !body->CheckAggro(target))) ||
+        (target->IsEngaged() && (target->GetHateListCount() != 1 || !target->CheckAggro(body)))) { return false; }
+    return std::hypot(body->GetX() - target->GetX(), body->GetY() - target->GetY()) <= 5 &&
+        std::abs(body->GetZ() - target->GetZ()) <= 6 &&
+        body->CombatRange(target) && body->CheckLosFN(target) && body->IsAttackAllowed(target);
+}
+
+void Adapter::ObserveDeath(NPC *victim, Mob *killer)
+{
+    // No Rust calls, advancement or retained entity pointers in native callbacks.
+    if (!combat_.operation) { return; }
+    if (victim->MatchesRustActor(combat_.epoch, combat_.generation) &&
+        victim->NativeIncarnation() == combat_.actor_incarnation) { combat_.defeated = true; }
+    auto *body = killer && killer->IsNPC() ? killer->CastToNPC() : nullptr;
+    if (victim->NativeIncarnation() == combat_.target && body &&
+        body->MatchesRustActor(combat_.epoch, combat_.generation) &&
+        body->NativeIncarnation() == combat_.actor_incarnation &&
+        body->actor_swing_authorized_) { combat_.killed = true; }
+}
+
+void Adapter::ProcessCombat()
+{
+    using namespace eqemu_proof;
+    const auto state = Inspect();
+    if (!state.attacking || state.epoch != combat_.epoch || state.generation != combat_.generation ||
+        state.goal != combat_.goal || state.operation != combat_.operation || state.target != combat_.target) { return; }
+    // Latched owned native terminals outrank pause, retirement and ID reuse.
+    if (combat_.killed && state.damage > 0) { CombatFact(Kind::TargetKilled); return; }
+    auto *body = Body();
+    if (combat_.defeated || !body || body->GetHP() <= 0) { CombatFact(Kind::ActorDefeated); return; }
+    auto *target = entity_list.GetNPCByID(combat_.id);
+    if (!target || entity_list.GetMob(combat_.id) != target ||
+        target->NativeIncarnation() != combat_.target || target->GetHP() <= 0 || target->GetDepop()) {
+        CombatFact(Kind::TargetLost); return;
+    }
+    const bool enabled = !closing_ && state.approach == Approach::Engaging;
+    const bool allowed = enabled && CombatAllowed(body, target);
+    if (state.phase == Phase::Requested) {
+        if (allowed) { body->SetTarget(target); } // ordinary native timer configuration
+        CombatFact(allowed ? Kind::AttackAdmitted : Kind::AttackRefused);
+        return; // intent admission never bypasses the native attack timer
+    }
+    if (!allowed || state.phase == Phase::Stopping) {
+        CombatFact(Kind::AttackInterrupted); return;
+    }
+    if (!body->ActorAttackTimerReady()) { return; }
+    // Revalidate after timer admission immediately before the ordinary entry point.
+    if (!CombatAllowed(body, target)) { CombatFact(Kind::AttackInterrupted); return; }
+    const auto before = target->GetHP();
+    body->SetTarget(target);
+    body->actor_swing_authorized_ = true;
+    body->Attack(target);
+    body->actor_swing_authorized_ = false;
+    const auto loss = std::max<int64_t>(0, before - std::max<int64_t>(0, target->GetHP()));
+    const auto actual = static_cast<uint32_t>(std::min<int64_t>(loss, std::numeric_limits<uint32_t>::max()));
+    CombatFact(actual ? Kind::SwingHit : Kind::SwingMiss, actual);
+}
+
 void Adapter::Process()
 {
     using namespace eqemu_proof;
     if (Inspect().closed || !Inspect().alive) { return; }
     Observe(); // bounded fresh perception cannot be starved by active travel
+    if (Inspect().attacking) { ProcessCombat(); return; }
     const auto state = Inspect();
     if (state.body == eqemu_proof::Body::Present && state.phase != Phase::Idle) {
         auto *npc = Body();
@@ -261,6 +414,10 @@ void Adapter::BeginTeardown()
         Advance({eqemu_proof::Kind::Retire, state.epoch, state.generation, 0, 0, 0, 0});
         state = Inspect();
     }
+    if (state.attacking) {
+        ProcessCombat(); // owns correlated pending death before cancellation/absence
+        state = Inspect();
+    }
     if (state.phase == eqemu_proof::Phase::Requested) {
         Advance({eqemu_proof::Kind::Rejected, state.epoch, state.generation, state.operation, 0, 0, 0});
     } else if (state.phase != eqemu_proof::Phase::Idle) {
@@ -274,7 +431,11 @@ void Adapter::BeginTeardown()
     }
     state = Inspect();
     if (state.body == eqemu_proof::Body::Present && state.phase == eqemu_proof::Phase::Idle) {
-        Advance({eqemu_proof::Kind::Retire, state.epoch, state.generation, 0, 0, 0, 0});
+        if (state.approach == eqemu_proof::Approach::Retiring || state.patrol == eqemu_proof::Patrol::Retiring) {
+            Advance({}, true);
+        } else {
+            Advance({eqemu_proof::Kind::Retire, state.epoch, state.generation, 0, 0, 0, 0});
+        }
     }
     if (auto *npc = Body()) { npc->Depop(false); }
 }
@@ -298,6 +459,10 @@ Adapter &Get()
     return *adapter;
 }
 void Process() { if (adapter) { adapter->Process(); } }
+void ObserveDeath(NPC *victim, Mob *killer)
+{
+    if (adapter) { adapter->ObserveDeath(victim, killer); }
+}
 void BeginTeardown() { if (adapter) { adapter->BeginTeardown(); } }
 void FinishTeardown()
 {

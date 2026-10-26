@@ -680,11 +680,12 @@ int main(int argc, char **argv)
 #endif
 				ActorBody::Process();
 #endif
-#ifdef EQEMU_BUILD_TESTS
-				InserverTests::Process();
-#endif
 			}
 		}
+#ifdef EQEMU_BUILD_TESTS
+		// Test-only replacement boot also advances while the zone is unloaded.
+		InserverTests::Process();
+#endif
 
 		QServ->CheckForConnectState();
 
@@ -734,7 +735,7 @@ int main(int argc, char **argv)
 
 void Shutdown()
 {
-	zone->Shutdown(true);
+	if (zone) { zone->Shutdown(true); }
 	LogInfo("Shutting down...");
 	EQEmuLogSys::Instance()->CloseFileLogs();
 	EQ::EventLoop::Get().Shutdown();

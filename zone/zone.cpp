@@ -1143,6 +1143,16 @@ Zone::~Zone() {
 
 //Modified for timezones.
 bool Zone::Init(bool is_static) {
+	// Passive, fixture-only markers around synchronous startup. In particular,
+	// the ordinary zone clock cannot measure time spent inside these loaders.
+	const auto boot_stage = [](const char *stage) {
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
+		InserverTests::ObserveMeleeBootStage(stage);
+#else
+		(void) stage;
+#endif
+	};
+	boot_stage("init-start");
 	SetStaticZone(is_static);
 
 	//load the zone config file.
@@ -1197,9 +1207,12 @@ bool Zone::Init(bool is_static) {
 
 	// make sure that anything that needs to be loaded prior to scripts is loaded before here
 	// this is to ensure that the scripts have access to the data they need
+	boot_stage("quests-start");
 	parse->ReloadQuests(true);
+	boot_stage("quests-end-conditions-start");
 
 	spawn_conditions.LoadSpawnConditions(short_name, instanceid);
+	boot_stage("conditions-end-spawns-start");
 
 	content_db.LoadStaticZonePoints(&zone_point_list, short_name, GetInstanceVersion());
 
@@ -1209,11 +1222,14 @@ bool Zone::Init(bool is_static) {
 	}
 
 	content_db.PopulateZoneSpawnList(zoneid, spawn2_list, GetInstanceVersion());
+	boot_stage("spawns-end-corpses-start");
 	SetSaveZoneState(true);
 
 	database.LoadCharacterCorpses(zoneid, instanceid);
+	boot_stage("corpses-end-traps-start");
 
 	content_db.LoadTraps(short_name, GetInstanceVersion());
+	boot_stage("traps-end");
 
 	LogInfo("Loading adventure flavor text");
 	LoadAdventureFlavor();
@@ -1224,10 +1240,15 @@ bool Zone::Init(bool is_static) {
 	LoadVeteranRewards();
 	LoadAlternateCurrencies();
 	LoadNPCEmotes(&npc_emote_list);
+	boot_stage("aa-start");
 	LoadAlternateAdvancement();
+	boot_stage("aa-end-base-start");
 	LoadBaseData();
+	boot_stage("base-end-merchants-start");
 	LoadMerchants();
+	boot_stage("merchants-end-temp-start");
 	LoadTempMerchantData();
+	boot_stage("temp-end");
 
 	// Merc data
 	if (RuleB(Mercs, AllowMercs)) {
@@ -1235,10 +1256,13 @@ bool Zone::Init(bool is_static) {
 		LoadMercenarySpells();
 	}
 
+	boot_stage("merc-end-petitions-start");
 	PetitionList::Instance()->ClearPetitions();
 	PetitionList::Instance()->ReadDatabase();
 
+	boot_stage("petitions-end-guilds-start");
 	guild_mgr.LoadGuilds();
+	boot_stage("guilds-end");
 
 	LogInfo("Zone booted successfully zone_id [{}] time_offset [{}]", zoneid, zone_time.getEQTimeZone());
 

@@ -14,9 +14,81 @@ public:
 		TEST_ADD(ActorRuntimeTest::BodyFacts);
 		TEST_ADD(ActorRuntimeTest::PatrolLoop);
 		TEST_ADD(ActorRuntimeTest::ApproachOnce);
+        TEST_ADD(ActorRuntimeTest::MeleeOnce);
 	}
 
 private:
+    void MeleeOnce()
+    {
+        using namespace eqemu_proof;
+        auto runtime = construct(90);
+        auto send = [&](Kind kind) {
+            const auto s = runtime->inspect();
+            rust::Vec<Input> inputs;
+            inputs.push_back({kind, s.epoch, s.generation, s.operation, 0, 0, 0});
+            return runtime->advance(s.sequence + 1, s.tick + 1, std::move(inputs));
+        };
+        auto fact = [&](Kind kind, uint32_t damage, bool stale) {
+            const auto s = runtime->inspect();
+            CombatFact f{};
+            f.epoch = s.epoch;
+            f.generation = s.generation;
+            f.goal = s.goal + (stale ? 1 : 0);
+            f.operation = s.operation;
+            f.target = s.target;
+            f.kind = kind;
+            f.damage = damage;
+            return runtime->combat(s.sequence + 1, s.tick + 1, f);
+        };
+        TEST_ASSERT(send(Kind::CreateMeleeBody).event == Event::BodyRequested);
+        TEST_ASSERT(send(Kind::BodyPresent).event == Event::BodyPresent);
+        TEST_ASSERT(runtime->inspect().combat_body);
+        TEST_ASSERT(send(Kind::StartMelee).status == Status::Ok);
+        {
+            const auto s = runtime->inspect();
+            Observation o{};
+            o.epoch = s.epoch;
+            o.generation = s.generation;
+            o.goal = s.goal;
+            Candidate city{}, rat{};
+            city.incarnation = 1;
+            city.type_id = 2030;
+            city.level = 1;
+            city.present = city.alive = city.targetable = true;
+            rat = city;
+            rat.incarnation = 2;
+            rat.type_id = 2011;
+            rat.x = 3000;
+            o.candidates.push_back(city);
+            o.candidates.push_back(rat);
+            TEST_ASSERT(runtime->observe(s.sequence + 1, s.tick + 1, std::move(o)).event == Event::AttackRequested);
+        }
+        TEST_ASSERT(runtime->inspect().target == 2);
+        {
+            const auto s = runtime->inspect();
+            CombatFact unknown{};
+            unknown.kind = static_cast<Kind>(255);
+            TEST_ASSERT(runtime->combat(s.sequence + 1, s.tick + 1, unknown).status == Status::InvalidInput);
+            TEST_ASSERT(runtime->inspect().sequence == s.sequence);
+        }
+        TEST_ASSERT(fact(Kind::AttackAdmitted, 0, true).status == Status::InvalidResult);
+        TEST_ASSERT(fact(Kind::AttackAdmitted, 0, false).event == Event::AttackAdmitted);
+        TEST_ASSERT(fact(Kind::SwingMiss, 0, false).event == Event::SwingMiss);
+        TEST_ASSERT(fact(Kind::TargetKilled, 0, false).status == Status::InvalidResult);
+        TEST_ASSERT(fact(Kind::SwingHit, 11, false).event == Event::SwingHit);
+        TEST_ASSERT(send(Kind::Pause).event == Event::StopRequested);
+        TEST_ASSERT(fact(Kind::TargetKilled, 0, false).event == Event::TargetKilled);
+        const auto won = runtime->inspect();
+        TEST_ASSERT(won.approach == Approach::Victory && won.damage == 11 && won.hits == 1 && won.swings == 2);
+        TEST_ASSERT(send(Kind::Resume).status == Status::Busy);
+        TEST_ASSERT(send(Kind::Retire).status == Status::Ok);
+        const auto s = runtime->inspect();
+        TEST_ASSERT(runtime->advance(s.sequence + 1, s.tick + 1, {}).event == Event::RemovalRequested);
+        TEST_ASSERT(send(Kind::BodyAbsent).event == Event::BodyAbsent);
+        TEST_ASSERT(send(Kind::Shutdown).event == Event::Shutdown);
+        TEST_ASSERT(runtime->inspect().last_terminal == Event::TargetKilled);
+    }
+
 	void ApproachOnce()
 	{
 		using namespace eqemu_proof;

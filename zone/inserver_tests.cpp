@@ -1,6 +1,8 @@
 #include "inserver_tests.h"
 #include "inserver_test_progress.h"
+#include "inserver_test_result.h"
 
+#include "common/eqemu_logsys.h"
 #include "common/json/json.hpp"
 #include "common/timer.h"
 #include "common/rulesys.h"
@@ -10,6 +12,8 @@
 #include "zone/entity.h"
 #include "zone/worldserver.h"
 #include "zone/zone.h"
+#include "zone/zonedb.h"
+#include "zone/water_map.h"
 #include "zone/mob_movement_manager.h"
 #include <cmath>
 
@@ -26,17 +30,11 @@
 extern EntityList entity_list;
 extern WorldServer worldserver;
 extern Zone *zone;
+extern ZoneDatabase content_db;
 extern volatile bool is_zone_loaded;
 
 namespace InserverTests {
 namespace {
-
-enum class Outcome { Pending, Passed, Failed };
-
-struct Result {
-	Outcome outcome;
-	std::string diagnostic;
-};
 
 // Exercise the production formatter without depending on ambient zone names.
 // No entities are registered or retained by this scenario.
@@ -97,6 +95,7 @@ Result BeaconLifetime()
 }
 
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+char melee_result_context[256] = "visit";
 bool actor_idle_saved = false;
 bool actor_prior_idle_override = false;
 uint16 actor_neighbor_id = 0;
@@ -110,8 +109,8 @@ uint16 actor_shutdown_id = 0;
 uint64 actor_shutdown_epoch = 0;
 uint64 actor_shutdown_generation = 0;
 
-// Only used around the synchronous shutdown/boot transition. Never persist the
-// override, and restore even when an assertion or Bootup fails.
+// Test-only shutdown/boot phases never persist this override. Restore it
+// before returning to the event loop, including when either phase fails.
 struct KeepZoneHostAlive {
     const bool prior = RuleB(Zone, KillProcessOnDynamicShutdown);
     bool Disable() {
@@ -1196,12 +1195,15 @@ Result ActorApproach()
     }
     return {Outcome::Pending, ""};
 }
+#include "actor_melee_tests.h"
+#include "actor_melee_facing_tests.h"
 #endif
 
 struct Scenario {
 	const char *name;
 	Result (*process)();
 	void (*cleanup)() = nullptr;
+    uint32 deadline_ms = 10000;
 };
 
 // Add scenarios here. The validator runs this complete source-owned suite and
@@ -1224,6 +1226,15 @@ constexpr std::array scenarios = {
     , Scenario{"rust_native_actor_blocked", ActorTravel<TravelCase::Blocked>, CleanupActorBody}
     , Scenario{"rust_native_actor_external_depop", ActorTravel<TravelCase::External>, CleanupActorBody}
     , Scenario{"rust_native_actor_control_suspended", ActorTravel<TravelCase::Suspended>, CleanupActorBody}
+    , Scenario{"rust_native_qeynos_facing", ActorMeleeFacing<FacingCase::Timed>, CleanupMelee, 30000}
+    , Scenario{"rust_native_qeynos_facing_loss", ActorMeleeFacing<FacingCase::Lost>, CleanupMelee, 30000}
+    , Scenario{"rust_native_qeynos_facing_control", ActorMeleeFacing<FacingCase::Control>, CleanupMelee, 30000}
+    , Scenario{"rust_native_qeynos_unowned_turn", ActorMeleeFacing<FacingCase::Unowned>, CleanupMelee, 30000}
+    // Native 2-second swings require a larger bounded window, old cases unchanged.
+    // Natural death persists the public spawn's respawn timer across zone boots.
+    // Run interruption/removal first; its Depop(false) does not write that timer.
+    , Scenario{"rust_native_qeynos_melee_cancel", ActorMelee<true>, CleanupMelee, 30000}
+    , Scenario{"rust_native_qeynos_melee", ActorMelee<false>, CleanupMelee, 30000}
 #endif
 };
 
@@ -1235,7 +1246,6 @@ std::filesystem::path result_path;
 size_t current = 0;
 size_t started = 0;
 bool case_started = false;
-uint32 case_started_at = 0;
 std::chrono::steady_clock::time_point progress_started_at;
 nlohmann::json results = nlohmann::json::array();
 
@@ -1269,8 +1279,8 @@ bool Publish()
 		{"finalized", true}, {"passed", !scenarios.empty() && failed == 0},
 		{"tests", results}
 	};
-	const auto bytes = report.dump() + "\n";
-	if (bytes.size() > 4096) {
+	const auto bytes = SerializeSuiteReport(std::move(report));
+	if (bytes.empty()) {
 		std::fputs("In-server test report exceeds 4096 bytes\n", stderr);
 		return false;
 	}
@@ -1298,6 +1308,21 @@ bool Publish()
 } // namespace
 
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+void ObserveMeleeBootStage(const char *stage)
+{
+    // Leave room for per-plugin loader phases after the zone boot markers.
+    // Keep a hard visit-wide ceiling even if plugin initialization loops.
+    if (!enabled || !melee_visit.active || melee_boot_records >= 256) { return; }
+    ++melee_boot_records;
+    // Timer::GetCurrentTime is advanced by the zone loop, not synchronous boot.
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - melee_visit_started).count();
+    // Use the zone console sink retained by normal-world failure evidence;
+    // standalone stderr markers are not present in that console tail.
+    LogInfo("melee boot stage={} elapsed_ms={} record={} context={}",
+        stage, static_cast<long long>(elapsed), melee_boot_records, melee_result_context);
+}
+
 void BeforeActorFacts()
 {
     if (!actor_latched_stop_armed) { return; }
@@ -1393,33 +1418,56 @@ bool Configure()
 
 void Process()
 {
-	if (!enabled || finalized || !zone || !is_zone_loaded || !worldserver.Connected()) {
+	if (!enabled || finalized || !worldserver.Connected()) {
 		return;
 	}
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+	// Replacement boot gets its own loop turn so network callbacks can run
+	// after shutdown. No scenario or entity processing runs on this turn.
+	if (AdvanceMeleeBoot()) { return; }
+	if ((!zone || !is_zone_loaded) && !melee_visit.finishing && !melee_visit.boot_failed) { return; }
+#else
+	if (!zone || !is_zone_loaded) { return; }
+#endif
 	if (!case_started) {
 		case_started = true;
 		++started;
-		case_started_at = Timer::GetCurrentTime();
 		progress_started_at = std::chrono::steady_clock::now();
 		EmitCaseProgress(stderr, run_id, scenarios[current].name, 0);
 	}
 	auto result = scenarios[current].process();
-	// A scenario may synchronously shut down the zone. Finish recording and
-	// publishing its result here; do not require another loaded-zone advance.
-	if (result.outcome == Outcome::Pending && Timer::GetCurrentTime() - case_started_at > 10000) {
-		result = {Outcome::Failed, "in-server scenario exceeded its 10 second deadline"};
+	// Combat retains its deadline. Once a terminal result begins cleanup,
+	// await real restoration before recording it, as the synchronous path did.
+	bool restoring = false;
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+	restoring = melee_visit.finishing;
+#endif
+    const auto elapsed_ms = [] {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - progress_started_at).count();
+    };
+    if (!restoring) {
+        result = EnforceScenarioDeadline(std::move(result), elapsed_ms(), scenarios[current].deadline_ms);
+    }
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+	// A registry deadline must also restore the original zone before case-end.
+	if (result.outcome != Outcome::Pending && melee_visit.active && !melee_visit.finishing) {
+		result = FinishMelee(std::move(result));
 	}
+#endif
 	if (result.outcome == Outcome::Pending) {
 		return;
 	}
+    // Restoration may finish after the cap. Record cleanup truthfully first,
+    // then refuse an overdue Passed result before emitting a successful case-end.
+    const auto completed_elapsed_ms = elapsed_ms();
+    result = EnforceScenarioDeadline(std::move(result), completed_elapsed_ms, scenarios[current].deadline_ms);
 	// Qualification uses the same real scenario and then proves an assertion
 	// failure reaches the VM caller. It cannot replace native execution.
 	if (assertion_control && result.outcome == Outcome::Passed) {
 		result = {Outcome::Failed, "deliberate in-server assertion control after native processing"};
 	}
-	EmitCaseProgress(stderr, run_id, scenarios[current].name,
-		std::chrono::duration_cast<std::chrono::milliseconds>(
-			std::chrono::steady_clock::now() - progress_started_at).count(),
+	EmitCaseProgress(stderr, run_id, scenarios[current].name, completed_elapsed_ms,
 		result.outcome == Outcome::Passed, result.diagnostic);
 	if (scenarios[current].cleanup) { scenarios[current].cleanup(); }
 	results.push_back({

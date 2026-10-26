@@ -30,6 +30,9 @@ Eglin
 #include "common/process/process.h"
 #include "common/timer.h"
 #include "zone/embperl.h"
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
+#include "zone/inserver_tests.h"
+#endif
 
 #include <vector>
 
@@ -54,6 +57,28 @@ int argc = 5;
 #else
 int argc = 3;
 #endif
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
+// Fixed diagnostic vocabulary only: never expose plugin names or contents.
+// The observer is inactive outside the opt-in in-server visit and caps output.
+XS(XS_EQEmu_MeleePluginStage)
+{
+	dXSARGS;
+	if (items == 1) {
+		switch (SvIV(ST(0))) {
+		case 0: InserverTests::ObserveMeleeBootStage("perl-plugin-directory-opened"); break;
+		case 1: InserverTests::ObserveMeleeBootStage("perl-plugin-directory-read"); break;
+		case 2: InserverTests::ObserveMeleeBootStage("perl-plugin-eval-start"); break;
+		case 3: InserverTests::ObserveMeleeBootStage("perl-plugin-eval-end"); break;
+		case 4: InserverTests::ObserveMeleeBootStage("perl-plugin-readable-start"); break;
+		case 5: InserverTests::ObserveMeleeBootStage("perl-plugin-readable-end"); break;
+		case 6: InserverTests::ObserveMeleeBootStage("perl-plugin-require-start"); break;
+		case 7: InserverTests::ObserveMeleeBootStage("perl-plugin-require-end"); break;
+		}
+	}
+	XSRETURN_EMPTY;
+}
+#endif
+
 //so embedded scripts can use xs extensions (ala 'use socket;')
 EXTERN_C void boot_DynaLoader(pTHX_ CV* cv);
 EXTERN_C void xs_init(pTHX)
@@ -67,6 +92,9 @@ EXTERN_C void xs_init(pTHX)
 	//add the strcpy stuff to get rid of const warnings....
 
 	newXS(strcpy(buf, "DynaLoader::boot_DynaLoader"), boot_DynaLoader, file);
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
+	newXS(strcpy(buf, "EQEmu::MeleePluginStage"), XS_EQEmu_MeleePluginStage, file);
+#endif
 #ifdef EMBPERL_IO_CAPTURE
 	newXS(strcpy(buf, "EQEmuIO::PRINT"), XS_EQEmuIO_PRINT, file);
 #endif
@@ -82,6 +110,16 @@ Embperl::Embperl()
 
 void Embperl::DoInit()
 {
+	// Passive, bounded by the active in-server melee visit and its record cap.
+	// Never include plugin contents or paths in fixture diagnostics.
+	const auto boot_stage = [](const char *stage) {
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
+		InserverTests::ObserveMeleeBootStage(stage);
+#else
+		(void) stage;
+#endif
+	};
+	boot_stage("perl-init-start");
 	char** argv = (char**) argv_eqemu;
 	my_perl = perl_alloc();
 	//setup perl...
@@ -143,6 +181,7 @@ void Embperl::DoInit()
 	);
 
 	LogQuests("Loading perlemb plugins");
+	boot_stage("perl-plugin-file-start");
 	try {
 		std::string perl_command;
 		perl_command = "main::eval_file('plugin', '" + Config->PluginPlFile + "');";
@@ -152,7 +191,9 @@ void Embperl::DoInit()
 		LogQuests("Warning [{}]: [{}]", Config->PluginPlFile, e);
 	}
 
+	boot_stage("perl-plugin-file-end");
 	for (auto & dir : PathManager::Instance()->GetPluginPaths()) {
+		boot_stage("perl-plugin-directory-start");
 		try {
 			//should probably read the directory in c, instead, so that
 			//I can echo filenames as I do it, but c'mon... I'm lazy and this 1 line reads in all the plugins
@@ -160,21 +201,35 @@ void Embperl::DoInit()
 				"if(opendir(D,'" +
 				dir +
 				"')) { "
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
+				" EQEmu::MeleePluginStage(0);"
+#endif
 				"	my @d = readdir(D);"
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
+				" EQEmu::MeleePluginStage(1);"
+#endif
 				"	closedir(D);"
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
+				" EQEmu::MeleePluginStage(2);"
+#endif
 				"	foreach(@d){ "
 				"		main::eval_file('plugin','" +
 				dir +
 				"/'.$_)if/\\.pl$/;"
 				"	}"
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
+				" EQEmu::MeleePluginStage(3);"
+#endif
 			"}");
 			eval_pv(perl_command.c_str(), FALSE);
 		}
 		catch (std::string& e) {
 			LogQuests("Warning [{}]", e);
 		}
+		boot_stage("perl-plugin-directory-end");
 	}
 #endif //EMBPERL_PLUGIN
+	boot_stage("perl-init-end");
 }
 
 Embperl::~Embperl()
@@ -212,14 +267,28 @@ void Embperl::init_eval_file(void)
 		"sub eval_file {"
 		"my($package, $filename) = @_;"
 		"$filename=~s/\'//g;"
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
+		// Observe the shared loader, including plugin.pl and directory plugins.
+		// Never expose plugin file identities or contents in these markers.
+		"EQEmu::MeleePluginStage(4) if $package eq 'plugin';"
+#endif
 		"if(! -r $filename) { print \"Unable to read perl file '$filename'\\n\"; return; }"
 		"my $mtime = -M $filename;"
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
+		"EQEmu::MeleePluginStage(5) if $package eq 'plugin';"
+#endif
 		"if(defined $Cache{$package}{mtime}&&$Cache{$package}{mtime} <= $mtime && !($package eq 'plugin')){"
 		"	return;"
 		"} else {"
 		// we 'my' $filename,$mtime,$package,$sub to prevent them from changing our state up here.
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
+		"EQEmu::MeleePluginStage(6) if $package eq 'plugin';"
+#endif
 		"	eval(\"package $package; my(\\$filename,\\$mtime,\\$package,\\$sub); \\$isloaded = 1; require './$filename'; \");"
 		" print $@ if $@;"
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
+		"EQEmu::MeleePluginStage(7) if $package eq 'plugin';"
+#endif
 		"}"
 		"}", FALSE);
 }

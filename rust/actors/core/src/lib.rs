@@ -29,6 +29,16 @@ pub enum Kind {
     Pause,
     Resume,
     StartApproach,
+    CreateMeleeBody,
+    StartMelee,
+    AttackAdmitted,
+    AttackRefused,
+    AttackInterrupted,
+    SwingHit,
+    SwingMiss,
+    TargetKilled,
+    TargetLost,
+    ActorDefeated,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -85,6 +95,15 @@ pub enum Event {
     BodyRejected,
     RemovalRequested,
     BodyAbsent,
+    AttackRequested,
+    AttackAdmitted,
+    AttackRefused,
+    AttackInterrupted,
+    SwingHit,
+    SwingMiss,
+    TargetKilled,
+    TargetLost,
+    ActorDefeated,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -116,7 +135,7 @@ pub struct Report {
     pub point: [i32; 3],
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Snapshot {
     pub epoch: u64,
     pub generation: u64,
@@ -133,6 +152,12 @@ pub struct Snapshot {
     pub approach: Approach,
     pub goal: u64,
     pub target: u64,
+    pub combat_body: bool,
+    pub melee: bool,
+    pub attacking: bool,
+    pub swings: u64,
+    pub hits: u64,
+    pub damage: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -154,6 +179,10 @@ pub enum Approach {
     Reached,
     Paused,
     Retiring,
+    Engaging,
+    Victory,
+    Lost,
+    Defeated,
 }
 
 /// Complete owned native facts. Positions are millimetres; no native pointers.
@@ -169,6 +198,20 @@ pub struct Candidate {
     pub actor: bool,
     pub client: bool,
     pub self_body: bool,
+    pub type_id: u32,
+    pub level: u8,
+    pub service: bool,
+}
+
+/// Owned native combat fact. Every result names the entire authority.
+pub struct CombatFact {
+    pub epoch: u64,
+    pub generation: u64,
+    pub goal: u64,
+    pub operation: u64,
+    pub target: u64,
+    pub kind: Kind,
+    pub damage: u32,
 }
 
 pub struct Observation<'a> {
@@ -207,6 +250,12 @@ impl Runtime {
                 approach: Approach::Disabled,
                 goal: 0,
                 target: 0,
+                combat_body: false,
+                melee: false,
+                attacking: false,
+                swings: 0,
+                hits: 0,
+                damage: 0,
             },
             high_operation: 0,
             endpoints: [[0; 3]; 2],
@@ -224,6 +273,16 @@ impl Runtime {
     /// Refusals do not consume ordering inputs or mutate state. Empty advances
     /// may select one patrol effect. No queued outputs: caller owns each report.
     pub fn advance(&mut self, sequence: u64, tick: u64, inputs: &[Input]) -> Report {
+        self.advance_inner(sequence, tick, inputs, false)
+    }
+
+    fn advance_inner(
+        &mut self,
+        sequence: u64,
+        tick: u64,
+        inputs: &[Input],
+        native_combat: bool,
+    ) -> Report {
         let mut report = Report {
             status: Status::Ok,
             event: Event::None,
@@ -241,7 +300,23 @@ impl Runtime {
         } else if let Some(input) = inputs.first() {
             report.operation = input.operation;
             report.point = input.point;
-            self.apply(*input, &mut report.event)
+            if !native_combat
+                && matches!(
+                    input.kind,
+                    Kind::AttackAdmitted
+                        | Kind::AttackRefused
+                        | Kind::AttackInterrupted
+                        | Kind::SwingHit
+                        | Kind::SwingMiss
+                        | Kind::TargetKilled
+                        | Kind::TargetLost
+                        | Kind::ActorDefeated
+                )
+            {
+                Status::InvalidInput
+            } else {
+                self.apply(*input, &mut report.event)
+            }
         } else {
             self.idle(&mut report)
         };
@@ -304,9 +379,11 @@ impl Runtime {
                 .candidates
                 .iter()
                 .find(|c| c.incarnation == s.target);
-            if let Some(c) =
-                target.filter(|c| eligible(c) && within(c.point, self.target_point, 1000, 1000))
-            {
+            if let Some(c) = target.filter(|c| {
+                eligible(c)
+                    && (!s.melee || prey(c))
+                    && within(c.point, self.target_point, 1000, 1000)
+            }) {
                 self.near_target = within(observation.actor, c.point, 5000, 6000);
             } else {
                 self.near_target = false;
@@ -321,7 +398,11 @@ impl Runtime {
             let selected = observation
                 .candidates
                 .iter()
-                .filter(|c| eligible(c) && within(observation.actor, c.point, 30000, 6000))
+                .filter(|c| {
+                    eligible(c)
+                        && (!s.melee || (prey(c) && (s.target == 0 || s.target == c.incarnation)))
+                        && within(observation.actor, c.point, 30000, 6000)
+                })
                 .min_by_key(|c| (distance_xy(observation.actor, c.point), c.incarnation));
             if let Some(c) = selected {
                 self.state.target = c.incarnation;
@@ -359,6 +440,75 @@ impl Runtime {
                 }
             }
         }
+        if s.melee && self.state.approach == Approach::Reached && self.state.phase == Phase::Idle {
+            let target = observation
+                .candidates
+                .iter()
+                .find(|c| c.incarnation == self.state.target);
+            if target.is_some_and(|c| {
+                eligible(c) && prey(c) && within(observation.actor, c.point, 5000, 6000)
+            }) {
+                if let Some(operation) = self.high_operation.checked_add(1) {
+                    self.high_operation = operation;
+                    self.state.operation = operation;
+                    self.state.phase = Phase::Requested;
+                    self.state.attacking = true;
+                    self.state.approach = Approach::Engaging;
+                    out.operation = operation;
+                    out.event = Event::AttackRequested;
+                } else {
+                    self.state.approach = Approach::Paused;
+                    out.status = Status::Exhausted;
+                }
+            } else {
+                self.state.approach = Approach::Paused;
+            }
+        }
+        out
+    }
+
+    /// Actual native HP loss, never a requested amount or Attack return boolean.
+    pub fn combat(&mut self, sequence: u64, tick: u64, fact: CombatFact) -> Report {
+        let s = self.state;
+        let valid = fact.goal == s.goal
+            && fact.target == s.target
+            && s.attacking
+            && fact.operation == s.operation
+            && matches!(
+                fact.kind,
+                Kind::AttackAdmitted
+                    | Kind::AttackRefused
+                    | Kind::AttackInterrupted
+                    | Kind::SwingHit
+                    | Kind::SwingMiss
+                    | Kind::TargetKilled
+                    | Kind::TargetLost
+                    | Kind::ActorDefeated
+            );
+        if !valid || (fact.kind == Kind::SwingHit) != (fact.damage > 0) {
+            return Report {
+                status: Status::InvalidResult,
+                event: Event::None,
+                epoch: s.epoch,
+                generation: s.generation,
+                operation: fact.operation,
+                point: [0; 3],
+            };
+        }
+        let out = self.advance_inner(
+            sequence,
+            tick,
+            &[Input::new(
+                fact.kind,
+                fact.epoch,
+                fact.generation,
+                fact.operation,
+            )],
+            true,
+        );
+        if out.status == Status::Ok && fact.kind == Kind::SwingHit {
+            self.state.damage = self.state.damage.saturating_add(u64::from(fact.damage));
+        }
         out
     }
 
@@ -393,7 +543,7 @@ impl Runtime {
             return Status::Stale;
         }
         match input.kind {
-            Kind::Create | Kind::CreateBody => {
+            Kind::Create | Kind::CreateBody | Kind::CreateMeleeBody => {
                 if s.alive {
                     return Status::Busy;
                 }
@@ -404,15 +554,21 @@ impl Runtime {
                 s.patrol = Patrol::Disabled;
                 s.approach = Approach::Disabled;
                 s.target = 0;
+                s.combat_body = input.kind == Kind::CreateMeleeBody;
+                s.melee = false;
+                s.attacking = false;
+                s.swings = 0;
+                s.hits = 0;
+                s.damage = 0;
                 self.endpoints[0] = input.point;
                 self.next_endpoint = 1;
                 s.alive = true;
-                s.body = if input.kind == Kind::CreateBody {
+                s.body = if input.kind != Kind::Create {
                     Body::Requested
                 } else {
                     Body::Logical
                 };
-                *event = if input.kind == Kind::CreateBody {
+                *event = if input.kind != Kind::Create {
                     Event::BodyRequested
                 } else {
                     Event::Created
@@ -443,6 +599,9 @@ impl Runtime {
                 s.alive = false;
                 s.phase = Phase::Idle;
                 s.operation = 0;
+                if s.melee && !matches!(s.approach, Approach::Retiring | Approach::Victory) {
+                    s.approach = Approach::Defeated;
+                }
                 *event = Event::BodyAbsent;
             }
             Kind::BodyPresent | Kind::BodyRejected | Kind::BodyAbsent => {
@@ -462,7 +621,7 @@ impl Runtime {
                 self.endpoints[1] = input.point;
                 s.patrol = Patrol::Running;
             }
-            Kind::StartApproach => {
+            Kind::StartApproach | Kind::StartMelee => {
                 if s.patrol != Patrol::Disabled
                     || s.approach != Approach::Disabled
                     || s.phase != Phase::Idle
@@ -473,7 +632,11 @@ impl Runtime {
                 let Some(goal) = s.goal.checked_add(1) else {
                     return Status::Exhausted;
                 };
+                if input.kind == Kind::StartMelee && !s.combat_body {
+                    return Status::InvalidInput;
+                }
                 s.goal = goal;
+                s.melee = input.kind == Kind::StartMelee;
                 s.approach = Approach::Observing;
             }
             Kind::Resume if s.approach != Approach::Disabled => {
@@ -487,15 +650,24 @@ impl Runtime {
                     return Status::Exhausted;
                 };
                 s.goal = goal;
-                s.target = 0;
+                if !s.melee {
+                    s.target = 0;
+                }
+                s.swings = 0;
+                s.hits = 0;
+                s.damage = 0;
                 self.near_target = false;
                 s.approach = Approach::Observing;
             }
             Kind::Pause if s.approach != Approach::Disabled => {
                 if !matches!(
                     s.approach,
-                    Approach::Observing | Approach::Travelling | Approach::Paused
-                ) {
+                    Approach::Observing
+                        | Approach::Travelling
+                        | Approach::Engaging
+                        | Approach::Paused
+                ) && !(s.melee && s.approach == Approach::Reached)
+                {
                     return Status::Busy;
                 }
                 s.approach = Approach::Paused;
@@ -540,12 +712,26 @@ impl Runtime {
                 s.phase = Phase::Requested;
                 *event = Event::MoveRequested;
             }
+            Kind::Stop if s.melee && matches!(s.phase, Phase::Idle | Phase::Requested) => {
+                if input.operation != s.operation {
+                    return Status::InvalidResult;
+                }
+                if matches!(
+                    s.approach,
+                    Approach::Observing
+                        | Approach::Travelling
+                        | Approach::Reached
+                        | Approach::Engaging
+                ) {
+                    s.approach = Approach::Paused;
+                }
+            }
             Kind::Stop => {
                 if input.operation != s.operation || s.phase != Phase::Admitted {
                     return Status::InvalidResult;
                 }
                 s.phase = Phase::Stopping;
-                if s.approach == Approach::Travelling {
+                if matches!(s.approach, Approach::Travelling | Approach::Engaging) {
                     s.approach = Approach::Paused;
                 }
                 if s.patrol == Patrol::Running {
@@ -579,6 +765,50 @@ impl Runtime {
                     *event = Event::Retired;
                 } else {
                     return Status::Busy;
+                }
+            }
+            kind if s.attacking => {
+                if input.operation != s.operation || s.phase == Phase::Idle {
+                    return Status::InvalidResult;
+                }
+                *event = match (kind, s.phase) {
+                    (Kind::AttackAdmitted, Phase::Requested) => Event::AttackAdmitted,
+                    (Kind::AttackRefused, Phase::Requested) => Event::AttackRefused,
+                    (Kind::SwingHit, Phase::Admitted) => Event::SwingHit,
+                    (Kind::SwingMiss, Phase::Admitted) => Event::SwingMiss,
+                    (Kind::TargetKilled, Phase::Admitted | Phase::Stopping) if s.damage > 0 => {
+                        Event::TargetKilled
+                    }
+                    (Kind::TargetLost, _) => Event::TargetLost,
+                    (Kind::ActorDefeated, _) => Event::ActorDefeated,
+                    (Kind::AttackInterrupted, Phase::Admitted | Phase::Stopping) => {
+                        Event::AttackInterrupted
+                    }
+                    _ => return Status::InvalidResult,
+                };
+                match *event {
+                    Event::AttackAdmitted => s.phase = Phase::Admitted,
+                    Event::SwingHit | Event::SwingMiss => {
+                        s.swings = s.swings.saturating_add(1);
+                        if *event == Event::SwingHit {
+                            s.hits = s.hits.saturating_add(1);
+                        }
+                    }
+                    terminal => {
+                        if s.approach != Approach::Retiring {
+                            s.approach = match terminal {
+                                Event::TargetKilled => Approach::Victory,
+                                Event::TargetLost => Approach::Lost,
+                                Event::ActorDefeated => Approach::Defeated,
+                                _ => Approach::Paused,
+                            };
+                        }
+                        s.last_terminal = terminal;
+                        s.last_operation = s.operation;
+                        s.operation = 0;
+                        s.phase = Phase::Idle;
+                        s.attacking = false;
+                    }
                 }
             }
             kind => {
@@ -634,6 +864,9 @@ fn within(a: [i32; 3], b: [i32; 3], xy: i32, z: i32) -> bool {
     distance_xy(a, b) <= i128::from(xy) * i128::from(xy)
         && (i64::from(a[2]) - i64::from(b[2])).abs() <= i64::from(z)
 }
+fn prey(c: &Candidate) -> bool {
+    c.type_id == 2011 && c.level == 1 && !c.service
+}
 fn eligible(c: &Candidate) -> bool {
     c.present
         && c.alive
@@ -678,6 +911,9 @@ mod tests {
             actor: false,
             client: false,
             self_body: false,
+            type_id: 2011,
+            level: 1,
+            service: false,
         }
     }
 
@@ -694,6 +930,325 @@ mod tests {
                 candidates,
             },
         )
+    }
+
+    fn melee() -> Runtime {
+        let mut r = Runtime::new(88);
+        send(&mut r, Kind::CreateMeleeBody, 0);
+        send(&mut r, Kind::BodyPresent, 0);
+        assert_eq!(send(&mut r, Kind::StartMelee, 0).status, Status::Ok);
+        r
+    }
+
+    fn combat(r: &mut Runtime, kind: Kind, damage: u32) -> Report {
+        let s = r.inspect();
+        r.combat(
+            s.sequence + 1,
+            s.tick + 1,
+            CombatFact {
+                epoch: s.epoch,
+                generation: s.generation,
+                goal: s.goal,
+                operation: s.operation,
+                target: s.target,
+                kind,
+                damage,
+            },
+        )
+    }
+
+    #[test]
+    fn melee_allowlist_selection_and_approach() {
+        let mut noncombat = Runtime::new(88);
+        send(&mut noncombat, Kind::CreateBody, 0);
+        send(&mut noncombat, Kind::BodyPresent, 0);
+        assert_eq!(
+            send(&mut noncombat, Kind::StartMelee, 0).status,
+            Status::InvalidInput
+        );
+        assert_eq!(noncombat.inspect().approach, Approach::Disabled);
+        for type_id in [2030, 2156, 2004, 2007, 2001, 2109, 2119, 0] {
+            let mut r = melee();
+            let mut city = candidate(1, 1000);
+            city.type_id = type_id;
+            for _ in 0..4 {
+                assert_eq!(observe(&mut r, [0; 3], &[city]).event, Event::None);
+                assert_eq!(idle(&mut r).event, Event::None);
+            }
+            let rat = candidate(10, 20000);
+            assert_eq!(
+                observe(&mut r, [0; 3], &[city, rat]).event,
+                Event::MoveRequested
+            );
+            assert_eq!(r.inspect().target, 10);
+            send(&mut r, Kind::Admitted, 1);
+            observe(&mut r, [18000, 0, 0], &[city, rat]);
+            send(&mut r, Kind::Completed, 1);
+            assert_eq!(r.inspect().approach, Approach::Reached);
+            let request = observe(&mut r, [18000, 0, 0], &[city, rat]);
+            assert_eq!(request.event, Event::AttackRequested);
+            assert_eq!(request.operation, 2);
+            assert_eq!(
+                send(&mut r, Kind::AttackAdmitted, request.operation).status,
+                Status::InvalidInput
+            );
+            assert_eq!(
+                combat(&mut r, Kind::SwingHit, 1).status,
+                Status::InvalidResult
+            );
+            assert_eq!(
+                combat(&mut r, Kind::AttackAdmitted, 0).event,
+                Event::AttackAdmitted
+            );
+            assert_eq!(idle(&mut r).event, Event::None); // no per-tick swing intents
+            assert_eq!(send(&mut r, Kind::Move, 55).status, Status::Busy);
+        }
+        for exclusion in 0..3 {
+            let mut r = melee();
+            let mut rat = candidate(1, 1000);
+            match exclusion {
+                0 => rat.level = 2,
+                1 => rat.service = true,
+                _ => rat.type_id = 2030,
+            }
+            assert_eq!(observe(&mut r, [0; 3], &[rat]).event, Event::None);
+        }
+    }
+
+    #[test]
+    fn melee_native_results_and_truthful_terminal_races() {
+        for retire in [false, true] {
+            let mut r = melee();
+            observe(&mut r, [0; 3], &[candidate(10, 3000)]);
+            combat(&mut r, Kind::AttackAdmitted, 0);
+            assert_eq!(
+                combat(&mut r, Kind::TargetKilled, 0).status,
+                Status::InvalidResult
+            );
+            assert_eq!(combat(&mut r, Kind::SwingMiss, 0).event, Event::SwingMiss);
+            assert_eq!(r.inspect().damage, 0);
+            assert_eq!(combat(&mut r, Kind::SwingHit, 4).event, Event::SwingHit);
+            assert_eq!(r.inspect().swings, 2);
+            assert_eq!(r.inspect().hits, 1);
+            assert_eq!(r.inspect().damage, 4);
+            let operation = r.inspect().operation;
+            send(&mut r, if retire { Kind::Retire } else { Kind::Pause }, 0);
+            assert_eq!(
+                combat(&mut r, Kind::TargetKilled, 0).event,
+                Event::TargetKilled
+            );
+            assert_eq!(r.inspect().last_operation, operation);
+            assert_eq!(r.inspect().last_terminal, Event::TargetKilled);
+            assert_eq!(
+                r.inspect().approach,
+                if retire {
+                    Approach::Retiring
+                } else {
+                    Approach::Victory
+                }
+            );
+            for _ in 0..4 {
+                assert_eq!(observe(&mut r, [0; 3], &[]).event, Event::None);
+                let out = idle(&mut r);
+                assert!(matches!(out.event, Event::None | Event::RemovalRequested));
+            }
+            assert_eq!(send(&mut r, Kind::Resume, 0).status, Status::Busy);
+            if !retire {
+                send(&mut r, Kind::Retire, 0);
+                idle(&mut r);
+            }
+            send(&mut r, Kind::BodyAbsent, 0);
+            send(&mut r, Kind::Shutdown, 0);
+            assert!(r.inspect().closed);
+            assert_eq!(r.inspect().last_terminal, Event::TargetKilled);
+        }
+    }
+
+    #[test]
+    fn melee_loss_defeat_refusal_pause_and_stale_authority() {
+        for terminal in [
+            Kind::TargetLost,
+            Kind::ActorDefeated,
+            Kind::AttackInterrupted,
+        ] {
+            let mut r = melee();
+            observe(&mut r, [0; 3], &[candidate(10, 3000)]);
+            combat(&mut r, Kind::AttackAdmitted, 0);
+            combat(&mut r, Kind::SwingHit, 2);
+            let old = r.inspect();
+            for mismatch in 0..5 {
+                let mut f = CombatFact {
+                    epoch: old.epoch,
+                    generation: old.generation,
+                    goal: old.goal,
+                    operation: old.operation,
+                    target: old.target,
+                    kind: Kind::TargetKilled,
+                    damage: 0,
+                };
+                match mismatch {
+                    0 => f.epoch += 1,
+                    1 => f.generation += 1,
+                    2 => f.goal += 1,
+                    3 => f.operation += 1,
+                    _ => f.target += 1,
+                }
+                assert_ne!(
+                    r.combat(old.sequence + 1, old.tick + 1, f).status,
+                    Status::Ok
+                );
+                assert_eq!(r.inspect().sequence, old.sequence);
+            }
+            send(&mut r, Kind::Pause, 0);
+            assert_eq!(combat(&mut r, terminal, 0).status, Status::Ok);
+            assert_ne!(r.inspect().approach, Approach::Victory);
+            for _ in 0..4 {
+                assert_eq!(idle(&mut r).event, Event::None);
+            }
+            if terminal == Kind::AttackInterrupted {
+                assert_eq!(send(&mut r, Kind::Resume, 0).status, Status::Ok);
+                assert!(r.inspect().goal > old.goal);
+                observe(&mut r, [0; 3], &[candidate(10, 3000)]);
+                assert!(r.inspect().operation > old.operation);
+                assert_eq!(
+                    combat(&mut r, Kind::AttackRefused, 0).event,
+                    Event::AttackRefused
+                );
+                assert_eq!(r.inspect().approach, Approach::Paused);
+            } else {
+                assert_eq!(send(&mut r, Kind::Resume, 0).status, Status::Busy);
+            }
+        }
+    }
+
+    #[test]
+    fn melee_facts_refuse_bad_payloads_order_and_replacement_authority() {
+        let mut r = melee();
+        observe(&mut r, [0; 3], &[candidate(10, 3000)]);
+        combat(&mut r, Kind::AttackAdmitted, 0);
+        let before = r.inspect();
+        for (kind, damage) in [
+            (Kind::SwingHit, 0),
+            (Kind::SwingMiss, 1),
+            (Kind::TargetKilled, 1),
+            (Kind::Completed, 0),
+        ] {
+            assert_eq!(combat(&mut r, kind, damage).status, Status::InvalidResult);
+            assert_eq!(r.inspect(), before);
+        }
+        let fact = CombatFact {
+            epoch: before.epoch,
+            generation: before.generation,
+            goal: before.goal,
+            operation: before.operation,
+            target: before.target,
+            kind: Kind::SwingHit,
+            damage: 2,
+        };
+        assert_eq!(
+            r.combat(before.sequence, before.tick, fact).status,
+            Status::Order
+        );
+        assert_eq!(r.inspect(), before);
+        combat(&mut r, Kind::SwingHit, 2);
+        // Prior damage grants no authority to call disappearance a victory.
+        assert_eq!(combat(&mut r, Kind::TargetLost, 0).event, Event::TargetLost);
+        let lost = r.inspect();
+        for _ in 0..4 {
+            assert_eq!(
+                observe(&mut r, [0; 3], &[candidate(11, 1000)]).event,
+                Event::None
+            );
+            assert_eq!(idle(&mut r).event, Event::None);
+            assert_eq!(r.inspect().approach, Approach::Lost);
+            assert_eq!(r.inspect().target, 10);
+            assert_eq!(r.inspect().swings, lost.swings);
+            assert_eq!(r.inspect().last_terminal, Event::TargetLost);
+        }
+        send(&mut r, Kind::Retire, 0);
+        idle(&mut r);
+        send(&mut r, Kind::BodyAbsent, 0);
+        send(&mut r, Kind::CreateMeleeBody, 0);
+        send(&mut r, Kind::BodyPresent, 0);
+        send(&mut r, Kind::StartMelee, 0);
+        observe(&mut r, [0; 3], &[candidate(11, 1000)]);
+        let replacement = r.inspect();
+        assert_eq!(replacement.target, 11);
+        assert!(replacement.generation > lost.generation);
+        let late = CombatFact {
+            epoch: lost.epoch,
+            generation: lost.generation,
+            goal: lost.goal,
+            operation: before.operation,
+            target: lost.target,
+            kind: Kind::TargetKilled,
+            damage: 0,
+        };
+        assert_ne!(
+            r.combat(replacement.sequence + 1, replacement.tick + 1, late)
+                .status,
+            Status::Ok
+        );
+        assert_eq!(r.inspect(), replacement);
+    }
+
+    #[test]
+    fn melee_retire_before_native_admission_drains_without_a_swing() {
+        let mut r = melee();
+        observe(&mut r, [0; 3], &[candidate(10, 3000)]);
+        let requested = r.inspect();
+        assert_eq!(send(&mut r, Kind::Shutdown, 0).status, Status::Busy);
+        assert_eq!(send(&mut r, Kind::Retire, 0).status, Status::Ok);
+        assert_eq!(r.inspect().approach, Approach::Retiring);
+        assert_eq!(send(&mut r, Kind::Resume, 0).status, Status::Busy);
+        assert_eq!(
+            combat(&mut r, Kind::AttackRefused, 0).event,
+            Event::AttackRefused
+        );
+        assert_eq!(r.inspect().last_operation, requested.operation);
+        assert_eq!(r.inspect().swings, 0);
+        assert!(!r.inspect().attacking);
+        assert_eq!(idle(&mut r).event, Event::RemovalRequested);
+        assert_eq!(send(&mut r, Kind::BodyAbsent, 0).event, Event::BodyAbsent);
+        assert_eq!(send(&mut r, Kind::Shutdown, 0).event, Event::Shutdown);
+        assert_eq!(r.inspect().last_terminal, Event::AttackRefused);
+    }
+
+    #[test]
+    fn melee_stop_before_admission_and_fresh_observation_authority() {
+        let mut r = melee();
+        assert_eq!(observe(&mut r, [0; 3], &[]).event, Event::None);
+        assert_eq!(send(&mut r, Kind::Stop, 0).status, Status::Ok);
+        assert_eq!(r.inspect().approach, Approach::Paused);
+        assert_eq!(send(&mut r, Kind::Resume, 0).status, Status::Ok);
+        let c = candidate(10, 3000);
+        let old = r.inspect();
+        assert_eq!(
+            observe(&mut r, [0; 3], &[c; 5]).status,
+            Status::InvalidInput
+        );
+        assert_eq!(
+            r.observe(
+                old.sequence + 1,
+                old.tick + 1,
+                Observation {
+                    epoch: old.epoch,
+                    generation: old.generation,
+                    goal: old.goal - 1,
+                    actor: [0; 3],
+                    candidates: &[c],
+                },
+            )
+            .status,
+            Status::Stale
+        );
+        assert_eq!(r.inspect().sequence, old.sequence);
+        assert_eq!(observe(&mut r, [0; 3], &[c]).event, Event::AttackRequested);
+        let operation = r.inspect().operation;
+        assert_eq!(send(&mut r, Kind::Stop, operation).status, Status::Ok);
+        assert_eq!(r.inspect().approach, Approach::Paused);
+        assert_eq!(combat(&mut r, Kind::AttackRefused, 0).status, Status::Ok);
+        assert_eq!(r.inspect().last_terminal, Event::AttackRefused);
     }
 
     #[test]

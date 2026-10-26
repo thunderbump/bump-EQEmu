@@ -28,6 +28,7 @@
 #include "zone/lua_parser.h"
 #include "zone/mob.h"
 #include "zone/npc.h"
+#include "zone/actor_body.h"
 #include "zone/queryserv.h"
 #include "zone/quest_parser_collection.h"
 #include "zone/string_ids.h"
@@ -2199,6 +2200,12 @@ bool Client::CheckIfAlreadyDead()
 //SYNC WITH: tune.cpp, mob.h TuneNPCAttack
 bool NPC::Attack(Mob* other, int Hand, bool bRiposte, bool IsStrikethrough, bool IsFromSpell, ExtraAttackOptions *opts)
 {
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+    // Only the serialized adapter's timer-bound primary swing is voluntary.
+    // Retaliation against the body remains ordinary native NPC behavior.
+    if (IsRustActor() && (!actor_swing_authorized_ || bRiposte || IsFromSpell ||
+        Hand != EQ::invslot::slotPrimary)) { return false; }
+#endif
 	if (!other) {
 		SetTarget(nullptr);
 		LogError("A null Mob object was passed to NPC::Attack() for evaluation!");
@@ -3048,6 +3055,9 @@ bool NPC::Death(Mob* killer_mob, int64 damage, uint16 spell, EQ::skills::SkillTy
 		parse->EventZone(EVENT_DEATH_ZONE, zone, export_string, 0, &args);
 	}
 
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+    ActorBody::ObserveDeath(this, killer_mob);
+#endif
 	return true;
 }
 

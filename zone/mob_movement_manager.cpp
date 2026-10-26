@@ -42,12 +42,14 @@ public:
 	virtual ~IMovementCommand() = default;
 	virtual bool Process(MobMovementManager *mob_movement_manager, Mob *mob) = 0;
 	virtual bool Started() const = 0;
+    virtual bool IsActorCombatFacing() const { return false; }
 };
 
 class RotateToCommand : public IMovementCommand {
 public:
-	RotateToCommand(double rotate_to, double dir, MobMovementMode mob_movement_mode)
+	RotateToCommand(double rotate_to, double dir, MobMovementMode mob_movement_mode, bool actor_combat_facing)
 	{
+		m_actor_combat_facing = actor_combat_facing;
 		m_rotate_to      = rotate_to;
 		m_rotate_to_dir  = dir;
 		m_rotate_to_mode = mob_movement_mode;
@@ -119,7 +121,10 @@ public:
 		return m_started;
 	}
 
+    bool IsActorCombatFacing() const override { return m_actor_combat_facing; }
+
 private:
+	bool            m_actor_combat_facing;
 	double          m_rotate_to;
 	double          m_rotate_to_dir;
 	MobMovementMode m_rotate_to_mode;
@@ -574,6 +579,7 @@ public:
 			return true;
 		}
 
+        if (mob->IsNPC() && mob->CastToNPC()->IsRustActor()) { mob->turning = false; }
 		if (mob->IsMoving()) {
 			mob->SetMoving(false);
             // Actor travel must stop at the last independently observed native
@@ -703,6 +709,15 @@ MobMovementManager::~MobMovementManager()
 {
 }
 
+static bool ActorControlAllowsNativeMotion(Mob *who)
+{
+    return who && who->IsNPC() && who->CastToNPC()->IsRustActor() &&
+        who->IsAIControlled() && !who->IsStunned() && !who->IsRooted() &&
+        !who->IsPseudoRooted() && !who->IsMezzed() && !who->IsFeared() &&
+        !who->IsBlind() && !who->IsCasting() && who->GetAppearance() == eaStanding &&
+        !who->Charmed() && !who->GetOwnerID() && who->GetHP() > 0;
+}
+
 void MobMovementManager::Process()
 {
 	for (auto &iter : _impl->Entries) {
@@ -710,8 +725,14 @@ void MobMovementManager::Process()
 		auto &commands = ent.Commands;
         // Check forced control before executing ANY queued displacement. Ordinary
         // NPCs do not enter this lane. Interruptions latch until the next request.
-        if (ent.actor_travel == ActorTravel::Moving && !ActorControlAllowsTravel(iter.first)) {
-            StopNavigation(iter.first);
+        if (iter.first->IsNPC() && iter.first->CastToNPC()->IsRustActor()) {
+            bool combat_facing = false;
+            for (const auto &command : commands) { combat_facing |= command->IsActorCombatFacing(); }
+            if ((ent.actor_travel == ActorTravel::Moving && !ActorControlAllowsTravel(iter.first)) ||
+                (combat_facing && (!ActorControlAllowsNativeMotion(iter.first) ||
+                    iter.first->IsMeleeDisabled() || iter.first->DivineAura()))) {
+                StopNavigation(iter.first);
+            }
         }
 
 		while (true != commands.empty()) {
@@ -824,18 +845,28 @@ void MobMovementManager::NavigateTo(Mob *who, float x, float y, float z, MobMove
 
 bool MobMovementManager::ActorControlAllowsTravel(Mob *who)
 {
-    return who && who->IsNPC() && who->CastToNPC()->IsRustActor() &&
-        who->IsAIControlled() && !who->IsStunned() && !who->IsRooted() &&
-        !who->IsPseudoRooted() && !who->IsMezzed() && !who->IsFeared() &&
-        !who->IsBlind() && !who->IsCasting() && who->GetAppearance() == eaStanding &&
-        !who->Charmed() && !who->GetOwnerID() && !who->IsEngaged() &&
-        who->GetHP() > 0 && who->GetRunspeed() > 0;
+    return ActorControlAllowsNativeMotion(who) && !who->IsEngaged() && who->GetRunspeed() > 0;
 }
 
 MobMovementManager::ActorTravel MobMovementManager::InspectActorTravel(Mob *who) const
 {
     const auto iter = _impl->Entries.find(who);
     return iter == _impl->Entries.end() ? ActorTravel::Idle : iter->second.actor_travel;
+}
+
+MobMovementManager::ActorCombatMotion MobMovementManager::InspectActorCombatMotion(Mob *who) const
+{
+    const auto iter = _impl->Entries.find(who);
+    if (!who || !who->IsNPC() || !who->CastToNPC()->IsRustActor() || iter == _impl->Entries.end() ||
+        iter->second.actor_travel == ActorTravel::Moving) { return ActorCombatMotion::Unsupported; }
+    const auto &commands = iter->second.Commands;
+    if (commands.empty()) {
+        return who->IsMoving() || who->turning ? ActorCombatMotion::Unsupported : ActorCombatMotion::Stopped;
+    }
+    for (const auto &command : commands) {
+        if (!command->IsActorCombatFacing()) { return ActorCombatMotion::Unsupported; }
+    }
+    return ActorCombatMotion::Facing;
 }
 
 bool MobMovementManager::NavigateActorTo(Mob *who, float x, float y, float z)
@@ -1460,7 +1491,8 @@ void MobMovementManager::PushRotateTo(MobMovementEntry &ent, Mob *who, float to,
 		diff -= 512.0;
 	}
 
-	ent.Commands.emplace_back(std::unique_ptr<IMovementCommand>(new RotateToCommand(to, diff > 0 ? 1.0 : -1.0, mob_movement_mode)));
+	ent.Commands.emplace_back(std::unique_ptr<IMovementCommand>(new RotateToCommand(to, diff > 0 ? 1.0 : -1.0, mob_movement_mode,
+        who->IsNPC() && who->CastToNPC()->IsAuthorizedActorSwing())));
 }
 
 void MobMovementManager::PushFlyTo(MobMovementEntry &ent, float x, float y, float z, MobMovementMode mob_movement_mode)

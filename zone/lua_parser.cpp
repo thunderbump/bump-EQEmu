@@ -18,6 +18,7 @@
 #ifdef LUA_EQEMU
 
 #include "lua_parser.h"
+#include "zone/inserver_tests.h"
 
 #include "common/spdat.h"
 #include "zone/lua_bit.h"
@@ -1060,6 +1061,15 @@ void LuaParser::Init() {
 }
 
 void LuaParser::ReloadQuests() {
+	// Passive, visit-scoped diagnostics: do not skip or interrupt quest reload.
+	const auto boot_stage = [](const char *stage) {
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
+		InserverTests::ObserveMeleeBootStage(stage);
+#else
+		(void) stage;
+#endif
+	};
+	boot_stage("lua-reload-start");
 	loaded_.clear();
 	errors_.clear();
 	mods_.clear();
@@ -1074,9 +1084,12 @@ void LuaParser::ReloadQuests() {
 	// so the Depop function above depends on the Process being called again so ...
 	// And there is situations where it wouldn't be :P
 	entity_list.EncounterProcess();
+	boot_stage("lua-encounters-cleared");
 
 	if(L) {
+		boot_stage("lua-close-start");
 		lua_close(L);
+		boot_stage("lua-close-end");
 	}
 
 	L = luaL_newstate();
@@ -1171,8 +1184,11 @@ void LuaParser::ReloadQuests() {
 	lua_setfield(L, -2, "cpath");
 	lua_pop(L, 1);
 
+	boot_stage("lua-bindings-start");
 	MapFunctions(L);
+	boot_stage("lua-bindings-end");
 
+	boot_stage("lua-global-init-start");
 	// load init
 	for (auto& dir : PathManager::Instance()->GetQuestPaths()) {
 		std::string filename = fmt::format("{}/{}/script_init.lua", dir, QUEST_GLOBAL_DIRECTORY);
@@ -1188,6 +1204,8 @@ void LuaParser::ReloadQuests() {
 		}
 	}
 
+	boot_stage("lua-global-init-end");
+	boot_stage("lua-zone-init-start");
 	//zone init - always loads after global
 	if (zone) {
 		for (auto& dir : PathManager::Instance()->GetQuestPaths()) {
@@ -1223,6 +1241,8 @@ void LuaParser::ReloadQuests() {
 		}
 	}
 
+	boot_stage("lua-zone-init-end");
+	boot_stage("lua-mods-start");
 	FILE *load_order = fopen(fmt::format("{}/load_order.txt", PathManager::Instance()->GetLuaModsPath()).c_str(), "r");
 	if (load_order) {
 		char file_name[256] = { 0 };
@@ -1241,6 +1261,7 @@ void LuaParser::ReloadQuests() {
 
 		fclose(load_order);
 	}
+	boot_stage("lua-mods-end");
 
 	auto end = lua_gettop(L);
 	int n = end - top;

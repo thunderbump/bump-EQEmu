@@ -2,6 +2,7 @@
 
 #include "cppunit/cpptest.h"
 #include "zone/inserver_test_progress.h"
+#include "zone/inserver_test_result.h"
 
 #include <array>
 #include <memory>
@@ -18,6 +19,8 @@ public:
 	{
 		TEST_ADD(InserverTestProgressTest::InterruptedCase);
 		TEST_ADD(InserverTestProgressTest::FailedCase);
+        TEST_ADD(InserverTestProgressTest::RestorationDeadlineBoundary);
+        TEST_ADD(InserverTestProgressTest::BoundedSuiteReport);
 		TEST_ADD(InserverTestProgressTest::BoundedEscapedFields);
 #ifndef _WIN32
 		TEST_ADD(InserverTestProgressTest::FlushBeforeReturn);
@@ -72,6 +75,68 @@ private:
 		TEST_ASSERT(event["event"] == "case-end" && event["passed"] == false);
 		TEST_ASSERT(event["elapsed_ms"] == 10001 && event["diagnostic"] == "deadline");
 	}
+
+    void RestorationDeadlineBoundary()
+    {
+        using namespace InserverTests;
+        for (const uint32_t cap : {10000u, 30000u}) {
+            // The registry withholds a terminal result until real restoration
+            // finishes. The same completion boundary must reject a late pass.
+            const auto within = EnforceScenarioDeadline({Outcome::Passed, "restored"}, cap, cap);
+            TEST_ASSERT(within.outcome == Outcome::Passed);
+            const auto pending = EnforceScenarioDeadline({Outcome::Pending, ""}, cap, cap);
+            TEST_ASSERT(pending.outcome == Outcome::Pending);
+            const auto active_overdue = EnforceScenarioDeadline(pending, cap + 1, cap);
+            TEST_ASSERT(active_overdue.outcome == Outcome::Failed);
+            const auto restored_late = EnforceScenarioDeadline({Outcome::Passed, "restored"}, cap + 1, cap);
+            TEST_ASSERT(restored_late.outcome == Outcome::Failed);
+            const auto failed = EnforceScenarioDeadline({Outcome::Failed, "original failure"}, cap + 1, cap);
+            TEST_ASSERT(failed.outcome == Outcome::Failed && failed.diagnostic == "original failure");
+            File file(std::tmpfile(), std::fclose);
+            TEST_ASSERT(file != nullptr);
+            TEST_ASSERT(EmitCaseProgress(file.get(), run_id, "restored-late", cap + 1,
+                restored_late.outcome == Outcome::Passed, restored_late.diagnostic));
+            std::rewind(file.get());
+            const auto event = ReadEvent(file.get());
+            TEST_ASSERT(event["event"] == "case-end" && event["passed"] == false);
+            TEST_ASSERT(event["elapsed_ms"] == cap + 1);
+            TEST_ASSERT(event["diagnostic"] == "in-server scenario exceeded its bounded deadline");
+        }
+    }
+
+    void BoundedSuiteReport()
+    {
+        for (const unsigned count : {21u, 32u}) {
+            nlohmann::json report = {
+                {"version", 1}, {"run_id", run_id}, {"suite", "zone"},
+                {"selected", count}, {"started", count}, {"completed", count},
+                {"failed", 1}, {"finalized", true}, {"passed", false},
+                {"tests", nlohmann::json::array()}
+            };
+            for (unsigned i = 0; i < count; ++i) {
+                report["tests"].push_back({{"name", std::to_string(i) + std::string(62, 'n')},
+                    {"passed", i != 0}, {"diagnostic", "original failure " + std::string(239, 'd')}});
+            }
+            // The old all-diagnostics serialization rejects this valid suite.
+            TEST_ASSERT(report.dump().size() + 1 > 4096);
+            const auto bytes = InserverTests::SerializeSuiteReport(report);
+            TEST_ASSERT(!bytes.empty() && bytes.size() <= 4096 && bytes.back() == '\n');
+            const auto bounded = nlohmann::json::parse(bytes);
+            TEST_ASSERT(bounded["tests"].size() == count);
+            for (unsigned i = 0; i < count; ++i) {
+                TEST_ASSERT(bounded["tests"][i]["name"] == report["tests"][i]["name"]);
+                TEST_ASSERT(bounded["tests"][i]["passed"] == report["tests"][i]["passed"]);
+            }
+            auto metadata = bounded;
+            metadata["tests"] = report["tests"];
+            TEST_ASSERT(metadata == report); // no result/count/identity changes
+            if (count == 21) {
+                TEST_ASSERT(bounded["tests"][0]["diagnostic"].get<std::string>().find("original failure") == 0);
+            }
+        }
+        const nlohmann::json small = {{"tests", {{{"name", "small"}, {"passed", true}, {"diagnostic", "done"}}}}};
+        TEST_ASSERT(InserverTests::SerializeSuiteReport(small) == small.dump() + "\n");
+    }
 
 	void BoundedEscapedFields()
 	{
