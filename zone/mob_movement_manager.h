@@ -73,6 +73,10 @@ public:
 	enum class ActorTravel { Idle, Moving, Completed, Interrupted };
 	bool NavigateActorTo(Mob *who, float x, float y, float z);
 	ActorTravel InspectActorTravel(Mob *who) const;
+    enum class ActorCombatMotion { Stopped, Facing, Unsupported };
+    // Only turns queued inside an authorized native actor swing qualify.
+    // Queued displacement, ordinary rotation and mixed queues remain unsupported.
+    ActorCombatMotion InspectActorCombatMotion(Mob *who) const;
 	static bool ActorControlAllowsTravel(Mob *who);
 
 	void SendCommandToClients(

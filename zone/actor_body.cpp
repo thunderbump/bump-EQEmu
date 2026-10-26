@@ -289,7 +289,8 @@ bool Adapter::CombatAllowed(NPC *body, NPC *target) const
         body->IsPseudoRooted() || body->IsCasting() || body->Charmed() || body->GetOwnerID() ||
         body->GetPetType() != PetType::None || body->GetSwarmInfo() ||
         body->IsMeleeDisabled() || body->DivineAura() || body->GetAppearance() != eaStanding ||
-        body->IsMoving()) { return false; }
+        MobMovementManager::Get().InspectActorCombatMotion(body) ==
+            MobMovementManager::ActorCombatMotion::Unsupported) { return false; }
     // Only mutual contention is permitted. Even a lower-hate third party stops us.
     if ((body->IsEngaged() && (body->GetHateListCount() != 1 || !body->CheckAggro(target))) ||
         (target->IsEngaged() && (target->GetHateListCount() != 1 || !target->CheckAggro(body)))) { return false; }

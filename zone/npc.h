@@ -121,6 +121,8 @@ public:
     // Process-local, nonwrapping lifetime identity; independent of address/ID/tick.
     uint64 NativeIncarnation() const { return native_incarnation_; }
     bool IsRustActor() const { return actor_epoch_ != 0; }
+    // True only inside the adapter's identity-checked ordinary native Attack.
+    bool IsAuthorizedActorSwing() const { return IsRustActor() && actor_swing_authorized_; }
     bool MatchesRustActor(uint64 epoch, uint64 generation) const {
         return IsRustActor() && actor_epoch_ == epoch && actor_generation_ == generation;
     }
