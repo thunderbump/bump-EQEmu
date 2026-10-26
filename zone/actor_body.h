@@ -8,6 +8,7 @@
 #include <vector>
 
 class NPC;
+class Mob;
 namespace ActorBody {
 
 // Zone-thread only. Rust owns identity/policy; this adapter owns native lookup.
@@ -22,6 +23,9 @@ public:
     // Existing Present body only. Scope names native instances, not native facts.
     // Empty scope is allowed. At most four distinct registered NPC IDs.
     eqemu_proof::Report StartApproach(const std::vector<uint16_t> &scope);
+    eqemu_proof::Report StartMelee(const std::vector<uint16_t> &scope);
+    // Native Death completion hook: latch values only, never reenter Rust.
+    void ObserveDeath(NPC *victim, Mob *killer);
     void Process();
     void BeginTeardown();
     void FinishTeardown(); // after EntityList::Clear or observed native teardown drain
@@ -34,6 +38,16 @@ private:
     eqemu_proof::Report Advance(eqemu_proof::Input input, bool empty = false);
     void Apply(const eqemu_proof::Report &report);
     void Observe();
+    eqemu_proof::Report StartGoal(const std::vector<uint16_t> &scope, bool melee);
+    void CombatFact(eqemu_proof::Kind kind, uint32_t damage = 0);
+    void ProcessCombat();
+    bool CombatAllowed(NPC *body, NPC *target) const;
+    struct Combat {
+        uint64_t epoch = 0, generation = 0, goal = 0, operation = 0, target = 0;
+        uint64_t actor_incarnation = 0;
+        uint16_t id = 0;
+        bool killed = false, defeated = false;
+    } combat_;
     struct Subject { uint16_t id = 0; uint64_t incarnation = 0; };
     std::array<Subject, 4> scope_{};
     std::size_t scope_size_ = 0;
@@ -45,6 +59,7 @@ private:
 };
 Adapter &Get();
 void Process();
+void ObserveDeath(NPC *victim, Mob *killer);
 void BeginTeardown();
 void FinishTeardown();
 } // namespace ActorBody

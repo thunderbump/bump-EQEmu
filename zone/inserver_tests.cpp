@@ -10,6 +10,8 @@
 #include "zone/entity.h"
 #include "zone/worldserver.h"
 #include "zone/zone.h"
+#include "zone/zonedb.h"
+#include "zone/water_map.h"
 #include "zone/mob_movement_manager.h"
 #include <cmath>
 
@@ -26,6 +28,7 @@
 extern EntityList entity_list;
 extern WorldServer worldserver;
 extern Zone *zone;
+extern ZoneDatabase content_db;
 extern volatile bool is_zone_loaded;
 
 namespace InserverTests {
@@ -1196,12 +1199,14 @@ Result ActorApproach()
     }
     return {Outcome::Pending, ""};
 }
+#include "actor_melee_tests.h"
 #endif
 
 struct Scenario {
 	const char *name;
 	Result (*process)();
 	void (*cleanup)() = nullptr;
+    uint32 deadline_ms = 10000;
 };
 
 // Add scenarios here. The validator runs this complete source-owned suite and
@@ -1224,6 +1229,9 @@ constexpr std::array scenarios = {
     , Scenario{"rust_native_actor_blocked", ActorTravel<TravelCase::Blocked>, CleanupActorBody}
     , Scenario{"rust_native_actor_external_depop", ActorTravel<TravelCase::External>, CleanupActorBody}
     , Scenario{"rust_native_actor_control_suspended", ActorTravel<TravelCase::Suspended>, CleanupActorBody}
+    // Native 2-second swings require a larger bounded window, old cases unchanged.
+    , Scenario{"rust_native_qeynos_melee", ActorMelee<false>, CleanupMelee, 30000}
+    , Scenario{"rust_native_qeynos_melee_cancel", ActorMelee<true>, CleanupMelee, 30000}
 #endif
 };
 
@@ -1406,8 +1414,8 @@ void Process()
 	auto result = scenarios[current].process();
 	// A scenario may synchronously shut down the zone. Finish recording and
 	// publishing its result here; do not require another loaded-zone advance.
-	if (result.outcome == Outcome::Pending && Timer::GetCurrentTime() - case_started_at > 10000) {
-		result = {Outcome::Failed, "in-server scenario exceeded its 10 second deadline"};
+	if (result.outcome == Outcome::Pending && Timer::GetCurrentTime() - case_started_at > scenarios[current].deadline_ms) {
+		result = {Outcome::Failed, "in-server scenario exceeded its bounded deadline"};
 	}
 	if (result.outcome == Outcome::Pending) {
 		return;

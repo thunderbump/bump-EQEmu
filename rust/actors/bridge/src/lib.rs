@@ -21,6 +21,16 @@ mod ffi {
         Pause,
         Resume,
         StartApproach,
+        CreateMeleeBody,
+        StartMelee,
+        AttackAdmitted,
+        AttackRefused,
+        AttackInterrupted,
+        SwingHit,
+        SwingMiss,
+        TargetKilled,
+        TargetLost,
+        ActorDefeated,
     }
     #[repr(u8)]
     enum Status {
@@ -52,6 +62,15 @@ mod ffi {
         BodyRejected,
         RemovalRequested,
         BodyAbsent,
+        AttackRequested,
+        AttackAdmitted,
+        AttackRefused,
+        AttackInterrupted,
+        SwingHit,
+        SwingMiss,
+        TargetKilled,
+        TargetLost,
+        ActorDefeated,
     }
     #[repr(u8)]
     enum Phase {
@@ -102,6 +121,10 @@ mod ffi {
         Reached,
         Paused,
         Retiring,
+        Engaging,
+        Victory,
+        Lost,
+        Defeated,
     }
     struct Candidate {
         incarnation: u64,
@@ -116,6 +139,18 @@ mod ffi {
         actor: bool,
         client: bool,
         self_body: bool,
+        type_id: u32,
+        level: u8,
+        service: bool,
+    }
+    struct CombatFact {
+        epoch: u64,
+        generation: u64,
+        goal: u64,
+        operation: u64,
+        target: u64,
+        kind: Kind,
+        damage: u32,
     }
     struct Observation {
         epoch: u64,
@@ -142,12 +177,19 @@ mod ffi {
         approach: Approach,
         goal: u64,
         target: u64,
+        combat_body: bool,
+        melee: bool,
+        attacking: bool,
+        swings: u64,
+        hits: u64,
+        damage: u64,
     }
     extern "Rust" {
         type Runtime;
         fn construct(epoch: u64) -> Box<Runtime>;
         fn advance(self: &mut Runtime, sequence: u64, tick: u64, inputs: Vec<Input>) -> Report;
         fn inspect(self: &Runtime) -> Snapshot;
+        fn combat(self: &mut Runtime, sequence: u64, tick: u64, fact: CombatFact) -> Report;
         fn observe(
             self: &mut Runtime,
             sequence: u64,
@@ -204,6 +246,15 @@ fn map_event(value: actor_core::Event) -> ffi::Event {
         actor_core::Event::BodyRejected => ffi::Event::BodyRejected,
         actor_core::Event::RemovalRequested => ffi::Event::RemovalRequested,
         actor_core::Event::BodyAbsent => ffi::Event::BodyAbsent,
+        actor_core::Event::AttackRequested => ffi::Event::AttackRequested,
+        actor_core::Event::AttackAdmitted => ffi::Event::AttackAdmitted,
+        actor_core::Event::AttackRefused => ffi::Event::AttackRefused,
+        actor_core::Event::AttackInterrupted => ffi::Event::AttackInterrupted,
+        actor_core::Event::SwingHit => ffi::Event::SwingHit,
+        actor_core::Event::SwingMiss => ffi::Event::SwingMiss,
+        actor_core::Event::TargetKilled => ffi::Event::TargetKilled,
+        actor_core::Event::TargetLost => ffi::Event::TargetLost,
+        actor_core::Event::ActorDefeated => ffi::Event::ActorDefeated,
     }
 }
 
@@ -217,6 +268,57 @@ fn map_phase(value: actor_core::Phase) -> ffi::Phase {
 }
 
 impl Runtime {
+    fn combat(&mut self, sequence: u64, tick: u64, fact: ffi::CombatFact) -> ffi::Report {
+        boundary(|| {
+            let kind = match fact.kind {
+                ffi::Kind::AttackAdmitted => actor_core::Kind::AttackAdmitted,
+                ffi::Kind::AttackRefused => actor_core::Kind::AttackRefused,
+                ffi::Kind::AttackInterrupted => actor_core::Kind::AttackInterrupted,
+                ffi::Kind::SwingHit => actor_core::Kind::SwingHit,
+                ffi::Kind::SwingMiss => actor_core::Kind::SwingMiss,
+                ffi::Kind::TargetKilled => actor_core::Kind::TargetKilled,
+                ffi::Kind::TargetLost => actor_core::Kind::TargetLost,
+                ffi::Kind::ActorDefeated => actor_core::Kind::ActorDefeated,
+                _ => {
+                    let s = self.0.inspect();
+                    return ffi::Report {
+                        status: ffi::Status::InvalidInput,
+                        event: ffi::Event::None,
+                        epoch: s.epoch,
+                        generation: s.generation,
+                        operation: fact.operation,
+                        x: 0,
+                        y: 0,
+                        z: 0,
+                    };
+                }
+            };
+            let r = self.0.combat(
+                sequence,
+                tick,
+                actor_core::CombatFact {
+                    epoch: fact.epoch,
+                    generation: fact.generation,
+                    goal: fact.goal,
+                    operation: fact.operation,
+                    target: fact.target,
+                    kind,
+                    damage: fact.damage,
+                },
+            );
+            ffi::Report {
+                status: map_status(r.status),
+                event: map_event(r.event),
+                epoch: r.epoch,
+                generation: r.generation,
+                operation: r.operation,
+                x: r.point[0],
+                y: r.point[1],
+                z: r.point[2],
+            }
+        })
+    }
+
     fn advance(&mut self, sequence: u64, tick: u64, inputs: Vec<ffi::Input>) -> ffi::Report {
         boundary(|| {
             // Check length before conversion: fixed work, no truncation of facts.
@@ -242,6 +344,8 @@ impl Runtime {
                     ffi::Kind::Pause => actor_core::Kind::Pause,
                     ffi::Kind::Resume => actor_core::Kind::Resume,
                     ffi::Kind::StartApproach => actor_core::Kind::StartApproach,
+                    ffi::Kind::CreateMeleeBody => actor_core::Kind::CreateMeleeBody,
+                    ffi::Kind::StartMelee => actor_core::Kind::StartMelee,
                     _ => {
                         let s = self.0.inspect();
                         return ffi::Report {
@@ -300,6 +404,9 @@ impl Runtime {
                         actor: c.actor,
                         client: c.client,
                         self_body: c.self_body,
+                        type_id: c.type_id,
+                        level: c.level,
+                        service: c.service,
                     });
                 }
             } else {
@@ -367,9 +474,19 @@ impl Runtime {
                     actor_core::Approach::Reached => ffi::Approach::Reached,
                     actor_core::Approach::Paused => ffi::Approach::Paused,
                     actor_core::Approach::Retiring => ffi::Approach::Retiring,
+                    actor_core::Approach::Engaging => ffi::Approach::Engaging,
+                    actor_core::Approach::Victory => ffi::Approach::Victory,
+                    actor_core::Approach::Lost => ffi::Approach::Lost,
+                    actor_core::Approach::Defeated => ffi::Approach::Defeated,
                 },
                 goal: s.goal,
                 target: s.target,
+                combat_body: s.combat_body,
+                melee: s.melee,
+                attacking: s.attacking,
+                swings: s.swings,
+                hits: s.hits,
+                damage: s.damage,
                 patrol: match s.patrol {
                     actor_core::Patrol::Disabled => ffi::Patrol::Disabled,
                     actor_core::Patrol::Running => ffi::Patrol::Running,

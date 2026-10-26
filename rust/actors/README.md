@@ -11,6 +11,88 @@ logical actor, then releases the box. The registered `ActorRuntimeTest` uses the
 same API, including a fake native move-result trace. The pointer-free
 `eqemu_rust_bridge_v1` marker remains 42 for existing zone-link validation.
 
+## Opt-in one-encounter melee (candidate; integrated qualification pending)
+
+`Send(CreateMeleeBody)` opts into a separate ordinary body profile: race 1,
+class/level 1, size 6, HP 100, body type 1, targetable, STR/STA/DEX/AGI 75,
+min/max melee damage 2/6 and native attack delay 2000ms. No equipment, spells,
+loot or progression is installed. `CreateBody` retains its original untargetable,
+noncombat profile. Wait for native `Body::Present`, then explicitly call
+`Adapter::StartMelee(scope)` with zero to four registered NPC instances. It is
+mutually exclusive with manual movement, patrol and approach. Ordinary NPC AI
+is unchanged; Rust actor voluntary AI remains gated, including incidental
+riposte/spell attack entry points. The adapter alone authorizes primary swings.
+
+Rust uses the existing deterministic nearest/incarnation tie-break and local
+approach bounds, but additionally requires **NPC type 2011, level 1**, not a
+name, spawn ID or level-only city classifier. Native service/body facts also
+exclude nonordinary subjects. Tests explicitly exclude city types 2030, 2156,
+2004, 2007 and Fippy types 2001/2109/2119. Runtime entity IDs only author scope;
+process-monotonic native incarnations authorize targets. A reused entity ID
+cannot inherit the old scope. Resume retains the selected melee incarnation,
+advances goal identity and requires fresh observations; it cannot silently pick
+another target. Victory, lost target and defeat are quiet nonresumable states.
+A new encounter requires explicit retirement, body creation and scope opt-in.
+
+After correlated approach completion, a fresh observation requests one melee
+operation. Native admission is a distinct later fact. The adapter revalidates
+actor epoch/generation, goal, operation and target incarnation, North Qeynos
+zone 2/version 0 and combat permission, actual HP/status/control, ownership,
+targetability, mutual-only hate,
+LOS and native melee reach on every combat advance and immediately before each
+swing. The supported stationary engagement envelope remains XY <=5, Z <=6;
+there is no pursuit. Native flee is unmodified: leaving that envelope pauses,
+not victory or fabricated movement. Native `attack_timer.Check()` gates the
+ordinary `NPC::Attack` entry point. Rust never computes damage or schedules a
+swing per tick; there are no direct HP, Damage or Death calls in the encounter.
+Pause does not stop the rat's real retaliation or flee behavior.
+
+`CombatFact` carries the complete actor/goal/operation/target authority. Admission,
+refusal, interruption, damaging/non-damaging swings, target loss, actor defeat and
+natural target kill are distinct events. Snapshot exposes actual HP-loss damage,
+hits and swings for the current goal. `SwingMiss` denotes a native swing with no
+observed HP loss (not an invented damage formula). Native Death completion only
+latches a target kill when the exact actor's authorized swing caused it; the
+adapter separately reports actual HP loss before publishing that kill. An
+external death, disappearance, Depop, corpse or timeout cannot become victory.
+Pending owned death facts outrank pause/retire cancellation, while cleanup still
+requires observed native absence. Terminals remain in `last_terminal` through
+retirement and shutdown. No pointers cross CXX or survive in the adapter's
+combat record; callbacks only latch bounded values and never reenter Rust.
+
+Source-owned coverage adds deterministic melee policy/protocol tests, a CXX
+owned-value contract case, and two final in-server cases. All 15 existing PoK
+cases retain their 10-second deadlines. Each new case has an explicit 30-second
+cap for real 2-second native attack timers; the suite/report/diagnostic budgets
+remain 32 cases / 4096 bytes / 256 bytes. The new cases use real Shutdown/Bootup
+in the world-connected zone host to visit North Qeynos (2/version 0), then
+restore the prior zone, server identity, idle override and host termination rule
+on success or failure. Default launch remains PoK. They require actual map,
+navmesh, water and floor/LOS data, native spawn 10863/group 7678/type 2011, and
+unchanged public rat stats (11 HP, damage 1..6). The victory case includes a
+closer public Tomer template (2030), independently sampled approach, observed
+HP loss and correlated natural death, 400ms quiet victory and retirement. The
+cancellation case exercises actual combat pause, native stun, explicit resume,
+external removal, forced native ID reuse with an ordinary public rat template,
+quiet exclusion and real active-combat zone teardown. Sampling <=250ms,
+movement/displacement, stop <=1000ms and quiet drift <=0.05 bounds are retained.
+Diagnostics report measured damage, HP, cadence and quiet/cleanup observations;
+the cadence assertion allows only the sampling uncertainty (>=1750ms between
+samples for the configured 2000ms timer). Setup placement never counts as approach.
+
+Content attribution: sealed public PEQ archive
+`71c9969a65c190ab7f388f5887136d0e5f705ad3ed54788276827ccd275f1266`.
+Neither combat permissions nor rat flee/stats are rewritten. PoK remains
+noncombat. **No current-head native result is claimed**: real Qeynos startup,
+combat/cadence/flee behavior, all retained PoK cases, native utilities/build/link,
+VM/database/native cleanup and independent review remain caller-owned integrated
+acceptance gates. Source coverage is not measured native qualification.
+The approved standalone VM snapshot formatter and quickcheck provide advisory
+feedback during writing. Their receipts identify the checked dirty snapshot;
+they do not replace exact committed-head acceptance. The quickcheck cannot
+compile this changed bridge/header scope. An unavailable native object check is
+not a passing build. No Cargo or native code runs on the implementation host.
+
 ## Opt-in one-shot native approach (candidate; native qualification pending)
 
 Create a body with the existing `Send(CreateBody)` interface, wait for actual

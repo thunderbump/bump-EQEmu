@@ -114,6 +114,8 @@ private:
     uint64 actor_generation_ = 0;
     uint64 actor_process_count_ = 0;
     uint64 native_decision_count_ = 0;
+    bool actor_swing_authorized_ = false;
+    bool ActorAttackTimerReady() { return attack_timer.Check(); }
 public:
     // Independent of IsAIControlled: native mechanics continue, voluntary AI does not.
     // Process-local, nonwrapping lifetime identity; independent of address/ID/tick.
