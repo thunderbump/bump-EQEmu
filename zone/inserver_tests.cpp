@@ -1279,8 +1279,8 @@ bool Publish()
 		{"finalized", true}, {"passed", !scenarios.empty() && failed == 0},
 		{"tests", results}
 	};
-	const auto bytes = report.dump() + "\n";
-	if (bytes.size() > 4096) {
+	const auto bytes = SerializeSuiteReport(std::move(report));
+	if (bytes.empty()) {
 		std::fputs("In-server test report exceeds 4096 bytes\n", stderr);
 		return false;
 	}

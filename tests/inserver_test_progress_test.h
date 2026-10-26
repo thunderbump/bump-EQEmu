@@ -20,6 +20,7 @@ public:
 		TEST_ADD(InserverTestProgressTest::InterruptedCase);
 		TEST_ADD(InserverTestProgressTest::FailedCase);
         TEST_ADD(InserverTestProgressTest::RestorationDeadlineBoundary);
+        TEST_ADD(InserverTestProgressTest::BoundedSuiteReport);
 		TEST_ADD(InserverTestProgressTest::BoundedEscapedFields);
 #ifndef _WIN32
 		TEST_ADD(InserverTestProgressTest::FlushBeforeReturn);
@@ -101,6 +102,40 @@ private:
             TEST_ASSERT(event["elapsed_ms"] == cap + 1);
             TEST_ASSERT(event["diagnostic"] == "in-server scenario exceeded its bounded deadline");
         }
+    }
+
+    void BoundedSuiteReport()
+    {
+        for (const unsigned count : {21u, 32u}) {
+            nlohmann::json report = {
+                {"version", 1}, {"run_id", run_id}, {"suite", "zone"},
+                {"selected", count}, {"started", count}, {"completed", count},
+                {"failed", 1}, {"finalized", true}, {"passed", false},
+                {"tests", nlohmann::json::array()}
+            };
+            for (unsigned i = 0; i < count; ++i) {
+                report["tests"].push_back({{"name", std::to_string(i) + std::string(62, 'n')},
+                    {"passed", i != 0}, {"diagnostic", "original failure " + std::string(239, 'd')}});
+            }
+            // The old all-diagnostics serialization rejects this valid suite.
+            TEST_ASSERT(report.dump().size() + 1 > 4096);
+            const auto bytes = InserverTests::SerializeSuiteReport(report);
+            TEST_ASSERT(!bytes.empty() && bytes.size() <= 4096 && bytes.back() == '\n');
+            const auto bounded = nlohmann::json::parse(bytes);
+            TEST_ASSERT(bounded["tests"].size() == count);
+            for (unsigned i = 0; i < count; ++i) {
+                TEST_ASSERT(bounded["tests"][i]["name"] == report["tests"][i]["name"]);
+                TEST_ASSERT(bounded["tests"][i]["passed"] == report["tests"][i]["passed"]);
+            }
+            auto metadata = bounded;
+            metadata["tests"] = report["tests"];
+            TEST_ASSERT(metadata == report); // no result/count/identity changes
+            if (count == 21) {
+                TEST_ASSERT(bounded["tests"][0]["diagnostic"].get<std::string>().find("original failure") == 0);
+            }
+        }
+        const nlohmann::json small = {{"tests", {{{"name", "small"}, {"passed", true}, {"diagnostic", "done"}}}}};
+        TEST_ASSERT(InserverTests::SerializeSuiteReport(small) == small.dump() + "\n");
     }
 
 	void BoundedEscapedFields()
