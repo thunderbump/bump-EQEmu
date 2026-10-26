@@ -289,7 +289,10 @@ template<bool Cancel> Result ActorMelee()
         break;
     case 4:
         drift = std::max(drift, glm::distance(previous, quiet));
-        if (!body || body->IsMoving() || drift > 0.05f || state.swings != quiet_swings) { return fail("quiet attacks/drift"); }
+        if (!body) { return fail("quiet body absent"); }
+        if (body->IsMoving()) { return fail("quiet native motion"); }
+        if (drift > 0.05f) { return fail("quiet body drift"); }
+        if (state.swings != quiet_swings) { return fail("quiet extra swing"); }
         if constexpr (!Cancel) {
             if (state.approach != Approach::Victory || state.operation || state.last_terminal != Event::TargetKilled) { return fail("victory not latched"); }
             if (now - stage_at < 400) { break; }

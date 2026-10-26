@@ -234,8 +234,11 @@ void Adapter::Apply(const eqemu_proof::Report &report)
     } else if (report.event == Event::StopRequested) {
         if (auto *npc = Body()) {
             auto &movement = MobMovementManager::Get();
-            // A native completion already latched before Stop remains truthful.
-            if (movement.InspectActorTravel(npc) == MobMovementManager::ActorTravel::Moving) {
+            // Attack can queue FaceTarget rotation without an actor travel goal.
+            // Drain it on combat pause too, even before IsMoving becomes true.
+            // StopNavigation preserves an already latched travel completion.
+            if (Inspect().attacking ||
+                movement.InspectActorTravel(npc) == MobMovementManager::ActorTravel::Moving) {
                 movement.StopNavigation(npc);
             }
         }
