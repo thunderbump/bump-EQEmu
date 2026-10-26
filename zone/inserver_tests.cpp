@@ -1460,15 +1460,14 @@ void Process()
 	}
     // Restoration may finish after the cap. Record cleanup truthfully first,
     // then refuse an overdue Passed result before emitting a successful case-end.
-    result = EnforceScenarioDeadline(std::move(result), elapsed_ms(), scenarios[current].deadline_ms);
+    const auto completed_elapsed_ms = elapsed_ms();
+    result = EnforceScenarioDeadline(std::move(result), completed_elapsed_ms, scenarios[current].deadline_ms);
 	// Qualification uses the same real scenario and then proves an assertion
 	// failure reaches the VM caller. It cannot replace native execution.
 	if (assertion_control && result.outcome == Outcome::Passed) {
 		result = {Outcome::Failed, "deliberate in-server assertion control after native processing"};
 	}
-	EmitCaseProgress(stderr, run_id, scenarios[current].name,
-		std::chrono::duration_cast<std::chrono::milliseconds>(
-			std::chrono::steady_clock::now() - progress_started_at).count(),
+	EmitCaseProgress(stderr, run_id, scenarios[current].name, completed_elapsed_ms,
 		result.outcome == Outcome::Passed, result.diagnostic);
 	if (scenarios[current].cleanup) { scenarios[current].cleanup(); }
 	results.push_back({
