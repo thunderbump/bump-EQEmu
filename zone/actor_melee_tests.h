@@ -4,30 +4,59 @@ struct MeleeVisit {
     bool active = false;
     uint32 zone_id = 0, instance_id = 0, server_id = 0;
     bool is_static = false, idle = false;
+    bool boot_pending = false, restoring = false, boot_failed = false, finishing = false;
+    Result result{Outcome::Pending, ""};
 } melee_visit;
 
 std::chrono::steady_clock::time_point melee_visit_started;
 unsigned melee_boot_records = 0;
 
-bool RestoreMeleeZone()
+void ReportMeleeTransition(const char *phase)
 {
-    if (!melee_visit.active) { return true; }
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - melee_visit_started).count();
+    std::fprintf(stderr, "EQEMU_NATIVE_DIAGNOSTIC_CONTEXT phase=%s ms=%lld %s\n",
+        phase, static_cast<long long>(elapsed), melee_result_context);
+}
+
+// Shutdown closes admission immediately. Replacement boot must wait for another
+// loop turn so their combined work cannot starve the shared UDP event loop.
+bool QueueMeleeBoot(bool restoring)
+{
     KeepZoneHostAlive host;
     if (!host.Disable()) { return false; }
-    MeleeTransitionTrace trace;
-    ObserveMeleeBootStage("restore-shutdown-start");
+    ReportMeleeTransition(restoring ? "restore-shutdown-start" : "visit-shutdown-start");
+    ObserveMeleeBootStage(restoring ? "restore-shutdown-start" : "visit-shutdown-start");
     if (zone) { zone->Shutdown(); }
-    ObserveMeleeBootStage("restore-shutdown-end");
-    const bool booted = !zone && !is_zone_loaded &&
-        Zone::Bootup(melee_visit.zone_id, melee_visit.instance_id, melee_visit.is_static);
-    ObserveMeleeBootStage("restore-boot-returned");
+    ObserveMeleeBootStage(restoring ? "restore-shutdown-end" : "visit-shutdown-end");
+    ReportMeleeTransition(restoring ? "restore-shutdown-end" : "visit-shutdown-end");
+    const bool unloaded = !zone && !is_zone_loaded;
+    const bool restored = host.Restore();
+    melee_visit.restoring = restoring;
+    melee_visit.boot_failed = !unloaded || !restored;
+    melee_visit.boot_pending = unloaded && restored;
+    return melee_visit.boot_pending;
+}
+
+bool AdvanceMeleeBoot()
+{
+    if (!melee_visit.boot_pending) { return false; }
+    melee_visit.boot_pending = false;
+    KeepZoneHostAlive host;
+    ReportMeleeTransition(melee_visit.restoring ? "restore-boot-start" : "visit-boot-start");
+    const bool booted = host.Disable() && !zone && !is_zone_loaded && Zone::Bootup(
+        melee_visit.restoring ? melee_visit.zone_id : 2,
+        melee_visit.restoring ? melee_visit.instance_id : 0, melee_visit.is_static);
+    ObserveMeleeBootStage(melee_visit.restoring ? "restore-boot-returned" : "visit-boot-returned");
+    ReportMeleeTransition(melee_visit.restoring ? "restore-boot-returned" : "visit-boot-returned");
     if (booted && zone) {
         zone->SetZoneServerId(melee_visit.server_id);
-        zone->quest_idle_override = melee_visit.idle;
+        zone->quest_idle_override = melee_visit.restoring ? melee_visit.idle : true;
     }
     const bool restored = host.Restore();
-    if (booted && restored && worldserver.Connected()) { melee_visit.active = false; return true; }
-    return false;
+    melee_visit.boot_failed = !booted || !restored || !worldserver.Connected();
+    if (melee_visit.restoring && !melee_visit.boot_failed) { melee_visit.active = false; }
+    return true;
 }
 
 bool VisitMeleeZone()
@@ -37,35 +66,32 @@ bool VisitMeleeZone()
         zone->IsStaticZone(), zone->quest_idle_override};
     melee_visit_started = std::chrono::steady_clock::now();
     melee_boot_records = 0;
-    KeepZoneHostAlive host;
-    if (!host.Disable()) { return false; }
-    MeleeTransitionTrace trace;
-    ObserveMeleeBootStage("visit-shutdown-start");
-    zone->Shutdown();
-    ObserveMeleeBootStage("visit-shutdown-end");
-    const bool booted = !zone && !is_zone_loaded && Zone::Bootup(2, 0, melee_visit.is_static);
-    ObserveMeleeBootStage("visit-boot-returned");
-    if (booted && zone) {
-        zone->SetZoneServerId(melee_visit.server_id);
-        zone->quest_idle_override = true;
-    }
-    const bool restored = host.Restore();
-    return booted && restored && zone && zone->GetZoneID() == 2 && worldserver.Connected();
+    std::snprintf(melee_result_context, sizeof(melee_result_context), "visit");
+    return QueueMeleeBoot(false);
 }
 
 void CleanupMelee()
 {
-    RestoreMeleeZone(); // fallback for registry timeout; never changes fixture/media
+    // All terminal paths, including the registry deadline, await restoration.
     actor_shutdown_armed = false;
+    melee_visit.finishing = false;
 }
 
-Result FinishMelee(Result result)
+Result FinishMelee(Result result, bool verify_active_teardown = false)
 {
-    std::snprintf(melee_result_context, sizeof(melee_result_context), "result=%s %s",
-        result.outcome == Outcome::Passed ? "passed" : "failed", result.diagnostic.c_str());
+    if (!melee_visit.active) { return result; }
+    melee_visit.result = std::move(result);
+    melee_visit.finishing = true;
+    std::snprintf(melee_result_context, sizeof(melee_result_context), "pending-restore result=%s %s",
+        melee_visit.result.outcome == Outcome::Passed ? "passed" : "failed", melee_visit.result.diagnostic.c_str());
     std::fprintf(stderr, "EQEMU_NATIVE_DIAGNOSTIC_CONTEXT %s\n", melee_result_context);
-    if (!RestoreMeleeZone()) { return {Outcome::Failed, "melee prior zone/host restoration failed"}; }
-    return result;
+    if (!QueueMeleeBoot(true)) {
+        melee_visit.result = {Outcome::Failed, "melee prior zone shutdown/host restoration failed"};
+    } else if (verify_active_teardown && (!actor_shutdown_valid || actor_shutdown_stages != 3)) {
+        melee_visit.result = {Outcome::Failed, "melee active combat cleanup ordering"};
+    }
+    actor_shutdown_armed = false;
+    return {Outcome::Pending, ""};
 }
 
 // Both setup and replacement subjects use the sealed public native templates.
@@ -102,6 +128,15 @@ bool MeleeStart(NPC *rat, float distance, glm::vec3 &start)
 template<bool Cancel> Result ActorMelee()
 {
     using namespace eqemu_proof;
+    if (melee_visit.finishing) {
+        if (melee_visit.boot_pending) { return {Outcome::Pending, ""}; }
+        if (melee_visit.active || melee_visit.boot_failed) {
+            return {Outcome::Failed, "melee prior zone/host restoration failed"};
+        }
+        auto result = melee_visit.result;
+        result.diagnostic += " prior-zone-restored";
+        return result;
+    }
     static unsigned step = 0, samples = 0;
     static uint32 began = 0, stage_at = 0, action_at = 0, last_at = 0, last_swing_at = 0;
     static uint32 min_cadence = 30000, stop_ms = 0;
@@ -366,21 +401,18 @@ template<bool Cancel> Result ActorMelee()
         actor_shutdown_armed = true;
         // Actual Zone::Shutdown while combat is admitted; hooks establish closed
         // admission, native absence, then Rust closure. Restore boots prior zone.
-        if (!RestoreMeleeZone()) { return fail("active combat teardown/restore"); }
-        actor_shutdown_armed = false;
-        if (!actor_shutdown_valid || actor_shutdown_stages != 3) { return fail("active combat cleanup ordering"); }
         {
             char text[220];
-            std::snprintf(text, sizeof(text), "melee pause/control quiet>=400/1900ms resume loss/reuse quiet>=400ms stop=%ums drift=%.3f active-zone-teardown closed/absent prior-zone-restored",
+            std::snprintf(text, sizeof(text), "melee pause/control quiet>=400/1900ms resume loss/reuse quiet>=400ms stop=%ums drift=%.3f active-zone-teardown closed/absent",
                 stop_ms, drift);
-            return {Outcome::Passed, text};
+            return FinishMelee({Outcome::Passed, text}, true);
         }
     case 12:
         if (state.alive) { break; }
         if (body || state.body != Body::Absent || state.last_terminal != Event::TargetKilled) { return fail("retirement absence/terminal"); }
         {
             char text[256];
-            std::snprintf(text, sizeof(text), "melee start=%.1f,%.1f,%.1f n=%u d=%.2f hp=%lld damage=%llu hits=%llu swings=%llu cadence=%ums quiet=400ms city-safe natural-kill retired/restored",
+            std::snprintf(text, sizeof(text), "melee start=%.1f,%.1f,%.1f n=%u d=%.2f hp=%lld damage=%llu hits=%llu swings=%llu cadence=%ums quiet=400ms city-safe natural-kill retired",
                 origin.x, origin.y, origin.z, samples, travelled, static_cast<long long>(min_hp), static_cast<unsigned long long>(total_damage),
                 static_cast<unsigned long long>(total_hits), static_cast<unsigned long long>(total_swings), min_cadence);
             return FinishMelee({Outcome::Passed, text});

@@ -26,13 +26,6 @@
 #include <string>
 #include <utility>
 
-#if defined(__linux__)
-#include <execinfo.h>
-#include <signal.h>
-#include <sys/time.h>
-#include <unistd.h>
-#endif
-
 extern EntityList entity_list;
 extern WorldServer worldserver;
 extern Zone *zone;
@@ -108,52 +101,7 @@ Result BeaconLifetime()
 }
 
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
-// Diagnostic branch only. Sample the main thread during a real transition,
-// without stopping/resuming it or changing the observer's responsiveness limits.
 char melee_result_context[256] = "visit";
-#if defined(__linux__)
-void MeleeTransitionStack(int)
-{
-    constexpr char prefix[] = "EQEMU_NATIVE_DIAGNOSTIC_STACK_BEGIN\n";
-    (void) ::write(STDERR_FILENO, prefix, sizeof(prefix) - 1);
-    void *frames[16];
-    const int count = backtrace(frames, 16);
-    backtrace_symbols_fd(frames, count, STDERR_FILENO);
-    (void) ::write(STDERR_FILENO, melee_result_context, std::strlen(melee_result_context));
-    (void) ::write(STDERR_FILENO, "\n", 1);
-    constexpr char suffix[] = "EQEMU_NATIVE_DIAGNOSTIC_STACK_END\n";
-    (void) ::write(STDERR_FILENO, suffix, sizeof(suffix) - 1);
-}
-struct MeleeTransitionTrace {
-    struct sigaction prior_action {};
-    struct itimerval prior_timer {};
-    bool armed = false;
-    MeleeTransitionTrace() {
-        if (getitimer(ITIMER_REAL, &prior_timer) != 0 ||
-            prior_timer.it_value.tv_sec || prior_timer.it_value.tv_usec ||
-            prior_timer.it_interval.tv_sec || prior_timer.it_interval.tv_usec) { return; }
-        void *warm[2];
-        backtrace(warm, 2); // Load the unwinder before the signal handler.
-        struct sigaction action {};
-        action.sa_handler = MeleeTransitionStack;
-        sigemptyset(&action.sa_mask);
-        action.sa_flags = SA_RESTART;
-        if (sigaction(SIGALRM, &action, &prior_action) != 0) { return; }
-        struct itimerval timer {};
-        timer.it_value.tv_usec = 100000;
-        armed = setitimer(ITIMER_REAL, &timer, nullptr) == 0;
-        if (!armed) { sigaction(SIGALRM, &prior_action, nullptr); }
-    }
-    ~MeleeTransitionTrace() {
-        if (!armed) { return; }
-        struct itimerval timer {};
-        setitimer(ITIMER_REAL, &timer, nullptr);
-        sigaction(SIGALRM, &prior_action, nullptr);
-    }
-};
-#else
-struct MeleeTransitionTrace {};
-#endif
 bool actor_idle_saved = false;
 bool actor_prior_idle_override = false;
 uint16 actor_neighbor_id = 0;
@@ -167,8 +115,8 @@ uint16 actor_shutdown_id = 0;
 uint64 actor_shutdown_epoch = 0;
 uint64 actor_shutdown_generation = 0;
 
-// Only used around the synchronous shutdown/boot transition. Never persist the
-// override, and restore even when an assertion or Bootup fails.
+// Test-only shutdown/boot phases never persist this override. Restore it
+// before returning to the event loop, including when either phase fails.
 struct KeepZoneHostAlive {
     const bool prior = RuleB(Zone, KillProcessOnDynamicShutdown);
     bool Disable() {
@@ -1470,9 +1418,17 @@ bool Configure()
 
 void Process()
 {
-	if (!enabled || finalized || !zone || !is_zone_loaded || !worldserver.Connected()) {
+	if (!enabled || finalized || !worldserver.Connected()) {
 		return;
 	}
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+	// Replacement boot gets its own loop turn so network callbacks can run
+	// after shutdown. No scenario or entity processing runs on this turn.
+	if (AdvanceMeleeBoot()) { return; }
+	if ((!zone || !is_zone_loaded) && !melee_visit.finishing && !melee_visit.boot_failed) { return; }
+#else
+	if (!zone || !is_zone_loaded) { return; }
+#endif
 	if (!case_started) {
 		case_started = true;
 		++started;
@@ -1481,11 +1437,21 @@ void Process()
 		EmitCaseProgress(stderr, run_id, scenarios[current].name, 0);
 	}
 	auto result = scenarios[current].process();
-	// A scenario may synchronously shut down the zone. Finish recording and
-	// publishing its result here; do not require another loaded-zone advance.
-	if (result.outcome == Outcome::Pending && Timer::GetCurrentTime() - case_started_at > scenarios[current].deadline_ms) {
+	// Combat retains its deadline. Once a terminal result begins cleanup,
+	// await real restoration before recording it, as the synchronous path did.
+	bool restoring = false;
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+	restoring = melee_visit.finishing;
+#endif
+	if (result.outcome == Outcome::Pending && !restoring && Timer::GetCurrentTime() - case_started_at > scenarios[current].deadline_ms) {
 		result = {Outcome::Failed, "in-server scenario exceeded its bounded deadline"};
 	}
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+	// A registry deadline must also restore the original zone before case-end.
+	if (result.outcome != Outcome::Pending && melee_visit.active && !melee_visit.finishing) {
+		result = FinishMelee(std::move(result));
+	}
+#endif
 	if (result.outcome == Outcome::Pending) {
 		return;
 	}
