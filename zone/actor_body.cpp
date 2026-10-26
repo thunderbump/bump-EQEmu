@@ -263,8 +263,13 @@ void Adapter::CombatFact(eqemu_proof::Kind kind, uint32_t damage)
     last_ = runtime_->combat(state.sequence + 1, state.tick + 1, fact);
     Apply(last_);
     if (last_.status == eqemu_proof::Status::Ok && !Inspect().attacking) {
+        // Every accepted combat terminal owns cancellation, including terminals
+        // that never passed through StopRequested. Never act on a reused body.
+        if (auto *body = Body(); body && body->NativeIncarnation() == combat_.actor_incarnation) {
+            MobMovementManager::Get().StopNavigation(body);
+            body->SetTarget(nullptr);
+        }
         combat_.operation = 0;
-        if (auto *body = Body()) { body->SetTarget(nullptr); }
     }
 }
 

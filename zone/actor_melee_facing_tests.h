@@ -11,7 +11,7 @@ Result PollMeleeRestoration()
     return result;
 }
 
-enum class FacingCase { Timed };
+enum class FacingCase { Timed, Lost, Control, Unowned };
 
 template<FacingCase Mode> Result ActorMeleeFacing()
 {
@@ -86,49 +86,92 @@ template<FacingCase Mode> Result ActorMeleeFacing()
         origin = glm::vec3(body->GetPosition());
         // Initial setup faces directly away, before any goal/native motion.
         body->SetHeading(movement.FixHeading(body->CalculateHeadingToTarget(target->GetX(), target->GetY()) + 256));
+        if constexpr (Mode == FacingCase::Unowned) {
+            body->RotateToWalking(movement.FixHeading(body->GetHeading() + 128));
+            if (movement.InspectActorCombatMotion(body) != Motion::Unsupported) { return fail("unowned turn admitted"); }
+        }
         if (adapter.StartMelee({target_id}).status != Status::Ok) { return fail("goal"); }
         step = 5;
         break;
     case 5:
-        if (state.approach == Approach::Paused || state.approach == Approach::Lost || state.approach == Approach::Defeated) {
-            return fail("self-interruption before second swing");
+        if constexpr (Mode == FacingCase::Unowned) {
+            if (state.phase != Phase::Idle || state.approach != Approach::Paused) { break; }
+            if (state.swings || state.damage || state.last_terminal != Event::AttackRefused) { return fail("unowned turn not refused"); }
+            expected = Event::AttackRefused;
+        } else {
+            if (state.approach == Approach::Paused || state.approach == Approach::Lost || state.approach == Approach::Defeated) {
+                return fail("self-interruption before action");
+            }
+            if (!state.swings) { break; }
+            if (!first_swing_at) {
+                if (movement.InspectActorCombatMotion(body) != Motion::Facing) { return fail("native turn not queued by swing"); }
+                first_swing_at = now;
+            }
+            if constexpr (Mode == FacingCase::Timed) {
+                turning_seen |= body && body->IsMoving() && movement.InspectActorCombatMotion(body) == Motion::Facing;
+                if (state.swings < 2) { break; }
+                if (!turning_seen || now - first_swing_at < 1750) { return fail("turn/timed swing evidence"); }
+                expected = !target || target->GetHP() <= 0 ? Event::TargetKilled : Event::AttackInterrupted;
+                if (expected == Event::AttackInterrupted && adapter.Send({Kind::Pause, state.epoch,
+                    state.generation, state.operation, 0, 0, 0}).event != Event::StopRequested) { return fail("pause"); }
+            } else {
+                // Interrupt in the same test advance as the first actual swing,
+                // before its queued facing command gets a movement-manager tick.
+                if (!target || movement.InspectActorCombatMotion(body) != Motion::Facing) { return fail("interruption turn setup"); }
+                if constexpr (Mode == FacingCase::Lost) {
+                    target->Depop(false);
+                    expected = Event::TargetLost;
+                } else {
+                    body->Stun(1500);
+                    expected = Event::AttackInterrupted;
+                }
+            }
         }
-        if (!state.swings) { break; }
-        if (!first_swing_at) {
-            if (movement.InspectActorCombatMotion(body) != Motion::Facing) { return fail("native turn not queued by swing"); }
-            first_swing_at = now;
-        }
-        turning_seen |= body && body->IsMoving() && movement.InspectActorCombatMotion(body) == Motion::Facing;
-        if (state.swings < 2) { break; }
-        if (!turning_seen || now - first_swing_at < 1750) { return fail("turn/timed swing evidence"); }
         quiet_swings = state.swings;
         quiet_damage = state.damage;
         operation = state.operation;
         action_at = now;
-        expected = !target || target->GetHP() <= 0 ? Event::TargetKilled : Event::AttackInterrupted;
-        if (expected == Event::AttackInterrupted && adapter.Send({Kind::Pause, state.epoch,
-            state.generation, state.operation, 0, 0, 0}).event != Event::StopRequested) { return fail("pause"); }
         step = 6;
         break;
     case 6:
         if (!body || state.swings != quiet_swings || state.damage != quiet_damage) { return fail("terminal extra attack/absence"); }
-        if (state.phase != Phase::Idle || body->IsMoving() || movement.InspectActorCombatMotion(body) != Motion::Stopped) {
-            if (now - action_at > 1000) { return fail("terminal stop deadline"); }
+        if (state.phase != Phase::Idle) {
+            if (now - action_at > 1000) { return fail("terminal fact deadline"); }
             break;
         }
-        if (state.last_terminal != expected || (operation && state.last_operation != operation)) { return fail("terminal identity/outcome"); }
+        if (state.last_terminal != expected || !state.last_operation || (operation && state.last_operation != operation)) { return fail("terminal identity/outcome"); }
         if (!terminal_seen) {
             terminal_seen = true;
-            quiet_at = now;
-            stop_ms = now - action_at;
             settled = glm::vec3(body->GetPosition());
             settled_heading = body->GetHeading();
         }
         if (glm::distance(glm::vec3(body->GetPosition()), settled) > 0.05f || body->GetHeading() != settled_heading) {
-            return fail("terminal position/heading drift");
+            return fail("post-terminal position/heading drift");
         }
-        if (now - quiet_at < 400) { break; }
-        return FinishMelee({Outcome::Passed, "in-range facing-away native turn completed; second timed swing; terminal quiet>=400ms stop=" + std::to_string(stop_ms) + "ms"});
+        if (body->IsMoving() || movement.InspectActorCombatMotion(body) != Motion::Stopped) {
+            if (quiet_at || now - action_at > 1000) { return fail("terminal motion not drained"); }
+            break;
+        }
+        if (!quiet_at) {
+            quiet_at = now;
+            stop_ms = now - action_at;
+            if constexpr (Mode == FacingCase::Lost) {
+                if (entity_list.GetMob(target_id)) { quiet_at = 0; break; }
+                if (!entity_list.ReuseFreeIDForTest(target_id)) { return fail("reuse allocation"); }
+                auto *replacement = new NPC(content_db.LoadNPCTypesData(2011), nullptr,
+                    glm::vec4(target_position, 0), GravityBehavior::Ground);
+                entity_list.AddNPC(replacement, false);
+                if (replacement->GetID() != target_id || replacement->NativeIncarnation() == target_incarnation) { return fail("reuse identity"); }
+            }
+        }
+        if constexpr (Mode == FacingCase::Lost) {
+            auto *replacement = entity_list.GetNPCByID(target_id);
+            if (!replacement || replacement->GetHP() != 11 || replacement->CheckAggro(body) || body->CheckAggro(replacement) ||
+                adapter.Send({Kind::Resume, state.epoch, state.generation, 0, 0, 0, 0}).status != Status::Busy) { return fail("reused target authority"); }
+        }
+        if (now - quiet_at < (Mode == FacingCase::Control ? 1900u : 400u)) { break; }
+        return FinishMelee({Outcome::Passed, "in-range facing-away mode=" + std::to_string(static_cast<unsigned>(Mode)) +
+            " native-queue/terminal quiet; stop=" + std::to_string(stop_ms) + "ms swings=" + std::to_string(quiet_swings)});
     default: return fail("stage");
     }
     return {Outcome::Pending, ""};

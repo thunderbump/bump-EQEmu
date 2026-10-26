@@ -579,6 +579,7 @@ public:
 			return true;
 		}
 
+        if (mob->IsNPC() && mob->CastToNPC()->IsRustActor()) { mob->turning = false; }
 		if (mob->IsMoving()) {
 			mob->SetMoving(false);
             // Actor travel must stop at the last independently observed native
@@ -708,6 +709,15 @@ MobMovementManager::~MobMovementManager()
 {
 }
 
+static bool ActorControlAllowsNativeMotion(Mob *who)
+{
+    return who && who->IsNPC() && who->CastToNPC()->IsRustActor() &&
+        who->IsAIControlled() && !who->IsStunned() && !who->IsRooted() &&
+        !who->IsPseudoRooted() && !who->IsMezzed() && !who->IsFeared() &&
+        !who->IsBlind() && !who->IsCasting() && who->GetAppearance() == eaStanding &&
+        !who->Charmed() && !who->GetOwnerID() && who->GetHP() > 0;
+}
+
 void MobMovementManager::Process()
 {
 	for (auto &iter : _impl->Entries) {
@@ -715,7 +725,11 @@ void MobMovementManager::Process()
 		auto &commands = ent.Commands;
         // Check forced control before executing ANY queued displacement. Ordinary
         // NPCs do not enter this lane. Interruptions latch until the next request.
-        if (ent.actor_travel == ActorTravel::Moving && !ActorControlAllowsTravel(iter.first)) {
+        bool combat_facing = false;
+        for (const auto &command : commands) { combat_facing |= command->IsActorCombatFacing(); }
+        if ((ent.actor_travel == ActorTravel::Moving && !ActorControlAllowsTravel(iter.first)) ||
+            (combat_facing && (!ActorControlAllowsNativeMotion(iter.first) ||
+                iter.first->IsMeleeDisabled() || iter.first->DivineAura()))) {
             StopNavigation(iter.first);
         }
 
@@ -829,12 +843,7 @@ void MobMovementManager::NavigateTo(Mob *who, float x, float y, float z, MobMove
 
 bool MobMovementManager::ActorControlAllowsTravel(Mob *who)
 {
-    return who && who->IsNPC() && who->CastToNPC()->IsRustActor() &&
-        who->IsAIControlled() && !who->IsStunned() && !who->IsRooted() &&
-        !who->IsPseudoRooted() && !who->IsMezzed() && !who->IsFeared() &&
-        !who->IsBlind() && !who->IsCasting() && who->GetAppearance() == eaStanding &&
-        !who->Charmed() && !who->GetOwnerID() && !who->IsEngaged() &&
-        who->GetHP() > 0 && who->GetRunspeed() > 0;
+    return ActorControlAllowsNativeMotion(who) && !who->IsEngaged() && who->GetRunspeed() > 0;
 }
 
 MobMovementManager::ActorTravel MobMovementManager::InspectActorTravel(Mob *who) const
@@ -850,7 +859,7 @@ MobMovementManager::ActorCombatMotion MobMovementManager::InspectActorCombatMoti
         iter->second.actor_travel == ActorTravel::Moving) { return ActorCombatMotion::Unsupported; }
     const auto &commands = iter->second.Commands;
     if (commands.empty()) {
-        return who->IsMoving() ? ActorCombatMotion::Unsupported : ActorCombatMotion::Stopped;
+        return who->IsMoving() || who->turning ? ActorCombatMotion::Unsupported : ActorCombatMotion::Stopped;
     }
     for (const auto &command : commands) {
         if (!command->IsActorCombatFacing()) { return ActorCombatMotion::Unsupported; }
