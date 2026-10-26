@@ -725,12 +725,14 @@ void MobMovementManager::Process()
 		auto &commands = ent.Commands;
         // Check forced control before executing ANY queued displacement. Ordinary
         // NPCs do not enter this lane. Interruptions latch until the next request.
-        bool combat_facing = false;
-        for (const auto &command : commands) { combat_facing |= command->IsActorCombatFacing(); }
-        if ((ent.actor_travel == ActorTravel::Moving && !ActorControlAllowsTravel(iter.first)) ||
-            (combat_facing && (!ActorControlAllowsNativeMotion(iter.first) ||
-                iter.first->IsMeleeDisabled() || iter.first->DivineAura()))) {
-            StopNavigation(iter.first);
+        if (iter.first->IsNPC() && iter.first->CastToNPC()->IsRustActor()) {
+            bool combat_facing = false;
+            for (const auto &command : commands) { combat_facing |= command->IsActorCombatFacing(); }
+            if ((ent.actor_travel == ActorTravel::Moving && !ActorControlAllowsTravel(iter.first)) ||
+                (combat_facing && (!ActorControlAllowsNativeMotion(iter.first) ||
+                    iter.first->IsMeleeDisabled() || iter.first->DivineAura()))) {
+                StopNavigation(iter.first);
+            }
         }
 
 		while (true != commands.empty()) {

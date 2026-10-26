@@ -1246,7 +1246,6 @@ std::filesystem::path result_path;
 size_t current = 0;
 size_t started = 0;
 bool case_started = false;
-uint32 case_started_at = 0;
 std::chrono::steady_clock::time_point progress_started_at;
 nlohmann::json results = nlohmann::json::array();
 
@@ -1433,7 +1432,6 @@ void Process()
 	if (!case_started) {
 		case_started = true;
 		++started;
-		case_started_at = Timer::GetCurrentTime();
 		progress_started_at = std::chrono::steady_clock::now();
 		EmitCaseProgress(stderr, run_id, scenarios[current].name, 0);
 	}
