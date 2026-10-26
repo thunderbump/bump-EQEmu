@@ -69,6 +69,10 @@ XS(XS_EQEmu_MeleePluginStage)
 		case 1: InserverTests::ObserveMeleeBootStage("perl-plugin-directory-read"); break;
 		case 2: InserverTests::ObserveMeleeBootStage("perl-plugin-eval-start"); break;
 		case 3: InserverTests::ObserveMeleeBootStage("perl-plugin-eval-end"); break;
+		case 4: InserverTests::ObserveMeleeBootStage("perl-plugin-readable-start"); break;
+		case 5: InserverTests::ObserveMeleeBootStage("perl-plugin-readable-end"); break;
+		case 6: InserverTests::ObserveMeleeBootStage("perl-plugin-require-start"); break;
+		case 7: InserverTests::ObserveMeleeBootStage("perl-plugin-require-end"); break;
 		}
 	}
 	XSRETURN_EMPTY;
@@ -263,14 +267,28 @@ void Embperl::init_eval_file(void)
 		"sub eval_file {"
 		"my($package, $filename) = @_;"
 		"$filename=~s/\'//g;"
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+		// Observe the shared loader, including plugin.pl and directory plugins.
+		// Never expose plugin file identities or contents in these markers.
+		"EQEmu::MeleePluginStage(4) if $package eq 'plugin';"
+#endif
 		"if(! -r $filename) { print \"Unable to read perl file '$filename'\\n\"; return; }"
 		"my $mtime = -M $filename;"
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+		"EQEmu::MeleePluginStage(5) if $package eq 'plugin';"
+#endif
 		"if(defined $Cache{$package}{mtime}&&$Cache{$package}{mtime} <= $mtime && !($package eq 'plugin')){"
 		"	return;"
 		"} else {"
 		// we 'my' $filename,$mtime,$package,$sub to prevent them from changing our state up here.
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+		"EQEmu::MeleePluginStage(6) if $package eq 'plugin';"
+#endif
 		"	eval(\"package $package; my(\\$filename,\\$mtime,\\$package,\\$sub); \\$isloaded = 1; require './$filename'; \");"
 		" print $@ if $@;"
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+		"EQEmu::MeleePluginStage(7) if $package eq 'plugin';"
+#endif
 		"}"
 		"}", FALSE);
 }

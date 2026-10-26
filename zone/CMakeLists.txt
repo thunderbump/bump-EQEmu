@@ -677,6 +677,9 @@ eqemu_apply_format_warnings(zone)
 if(EQEMU_BUILD_TESTS)
     target_sources(zone PRIVATE inserver_tests.cpp inserver_tests.h inserver_test_progress.h)
     target_compile_definitions(zone PRIVATE EQEMU_BUILD_TESTS)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_link_options(zone PRIVATE -rdynamic) # diagnostic stack function names
+    endif()
 endif()
 
 include("${CMAKE_SOURCE_DIR}/cmake/ActorBridge.cmake")

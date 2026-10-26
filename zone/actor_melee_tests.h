@@ -14,6 +14,7 @@ bool RestoreMeleeZone()
     if (!melee_visit.active) { return true; }
     KeepZoneHostAlive host;
     if (!host.Disable()) { return false; }
+    MeleeTransitionTrace trace;
     ObserveMeleeBootStage("restore-shutdown-start");
     if (zone) { zone->Shutdown(); }
     ObserveMeleeBootStage("restore-shutdown-end");
@@ -38,6 +39,7 @@ bool VisitMeleeZone()
     melee_boot_records = 0;
     KeepZoneHostAlive host;
     if (!host.Disable()) { return false; }
+    MeleeTransitionTrace trace;
     ObserveMeleeBootStage("visit-shutdown-start");
     zone->Shutdown();
     ObserveMeleeBootStage("visit-shutdown-end");
@@ -59,6 +61,8 @@ void CleanupMelee()
 
 Result FinishMelee(Result result)
 {
+    std::snprintf(melee_result_context, sizeof(melee_result_context), "result=%s %s",
+        result.outcome == Outcome::Passed ? "passed" : "failed", result.diagnostic.c_str());
     if (!RestoreMeleeZone()) { return {Outcome::Failed, "melee prior zone/host restoration failed"}; }
     return result;
 }

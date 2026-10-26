@@ -26,6 +26,13 @@
 #include <string>
 #include <utility>
 
+#if defined(__linux__)
+#include <execinfo.h>
+#include <signal.h>
+#include <sys/time.h>
+#include <unistd.h>
+#endif
+
 extern EntityList entity_list;
 extern WorldServer worldserver;
 extern Zone *zone;
@@ -101,6 +108,50 @@ Result BeaconLifetime()
 }
 
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+// Diagnostic branch only. Sample the main thread during a real transition,
+// without stopping/resuming it or changing the observer's responsiveness limits.
+char melee_result_context[256] = "visit";
+#if defined(__linux__)
+void MeleeTransitionStack(int)
+{
+    constexpr char prefix[] = "DIAG_QEYNOS_TRANSITION_STACK\n";
+    (void) ::write(STDERR_FILENO, prefix, sizeof(prefix) - 1);
+    void *frames[16];
+    const int count = backtrace(frames, 16);
+    backtrace_symbols_fd(frames, count, STDERR_FILENO);
+    (void) ::write(STDERR_FILENO, melee_result_context, std::strlen(melee_result_context));
+    (void) ::write(STDERR_FILENO, "\n", 1);
+}
+struct MeleeTransitionTrace {
+    struct sigaction prior_action {};
+    struct itimerval prior_timer {};
+    bool armed = false;
+    MeleeTransitionTrace() {
+        if (getitimer(ITIMER_REAL, &prior_timer) != 0 ||
+            prior_timer.it_value.tv_sec || prior_timer.it_value.tv_usec ||
+            prior_timer.it_interval.tv_sec || prior_timer.it_interval.tv_usec) { return; }
+        void *warm[2];
+        backtrace(warm, 2); // Load the unwinder before the signal handler.
+        struct sigaction action {};
+        action.sa_handler = MeleeTransitionStack;
+        sigemptyset(&action.sa_mask);
+        action.sa_flags = SA_RESTART;
+        if (sigaction(SIGALRM, &action, &prior_action) != 0) { return; }
+        struct itimerval timer {};
+        timer.it_value.tv_usec = 100000;
+        armed = setitimer(ITIMER_REAL, &timer, nullptr) == 0;
+        if (!armed) { sigaction(SIGALRM, &prior_action, nullptr); }
+    }
+    ~MeleeTransitionTrace() {
+        if (!armed) { return; }
+        struct itimerval timer {};
+        setitimer(ITIMER_REAL, &timer, nullptr);
+        sigaction(SIGALRM, &prior_action, nullptr);
+    }
+};
+#else
+struct MeleeTransitionTrace {};
+#endif
 bool actor_idle_saved = false;
 bool actor_prior_idle_override = false;
 uint16 actor_neighbor_id = 0;
@@ -1309,15 +1360,17 @@ bool Publish()
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
 void ObserveMeleeBootStage(const char *stage)
 {
-    if (!enabled || !melee_visit.active || melee_boot_records >= 96) { return; }
+    // Leave room for per-plugin loader phases after the zone boot markers.
+    // Keep a hard visit-wide ceiling even if plugin initialization loops.
+    if (!enabled || !melee_visit.active || melee_boot_records >= 256) { return; }
     ++melee_boot_records;
     // Timer::GetCurrentTime is advanced by the zone loop, not synchronous boot.
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - melee_visit_started).count();
     // Use the zone console sink retained by normal-world failure evidence;
     // standalone stderr markers are not present in that console tail.
-    LogInfo("melee boot stage={} elapsed_ms={} record={}",
-        stage, static_cast<long long>(elapsed), melee_boot_records);
+    LogInfo("melee boot stage={} elapsed_ms={} record={} context={}",
+        stage, static_cast<long long>(elapsed), melee_boot_records, melee_result_context);
 }
 
 void BeforeActorFacts()
