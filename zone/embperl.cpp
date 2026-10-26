@@ -57,6 +57,24 @@ int argc = 5;
 #else
 int argc = 3;
 #endif
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+// Fixed diagnostic vocabulary only: never expose plugin names or contents.
+// The observer is inactive outside the opt-in in-server visit and caps output.
+XS(XS_EQEmu_MeleePluginStage)
+{
+	dXSARGS;
+	if (items == 1) {
+		switch (SvIV(ST(0))) {
+		case 0: InserverTests::ObserveMeleeBootStage("perl-plugin-directory-opened"); break;
+		case 1: InserverTests::ObserveMeleeBootStage("perl-plugin-directory-read"); break;
+		case 2: InserverTests::ObserveMeleeBootStage("perl-plugin-eval-start"); break;
+		case 3: InserverTests::ObserveMeleeBootStage("perl-plugin-eval-end"); break;
+		}
+	}
+	XSRETURN_EMPTY;
+}
+#endif
+
 //so embedded scripts can use xs extensions (ala 'use socket;')
 EXTERN_C void boot_DynaLoader(pTHX_ CV* cv);
 EXTERN_C void xs_init(pTHX)
@@ -70,6 +88,9 @@ EXTERN_C void xs_init(pTHX)
 	//add the strcpy stuff to get rid of const warnings....
 
 	newXS(strcpy(buf, "DynaLoader::boot_DynaLoader"), boot_DynaLoader, file);
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+	newXS(strcpy(buf, "EQEmu::MeleePluginStage"), XS_EQEmu_MeleePluginStage, file);
+#endif
 #ifdef EMBPERL_IO_CAPTURE
 	newXS(strcpy(buf, "EQEmuIO::PRINT"), XS_EQEmuIO_PRINT, file);
 #endif
@@ -176,13 +197,25 @@ void Embperl::DoInit()
 				"if(opendir(D,'" +
 				dir +
 				"')) { "
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+				" EQEmu::MeleePluginStage(0);"
+#endif
 				"	my @d = readdir(D);"
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+				" EQEmu::MeleePluginStage(1);"
+#endif
 				"	closedir(D);"
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+				" EQEmu::MeleePluginStage(2);"
+#endif
 				"	foreach(@d){ "
 				"		main::eval_file('plugin','" +
 				dir +
 				"/'.$_)if/\\.pl$/;"
 				"	}"
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+				" EQEmu::MeleePluginStage(3);"
+#endif
 			"}");
 			eval_pv(perl_command.c_str(), FALSE);
 		}
