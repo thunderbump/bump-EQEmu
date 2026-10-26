@@ -1,5 +1,6 @@
 #include "inserver_tests.h"
 #include "inserver_test_progress.h"
+#include "inserver_test_result.h"
 
 #include "common/eqemu_logsys.h"
 #include "common/json/json.hpp"
@@ -34,13 +35,6 @@ extern volatile bool is_zone_loaded;
 
 namespace InserverTests {
 namespace {
-
-enum class Outcome { Pending, Passed, Failed };
-
-struct Result {
-	Outcome outcome;
-	std::string diagnostic;
-};
 
 // Exercise the production formatter without depending on ambient zone names.
 // No entities are registered or retained by this scenario.
@@ -1450,9 +1444,13 @@ void Process()
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
 	restoring = melee_visit.finishing;
 #endif
-	if (result.outcome == Outcome::Pending && !restoring && Timer::GetCurrentTime() - case_started_at > scenarios[current].deadline_ms) {
-		result = {Outcome::Failed, "in-server scenario exceeded its bounded deadline"};
-	}
+    const auto elapsed_ms = [] {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - progress_started_at).count();
+    };
+    if (!restoring) {
+        result = EnforceScenarioDeadline(std::move(result), elapsed_ms(), scenarios[current].deadline_ms);
+    }
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
 	// A registry deadline must also restore the original zone before case-end.
 	if (result.outcome != Outcome::Pending && melee_visit.active && !melee_visit.finishing) {
@@ -1462,6 +1460,9 @@ void Process()
 	if (result.outcome == Outcome::Pending) {
 		return;
 	}
+    // Restoration may finish after the cap. Record cleanup truthfully first,
+    // then refuse an overdue Passed result before emitting a successful case-end.
+    result = EnforceScenarioDeadline(std::move(result), elapsed_ms(), scenarios[current].deadline_ms);
 	// Qualification uses the same real scenario and then proves an assertion
 	// failure reaches the VM caller. It cannot replace native execution.
 	if (assertion_control && result.outcome == Outcome::Passed) {
