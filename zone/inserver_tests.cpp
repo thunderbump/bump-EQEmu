@@ -1,6 +1,7 @@
 #include "inserver_tests.h"
 #include "inserver_test_progress.h"
 
+#include "common/eqemu_logsys.h"
 #include "common/json/json.hpp"
 #include "common/timer.h"
 #include "common/rulesys.h"
@@ -1313,9 +1314,10 @@ void ObserveMeleeBootStage(const char *stage)
     // Timer::GetCurrentTime is advanced by the zone loop, not synchronous boot.
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - melee_visit_started).count();
-    std::fprintf(stderr, "melee boot stage=%s elapsed_ms=%lld record=%u\n",
+    // Use the zone console sink retained by normal-world failure evidence;
+    // standalone stderr markers are not present in that console tail.
+    LogInfo("melee boot stage={} elapsed_ms={} record={}",
         stage, static_cast<long long>(elapsed), melee_boot_records);
-    std::fflush(stderr);
 }
 
 void BeforeActorFacts()

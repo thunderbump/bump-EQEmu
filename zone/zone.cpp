@@ -1207,9 +1207,12 @@ bool Zone::Init(bool is_static) {
 
 	// make sure that anything that needs to be loaded prior to scripts is loaded before here
 	// this is to ensure that the scripts have access to the data they need
+	boot_stage("quests-start");
 	parse->ReloadQuests(true);
+	boot_stage("quests-end-conditions-start");
 
 	spawn_conditions.LoadSpawnConditions(short_name, instanceid);
+	boot_stage("conditions-end-spawns-start");
 
 	content_db.LoadStaticZonePoints(&zone_point_list, short_name, GetInstanceVersion());
 
@@ -1219,11 +1222,14 @@ bool Zone::Init(bool is_static) {
 	}
 
 	content_db.PopulateZoneSpawnList(zoneid, spawn2_list, GetInstanceVersion());
+	boot_stage("spawns-end-corpses-start");
 	SetSaveZoneState(true);
 
 	database.LoadCharacterCorpses(zoneid, instanceid);
+	boot_stage("corpses-end-traps-start");
 
 	content_db.LoadTraps(short_name, GetInstanceVersion());
+	boot_stage("traps-end");
 
 	LogInfo("Loading adventure flavor text");
 	LoadAdventureFlavor();

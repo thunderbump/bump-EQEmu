@@ -30,6 +30,9 @@ Eglin
 #include "common/process/process.h"
 #include "common/timer.h"
 #include "zone/embperl.h"
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+#include "zone/inserver_tests.h"
+#endif
 
 #include <vector>
 
@@ -82,6 +85,16 @@ Embperl::Embperl()
 
 void Embperl::DoInit()
 {
+	// Passive, bounded by the active in-server melee visit and its record cap.
+	// Never include plugin contents or paths in fixture diagnostics.
+	const auto boot_stage = [](const char *stage) {
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+		InserverTests::ObserveMeleeBootStage(stage);
+#else
+		(void) stage;
+#endif
+	};
+	boot_stage("perl-init-start");
 	char** argv = (char**) argv_eqemu;
 	my_perl = perl_alloc();
 	//setup perl...
@@ -143,6 +156,7 @@ void Embperl::DoInit()
 	);
 
 	LogQuests("Loading perlemb plugins");
+	boot_stage("perl-plugin-file-start");
 	try {
 		std::string perl_command;
 		perl_command = "main::eval_file('plugin', '" + Config->PluginPlFile + "');";
@@ -152,7 +166,9 @@ void Embperl::DoInit()
 		LogQuests("Warning [{}]: [{}]", Config->PluginPlFile, e);
 	}
 
+	boot_stage("perl-plugin-file-end");
 	for (auto & dir : PathManager::Instance()->GetPluginPaths()) {
+		boot_stage("perl-plugin-directory-start");
 		try {
 			//should probably read the directory in c, instead, so that
 			//I can echo filenames as I do it, but c'mon... I'm lazy and this 1 line reads in all the plugins
@@ -173,8 +189,10 @@ void Embperl::DoInit()
 		catch (std::string& e) {
 			LogQuests("Warning [{}]", e);
 		}
+		boot_stage("perl-plugin-directory-end");
 	}
 #endif //EMBPERL_PLUGIN
+	boot_stage("perl-init-end");
 }
 
 Embperl::~Embperl()
