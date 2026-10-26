@@ -1232,8 +1232,10 @@ constexpr std::array scenarios = {
     , Scenario{"rust_native_actor_external_depop", ActorTravel<TravelCase::External>, CleanupActorBody}
     , Scenario{"rust_native_actor_control_suspended", ActorTravel<TravelCase::Suspended>, CleanupActorBody}
     // Native 2-second swings require a larger bounded window, old cases unchanged.
-    , Scenario{"rust_native_qeynos_melee", ActorMelee<false>, CleanupMelee, 30000}
+    // Natural death persists the public spawn's respawn timer across zone boots.
+    // Run interruption/removal first; its Depop(false) does not write that timer.
     , Scenario{"rust_native_qeynos_melee_cancel", ActorMelee<true>, CleanupMelee, 30000}
+    , Scenario{"rust_native_qeynos_melee", ActorMelee<false>, CleanupMelee, 30000}
 #endif
 };
 
