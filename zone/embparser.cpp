@@ -18,6 +18,7 @@
 #ifdef EMBPERL
 
 #include "zone/embparser.h"
+#include "zone/inserver_tests.h"
 
 #include "common/compiler_macros.h"
 #include "common/features.h"
@@ -251,7 +252,13 @@ void PerlembParser::ReloadQuests()
 			perl->Reinit();
 		}
 
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+		InserverTests::ObserveMeleeBootStage("perl-bindings-start");
+#endif
 		MapFunctions();
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+		InserverTests::ObserveMeleeBootStage("perl-bindings-end");
+#endif
 	}
 	catch (std::exception& e) {
 		if (perl) {
