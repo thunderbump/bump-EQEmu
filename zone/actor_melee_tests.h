@@ -63,6 +63,7 @@ Result FinishMelee(Result result)
 {
     std::snprintf(melee_result_context, sizeof(melee_result_context), "result=%s %s",
         result.outcome == Outcome::Passed ? "passed" : "failed", result.diagnostic.c_str());
+    std::fprintf(stderr, "EQEMU_NATIVE_DIAGNOSTIC_CONTEXT %s\n", melee_result_context);
     if (!RestoreMeleeZone()) { return {Outcome::Failed, "melee prior zone/host restoration failed"}; }
     return result;
 }

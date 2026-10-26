@@ -114,13 +114,15 @@ char melee_result_context[256] = "visit";
 #if defined(__linux__)
 void MeleeTransitionStack(int)
 {
-    constexpr char prefix[] = "DIAG_QEYNOS_TRANSITION_STACK\n";
+    constexpr char prefix[] = "EQEMU_NATIVE_DIAGNOSTIC_STACK_BEGIN\n";
     (void) ::write(STDERR_FILENO, prefix, sizeof(prefix) - 1);
     void *frames[16];
     const int count = backtrace(frames, 16);
     backtrace_symbols_fd(frames, count, STDERR_FILENO);
     (void) ::write(STDERR_FILENO, melee_result_context, std::strlen(melee_result_context));
     (void) ::write(STDERR_FILENO, "\n", 1);
+    constexpr char suffix[] = "EQEMU_NATIVE_DIAGNOSTIC_STACK_END\n";
+    (void) ::write(STDERR_FILENO, suffix, sizeof(suffix) - 1);
 }
 struct MeleeTransitionTrace {
     struct sigaction prior_action {};
