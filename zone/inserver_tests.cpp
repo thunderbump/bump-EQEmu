@@ -1306,6 +1306,18 @@ bool Publish()
 } // namespace
 
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+void ObserveMeleeBootStage(const char *stage)
+{
+    if (!enabled || !melee_visit.active || melee_boot_records >= 96) { return; }
+    ++melee_boot_records;
+    // Timer::GetCurrentTime is advanced by the zone loop, not synchronous boot.
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - melee_visit_started).count();
+    std::fprintf(stderr, "melee boot stage=%s elapsed_ms=%lld record=%u\n",
+        stage, static_cast<long long>(elapsed), melee_boot_records);
+    std::fflush(stderr);
+}
+
 void BeforeActorFacts()
 {
     if (!actor_latched_stop_armed) { return; }

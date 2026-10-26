@@ -6,14 +6,20 @@ struct MeleeVisit {
     bool is_static = false, idle = false;
 } melee_visit;
 
+std::chrono::steady_clock::time_point melee_visit_started;
+unsigned melee_boot_records = 0;
+
 bool RestoreMeleeZone()
 {
     if (!melee_visit.active) { return true; }
     KeepZoneHostAlive host;
     if (!host.Disable()) { return false; }
+    ObserveMeleeBootStage("restore-shutdown-start");
     if (zone) { zone->Shutdown(); }
+    ObserveMeleeBootStage("restore-shutdown-end");
     const bool booted = !zone && !is_zone_loaded &&
         Zone::Bootup(melee_visit.zone_id, melee_visit.instance_id, melee_visit.is_static);
+    ObserveMeleeBootStage("restore-boot-returned");
     if (booted && zone) {
         zone->SetZoneServerId(melee_visit.server_id);
         zone->quest_idle_override = melee_visit.idle;
@@ -28,10 +34,15 @@ bool VisitMeleeZone()
     if (!zone || !worldserver.Connected() || melee_visit.active) { return false; }
     melee_visit = {true, zone->GetZoneID(), zone->GetInstanceID(), zone->GetZoneServerId(),
         zone->IsStaticZone(), zone->quest_idle_override};
+    melee_visit_started = std::chrono::steady_clock::now();
+    melee_boot_records = 0;
     KeepZoneHostAlive host;
     if (!host.Disable()) { return false; }
+    ObserveMeleeBootStage("visit-shutdown-start");
     zone->Shutdown();
+    ObserveMeleeBootStage("visit-shutdown-end");
     const bool booted = !zone && !is_zone_loaded && Zone::Bootup(2, 0, melee_visit.is_static);
+    ObserveMeleeBootStage("visit-boot-returned");
     if (booted && zone) {
         zone->SetZoneServerId(melee_visit.server_id);
         zone->quest_idle_override = true;
