@@ -30,7 +30,7 @@ Eglin
 #include "common/process/process.h"
 #include "common/timer.h"
 #include "zone/embperl.h"
-#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
 #include "zone/inserver_tests.h"
 #endif
 
@@ -57,7 +57,7 @@ int argc = 5;
 #else
 int argc = 3;
 #endif
-#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
 // Fixed diagnostic vocabulary only: never expose plugin names or contents.
 // The observer is inactive outside the opt-in in-server visit and caps output.
 XS(XS_EQEmu_MeleePluginStage)
@@ -92,7 +92,7 @@ EXTERN_C void xs_init(pTHX)
 	//add the strcpy stuff to get rid of const warnings....
 
 	newXS(strcpy(buf, "DynaLoader::boot_DynaLoader"), boot_DynaLoader, file);
-#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
 	newXS(strcpy(buf, "EQEmu::MeleePluginStage"), XS_EQEmu_MeleePluginStage, file);
 #endif
 #ifdef EMBPERL_IO_CAPTURE
@@ -113,7 +113,7 @@ void Embperl::DoInit()
 	// Passive, bounded by the active in-server melee visit and its record cap.
 	// Never include plugin contents or paths in fixture diagnostics.
 	const auto boot_stage = [](const char *stage) {
-#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
 		InserverTests::ObserveMeleeBootStage(stage);
 #else
 		(void) stage;
@@ -201,15 +201,15 @@ void Embperl::DoInit()
 				"if(opendir(D,'" +
 				dir +
 				"')) { "
-#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
 				" EQEmu::MeleePluginStage(0);"
 #endif
 				"	my @d = readdir(D);"
-#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
 				" EQEmu::MeleePluginStage(1);"
 #endif
 				"	closedir(D);"
-#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
 				" EQEmu::MeleePluginStage(2);"
 #endif
 				"	foreach(@d){ "
@@ -217,7 +217,7 @@ void Embperl::DoInit()
 				dir +
 				"/'.$_)if/\\.pl$/;"
 				"	}"
-#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
 				" EQEmu::MeleePluginStage(3);"
 #endif
 			"}");
@@ -267,26 +267,26 @@ void Embperl::init_eval_file(void)
 		"sub eval_file {"
 		"my($package, $filename) = @_;"
 		"$filename=~s/\'//g;"
-#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
 		// Observe the shared loader, including plugin.pl and directory plugins.
 		// Never expose plugin file identities or contents in these markers.
 		"EQEmu::MeleePluginStage(4) if $package eq 'plugin';"
 #endif
 		"if(! -r $filename) { print \"Unable to read perl file '$filename'\\n\"; return; }"
 		"my $mtime = -M $filename;"
-#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
 		"EQEmu::MeleePluginStage(5) if $package eq 'plugin';"
 #endif
 		"if(defined $Cache{$package}{mtime}&&$Cache{$package}{mtime} <= $mtime && !($package eq 'plugin')){"
 		"	return;"
 		"} else {"
 		// we 'my' $filename,$mtime,$package,$sub to prevent them from changing our state up here.
-#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
 		"EQEmu::MeleePluginStage(6) if $package eq 'plugin';"
 #endif
 		"	eval(\"package $package; my(\\$filename,\\$mtime,\\$package,\\$sub); \\$isloaded = 1; require './$filename'; \");"
 		" print $@ if $@;"
-#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
 		"EQEmu::MeleePluginStage(7) if $package eq 'plugin';"
 #endif
 		"}"

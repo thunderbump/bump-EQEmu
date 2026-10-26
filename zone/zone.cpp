@@ -1146,7 +1146,7 @@ bool Zone::Init(bool is_static) {
 	// Passive, fixture-only markers around synchronous startup. In particular,
 	// the ordinary zone clock cannot measure time spent inside these loaders.
 	const auto boot_stage = [](const char *stage) {
-#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
 		InserverTests::ObserveMeleeBootStage(stage);
 #else
 		(void) stage;

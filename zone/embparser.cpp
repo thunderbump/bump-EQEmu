@@ -252,11 +252,11 @@ void PerlembParser::ReloadQuests()
 			perl->Reinit();
 		}
 
-#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
 		InserverTests::ObserveMeleeBootStage("perl-bindings-start");
 #endif
 		MapFunctions();
-#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
 		InserverTests::ObserveMeleeBootStage("perl-bindings-end");
 #endif
 	}

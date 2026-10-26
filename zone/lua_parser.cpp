@@ -1063,7 +1063,7 @@ void LuaParser::Init() {
 void LuaParser::ReloadQuests() {
 	// Passive, visit-scoped diagnostics: do not skip or interrupt quest reload.
 	const auto boot_stage = [](const char *stage) {
-#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
 		InserverTests::ObserveMeleeBootStage(stage);
 #else
 		(void) stage;
