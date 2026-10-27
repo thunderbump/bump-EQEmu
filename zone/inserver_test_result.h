@@ -14,6 +14,32 @@ struct Result {
     std::string diagnostic;
 };
 
+// Compose the melee result only after the staged restoration has returned.
+// Reserve room for both failure causes and the truthful restoration suffix.
+inline Result CompleteMeleeRestoration(Result result, bool restored, std::string restoration_error)
+{
+    if (!restored && restoration_error.empty()) {
+        restoration_error = "melee prior zone/host restoration failed";
+    }
+    if (!restoration_error.empty()) {
+        result.outcome = Outcome::Failed;
+        if (restoration_error.size() > 128) {
+            restoration_error = restoration_error.substr(0, 125) + "...";
+        }
+    }
+    std::string suffix;
+    if (!restoration_error.empty()) {
+        suffix = (result.diagnostic.empty() ? "" : "; ") + restoration_error;
+    }
+    if (restored) { suffix += " prior-zone-restored"; }
+    const auto original_limit = 256 - suffix.size();
+    if (result.diagnostic.size() > original_limit) {
+        result.diagnostic = result.diagnostic.substr(0, original_limit - 3) + "...";
+    }
+    result.diagnostic += suffix;
+    return result;
+}
+
 // Use at the active-case boundary and again after truthful cleanup/restoration.
 // A terminal failure keeps its original diagnostic; cleanup cannot turn a late
 // success into an on-time one. Exactly the existing cap is still permitted.
