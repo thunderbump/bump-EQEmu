@@ -1,16 +1,5 @@
 // Real native Attack/FaceTarget/movement-queue regression. Setup subjects use
 // the admitted public template; only setup placement/heading is assigned.
-Result PollMeleeRestoration()
-{
-    if (melee_visit.boot_pending) { return {Outcome::Pending, ""}; }
-    if (melee_visit.active || melee_visit.boot_failed) {
-        return {Outcome::Failed, "melee prior zone/host restoration failed"};
-    }
-    auto result = melee_visit.result;
-    result.diagnostic += " prior-zone-restored";
-    return result;
-}
-
 enum class FacingCase { Timed, Lost, Control, Unowned };
 
 template<FacingCase Mode> Result ActorMeleeFacing()

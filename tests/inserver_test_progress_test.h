@@ -20,6 +20,7 @@ public:
 		TEST_ADD(InserverTestProgressTest::InterruptedCase);
 		TEST_ADD(InserverTestProgressTest::FailedCase);
         TEST_ADD(InserverTestProgressTest::RestorationDeadlineBoundary);
+        TEST_ADD(InserverTestProgressTest::MeleeRestorationDiagnostics);
         TEST_ADD(InserverTestProgressTest::BoundedSuiteReport);
 		TEST_ADD(InserverTestProgressTest::BoundedEscapedFields);
 #ifndef _WIN32
@@ -102,6 +103,53 @@ private:
             TEST_ASSERT(event["elapsed_ms"] == cap + 1);
             TEST_ASSERT(event["diagnostic"] == "in-server scenario exceeded its bounded deadline");
         }
+    }
+
+    void MeleeRestorationDiagnostics()
+    {
+        using namespace InserverTests;
+        for (const auto outcome : {Outcome::Failed, Outcome::Passed}) {
+            for (const std::string original : {std::string{}, std::string{"original scenario"},
+                     "original scenario " + std::string(512, 'x')}) {
+                for (const std::string cause : {"melee prior zone shutdown/host restoration failed",
+                         "melee prior zone boot/host/world restoration failed", "melee active combat cleanup ordering"}) {
+                    for (const bool restored : {false, true}) {
+                        const auto result = CompleteMeleeRestoration({outcome, original}, restored, cause);
+                        TEST_ASSERT(result.outcome == Outcome::Failed && result.diagnostic.size() <= 256);
+                        TEST_ASSERT(result.diagnostic.find(cause) != std::string::npos);
+                        if (!original.empty()) { TEST_ASSERT(result.diagnostic.find("original scenario") == 0); }
+                        TEST_ASSERT((result.diagnostic.find(" prior-zone-restored") != std::string::npos) == restored);
+                        File file(std::tmpfile(), std::fclose);
+                        TEST_ASSERT(file != nullptr);
+                        TEST_ASSERT(EmitCaseProgress(file.get(), run_id, "restoration-failed", 25, false, result.diagnostic));
+                        std::rewind(file.get());
+                        const auto event = ReadEvent(file.get());
+                        TEST_ASSERT(event["passed"] == false && event["diagnostic"] == result.diagnostic);
+                    }
+                }
+            }
+            const auto success = CompleteMeleeRestoration({outcome, "original scenario"}, true, "");
+            TEST_ASSERT(success.outcome == outcome && success.diagnostic == "original scenario prior-zone-restored");
+            const auto long_success = CompleteMeleeRestoration({outcome, "original scenario " + std::string(512, 'x')}, true, "");
+            TEST_ASSERT(long_success.outcome == outcome && long_success.diagnostic.size() == 256);
+            TEST_ASSERT(long_success.diagnostic.find("original scenario") == 0);
+            TEST_ASSERT(long_success.diagnostic.substr(long_success.diagnostic.size() - 20) == " prior-zone-restored");
+            const auto unknown = CompleteMeleeRestoration({outcome, "original scenario"}, false, "");
+            TEST_ASSERT(unknown.outcome == Outcome::Failed);
+            TEST_ASSERT(unknown.diagnostic == "original scenario; melee prior zone/host restoration failed");
+            const auto both = CompleteMeleeRestoration({outcome, "original scenario " + std::string(512, 'x')}, false,
+                "melee active combat cleanup ordering; melee prior zone boot/host/world restoration failed");
+            TEST_ASSERT(both.outcome == Outcome::Failed && both.diagnostic.size() == 256);
+            TEST_ASSERT(both.diagnostic.find("original scenario") == 0);
+            TEST_ASSERT(both.diagnostic.find("cleanup ordering; melee prior zone boot/host/world") != std::string::npos);
+        }
+        const auto empty_success = CompleteMeleeRestoration({Outcome::Passed, ""}, true, "");
+        TEST_ASSERT(empty_success.outcome == Outcome::Passed && empty_success.diagnostic == " prior-zone-restored");
+        const auto bounded_cause = CompleteMeleeRestoration({Outcome::Failed, std::string(512, 'a')}, false,
+            "restoration cause " + std::string(512, 'b'));
+        TEST_ASSERT(bounded_cause.outcome == Outcome::Failed && bounded_cause.diagnostic.size() == 256);
+        TEST_ASSERT(bounded_cause.diagnostic.front() == 'a');
+        TEST_ASSERT(bounded_cause.diagnostic.find("restoration cause") != std::string::npos);
     }
 
     void BoundedSuiteReport()

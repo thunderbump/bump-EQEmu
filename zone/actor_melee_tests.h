@@ -6,6 +6,7 @@ struct MeleeVisit {
     bool is_static = false, idle = false;
     bool boot_pending = false, restoring = false, boot_failed = false, finishing = false;
     Result result{Outcome::Pending, ""};
+    std::string restoration_error{};
 } melee_visit;
 
 std::chrono::steady_clock::time_point melee_visit_started;
@@ -55,6 +56,10 @@ bool AdvanceMeleeBoot()
     }
     const bool restored = host.Restore();
     melee_visit.boot_failed = !booted || !restored || !worldserver.Connected();
+    if (melee_visit.restoring && melee_visit.boot_failed) {
+        if (!melee_visit.restoration_error.empty()) { melee_visit.restoration_error += "; "; }
+        melee_visit.restoration_error += "melee prior zone boot/host/world restoration failed";
+    }
     if (melee_visit.restoring && !melee_visit.boot_failed) { melee_visit.active = false; }
     return true;
 }
@@ -81,14 +86,15 @@ Result FinishMelee(Result result, bool verify_active_teardown = false)
 {
     if (!melee_visit.active) { return result; }
     melee_visit.result = std::move(result);
+    melee_visit.restoration_error.clear();
     melee_visit.finishing = true;
     std::snprintf(melee_result_context, sizeof(melee_result_context), "pending-restore result=%s %s",
         melee_visit.result.outcome == Outcome::Passed ? "passed" : "failed", melee_visit.result.diagnostic.c_str());
     std::fprintf(stderr, "EQEMU_NATIVE_DIAGNOSTIC_CONTEXT %s\n", melee_result_context);
     if (!QueueMeleeBoot(true)) {
-        melee_visit.result = {Outcome::Failed, "melee prior zone shutdown/host restoration failed"};
+        melee_visit.restoration_error = "melee prior zone shutdown/host restoration failed";
     } else if (verify_active_teardown && (!actor_shutdown_valid || actor_shutdown_stages != 3)) {
-        melee_visit.result = {Outcome::Failed, "melee active combat cleanup ordering"};
+        melee_visit.restoration_error = "melee active combat cleanup ordering";
     }
     actor_shutdown_armed = false;
     return {Outcome::Pending, ""};
@@ -125,18 +131,17 @@ bool MeleeStart(NPC *rat, float distance, glm::vec3 &start)
     return false;
 }
 
+Result PollMeleeRestoration()
+{
+    if (melee_visit.boot_pending) { return {Outcome::Pending, ""}; }
+    return CompleteMeleeRestoration(melee_visit.result, !melee_visit.active && !melee_visit.boot_failed,
+        melee_visit.restoration_error);
+}
+
 template<bool Cancel> Result ActorMelee()
 {
     using namespace eqemu_proof;
-    if (melee_visit.finishing) {
-        if (melee_visit.boot_pending) { return {Outcome::Pending, ""}; }
-        if (melee_visit.active || melee_visit.boot_failed) {
-            return {Outcome::Failed, "melee prior zone/host restoration failed"};
-        }
-        auto result = melee_visit.result;
-        result.diagnostic += " prior-zone-restored";
-        return result;
-    }
+    if (melee_visit.finishing) { return PollMeleeRestoration(); }
     static unsigned step = 0, samples = 0;
     static uint32 began = 0, stage_at = 0, action_at = 0, last_at = 0, last_swing_at = 0;
     static uint32 min_cadence = 30000, stop_ms = 0;
