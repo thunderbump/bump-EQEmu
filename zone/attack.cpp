@@ -29,6 +29,7 @@
 #include "zone/mob.h"
 #include "zone/npc.h"
 #include "zone/actor_body.h"
+#include "zone/actor_demo.h"
 #include "zone/queryserv.h"
 #include "zone/quest_parser_collection.h"
 #include "zone/string_ids.h"
@@ -2201,6 +2202,7 @@ bool Client::CheckIfAlreadyDead()
 bool NPC::Attack(Mob* other, int Hand, bool bRiposte, bool IsStrikethrough, bool IsFromSpell, ExtraAttackOptions *opts)
 {
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+    if (!ActorDemo::AllowCombat(this, other)) { return false; }
     // Only the serialized adapter's timer-bound primary swing is voluntary.
     // Retaliation against the body remains ordinary native NPC behavior.
     if (IsRustActor() && (!actor_swing_authorized_ || bRiposte || IsFromSpell ||
@@ -4035,6 +4037,9 @@ bool Mob::CheckDoubleAttack()
 }
 
 void Mob::CommonDamage(Mob* attacker, int64 &damage, const uint16 spell_id, const EQ::skills::SkillType skill_used, bool &avoidable, const int8 buffslot, const bool iBuffTic, eSpecialAttacks special) {
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+    if (!ActorDemo::AllowCombat(attacker, this)) { damage = 0; return; }
+#endif
 #ifdef LUA_EQEMU
 	int64 lua_ret = 0;
 	bool ignore_default = false;

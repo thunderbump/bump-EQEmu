@@ -1,4 +1,5 @@
 #include "actor_body.h"
+#include "actor_demo.h"
 #ifdef EQEMU_BUILD_TESTS
 #include "zone/inserver_tests.h"
 #endif
@@ -97,6 +98,16 @@ eqemu_proof::Report Adapter::StartApproach(const std::vector<uint16_t> &scope)
 eqemu_proof::Report Adapter::StartMelee(const std::vector<uint16_t> &scope)
 {
     return StartGoal(scope, true);
+}
+
+eqemu_proof::Report Adapter::CreateVisibleMeleeBody(int32_t x, int32_t y, int32_t z)
+{
+    const auto state = Inspect();
+    visible_creation_ = true;
+    const auto report = Send({eqemu_proof::Kind::CreateMeleeBody,
+        state.epoch, state.generation, 0, x, y, z});
+    visible_creation_ = false;
+    return report;
 }
 
 eqemu_proof::Report Adapter::StartGoal(const std::vector<uint16_t> &scope, bool melee)
@@ -198,6 +209,11 @@ void Adapter::Apply(const eqemu_proof::Report &report)
         type->bodytype = 11;
         type->untargetable = 1;
         type->skip_global_loot = true;
+        if (visible_creation_) {
+            std::strcpy(type->name, "Staging_Actor");
+            type->gender = 0; // rendered male human, rather than neutral gender
+            type->show_name = true;
+        }
         if (Inspect().combat_body) {
             // Explicit ordinary melee body; original noncombat profile is unchanged.
             type->bodytype = 1;
@@ -213,7 +229,7 @@ void Adapter::Apply(const eqemu_proof::Report &report)
         npc->actor_epoch_ = report.epoch;
         npc->actor_generation_ = report.generation;
         // Do not AI_Stop or clear IsAIControlled: the explicit gate owns decisions.
-        entity_list.AddNPC(npc, false);
+        entity_list.AddNPC(npc, visible_creation_, visible_creation_);
         id_ = npc->GetID();
     } else if (report.event == Event::AttackRequested) {
         const auto state = Inspect();
@@ -463,11 +479,15 @@ void ObserveDeath(NPC *victim, Mob *killer)
 {
     if (adapter) { adapter->ObserveDeath(victim, killer); }
 }
-void BeginTeardown() { if (adapter) { adapter->BeginTeardown(); } }
+void BeginTeardown() {
+    ActorDemo::BeginTeardown();
+    if (adapter) { adapter->BeginTeardown(); }
+}
 void FinishTeardown()
 {
     if (adapter) {
         adapter->FinishTeardown();
+        ActorDemo::FinishTeardown();
 #ifdef EQEMU_BUILD_TESTS
         InserverTests::ObserveActorShutdown(InserverTests::ActorShutdownStage::RuntimeClosed);
 #endif
