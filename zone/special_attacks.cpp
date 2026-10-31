@@ -16,6 +16,7 @@
 	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 #include "mob.h"
+#include "actor_demo.h"
 
 #include "common/rulesys.h"
 #include "common/strings.h"
@@ -212,6 +213,9 @@ int Mob::GetBaseSkillDamage(EQ::skills::SkillType skill, Mob *target)
 void Mob::DoSpecialAttackDamage(Mob *who, EQ::skills::SkillType skill, int32 base_damage, int32 min_damage,
 				int32 hate_override, int ReuseTime)
 {
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+    if (!ActorDemo::AllowCombat(this, who)) { return; }
+#endif
 	// this really should go through the same code as normal melee damage to
 	// pick up all the special behavior there
 
@@ -369,6 +373,11 @@ void Client::OPCombatAbility(const CombatAbility_Struct *ca_atk)
 		return;
 	}
 
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+    // A validated single Kick/Bash/ranged request is actual attack intent even
+    // with autoattack off. Latch it before the passive permission query.
+    if (!ActorDemo::AllowClientAbility(this, GetTarget(), ca_atk->m_target)) { return; }
+#endif
 	if (!IsAttackAllowed(GetTarget())) {
 		return;
 	}
@@ -860,6 +869,9 @@ void Mob::RogueAssassinate(Mob* other)
 }
 
 bool Client::RangedAttack(Mob* other, bool CanDoubleAttack) {
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+    if (!ActorDemo::AllowCombat(this, other)) { return false; }
+#endif
 	//conditions to use an attack checked before we are called
 	if (!other) {
 		return false;
@@ -1389,6 +1401,9 @@ float Mob::GetRangeDistTargetSizeMod(Mob* other)
 
 void NPC::RangedAttack(Mob *other)
 {
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+    if (!ActorDemo::AllowCombat(this, other)) { return; }
+#endif
 	if (!other)
 		return;
 	// make sure the attack and ranged timers are up
@@ -1529,6 +1544,9 @@ void NPC::DoRangedAttackDmg(Mob* other, bool Launch, int16 damage_mod, int16 cha
 }
 
 void Client::ThrowingAttack(Mob* other, bool CanDoubleAttack) { //old was 51
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+    if (!ActorDemo::AllowCombat(this, other)) { return; }
+#endif
 	//conditions to use an attack checked before we are called
 	if (!other)
 		return;

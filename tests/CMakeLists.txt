@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.20.0)
 
 add_subdirectory(cppunit)
 
+# Opt-in controller/protocol seam checks. No server, DB, client or Rust fixtures.
+add_executable(tests_actor_demo_controls EXCLUDE_FROM_ALL actor_demo_controls.cpp)
+
 set(tests_sources
 	main.cpp
 )

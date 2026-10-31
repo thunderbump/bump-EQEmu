@@ -16,6 +16,7 @@
 	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 #include "bot.h"
+#include "actor_demo.h"
 
 #include "common/data_verification.h"
 #include "common/repositories/bot_inventories_repository.h"
@@ -5253,6 +5254,9 @@ int Bot::GetBaseSkillDamage(EQ::skills::SkillType skill, Mob *target)
 }
 
 void Bot::DoSpecialAttackDamage(Mob *who, EQ::skills::SkillType skill, int32 max_damage, int32 min_damage, int32 hate_override, int ReuseTime, bool HitChance) {
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+    if (!ActorDemo::AllowCombat(this, who)) { return; }
+#endif
 	int32 hate = max_damage;
 	if (hate_override > -1)
 		hate = hate_override;

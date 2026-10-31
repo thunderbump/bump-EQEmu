@@ -24,6 +24,8 @@ public:
     // Empty scope is allowed. At most four distinct registered NPC IDs.
     eqemu_proof::Report StartApproach(const std::vector<uint16_t> &scope);
     eqemu_proof::Report StartMelee(const std::vector<uint16_t> &scope);
+    // Demo-only appearance/broadcast. Ordinary creation and test profiles stay unchanged.
+    eqemu_proof::Report CreateVisibleMeleeBody(int32_t x, int32_t y, int32_t z);
     // Native Death completion hook: latch values only, never reenter Rust.
     void ObserveDeath(NPC *victim, Mob *killer);
     void Process();
@@ -34,6 +36,9 @@ public:
     uint16_t NativeID() const { return id_; }
     eqemu_proof::Snapshot Inspect() const { return runtime_->inspect(); }
     eqemu_proof::Report LastReport() const { return last_; }
+    // Native Death can be latched by this tick's swing before Rust consumes it
+    // on the next tick. This is evidence to wait, never a reported victory.
+    bool HasPendingTargetKill(uint64_t target_incarnation) const;
 private:
     eqemu_proof::Report Advance(eqemu_proof::Input input, bool empty = false);
     void Apply(const eqemu_proof::Report &report);
@@ -55,6 +60,7 @@ private:
     eqemu_proof::Report last_{};
     uint16_t id_ = 0;
     bool closing_ = false;
+    bool visible_creation_ = false;
     int32_t target_x_ = 0, target_y_ = 0, target_z_ = 0;
 };
 Adapter &Get();
