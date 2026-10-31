@@ -1565,6 +1565,9 @@ void Mob::DoAttack(Mob *other, DamageHitInfo &hit, ExtraAttackOptions *opts, boo
 //SYNC WITH: tune.cpp, mob.h TuneClientAttack
 bool Mob::Attack(Mob* other, int Hand, bool bRiposte, bool IsStrikethrough, bool IsFromSpell, ExtraAttackOptions *opts)
 {
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+    if (!ActorDemo::AllowCombat(this, other)) { return false; }
+#endif
 	if (!other || (other && other->IsCorpse())) {
 		SetTarget(nullptr);
 		LogError("A null or invalid Mob object was passed for evaluation!");
@@ -2440,6 +2443,9 @@ bool NPC::Attack(Mob* other, int Hand, bool bRiposte, bool IsStrikethrough, bool
 }
 
 void NPC::Damage(Mob* other, int64 damage, uint16 spell_id, EQ::skills::SkillType attack_skill, bool avoidable, int8 buffslot, bool iBuffTic, eSpecialAttacks special) {
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+    if (!ActorDemo::AllowCombat(other, this)) { return; }
+#endif
 	if (spell_id == 0)
 		spell_id = SPELL_UNKNOWN;
 
@@ -3065,6 +3071,9 @@ bool NPC::Death(Mob* killer_mob, int64 damage, uint16 spell, EQ::skills::SkillTy
 
 void Mob::AddToHateList(Mob* other, int64 hate /*= 0*/, int64 damage /*= 0*/, bool iYellForHelp /*= true*/, bool bFrenzy /*= false*/, bool iBuffTic /*= false*/, uint16 spell_id, bool pet_command)
 {
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+    if (!ActorDemo::AllowCombat(other, this)) { return; }
+#endif
 	if (!other)
 		return;
 

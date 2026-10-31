@@ -1,6 +1,7 @@
 #include "actor_demo.h"
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
 #include "actor_demo_state.h"
+#include "actor_demo_native.h"
 #include "actor_body.h"
 #include "entity.h"
 #include "npc.h"
@@ -27,19 +28,15 @@ uint64_t Now()
     return std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
 }
-struct Identity {
-    uint16_t id = 0;
-    uint64_t incarnation = 0;
-    bool Matches(Mob *mob) const {
-        return mob && mob->IsNPC() && mob->GetID() == id &&
-            mob->CastToNPC()->NativeIncarnation() == incarnation;
-    }
-    NPC *Get() const {
-        auto *npc = entity_list.GetNPCByID(id);
-        return Matches(npc) && entity_list.GetMob(id) == npc ? npc : nullptr;
-    }
-    void Set(NPC *npc) { id = npc->GetID(); incarnation = npc->NativeIncarnation(); }
-};
+NativeIdentity Identify(Mob *mob)
+{
+    return mob && mob->IsNPC() ? NativeIdentity{mob->GetID(), mob->CastToNPC()->NativeIncarnation()} : NativeIdentity{};
+}
+NPC *Find(const NativeIdentity &key)
+{
+    auto *npc = entity_list.GetNPCByID(key.id);
+    return key.Matches(Identify(npc)) && entity_list.GetMob(key.id) == npc ? npc : nullptr;
+}
 
 class Demo {
 public:
@@ -50,23 +47,24 @@ public:
         std::remove(Path("command").c_str());
     }
     Run run;
-    Identity actor, rat;
-    uint64_t epoch = 0, generation = 0;
-    bool interference = false;
+    Custody custody;
 
     std::string Path(const char *name) const { return dir + "/" + name; }
-    bool Drained() const {
+    NativeView View() const {
         const auto s = ActorBody::Get().Inspect();
-        return !actor.Get() && !rat.Get() &&
-            (s.epoch != epoch || s.generation != generation || !s.alive);
+        return {s.epoch, s.generation, s.alive, Identify(Find(custody.actor)), Identify(Find(custody.target))};
     }
+    bool Drained() const { return custody.PlanRetirement(View()).drained; }
     void Retire() {
         auto &adapter = ActorBody::Get();
-        const auto s = adapter.Inspect();
-        if (s.epoch == epoch && s.generation == generation && s.alive) {
-            adapter.Send({eqemu_proof::Kind::Retire, s.epoch, s.generation, 0, 0, 0, 0});
+        const auto view = View();
+        const auto plan = custody.PlanRetirement(view);
+        if (plan.actor) {
+            adapter.Send({eqemu_proof::Kind::Retire, view.epoch, view.generation, 0, 0, 0, 0});
         }
-        if (auto *target = rat.Get(); target && !target->GetDepop()) { target->Depop(false); }
+        if (auto *target = Find(custody.target); plan.target && target && !target->GetDepop()) {
+            target->Depop(false);
+        }
     }
 
     bool Spawn() {
@@ -121,18 +119,18 @@ public:
         // Registration owns the allocation before any later native observation.
         auto *native = npc.release();
         entity_list.AddNPC(native, true, true);
-        rat.Set(native);
+        custody.target = Identify(native);
         if (adapter.CreateVisibleMeleeBody(std::lround(start.x), std::lround(start.y),
             std::lround(start.z)).event != eqemu_proof::Event::BodyRequested) { return false; }
         const auto s = adapter.Inspect();
-        epoch = s.epoch;
-        generation = s.generation;
+        custody.epoch = s.epoch;
+        custody.generation = s.generation;
         auto *body = adapter.Body();
         if (!body) { return false; }
-        actor.Set(body);
+        custody.actor = Identify(body);
         actor_x = start.x; actor_y = start.y; actor_z = start.z;
         rat_x = target.x; rat_y = target.y; rat_z = target.z;
-        last_swings = last_hits = last_damage = 0;
+        custody.last = {};
         last_position = glm::vec3(body->GetPosition());
         last_approach = s.approach;
         return true;
@@ -141,11 +139,11 @@ public:
     void Execute(Action action, uint64_t now) {
         if (action == Action::Retire) { Retire(); }
         if (action == Action::Spawn && !Spawn()) {
-            Execute(run.Stop(now, "setup_refused", true), now);
+            Execute(run.Stop(now, "setup_refused", Phase::Failed), now);
         }
         if (action == Action::Engage &&
-            ActorBody::Get().StartMelee({rat.id}).status != eqemu_proof::Status::Ok) {
-            Execute(run.Stop(now, "melee_refused", true), now);
+            ActorBody::Get().StartMelee({custody.target.id}).status != eqemu_proof::Status::Ok) {
+            Execute(run.Stop(now, "melee_refused", Phase::Failed), now);
         }
     }
 
@@ -158,7 +156,7 @@ public:
         input.close();
         if (std::remove(Path("command").c_str()) != 0) {
             command_result = "consume_failed";
-            Execute(run.Stop(now, "control_io_failed", true), now);
+            Execute(run.Stop(now, "control_io_failed", Phase::Failed), now);
             return;
         }
         Command command;
@@ -172,9 +170,7 @@ public:
         } else if (run.Active() || !Drained() || ActorBody::Get().Inspect().alive) {
             command_result = "busy";
         } else {
-            actor = {}; rat = {}; epoch = generation = 0;
-            interference = false;
-            swings = hits = damage = 0;
+            custody = {};
             run_id = session + "-" + std::to_string(command.request);
             run.Start(now, command.seconds);
             command_result = "start_accepted";
@@ -185,21 +181,19 @@ public:
         if (now >= next_io) {
             ReadCommand(now);
             next_io = now + 1000;
-            if (!WriteStatus(now)) { Execute(run.Stop(now, "status_io_failed", true), now); }
+            if (!WriteStatus(now)) { Execute(run.Stop(now, "status_io_failed", Phase::Failed), now); }
         }
         Facts facts;
         facts.drained = Drained();
         auto &adapter = ActorBody::Get();
         const auto s = adapter.Inspect();
-        auto *body = actor.Get();
-        auto *target = rat.Get();
-        if (s.epoch == epoch && s.generation == generation) {
-            swings += s.swings - last_swings;
-            hits += s.hits - last_hits;
-            damage += s.damage - last_damage;
-        }
+        auto *body = Find(custody.actor);
+        auto *target = Find(custody.target);
+        const auto view = View();
+        const bool swung = s.swings > custody.last.swings;
+        custody.ObserveCounters(view, {s.swings, s.hits, s.damage});
         if (run.phase == Phase::Spawning || run.phase == Phase::Fighting) {
-            if (s.epoch != epoch || s.generation != generation || !s.alive || !body ||
+            if (!custody.OwnsRuntime(view) || !s.alive || !body ||
                 adapter.Body() != body || body->GetDepop() || body->GetHP() <= 0) {
                 facts.failure = "actor_identity_lost";
             } else {
@@ -207,7 +201,7 @@ public:
                 facts.victory = s.approach == eqemu_proof::Approach::Victory &&
                     s.last_terminal == eqemu_proof::Event::TargetKilled && s.damage > 0;
                 const auto p = glm::vec3(body->GetPosition());
-                facts.progress = s.swings > last_swings || s.approach != last_approach ||
+                facts.progress = swung || s.approach != last_approach ||
                     glm::distance(p, last_position) >= 0.25f;
                 if (facts.progress) { last_position = p; }
                 last_approach = s.approach;
@@ -224,10 +218,7 @@ public:
                     s.approach == eqemu_proof::Approach::Defeated) { facts.failure = "native_encounter_refused"; }
             }
         }
-        if (s.epoch == epoch && s.generation == generation) {
-            last_swings = s.swings; last_hits = s.hits; last_damage = s.damage;
-        }
-        if (interference) { facts.failure = "foreign_interference"; }
+        if (custody.interference) { facts.failure = "foreign_interference"; }
         Execute(run.Advance(now, facts), now);
     }
 
@@ -241,11 +232,11 @@ public:
             << "\",\"last_request\":" << last_request << ",\"command_result\":\"" << command_result
             << "\",\"phase\":\"" << PhaseName(run.phase) << "\",\"elapsed_ms\":" << elapsed
             << ",\"attempted\":" << run.attempted << ",\"completed\":" << run.completed << ",\"failed\":" << run.failed
-            << ",\"actor_epoch\":" << epoch << ",\"actor_generation\":" << generation
-            << ",\"actor_id\":" << actor.id << ",\"actor_incarnation\":" << actor.incarnation
-            << ",\"target_id\":" << rat.id << ",\"target_incarnation\":" << rat.incarnation
-            << ",\"swings\":" << swings << ",\"hits\":" << hits << ",\"damage\":" << damage
-            << ",\"live_owned\":" << (unsigned(bool(actor.Get())) + unsigned(bool(rat.Get())))
+            << ",\"actor_epoch\":" << custody.epoch << ",\"actor_generation\":" << custody.generation
+            << ",\"actor_id\":" << custody.actor.id << ",\"actor_incarnation\":" << custody.actor.incarnation
+            << ",\"target_id\":" << custody.target.id << ",\"target_incarnation\":" << custody.target.incarnation
+            << ",\"swings\":" << custody.total.swings << ",\"hits\":" << custody.total.hits << ",\"damage\":" << custody.total.damage
+            << ",\"live_owned\":" << (unsigned(bool(Find(custody.actor))) + unsigned(bool(Find(custody.target))))
             << ",\"custody_drained\":" << (Drained() ? "true" : "false")
             << ",\"terminal_reason\":\"" << run.reason << "\",\"updated_ms\":" << now
             << ",\"actor_position\":[" << actor_x << ',' << actor_y << ',' << actor_z
@@ -257,7 +248,6 @@ public:
 private:
     std::string dir, session, run_id, command_result = "ready";
     uint64_t last_request = 0, next_io = 0;
-    uint64_t swings = 0, hits = 0, damage = 0, last_swings = 0, last_hits = 0, last_damage = 0;
     glm::vec3 last_position{};
     eqemu_proof::Approach last_approach = eqemu_proof::Approach::Disabled;
     float actor_x = 0, actor_y = 0, actor_z = 0, rat_x = 0, rat_y = 0, rat_z = 0;
@@ -278,14 +268,13 @@ void Process()
     demo->Tick(Now());
 }
 
+bool CanCombat(Mob *attacker, Mob *target)
+{
+    return !demo || demo->custody.CanCombat(Identify(attacker), Identify(target));
+}
 bool AllowCombat(Mob *attacker, Mob *target)
 {
-    if (!demo) { return true; }
-    const bool a = demo->actor.Matches(attacker), b = demo->rat.Matches(attacker);
-    const bool c = demo->actor.Matches(target), d = demo->rat.Matches(target);
-    if (!(a || b || c || d) || (a && d) || (b && c)) { return true; }
-    demo->interference = true;
-    return false;
+    return !demo || demo->custody.AdmitCombat(Identify(attacker), Identify(target));
 }
 
 void BeginTeardown()

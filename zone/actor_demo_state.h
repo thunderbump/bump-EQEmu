@@ -20,7 +20,13 @@ struct Command {
 inline bool ParseCommand(const std::string &text, Command &command)
 {
     if (text.size() > 128) { return false; }
-    std::istringstream input(text);
+    auto line = text;
+    if (!line.empty() && line.back() == '\n') { line.pop_back(); }
+    if (!line.empty() && line.back() == '\r') { line.pop_back(); }
+    for (const auto c : line) {
+        if ((c < ' ' && c != '\t') || c > '~') { return false; }
+    }
+    std::istringstream input(line);
     std::string verb, request, seconds, extra;
     Command parsed;
     if (!(input >> verb >> parsed.session >> request) ||
@@ -87,13 +93,12 @@ public:
         expires_ = now + uint64_t(seconds) * 1000;
         phase = Phase::Waiting;
     }
-    Action Stop(uint64_t now, const char *why, bool failure = false) {
+    Action Stop(uint64_t now, const char *why, Phase terminal = Phase::Stopped) {
         if (!Active() || !reason.empty()) { return Action::None; }
         const bool draining = phase == Phase::Draining;
-        if (failure && attempted > completed + failed) { ++failed; }
+        if (terminal == Phase::Failed && attempted > completed + failed) { ++failed; }
         reason = why;
-        terminal_ = failure ? Phase::Failed :
-            (reason == "operator_stop" || reason == "zone_teardown" ? Phase::Stopped : Phase::Completed);
+        terminal_ = terminal;
         phase = Phase::Draining;
         if (!draining) { stage_at_ = now; }
         return draining ? Action::None : Action::Retire;
@@ -110,10 +115,10 @@ public:
             }
             return Action::None;
         }
-        if (facts.failure) { return Stop(now, facts.failure, true); }
-        if (now >= expires_) { return Stop(now, "duration_expired"); }
+        if (facts.failure) { return Stop(now, facts.failure, Phase::Failed); }
+        if (now >= expires_) { return Stop(now, "duration_expired", Phase::Completed); }
         if (phase == Phase::Waiting) {
-            if (attempted >= EncounterCap) { return Stop(now, "encounter_cap"); }
+            if (attempted >= EncounterCap) { return Stop(now, "encounter_cap", Phase::Completed); }
             if (now < stage_at_) { return Action::None; }
             ++attempted;
             stage_at_ = progress_at_ = now;
@@ -122,7 +127,7 @@ public:
         }
         if (facts.progress) { progress_at_ = now; }
         if (now - progress_at_ >= 30000 || now - stage_at_ >= 60000) {
-            return Stop(now, "encounter_stalled", true);
+            return Stop(now, "encounter_stalled", Phase::Failed);
         }
         if (phase == Phase::Spawning && facts.ready) {
             phase = Phase::Fighting;

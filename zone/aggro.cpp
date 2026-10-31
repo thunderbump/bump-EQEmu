@@ -25,6 +25,7 @@
 #include "zone/map.h"
 #include "zone/mob.h"
 #include "zone/water_map.h"
+#include "zone/actor_demo.h"
 
 extern Zone* zone;
 //#define LOSDEBUG 6
@@ -721,6 +722,9 @@ int EntityList::GetHatedCount(Mob *attacker, Mob *exclude, bool inc_gray_con)
  */
 bool Mob::IsAttackAllowed(Mob *target, bool isSpellAttack)
 {
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+    if (!ActorDemo::CanCombat(this, target)) { return false; }
+#endif
 
 	Mob *mob1 = nullptr, *mob2 = nullptr, *tempmob = nullptr;
 	Client *c1 = nullptr, *c2 = nullptr, *becomenpc = nullptr;

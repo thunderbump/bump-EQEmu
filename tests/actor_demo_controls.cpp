@@ -1,4 +1,5 @@
 #include "../zone/actor_demo_state.h"
+#include "../zone/actor_demo_native.h"
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
@@ -17,10 +18,12 @@ void Commands()
     Require(ParseCommand("start session 1", c) && c.start && c.seconds == 1800, "default duration");
     Require(ParseCommand("start session 18446744073709551615 10", c), "uint64 maximum");
     for (const auto *text : {"start s 0", "start s -1", "start s +1", "start s 18446744073709551616",
-         "start s 1 9", "start s 1 1801", "start s 1 10 extra", "stop s 1 10", "start s 1 10x", "unknown s 1"}) {
+         "start s 1 9", "start s 1 1801", "start s 1 10 extra", "stop s 1 10", "start s 1 10x", "unknown s 1",
+         "start\ns\n1", "start s 1\n\n", "start s 1\rstop s 2", "start s\v1"}) {
         Require(!ParseCommand(text, c), "malformed command accepted");
     }
     Require(!ParseCommand(std::string(129, 'x'), c), "oversized command");
+    Require(ParseCommand("start s 1\r\n", c) && ParseCommand("stop s 2\n", c), "final line terminator");
     Require(ParseCommand("start old-session 1 10", c), "old session syntax");
     uint64_t last = 0;
     Require(std::string(AdmitRequest(c, "new-session", last)) == "stale_session" && last == 0,
@@ -128,13 +131,60 @@ void FailuresAndTeardown()
     run.Advance(1002, {});
     Require(run.phase == Phase::Stopped && run.reason == "zone_teardown", "teardown terminal");
 }
+
+void NativeCustody()
+{
+    Custody custody;
+    custody.actor = {10, 100}; custody.target = {20, 200};
+    custody.epoch = 7; custody.generation = 3;
+    NativeView view{7, 3, true, custody.actor, custody.target};
+    Require(custody.CanCombat(custody.actor, custody.target) && custody.CanCombat(custody.target, custody.actor),
+        "owned native retaliation");
+    const NativeIdentity foreign{30, 300}, reused_actor{10, 101}, reused_target{20, 201};
+    Require(custody.CanCombat(foreign, reused_actor) && custody.CanCombat(reused_actor, reused_target),
+        "unrelated replacement identities restricted");
+    for (const auto &pair : {std::pair{foreign, custody.target}, std::pair{custody.actor, foreign},
+         std::pair{foreign, custody.actor}, std::pair{custody.target, foreign}, std::pair{NativeIdentity{}, custody.actor}}) {
+        Require(!custody.AdmitCombat(pair.first, pair.second) && custody.interference, "foreign native interaction admitted");
+    }
+    const auto present = custody.PlanRetirement(view);
+    Require(present.actor && present.target && !present.drained, "owned retirement plan");
+    view.actor = reused_actor; view.target = reused_target; view.generation = 4;
+    const auto replacement = custody.PlanRetirement(view);
+    Require(!replacement.actor && !replacement.target && replacement.drained, "ID reuse inherited cleanup authority");
+    view = {7, 3, true, {}, {}};
+    Require(!custody.PlanRetirement(view).drained, "native absence bypassed Rust custody drain");
+    view.alive = false;
+    Require(custody.PlanRetirement(view).drained, "fully released custody");
+    // Partial setup: target registered, actor creation refused by unrelated runtime.
+    Custody partial;
+    partial.target = {20, 200};
+    const auto cleanup = partial.PlanRetirement({9, 9, true, foreign, partial.target});
+    Require(!cleanup.actor && cleanup.target && !cleanup.drained, "partial setup retired foreign actor");
+    Require(partial.PlanRetirement({9, 9, true, foreign, {}}).drained, "partial setup target release");
+
+    custody.interference = false;
+    view = {7, 3, true, custody.actor, custody.target};
+    custody.ObserveCounters(view, {3, 2, 6});
+    custody.ObserveCounters(view, {3, 2, 6});
+    Require(custody.total.swings == 3 && custody.total.hits == 2 && custody.total.damage == 6, "duplicate native samples counted");
+    custody.ObserveCounters({7, 4, true, reused_actor, reused_target}, {99, 99, 999});
+    Require(custody.total.damage == 6, "foreign runtime counters admitted");
+    custody.generation = 4; custody.last = {}; // explicit next owned encounter
+    view.generation = 4;
+    custody.ObserveCounters(view, {2, 1, 4});
+    Require(custody.total.swings == 5 && custody.total.hits == 3 && custody.total.damage == 10,
+        "native cumulative counters across incarnations");
+    custody.ObserveCounters(view, {1, 1, 1});
+    Require(custody.interference && custody.total.damage == 10, "regression produced unsigned counter damage");
+}
 }
 
 int main()
 {
     try {
-        Commands(); EncountersAndStop(); Limits(); CapAndGap(); FailuresAndTeardown();
-        std::cout << "actor demo controls: 5 groups passed\n";
+        Commands(); EncountersAndStop(); Limits(); CapAndGap(); FailuresAndTeardown(); NativeCustody();
+        std::cout << "actor demo controls: 6 groups passed\n";
         return EXIT_SUCCESS;
     } catch (const std::exception &error) {
         std::cerr << "actor demo controls: " << error.what() << '\n';
