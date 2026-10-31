@@ -178,13 +178,44 @@ void NativeCustody()
     custody.ObserveCounters(view, {1, 1, 1});
     Require(custody.interference && custody.total.damage == 10, "regression produced unsigned counter damage");
 }
+
+void NativeKillOrdering()
+{
+    Custody custody;
+    custody.actor = {10, 100}; custody.target = {20, 200};
+    custody.epoch = 7; custody.generation = 3;
+    NativeView view{7, 3, true, custody.actor, custody.target};
+    Run run;
+    run.Start(1000, 1800);
+    run.Advance(1000, {});
+    Facts f;
+    f.ready = true;
+    run.Advance(1001, f);
+    // Actual production order: Attack -> native Death callback -> SwingHit,
+    // then demo observes the dead/depop rat while Rust is still Engaging.
+    view.target_kill_pending = true;
+    f.progress = true;
+    f.drained = false;
+    f.failure = custody.TargetLost(view, false, false) ? "target_identity_lost" : nullptr;
+    Require(run.Advance(1002, f) == Action::None && run.phase == Phase::Fighting && run.completed == 0,
+        "native death latch either failed early or manufactured victory");
+    // Next serialized adapter tick consumes the correlated latch as TargetKilled.
+    view.target = {}; view.target_kill_pending = false;
+    f.victory = true;
+    f.failure = custody.TargetLost(view, false, true) ? "target_identity_lost" : nullptr;
+    Require(run.Advance(1003, f) == Action::Retire && run.completed == 1 && run.failed == 0,
+        "delayed truthful native kill was not completed");
+    Require(custody.TargetLost(view, false, false), "mere external depop treated as pending kill");
+    view.target_kill_pending = true; ++view.generation;
+    Require(custody.TargetLost(view, false, false), "foreign runtime pending kill inherited authority");
+}
 }
 
 int main()
 {
     try {
-        Commands(); EncountersAndStop(); Limits(); CapAndGap(); FailuresAndTeardown(); NativeCustody();
-        std::cout << "actor demo controls: 6 groups passed\n";
+        Commands(); EncountersAndStop(); Limits(); CapAndGap(); FailuresAndTeardown(); NativeCustody(); NativeKillOrdering();
+        std::cout << "actor demo controls: 7 groups passed\n";
         return EXIT_SUCCESS;
     } catch (const std::exception &error) {
         std::cerr << "actor demo controls: " << error.what() << '\n';

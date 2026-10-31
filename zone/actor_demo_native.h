@@ -13,6 +13,7 @@ struct NativeView {
     uint64_t epoch = 0, generation = 0;
     bool alive = false;
     NativeIdentity actor, target;
+    bool target_kill_pending = false;
 };
 struct Retirement {
     bool actor = false, target = false, drained = false;
@@ -38,6 +39,12 @@ public:
         const bool actor_present = actor.Matches(view.actor);
         const bool target_present = target.Matches(view.target);
         return {runtime_alive, target_present, !runtime_alive && !actor_present && !target_present};
+    }
+    bool TargetLost(const NativeView &view, bool viable, bool victory) const {
+        // A depop alone is loss. Only the adapter's correlated native death
+        // latch permits waiting for next tick's truthful Rust terminal.
+        return !OwnsRuntime(view) || (!victory && !view.target_kill_pending &&
+            (!target.Matches(view.target) || !viable));
     }
     bool CanCombat(const NativeIdentity &attacker, const NativeIdentity &victim) const {
         const bool attacker_is_actor = actor.Matches(attacker);

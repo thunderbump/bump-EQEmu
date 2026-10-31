@@ -22,6 +22,7 @@
 */
 
 #include "client.h"
+#include "actor_demo.h"
 
 #include "common/data_verification.h"
 #include "common/eqemu_logsys.h"
@@ -347,6 +348,13 @@ bool Client::Process() {
 			}
 		}
 
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+        // Armed client attack intent precedes the passive permission queries
+        // below, so a blocked demo attack still records real interference.
+        if (((auto_attack && may_use_attacks) || AutoFireEnabled()) && GetTarget()) {
+            ActorDemo::AllowCombat(this, GetTarget());
+        }
+#endif
 		if (AutoFireEnabled()) {
 			if (GetTarget() == this) {
 				MessageString(Chat::TooFarAway, TRY_ATTACKING_SOMEONE);

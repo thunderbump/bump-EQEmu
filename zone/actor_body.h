@@ -36,6 +36,9 @@ public:
     uint16_t NativeID() const { return id_; }
     eqemu_proof::Snapshot Inspect() const { return runtime_->inspect(); }
     eqemu_proof::Report LastReport() const { return last_; }
+    // Native Death can be latched by this tick's swing before Rust consumes it
+    // on the next tick. This is evidence to wait, never a reported victory.
+    bool HasPendingTargetKill(uint64_t target_incarnation) const;
 private:
     eqemu_proof::Report Advance(eqemu_proof::Input input, bool empty = false);
     void Apply(const eqemu_proof::Report &report);

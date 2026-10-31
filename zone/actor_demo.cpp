@@ -52,7 +52,8 @@ public:
     std::string Path(const char *name) const { return dir + "/" + name; }
     NativeView View() const {
         const auto s = ActorBody::Get().Inspect();
-        return {s.epoch, s.generation, s.alive, Identify(Find(custody.actor)), Identify(Find(custody.target))};
+        return {s.epoch, s.generation, s.alive, Identify(Find(custody.actor)), Identify(Find(custody.target)),
+            ActorBody::Get().HasPendingTargetKill(custody.target.incarnation)};
     }
     bool Drained() const { return custody.PlanRetirement(View()).drained; }
     void Retire() {
@@ -205,7 +206,7 @@ public:
                     glm::distance(p, last_position) >= 0.25f;
                 if (facts.progress) { last_position = p; }
                 last_approach = s.approach;
-                if ((!target || target->GetDepop() || target->GetHP() <= 0) && !facts.victory) {
+                if (custody.TargetLost(view, target && !target->GetDepop() && target->GetHP() > 0, facts.victory)) {
                     facts.failure = "target_identity_lost";
                 }
                 if (body->GetOwnerID() || body->GetPetType() != PetType::None || body->GetSwarmInfo() ||

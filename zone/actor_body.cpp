@@ -48,6 +48,15 @@ NPC *Adapter::Body() const
     return Lookup(state.epoch, state.generation, id_);
 }
 
+bool Adapter::HasPendingTargetKill(uint64_t target_incarnation) const
+{
+    const auto s = Inspect();
+    return combat_.killed && s.alive && s.attacking && s.damage > 0 &&
+        combat_.epoch == s.epoch && combat_.generation == s.generation &&
+        combat_.goal == s.goal && combat_.operation == s.operation && s.operation &&
+        combat_.target == target_incarnation && s.target == target_incarnation;
+}
+
 eqemu_proof::Report Adapter::Advance(eqemu_proof::Input input, bool empty)
 {
     const auto state = Inspect();
