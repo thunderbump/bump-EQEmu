@@ -1,5 +1,6 @@
 #include "actor_body.h"
 #include "actor_demo.h"
+#include "actor_hunt_state.h"
 #ifdef EQEMU_BUILD_TESTS
 #include "zone/inserver_tests.h"
 #endif
@@ -363,9 +364,12 @@ bool Adapter::CombatAllowed(NPC *body, NPC *target) const
     // Only mutual contention is permitted. Even a lower-hate third party stops us.
     if ((body->IsEngaged() && (body->GetHateListCount() != 1 || !body->CheckAggro(target))) ||
         (target->IsEngaged() && (target->GetHateListCount() != 1 || !target->CheckAggro(body)))) { return false; }
-    return std::hypot(body->GetX() - target->GetX(), body->GetY() - target->GetY()) <= 5 &&
-        std::abs(body->GetZ() - target->GetZ()) <= 6 &&
-        body->CombatRange(target) && body->CheckLosFN(target) && body->IsAttackAllowed(target);
+    // The public hunt follows native reach, including its fleeing-prey reach.
+    // The sealed proof keeps its additional five-unit bound.
+    return ActorDemo::ActorMeleeReachAllowed(state.public_hunt,
+        std::hypot(body->GetX() - target->GetX(), body->GetY() - target->GetY()),
+        body->GetZ() - target->GetZ(), body->CombatRange(target)) &&
+        body->CheckLosFN(target) && body->IsAttackAllowed(target);
 }
 
 void Adapter::ObserveDeath(NPC *victim, Mob *killer)

@@ -1,4 +1,5 @@
 #pragma once
+#include "actor_hunt_state.h"
 
 #include <charconv>
 #include <cstdint>
@@ -198,7 +199,7 @@ private:
                 last_outcome = facts.yield; stage_at_ = now;
                 return Action::Rest; // another body-directed attempt restarts the quiet interval
             }
-            if (now - stage_at_ >= 10000 && facts.rested) { phase = Phase::Searching; return Action::Stand; }
+            if (now - stage_at_ >= HuntRestMinimumMs && facts.rested) { phase = Phase::Searching; return Action::Stand; }
             break;
         default: break;
         }

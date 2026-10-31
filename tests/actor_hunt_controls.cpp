@@ -125,11 +125,28 @@ void YieldRecoveryAndGoalCounters() {
     view.target_kill_pending = true;
     Require(!c.TargetLost(view, false, false), "correlated actor death latch lost before Rust terminal");
 }
+
+void NativeReachAndShortApproaches() {
+    // A prey at5.1 produces Rust's rounded two-unit-short destination x3.
+    // That is a valid public approach even though the proof requires >=4.
+    const auto destination = std::round(5.1 - 2);
+    Require(ActorRouteDistanceAllowed(true, destination) && !ActorRouteDistanceAllowed(false, destination),
+        "nearby stationary prey skipped by proof minimum");
+    Require(ActorRouteDistanceAllowed(false, 80) && !ActorRouteDistanceAllowed(false, 80.1) &&
+        ActorRouteDistanceAllowed(true, 350) && !ActorRouteDistanceAllowed(true, 350.1), "route limits changed");
+    // Native CombatRange includes size/flee modifiers. Do not replace that
+    // native fact with the proof's stricter XY<=5 requirement during a hunt.
+    Require(ActorMeleeReachAllowed(true, 7, 0, true) && !ActorMeleeReachAllowed(false, 7, 0, true),
+        "moving/fleeing prey lost while native reach still permits melee");
+    Require(!ActorMeleeReachAllowed(true, 7, 0, false) && !ActorMeleeReachAllowed(true, 4, 7, true),
+        "out-of-reach or wrong-floor target admitted");
+    Require(!HuntRested(9, 11) && HuntRested(10, 11), "fractional native HP threshold rounding");
+}
 }
 int main() {
     try {
-        NearestAndEligibility(); PersistentRestAndNoTarget(); ImmediateContentionAndOnlyActorCleanup(); YieldRecoveryAndGoalCounters();
-        std::cout << "public hunt controls: 4 groups passed\n";
+        NearestAndEligibility(); PersistentRestAndNoTarget(); ImmediateContentionAndOnlyActorCleanup(); YieldRecoveryAndGoalCounters(); NativeReachAndShortApproaches();
+        std::cout << "public hunt controls: 5 groups passed\n";
         return EXIT_SUCCESS;
     } catch (const std::exception &error) {
         std::cerr << "public hunt controls: " << error.what() << '\n';

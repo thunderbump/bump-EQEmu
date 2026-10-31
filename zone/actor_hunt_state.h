@@ -5,6 +5,10 @@
 namespace ActorDemo {
 constexpr float HuntHomeX = -917, HuntHomeY = 1224;
 constexpr float HuntSearchRadius = 150, HuntLeash = 180, HuntZRange = 6;
+constexpr float HuntDirectRange = 350, HuntRouteLimit = 400;
+constexpr unsigned HuntRouteNodes = 64;
+constexpr uint64_t HuntSearchIntervalMs = 2000, HuntRestMinimumMs = 10000;
+constexpr int64_t HuntRestHPPercent = 90;
 struct HuntPosition { double x = 0, y = 0, z = 0; };
 inline double DistanceSquared(HuntPosition a, HuntPosition b) {
     return (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y);
@@ -15,6 +19,14 @@ inline bool InsideHuntArea(HuntPosition p, HuntPosition home, double radius) {
 }
 inline bool HuntType(uint32_t type, uint8_t level) {
     return ((type == 2011 || type == 2104) && level == 1) || (type == 2000 && level == 2);
+}
+inline bool ActorRouteDistanceAllowed(bool public_hunt, double distance) {
+    return std::isfinite(distance) && distance >= (public_hunt ? 0.5 : 4.0) &&
+        distance <= (public_hunt ? HuntDirectRange : 80.0);
+}
+inline bool ActorMeleeReachAllowed(bool public_hunt, double xy, double z, bool native_reach) {
+    return std::isfinite(xy) && std::isfinite(z) && native_reach && std::abs(z) <= HuntZRange &&
+        (public_hunt || xy <= 5);
 }
 struct HuntCandidate {
     NativeIdentity key;
@@ -35,6 +47,9 @@ inline bool HuntNearer(const HuntCandidate &a, const HuntCandidate &b, HuntPosit
     return da < db || (da == db && a.key.incarnation < b.key.incarnation);
 }
 inline bool HuntRested(int64_t hp, int64_t maximum) {
-    return hp > 0 && maximum > 0 && hp >= maximum - maximum / 10;
+    if (hp <= 0 || maximum <= 0) { return false; }
+    // Ceiling of the percentage without multiplying a full int64 HP maximum.
+    const auto required = maximum / 100 * HuntRestHPPercent + (maximum % 100 * HuntRestHPPercent + 99) / 100;
+    return hp >= required;
 }
 } // namespace ActorDemo

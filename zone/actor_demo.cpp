@@ -313,9 +313,11 @@ public:
             out << ",\"target_owned\":false,\"target_type_id\":" << target_type << ",\"target_spawn_id\":" << target_spawn
                 << ",\"goal\":" << custody.goal << ",\"yielded\":" << run.yielded << ",\"last_outcome\":\"" << run.last_outcome
                 << "\",\"actor_hp\":" << (body ? body->GetHP() : 0) << ",\"actor_max_hp\":" << (body ? body->GetMaxHP() : 0)
-                << ",\"rest_elapsed_ms\":" << run.RestElapsed(now) << ",\"rest_min_ms\":10000,\"rest_hp_percent\":90"
+                << ",\"rest_elapsed_ms\":" << run.RestElapsed(now) << ",\"rest_min_ms\":" << HuntRestMinimumMs
+                << ",\"rest_hp_percent\":" << HuntRestHPPercent
                 << ",\"home_position\":[" << home.x << ',' << home.y << ',' << home.z
-                << "],\"search_radius\":150,\"actor_leash\":180,\"z_range\":6,\"route_limit\":400"
+                << "],\"search_radius\":" << HuntSearchRadius << ",\"actor_leash\":" << HuntLeash
+                << ",\"z_range\":" << HuntZRange << ",\"route_limit\":" << HuntRouteLimit
                 << ",\"eligible_count\":" << eligible_count << ",\"selected_distance_xy\":" << selected_distance
                 << ",\"selected_from_position\":[" << selected_from.x << ',' << selected_from.y << ',' << selected_from.z
                 << "],\"selected_target_position\":[" << selected_position.x << ',' << selected_position.y << ',' << selected_position.z << ']';
@@ -445,7 +447,9 @@ private:
                     if (custody.contested) { facts.yield = "target_contested"; }
                     if (s.approach == eqemu_proof::Approach::Paused || s.approach == eqemu_proof::Approach::Lost) {
                         if (!facts.yield) {
-                            facts.yield = target && DistanceSquared(Position(body), Position(target)) > 25 ?
+                            facts.yield = target && !ActorMeleeReachAllowed(true,
+                                std::sqrt(DistanceSquared(Position(body), Position(target))), body->GetZ() - target->GetZ(),
+                                body->CombatRange(target)) ?
                                 "target_out_of_reach" : "native_encounter_refused";
                         }
                     }
@@ -458,7 +462,7 @@ private:
                             MobMovementManager::ActorCombatMotion::Stopped;
                 }
                 if (run.phase == Phase::Searching && now >= next_search && !facts.yield) {
-                    next_search = now + 2000;
+                    next_search = now + HuntSearchIntervalMs;
                     facts.target_available = SelectPublicTarget(body);
                 }
             }

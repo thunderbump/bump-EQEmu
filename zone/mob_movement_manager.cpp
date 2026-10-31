@@ -880,14 +880,14 @@ bool BuildActorRoute(Mob *who, float x, float y, float z, bool public_hunt, IPat
     // Intentionally local: the first proof does not admit detours, water,
     // portals or partial routes. Native map/navmesh remain authoritative.
     const auto distance = glm::distance(start, end);
-    if (distance < 4.0f || distance > (public_hunt ? 350.0f : 80.0f) || std::abs(z - start.z) > 6.0f ||
+    if (!ActorDemo::ActorRouteDistanceAllowed(public_hunt, distance) || std::abs(z - start.z) > 6.0f ||
         !zone->zonemap->CheckLoS(start, end)) { return false; }
     PathfinderOptions opts;
     opts.offset = who->GetZOffset();
     opts.flags = PathingNotDisabled ^ PathingZoneLine;
     bool partial = false, stuck = false;
     route = zone->pathing->FindPath(start, end, partial, stuck, opts);
-    if (partial || stuck || route.size() < 2 || route.size() > (public_hunt ? 64u : 32u)) { return false; }
+    if (partial || stuck || route.size() < 2 || route.size() > (public_hunt ? ActorDemo::HuntRouteNodes : 32u)) { return false; }
     // Test teleport BEFORE inspecting pos (a teleport marker may have no pos).
     for (const auto &node : route) { if (node.teleport) { return false; } }
     AdjustRoute(route, who);
@@ -903,7 +903,7 @@ bool BuildActorRoute(Mob *who, float x, float y, float z, bool public_hunt, IPat
         previous = node.pos;
     }
     if (zone->watermap->InLiquid(start) || glm::distance(previous, end) > 6.0f ||
-        length > distance * 1.5f || (public_hunt && length > 400.0f)) { return false; }
+        length > distance * 1.5f || (public_hunt && length > ActorDemo::HuntRouteLimit)) { return false; }
     return true;
 }
 }
