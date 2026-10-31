@@ -23,6 +23,7 @@
 #include "zone/client.h"
 #include "zone/mob.h"
 #include "zone/npc.h"
+#include "zone/actor_hunt_state.h"
 #include <cmath>
 #include "zone/position.h"
 #include "zone/water_map.h"
@@ -869,26 +870,24 @@ MobMovementManager::ActorCombatMotion MobMovementManager::InspectActorCombatMoti
     return ActorCombatMotion::Facing;
 }
 
-bool MobMovementManager::NavigateActorTo(Mob *who, float x, float y, float z)
+namespace {
+bool BuildActorRoute(Mob *who, float x, float y, float z, bool public_hunt, IPathfinder::IPath &route)
 {
-    const auto iter = _impl->Entries.find(who);
-    if (!ActorControlAllowsTravel(who) || iter == _impl->Entries.end() || !zone ||
+    if (!MobMovementManager::ActorControlAllowsTravel(who) || !zone ||
         !zone->zonemap || !zone->pathing || !zone->watermap ||
         !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) { return false; }
-    auto &ent = iter->second;
-    if (!ent.Commands.empty() || ent.actor_travel == ActorTravel::Moving) { return false; }
     const glm::vec3 start(who->GetX(), who->GetY(), who->GetZ()), end(x, y, z);
     // Intentionally local: the first proof does not admit detours, water,
     // portals or partial routes. Native map/navmesh remain authoritative.
     const auto distance = glm::distance(start, end);
-    if (distance < 4.0f || distance > 80.0f || std::abs(z - start.z) > 6.0f ||
+    if (distance < 4.0f || distance > (public_hunt ? 350.0f : 80.0f) || std::abs(z - start.z) > 6.0f ||
         !zone->zonemap->CheckLoS(start, end)) { return false; }
     PathfinderOptions opts;
     opts.offset = who->GetZOffset();
     opts.flags = PathingNotDisabled ^ PathingZoneLine;
     bool partial = false, stuck = false;
-    auto route = zone->pathing->FindPath(start, end, partial, stuck, opts);
-    if (partial || stuck || route.size() < 2 || route.size() > 32) { return false; }
+    route = zone->pathing->FindPath(start, end, partial, stuck, opts);
+    if (partial || stuck || route.size() < 2 || route.size() > (public_hunt ? 64u : 32u)) { return false; }
     // Test teleport BEFORE inspecting pos (a teleport marker may have no pos).
     for (const auto &node : route) { if (node.teleport) { return false; } }
     AdjustRoute(route, who);
@@ -898,11 +897,34 @@ bool MobMovementManager::NavigateActorTo(Mob *who, float x, float y, float z)
         if (!std::isfinite(node.pos.x) || !std::isfinite(node.pos.y) ||
             !std::isfinite(node.pos.z) || zone->watermap->InLiquid(node.pos) ||
             !zone->zonemap->CheckLoS(previous, node.pos)) { return false; }
+        if (public_hunt && std::hypot(node.pos.x - ActorDemo::HuntHomeX, node.pos.y - ActorDemo::HuntHomeY) >
+            ActorDemo::HuntLeash) { return false; }
         length += glm::distance(previous, node.pos);
         previous = node.pos;
     }
     if (zone->watermap->InLiquid(start) || glm::distance(previous, end) > 6.0f ||
-        length > distance * 1.5f) { return false; }
+        length > distance * 1.5f || (public_hunt && length > 400.0f)) { return false; }
+    return true;
+}
+}
+
+bool MobMovementManager::CanNavigateActorTo(Mob *who, float x, float y, float z, bool public_hunt)
+{
+    const auto iter = _impl->Entries.find(who);
+    if (iter == _impl->Entries.end() || !iter->second.Commands.empty() ||
+        iter->second.actor_travel == ActorTravel::Moving) { return false; }
+    IPathfinder::IPath route;
+    return BuildActorRoute(who, x, y, z, public_hunt, route);
+}
+
+bool MobMovementManager::NavigateActorTo(Mob *who, float x, float y, float z, bool public_hunt)
+{
+    const auto iter = _impl->Entries.find(who);
+    if (iter == _impl->Entries.end()) { return false; }
+    auto &ent = iter->second;
+    if (!ent.Commands.empty() || ent.actor_travel == ActorTravel::Moving) { return false; }
+    IPathfinder::IPath route;
+    if (!BuildActorRoute(who, x, y, z, public_hunt, route)) { return false; }
     // Reuse native interpolation/packets/collision observations; never invoke
     // generic stuck handling (which may teleport). No logical position writes.
     for (const auto &node : route) {

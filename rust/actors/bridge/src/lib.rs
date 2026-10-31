@@ -31,6 +31,8 @@ mod ffi {
         TargetKilled,
         TargetLost,
         ActorDefeated,
+        StartPublicHunt,
+        ReleasePublicHunt,
     }
     #[repr(u8)]
     enum Status {
@@ -183,6 +185,7 @@ mod ffi {
         swings: u64,
         hits: u64,
         damage: u64,
+        public_hunt: bool,
     }
     extern "Rust" {
         type Runtime;
@@ -346,6 +349,8 @@ impl Runtime {
                     ffi::Kind::StartApproach => actor_core::Kind::StartApproach,
                     ffi::Kind::CreateMeleeBody => actor_core::Kind::CreateMeleeBody,
                     ffi::Kind::StartMelee => actor_core::Kind::StartMelee,
+                    ffi::Kind::StartPublicHunt => actor_core::Kind::StartPublicHunt,
+                    ffi::Kind::ReleasePublicHunt => actor_core::Kind::ReleasePublicHunt,
                     _ => {
                         let s = self.0.inspect();
                         return ffi::Report {
@@ -487,6 +492,7 @@ impl Runtime {
                 swings: s.swings,
                 hits: s.hits,
                 damage: s.damage,
+                public_hunt: s.public_hunt,
                 patrol: match s.patrol {
                     actor_core::Patrol::Disabled => ffi::Patrol::Disabled,
                     actor_core::Patrol::Running => ffi::Patrol::Running,

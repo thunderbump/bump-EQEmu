@@ -2,12 +2,15 @@
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
 #include "actor_demo_state.h"
 #include "actor_demo_native.h"
+#include "actor_hunt_state.h"
 #include "actor_body.h"
 #include "entity.h"
 #include "npc.h"
 #include "zone.h"
 #include "map.h"
 #include "water_map.h"
+#include "mob_movement_manager.h"
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -15,6 +18,7 @@
 #include <cstring>
 #include <fstream>
 #include <memory>
+#include <vector>
 #include <unistd.h>
 
 extern EntityList entity_list;
@@ -40,23 +44,33 @@ NPC *Find(const NativeIdentity &key)
 
 class Demo {
 public:
-    explicit Demo(std::string directory) : dir(std::move(directory)) {
+    explicit Demo(std::string directory, bool hunt) : dir(std::move(directory)), public_hunt(hunt) {
         session = std::to_string(getpid()) + "-" + std::to_string(Now()) + "-" +
             std::to_string(ActorBody::Get().Inspect().epoch);
         // No queued command survives entry into a new zone/process session.
         std::remove(Path("command").c_str());
+        custody.public_hunt = public_hunt;
     }
     Run run;
     Custody custody;
+
+    bool PairInsideHuntArea(Mob *attacker, Mob *target) const {
+        if (!public_hunt || (!custody.actor.Matches(Identify(attacker)) && !custody.actor.Matches(Identify(target)))) { return true; }
+        auto *body = Find(custody.actor);
+        auto *prey = Find(custody.target);
+        return body && prey && InsideHuntArea(Position(body), home, HuntLeash) &&
+            InsideHuntArea(Position(prey), home, HuntSearchRadius);
+    }
 
     std::string Path(const char *name) const { return dir + "/" + name; }
     NativeView View() const {
         const auto s = ActorBody::Get().Inspect();
         return {s.epoch, s.generation, s.alive, Identify(Find(custody.actor)), Identify(Find(custody.target)),
-            ActorBody::Get().HasPendingTargetKill(custody.target.incarnation)};
+            ActorBody::Get().HasPendingTargetKill(custody.target.incarnation), s.goal};
     }
     bool Drained() const { return custody.PlanRetirement(View()).drained; }
     void Retire() {
+        if (public_hunt) { DetachPublicTarget(); }
         auto &adapter = ActorBody::Get();
         const auto view = View();
         const auto plan = custody.PlanRetirement(view);
@@ -69,6 +83,7 @@ public:
     }
 
     bool Spawn() {
+        if (public_hunt) { return SpawnHunter(); }
         auto &adapter = ActorBody::Get();
         if (adapter.Inspect().alive || !Drained()) { return false; }
         const auto *source = content_db.LoadNPCTypesData(2011);
@@ -145,9 +160,42 @@ public:
         if (action == Action::Spawn && !Spawn()) {
             Execute(run.Stop(now, "setup_refused", Phase::Failed), now);
         }
-        if (action == Action::Engage &&
+        if (action == Action::Engage && public_hunt) {
+            auto *body = Find(custody.actor);
+            auto *target = Find(custody.target);
+            if (!body || !target || !ActorBody::IsPublicHuntPrey(target) || target->IsEngaged()) {
+                Execute(run.Yield(now, "target_unavailable"), now);
+                return;
+            }
+            custody.combat_enabled = true;
+            const auto report = ActorBody::Get().StartPublicHunt(custody.target.id);
+            if (report.status != eqemu_proof::Status::Ok) {
+                Execute(run.Yield(now, "melee_refused"), now);
+            } else {
+                custody.goal = ActorBody::Get().Inspect().goal;
+                custody.last = {};
+            }
+        } else if (action == Action::Engage &&
             ActorBody::Get().StartMelee({custody.target.id}).status != eqemu_proof::Status::Ok) {
             Execute(run.Stop(now, "melee_refused", Phase::Failed), now);
+        }
+        if (action == Action::Release) {
+            custody.combat_enabled = false; // close swing permission before any native callbacks
+            const auto s = ActorBody::Get().Inspect();
+            if (s.public_hunt && s.approach != eqemu_proof::Approach::Disabled) {
+                ActorBody::Get().ReleasePublicHunt();
+            }
+            DetachPublicTarget();
+        }
+        if (action == Action::Rest) {
+            custody.target = {};
+            custody.contested = custody.interference = false;
+            target_type = target_spawn = 0;
+            if (auto *body = Find(custody.actor)) { body->SetAppearance(eaSitting); }
+        }
+        if (action == Action::Stand) {
+            next_search = 0;
+            if (auto *body = Find(custody.actor)) { body->SetAppearance(eaStanding); }
         }
     }
 
@@ -175,8 +223,12 @@ public:
             command_result = "busy";
         } else {
             custody = {};
+            custody.public_hunt = public_hunt;
+            target_type = target_spawn = eligible_count = 0;
+            selected_distance = 0; selected_from = {}; selected_position = {};
+            next_search = 0;
             run_id = session + "-" + std::to_string(command.request);
-            run.Start(now, command.seconds);
+            run.Start(now, command.seconds, public_hunt);
             command_result = "start_accepted";
         }
     }
@@ -187,6 +239,7 @@ public:
             next_io = now + 1000;
             if (!WriteStatus(now)) { Execute(run.Stop(now, "status_io_failed", Phase::Failed), now); }
         }
+        if (public_hunt) { TickHunt(now); return; }
         Facts facts;
         facts.drained = Drained();
         auto &adapter = ActorBody::Get();
@@ -231,7 +284,8 @@ public:
         std::ofstream out(Path("status.json.tmp"), std::ios::trunc);
         if (!out) { return false; }
         // Every string below is generated internally, never reflected input.
-        out << "{\"schema\":1,\"scenario\":\"qeynos2-owned-rat-v1\",\"pid\":" << getpid()
+        out << "{\"schema\":1,\"scenario\":\"" << (public_hunt ? "qeynos2-public-hunt-v2" : "qeynos2-owned-rat-v1")
+            << "\",\"pid\":" << getpid()
             << ",\"session\":\"" << session << "\",\"run_id\":\"" << run_id
             << "\",\"last_request\":" << last_request << ",\"command_result\":\"" << command_result
             << "\",\"phase\":\"" << PhaseName(run.phase) << "\",\"elapsed_ms\":" << elapsed
@@ -240,18 +294,184 @@ public:
             << ",\"actor_id\":" << custody.actor.id << ",\"actor_incarnation\":" << custody.actor.incarnation
             << ",\"target_id\":" << custody.target.id << ",\"target_incarnation\":" << custody.target.incarnation
             << ",\"swings\":" << custody.total.swings << ",\"hits\":" << custody.total.hits << ",\"damage\":" << custody.total.damage
-            << ",\"live_owned\":" << (unsigned(bool(Find(custody.actor))) + unsigned(bool(Find(custody.target))))
+            << ",\"live_owned\":" << (unsigned(bool(Find(custody.actor))) + unsigned(!public_hunt && bool(Find(custody.target))))
             << ",\"custody_drained\":" << (Drained() ? "true" : "false")
             << ",\"terminal_reason\":\"" << run.reason << "\",\"updated_ms\":" << now
-            << ",\"actor_position\":[" << actor_x << ',' << actor_y << ',' << actor_z
-            << "],\"target_position\":[" << rat_x << ',' << rat_y << ',' << rat_z << "]}\n";
+            << ",\"position_kind\":\"" << (public_hunt ? "current" : "setup") << "\",\"actor_position\":";
+        auto position = [&](NPC *npc) {
+            if (npc && std::isfinite(npc->GetX()) && std::isfinite(npc->GetY()) && std::isfinite(npc->GetZ())) {
+                out << '[' << npc->GetX() << ',' << npc->GetY() << ',' << npc->GetZ() << ']';
+            } else { out << "null"; }
+        };
+        if (public_hunt) { position(Find(custody.actor)); }
+        else { out << '[' << actor_x << ',' << actor_y << ',' << actor_z << ']'; }
+        out << ",\"target_position\":";
+        if (public_hunt) { position(Find(custody.target)); }
+        else { out << '[' << rat_x << ',' << rat_y << ',' << rat_z << ']'; }
+        if (public_hunt) {
+            const auto *body = Find(custody.actor);
+            out << ",\"target_owned\":false,\"target_type_id\":" << target_type << ",\"target_spawn_id\":" << target_spawn
+                << ",\"goal\":" << custody.goal << ",\"yielded\":" << run.yielded << ",\"last_outcome\":\"" << run.last_outcome
+                << "\",\"actor_hp\":" << (body ? body->GetHP() : 0) << ",\"actor_max_hp\":" << (body ? body->GetMaxHP() : 0)
+                << ",\"rest_elapsed_ms\":" << run.RestElapsed(now) << ",\"rest_min_ms\":10000,\"rest_hp_percent\":90"
+                << ",\"home_position\":[" << home.x << ',' << home.y << ',' << home.z
+                << "],\"search_radius\":150,\"actor_leash\":180,\"z_range\":6,\"route_limit\":400"
+                << ",\"eligible_count\":" << eligible_count << ",\"selected_distance_xy\":" << selected_distance
+                << ",\"selected_from_position\":[" << selected_from.x << ',' << selected_from.y << ',' << selected_from.z
+                << "],\"selected_target_position\":[" << selected_position.x << ',' << selected_position.y << ',' << selected_position.z << ']';
+        }
+        out << "}\n";
         out.close();
         return bool(out) && std::rename(Path("status.json.tmp").c_str(), Path("status.json").c_str()) == 0;
     }
 
 private:
+    static HuntPosition Position(NPC *npc) { return {npc->GetX(), npc->GetY(), npc->GetZ()}; }
+    bool SpawnHunter() {
+        auto &adapter = ActorBody::Get();
+        if (adapter.Inspect().alive || !Drained() || !zone->zonemap || !zone->pathing || !zone->watermap) { return false; }
+        glm::vec3 point(HuntHomeX, HuntHomeY, 29);
+        const auto floor = zone->zonemap->FindBestZ(point, nullptr);
+        if (floor == BEST_Z_INVALID || !std::isfinite(floor)) { return false; }
+        point.z = floor + 3.75f;
+        if (zone->watermap->InLiquid(point)) { return false; }
+        home = {point.x, point.y, point.z};
+        if (adapter.CreateVisibleMeleeBody(std::lround(point.x), std::lround(point.y), std::lround(point.z)).event !=
+            eqemu_proof::Event::BodyRequested) { return false; }
+        const auto s = adapter.Inspect();
+        custody.epoch = s.epoch; custody.generation = s.generation;
+        auto *body = adapter.Body();
+        if (!body) { return false; }
+        custody.actor = Identify(body);
+        actor_x = point.x; actor_y = point.y; actor_z = point.z;
+        custody.last = {};
+        last_position = glm::vec3(body->GetPosition());
+        last_approach = s.approach;
+        return true;
+    }
+    void DetachPublicTarget() {
+        custody.combat_enabled = false;
+        auto *body = Find(custody.actor);
+        auto *target = Find(custody.target);
+        if (!body) { return; }
+        // Remove exactly our contribution. Public foreign hate/damage entries
+        // and native stats, loot, flee, spawn and respawn remain untouched.
+        if (target && target->CheckAggro(body)) { target->RemoveFromHateList(body); }
+        if (target && body->CheckAggro(target)) { body->RemoveFromHateList(target); }
+        if (body->IsEngaged()) { body->WipeHateList(); } // owned body only
+        body->SetTarget(nullptr);
+    }
+    bool SelectPublicTarget(NPC *body) {
+        const auto from = Position(body);
+        std::vector<HuntCandidate> candidates;
+        for (const auto &entry : entity_list.GetNPCList()) {
+            auto *npc = entry.second;
+            HuntCandidate c{Identify(npc), Position(npc), npc->GetNPCTypeID(), npc->GetLevel()};
+            c.natural = npc->GetSpawn() && npc->GetSpawn()->GetNPC() == npc;
+            c.alive = npc->GetHP() > 0 && !npc->GetDepop();
+            c.targetable = npc->IsTargetable();
+            c.owned = npc->GetOwnerID() || npc->GetPetType() != PetType::None || npc->GetSwarmInfo() || npc->Charmed();
+            c.engaged = npc->IsEngaged();
+            c.moving = npc->IsMoving() || npc->IsCasting() || npc->IsStunned() || npc->IsMezzed() ||
+                npc->IsFeared() || npc->IsBlind() || npc->IsRooted() || npc->IsPseudoRooted();
+            c.service = !ActorBody::IsPublicHuntPrey(npc);
+            if (HuntEligible(c, from, home)) { candidates.push_back(c); }
+        }
+        std::sort(candidates.begin(), candidates.end(), [&](const auto &a, const auto &b) { return HuntNearer(a, b, from); });
+        eligible_count = candidates.size();
+        for (const auto &c : candidates) {
+            auto *npc = Find(c.key);
+            if (!npc || npc->IsEngaged() || !ActorBody::IsPublicHuntPrey(npc)) { continue; }
+            glm::vec3 position(npc->GetPosition());
+            auto floor_probe = position + glm::vec3(0, 0, 20);
+            const auto floor = zone->zonemap->FindBestZ(floor_probe, nullptr);
+            if (floor == BEST_Z_INVALID || !std::isfinite(floor) ||
+                std::abs(position.z - floor - npc->GetZOffset()) > 2 ||
+                zone->watermap->InLiquid(position) || !body->CheckLosFN(npc)) { continue; }
+            const auto distance = std::sqrt(DistanceSquared(from, c.position));
+            if (distance > 5 || !body->CombatRange(npc)) {
+                // Same rounded two-unit-short destination as Rust's approach.
+                const auto scale = distance > 2 ? 2 / distance : 0;
+                const auto x = std::round(c.position.x - (c.position.x - from.x) * scale);
+                const auto y = std::round(c.position.y - (c.position.y - from.y) * scale);
+                if (!MobMovementManager::Get().CanNavigateActorTo(body, x, y, std::round(c.position.z), true)) { continue; }
+            }
+            custody.target = c.key;
+            target_type = c.type; target_spawn = npc->GetSpawnPointID();
+            selected_distance = distance; selected_from = from; selected_position = c.position;
+            rat_x = position.x; rat_y = position.y; rat_z = position.z;
+            return true;
+        }
+        return false;
+    }
+    void TickHunt(uint64_t now) {
+        auto &adapter = ActorBody::Get();
+        auto s = adapter.Inspect();
+        auto *body = Find(custody.actor);
+        auto *target = Find(custody.target);
+        auto view = View();
+        const bool swung = s.swings > custody.last.swings;
+        custody.ObserveCounters(view, {s.swings, s.hits, s.damage});
+        Facts facts;
+        facts.drained = Drained();
+        if (run.Active() && run.phase != Phase::Waiting && run.phase != Phase::Draining) {
+            if (!custody.OwnsRuntime(view) || !s.alive || !body || adapter.Body() != body ||
+                body->GetDepop() || body->GetHP() <= 0) {
+                facts.failure = s.approach == eqemu_proof::Approach::Defeated ? "actor_defeated" : "actor_identity_lost";
+            } else if (body->GetOwnerID() || body->GetPetType() != PetType::None || body->GetSwarmInfo() || body->Charmed()) {
+                facts.failure = "actor_foreign_custody";
+            } else if (!InsideHuntArea(Position(body), home, HuntLeash)) {
+                facts.failure = "actor_leash_exceeded";
+            } else {
+                facts.ready = s.body == eqemu_proof::Body::Present;
+                facts.rested = HuntRested(body->GetHP(), body->GetMaxHP()) && !body->IsEngaged() &&
+                    !body->IsMoving() && body->GetAppearance() == eaSitting;
+                const auto p = glm::vec3(body->GetPosition());
+                facts.progress = swung || s.approach != last_approach || glm::distance(p, last_position) >= 0.25f;
+                if (facts.progress) { last_position = p; }
+                last_approach = s.approach;
+                if (custody.interference) { facts.yield = "foreign_interference"; }
+                if (run.phase == Phase::Fighting) {
+                    facts.victory = s.goal == custody.goal && s.target == custody.target.incarnation &&
+                        s.approach == eqemu_proof::Approach::Victory &&
+                        s.last_terminal == eqemu_proof::Event::TargetKilled && s.damage > 0;
+                    if (custody.TargetLost(view, target && !target->GetDepop() && target->GetHP() > 0, facts.victory)) {
+                        facts.yield = "target_lost";
+                    } else if (target && !InsideHuntArea(Position(target), home, HuntSearchRadius)) {
+                        facts.yield = "target_left_area";
+                    } else if (target && target->IsEngaged() && (target->GetHateListCount() != 1 || !target->CheckAggro(body))) {
+                        facts.yield = "target_contested";
+                    }
+                    if (custody.contested) { facts.yield = "target_contested"; }
+                    if (s.approach == eqemu_proof::Approach::Paused || s.approach == eqemu_proof::Approach::Lost) {
+                        if (!facts.yield) {
+                            facts.yield = target && DistanceSquared(Position(body), Position(target)) > 25 ?
+                                "target_out_of_reach" : "native_encounter_refused";
+                        }
+                    }
+                }
+                if (run.phase == Phase::Releasing) {
+                    if (s.public_hunt && s.approach != eqemu_proof::Approach::Disabled) { adapter.ReleasePublicHunt(); }
+                    s = adapter.Inspect();
+                    facts.goal_idle = s.approach == eqemu_proof::Approach::Disabled && s.phase == eqemu_proof::Phase::Idle &&
+                        !s.attacking && !body->IsMoving() && MobMovementManager::Get().InspectActorCombatMotion(body) ==
+                            MobMovementManager::ActorCombatMotion::Stopped;
+                }
+                if (run.phase == Phase::Searching && now >= next_search && !facts.yield) {
+                    next_search = now + 2000;
+                    facts.target_available = SelectPublicTarget(body);
+                }
+            }
+        }
+        Execute(run.Advance(now, facts), now);
+    }
     std::string dir, session, run_id, command_result = "ready";
+    bool public_hunt = false;
     uint64_t last_request = 0, next_io = 0;
+    uint64_t next_search = 0;
+    uint32_t target_type = 0, target_spawn = 0, eligible_count = 0;
+    double selected_distance = 0;
+    HuntPosition home{}, selected_from{}, selected_position{};
     glm::vec3 last_position{};
     eqemu_proof::Approach last_approach = eqemu_proof::Approach::Disabled;
     float actor_x = 0, actor_y = 0, actor_z = 0, rat_x = 0, rat_y = 0, rat_z = 0;
@@ -267,18 +487,20 @@ void Process()
         const auto *directory = std::getenv("EQEMU_STAGING_ACTOR_DEMO_DIR");
         if (!enabled || std::strcmp(enabled, "1") || !directory || directory[0] != '/' ||
             std::strlen(directory) > 512) { return; }
-        demo = std::make_unique<Demo>(directory);
+        const auto *scenario = std::getenv("EQEMU_STAGING_ACTOR_SCENARIO");
+        if (scenario && std::strcmp(scenario, "public-hunt-v2") && std::strcmp(scenario, "owned-rat-v1")) { return; }
+        demo = std::make_unique<Demo>(directory, scenario && std::strcmp(scenario, "public-hunt-v2") == 0);
     }
     demo->Tick(Now());
 }
 
 bool CanCombat(Mob *attacker, Mob *target)
 {
-    return !demo || demo->custody.CanCombat(Identify(attacker), Identify(target));
+    return !demo || (demo->custody.CanCombat(Identify(attacker), Identify(target)) && demo->PairInsideHuntArea(attacker, target));
 }
 bool AllowCombat(Mob *attacker, Mob *target)
 {
-    return !demo || demo->custody.AdmitCombat(Identify(attacker), Identify(target));
+    return !demo || (demo->custody.AdmitCombat(Identify(attacker), Identify(target)) && demo->PairInsideHuntArea(attacker, target));
 }
 bool AllowClientAbility(Mob *attacker, Mob *target, uint16_t requested_target)
 {

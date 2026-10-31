@@ -1,0 +1,138 @@
+#include "../zone/actor_demo_state.h"
+#include "../zone/actor_hunt_state.h"
+#include <algorithm>
+#include <cstdlib>
+#include <iostream>
+#include <stdexcept>
+#include <vector>
+
+using namespace ActorDemo;
+namespace {
+void Require(bool condition, const char *why) { if (!condition) { throw std::runtime_error(why); } }
+
+HuntCandidate Prey(uint16_t id, uint64_t incarnation, double x, double y = 0) {
+    HuntCandidate c{{id, incarnation}, {x, y, 0}, 2011, 1};
+    c.natural = c.alive = c.targetable = true;
+    return c;
+}
+void NearestAndEligibility() {
+    const HuntPosition home{0, 0, 0}, actor{100, 0, 0};
+    auto near_home = Prey(1, 100, 20), near_actor = Prey(2, 200, 120);
+    std::vector<HuntCandidate> candidates{near_home, near_actor};
+    std::sort(candidates.begin(), candidates.end(), [&](const auto &a, const auto &b) { return HuntNearer(a, b, actor); });
+    Require(candidates.front().key.id == 2, "nearest measured from home instead of current actor");
+    auto tie = Prey(3, 150, 80);
+    Require(HuntNearer(tie, near_actor, actor), "native incarnation tie break");
+    Require(HuntEligible(near_actor, actor, home), "idle natural rat excluded");
+    for (int exclusion = 0; exclusion < 11; ++exclusion) {
+        auto c = near_actor;
+        switch (exclusion) {
+        case 0: c.natural = false; break;
+        case 1: c.alive = false; break;
+        case 2: c.targetable = false; break;
+        case 3: c.owned = true; break;
+        case 4: c.engaged = true; break;
+        case 5: c.moving = true; break;
+        case 6: c.service = true; break;
+        case 7: c.type = 2030; break;
+        case 8: c.level = 2; break;
+        case 9: c.position.x = 151; break;
+        case 10: c.position.z = 7; break;
+        }
+        Require(!HuntEligible(c, actor, home), "ineligible public target admitted");
+    }
+    auto skeleton = near_actor; skeleton.type = 2104;
+    Require(HuntEligible(skeleton, actor, home), "level1 skeleton excluded");
+    skeleton.type = 2000; skeleton.level = 2;
+    Require(HuntEligible(skeleton, actor, home), "level2 skeleton excluded");
+    Require(InsideHuntArea({180, 0, 6}, home, HuntLeash) && !InsideHuntArea({180.01, 0, 0}, home, HuntLeash), "leash boundary");
+    Require(!HuntRested(89, 100) && HuntRested(90, 100) && !HuntRested(0, 100), "real HP rest threshold");
+}
+
+void PersistentRestAndNoTarget() {
+    Run run;
+    run.Start(1000, 1800, true);
+    Require(run.Advance(1000, {}) == Action::Spawn, "initial body allocation");
+    Facts f; f.ready = true;
+    Require(run.Advance(1001, f) == Action::Stand && run.phase == Phase::Searching, "body ready for search");
+    Require(run.Advance(641001, {}) == Action::None && run.phase == Phase::Searching && !run.failed,
+        "natural640s respawn wait misclassified as stalled combat");
+    f = {}; f.target_available = true;
+    Require(run.Advance(641002, f) == Action::Engage && run.attempted == 1, "natural hunt admission");
+    f = {}; f.victory = true;
+    Require(run.Advance(641003, f) == Action::Release && run.completed == 1, "victory must release goal, not body");
+    Require(run.Advance(641004, {}) == Action::None && run.phase == Phase::Releasing, "rest before correlated stop drain");
+    f = {}; f.goal_idle = true;
+    Require(run.Advance(641005, f) == Action::Rest, "visible rest admission");
+    f = {}; f.rested = true;
+    Require(run.Advance(651004, f) == Action::None, "minimum ten second rest");
+    f.rested = false;
+    Require(run.Advance(701005, f) == Action::None && run.phase == Phase::Resting, "low native HP treated as stall/refilled");
+    f.rested = true;
+    Require(run.Advance(701006, f) == Action::Stand && run.phase == Phase::Searching, "native HP recovery");
+    f = {}; f.target_available = true;
+    Require(run.Advance(701007, f) == Action::Engage && run.attempted == 2, "second goal replaced body");
+    Require(run.completed == 1 && run.failed == 0, "persistent encounter counters");
+}
+
+void ImmediateContentionAndOnlyActorCleanup() {
+    Custody c; c.public_hunt = true; c.combat_enabled = true;
+    c.actor = {10, 100}; c.target = {20, 200}; c.epoch = 7; c.generation = 1;
+    const NativeIdentity player{}, other_npc{30, 300};
+    Require(c.CanCombat(player, c.target) && !c.contested, "passive public permission caused contention");
+    Require(c.AdmitCombat(player, c.target) && c.contested, "player public damage/loot was blocked");
+    // This is the actual hook ordering: an input/hate/damage attempt latches
+    // contention before the earlier ActorBody::Process, without a demo tick.
+    Require(!c.CanCombat(c.actor, c.target), "actor got a subsequent swing before controller noticed player");
+    Require(c.CanCombat(c.target, player) && c.AdmitCombat(other_npc, c.target), "ordinary public combat blocked");
+    NativeView view{7, 1, true, c.actor, c.target};
+    const auto stop = c.PlanRetirement(view);
+    Require(stop.actor && !stop.target && !stop.drained, "public target inherited owned retirement");
+    view.actor = {}; view.alive = false;
+    Require(c.PlanRetirement(view).drained, "public target presence blocked actor cleanup");
+    c.contested = false;
+    const NativeIdentity reused{20, 201};
+    Require(c.AdmitCombat(player, reused) && !c.contested, "reused target ID inherited contention scope");
+    Require(!c.CanCombat(c.actor, reused), "actor inherited reused target authority");
+    Require(!c.AdmitCombat(c.actor, other_npc) && c.interference, "actor attacked a bystander");
+}
+
+void YieldRecoveryAndGoalCounters() {
+    Run run; run.Start(1000, 1800, true);
+    run.Advance(1000, {});
+    Facts f; f.ready = true; run.Advance(1001, f);
+    f = {}; f.target_available = true; run.Advance(1002, f);
+    f = {}; f.yield = "target_contested";
+    Require(run.Advance(1003, f) == Action::Release && run.yielded == 1 && run.failed == 0, "competition permanently failed run");
+    f = {}; f.goal_idle = true; run.Advance(1004, f);
+    f = {}; f.rested = true; run.Advance(11004, f);
+    f = {}; f.target_available = true; run.Advance(11005, f);
+    f = {}; f.progress = true;
+    Require(run.Advance(71005, f) == Action::Release && run.last_outcome == "encounter_stalled", "unbounded encounter despite progress");
+
+    Custody c; c.public_hunt = true; c.epoch = 7; c.generation = 1; c.goal = 1;
+    c.actor = {10, 100}; c.target = {20, 200};
+    NativeView view{7, 1, true, c.actor, c.target, false, 1};
+    c.ObserveCounters(view, {3, 2, 11});
+    c.goal = 2; c.last = {};
+    c.ObserveCounters(view, {99, 99, 999});
+    Require(c.total.damage == 11, "old goal counters inherited authority on persistent body");
+    view.goal = 2; view.target = {21, 201};
+    c.ObserveCounters(view, {4, 4, 24});
+    Require(c.total.swings == 7 && c.total.hits == 6 && c.total.damage == 35, "native counters reset across goals");
+    view.target = {};
+    Require(c.TargetLost(view, false, false), "player kill credited actor");
+    view.target_kill_pending = true;
+    Require(!c.TargetLost(view, false, false), "correlated actor death latch lost before Rust terminal");
+}
+}
+int main() {
+    try {
+        NearestAndEligibility(); PersistentRestAndNoTarget(); ImmediateContentionAndOnlyActorCleanup(); YieldRecoveryAndGoalCounters();
+        std::cout << "public hunt controls: 4 groups passed\n";
+        return EXIT_SUCCESS;
+    } catch (const std::exception &error) {
+        std::cerr << "public hunt controls: " << error.what() << '\n';
+        return EXIT_FAILURE;
+    }
+}

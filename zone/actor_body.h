@@ -24,6 +24,9 @@ public:
     // Empty scope is allowed. At most four distinct registered NPC IDs.
     eqemu_proof::Report StartApproach(const std::vector<uint16_t> &scope);
     eqemu_proof::Report StartMelee(const std::vector<uint16_t> &scope);
+    eqemu_proof::Report StartPublicHunt(uint16_t target);
+    // Repeat while draining. Does not remove the body or mutate public prey.
+    bool ReleasePublicHunt();
     // Demo-only appearance/broadcast. Ordinary creation and test profiles stay unchanged.
     eqemu_proof::Report CreateVisibleMeleeBody(int32_t x, int32_t y, int32_t z);
     // Native Death completion hook: latch values only, never reenter Rust.
@@ -43,7 +46,7 @@ private:
     eqemu_proof::Report Advance(eqemu_proof::Input input, bool empty = false);
     void Apply(const eqemu_proof::Report &report);
     void Observe();
-    eqemu_proof::Report StartGoal(const std::vector<uint16_t> &scope, bool melee);
+    eqemu_proof::Report StartGoal(const std::vector<uint16_t> &scope, bool melee, bool public_hunt = false);
     void CombatFact(eqemu_proof::Kind kind, uint32_t damage = 0);
     void ProcessCombat();
     bool CombatAllowed(NPC *body, NPC *target) const;
@@ -64,6 +67,7 @@ private:
     int32_t target_x_ = 0, target_y_ = 0, target_z_ = 0;
 };
 Adapter &Get();
+bool IsPublicHuntPrey(NPC *npc);
 void Process();
 void ObserveDeath(NPC *victim, Mob *killer);
 void BeginTeardown();

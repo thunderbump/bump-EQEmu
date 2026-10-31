@@ -14,6 +14,7 @@ struct NativeView {
     bool alive = false;
     NativeIdentity actor, target;
     bool target_kill_pending = false;
+    uint64_t goal = 0;
 };
 struct Retirement {
     bool actor = false, target = false, drained = false;
@@ -28,7 +29,9 @@ class Custody {
 public:
     NativeIdentity actor, target;
     uint64_t epoch = 0, generation = 0;
+    uint64_t goal = 0;
     bool interference = false;
+    bool public_hunt = false, combat_enabled = false, contested = false;
     Counters total, last;
 
     bool OwnsRuntime(const NativeView &view) const {
@@ -37,7 +40,7 @@ public:
     Retirement PlanRetirement(const NativeView &view) const {
         const bool runtime_alive = OwnsRuntime(view) && view.alive;
         const bool actor_present = actor.Matches(view.actor);
-        const bool target_present = target.Matches(view.target);
+        const bool target_present = !public_hunt && target.Matches(view.target);
         return {runtime_alive, target_present, !runtime_alive && !actor_present && !target_present};
     }
     bool TargetLost(const NativeView &view, bool viable, bool victory) const {
@@ -51,10 +54,20 @@ public:
         const bool attacker_is_rat = target.Matches(attacker);
         const bool victim_is_actor = actor.Matches(victim);
         const bool victim_is_rat = target.Matches(victim);
+        if (public_hunt) {
+            if (!attacker_is_actor && !victim_is_actor) { return true; }
+            return combat_enabled && !contested && !interference &&
+                ((attacker_is_actor && victim_is_rat) || (attacker_is_rat && victim_is_actor));
+        }
         return !(attacker_is_actor || attacker_is_rat || victim_is_actor || victim_is_rat) ||
             (attacker_is_actor && victim_is_rat) || (attacker_is_rat && victim_is_actor);
     }
     bool AdmitCombat(const NativeIdentity &attacker, const NativeIdentity &victim) {
+        if (public_hunt && !actor.Matches(attacker) && !actor.Matches(victim) &&
+            (target.Matches(attacker) || target.Matches(victim))) {
+            contested = true;
+            return true; // public prey remains ordinary combat/loot for everyone else
+        }
         if (CanCombat(attacker, victim)) { return true; }
         interference = true;
         return false;
@@ -65,7 +78,7 @@ public:
         return AdmitCombat(attacker, victim);
     }
     void ObserveCounters(const NativeView &view, Counters current) {
-        if (!OwnsRuntime(view)) { return; }
+        if (!OwnsRuntime(view) || (public_hunt && view.goal != goal)) { return; }
         // A counter regression cannot manufacture a huge unsigned delta.
         if (current.swings < last.swings || current.hits < last.hits || current.damage < last.damage) {
             interference = true;

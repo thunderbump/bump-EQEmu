@@ -109,6 +109,39 @@ eqemu_proof::Report Adapter::StartMelee(const std::vector<uint16_t> &scope)
     return StartGoal(scope, true);
 }
 
+bool IsPublicHuntPrey(NPC *npc)
+{
+    if (!npc || !npc->IsNPC() || npc->IsBot() || npc->IsMerc() || !npc->GetSpawn() ||
+        npc->GetSpawn()->GetNPC() != npc || !npc->GetSpawnPointID() ||
+        npc->GetClass() != 1 || npc->MerchantType || npc->IsQuestNPC() ||
+        npc->GetNPCSpellsID() || npc->GetNPCSpellsEffectsID() ||
+        npc->IsRustActor() || npc->GetOwnerID() || npc->GetPetType() != PetType::None ||
+        npc->GetSwarmInfo() || npc->Charmed() || !npc->IsTargetable() || npc->GetDepop() || npc->GetHP() <= 0) { return false; }
+    const auto type = npc->GetNPCTypeID();
+    return (type == 2011 && npc->GetLevel() == 1 && npc->GetRace() == 36 && npc->GetBodyType() == 21 &&
+            std::strcmp(npc->GetRawNPCTypeName(), "a_large_rat") == 0) ||
+        (((type == 2104 && npc->GetLevel() == 1) || (type == 2000 && npc->GetLevel() == 2)) &&
+            npc->GetRace() == 367 && npc->GetBodyType() == 3 &&
+            std::strcmp(npc->GetRawNPCTypeName(), "a_decaying_skeleton") == 0);
+}
+
+eqemu_proof::Report Adapter::StartPublicHunt(uint16_t target)
+{
+    return StartGoal({target}, true, true);
+}
+
+bool Adapter::ReleasePublicHunt()
+{
+    const auto state = Inspect();
+    if (!state.public_hunt || closing_) { return false; }
+    const auto report = Advance({eqemu_proof::Kind::ReleasePublicHunt, state.epoch, state.generation, 0, 0, 0, 0});
+    if (report.status != eqemu_proof::Status::Ok) { return false; }
+    if (Inspect().approach == eqemu_proof::Approach::Disabled) {
+        scope_ = {}; scope_size_ = 0; combat_ = {};
+    }
+    return true;
+}
+
 eqemu_proof::Report Adapter::CreateVisibleMeleeBody(int32_t x, int32_t y, int32_t z)
 {
     const auto state = Inspect();
@@ -119,16 +152,19 @@ eqemu_proof::Report Adapter::CreateVisibleMeleeBody(int32_t x, int32_t y, int32_
     return report;
 }
 
-eqemu_proof::Report Adapter::StartGoal(const std::vector<uint16_t> &scope, bool melee)
+eqemu_proof::Report Adapter::StartGoal(const std::vector<uint16_t> &scope, bool melee, bool public_hunt)
 {
     using namespace eqemu_proof;
     Report refused{};
     refused.status = closing_ ? Status::Closed : Status::InvalidInput;
     if (closing_ || scope.size() > scope_.size()) { return refused; }
+    if (public_hunt && (!zone || zone->GetZoneID() != 2 || zone->GetInstanceID() ||
+        zone->GetInstanceVersion() || scope.size() != 1)) { return refused; }
     std::array<Subject, 4> subjects{};
     for (size_t i = 0; i < scope.size(); ++i) {
         auto *npc = entity_list.GetNPCByID(scope[i]);
         if (!npc || entity_list.GetMob(scope[i]) != npc) { return refused; }
+        if (public_hunt && (!IsPublicHuntPrey(npc) || npc->IsEngaged())) { return refused; }
         for (size_t j = 0; j < i; ++j) {
             if (scope[i] == scope[j]) { return refused; }
         }
@@ -137,7 +173,8 @@ eqemu_proof::Report Adapter::StartGoal(const std::vector<uint16_t> &scope, bool 
     const auto state = Inspect();
     // Only this production opt-in can install scope. Send cannot inject facts
     // or start this mode without validated registered native instances.
-    auto report = Advance({melee ? Kind::StartMelee : Kind::StartApproach, state.epoch, state.generation, 0, 0, 0, 0});
+    const auto kind = public_hunt ? Kind::StartPublicHunt : (melee ? Kind::StartMelee : Kind::StartApproach);
+    auto report = Advance({kind, state.epoch, state.generation, 0, 0, 0, 0});
     if (report.status == Status::Ok) { scope_ = subjects; scope_size_ = scope.size(); }
     return report;
 }
@@ -186,6 +223,7 @@ void Adapter::Observe()
             fact.level = npc->GetLevel();
             fact.service = npc->GetClass() != 1 || npc->GetBodyType() != 21 ||
                 npc->MerchantType != 0 || npc->IsQuestNPC();
+            if (state.public_hunt) { fact.service = !IsPublicHuntPrey(npc); }
             if (state.melee && state.target == fact.incarnation && npc->GetHateListCount() == 1 &&
                 npc->CheckAggro(body)) { fact.engaged = false; }
         }
@@ -307,8 +345,9 @@ bool Adapter::CombatAllowed(NPC *body, NPC *target) const
         !zone->CanDoCombat() || !body || !target || !state.combat_body ||
         entity_list.GetNPCByID(combat_.id) != target || entity_list.GetMob(combat_.id) != target ||
         target->NativeIncarnation() != combat_.target ||
-        target->GetNPCTypeID() != 2011 || target->GetLevel() != 1 ||
-        target->GetClass() != 1 || target->GetBodyType() != 21 ||
+        (state.public_hunt ? !IsPublicHuntPrey(target) :
+            (target->GetNPCTypeID() != 2011 || target->GetLevel() != 1 ||
+             target->GetClass() != 1 || target->GetBodyType() != 21)) ||
         target->IsRustActor() || !target->IsTargetable() || target->GetHP() <= 0 || target->GetDepop() ||
         target->MerchantType || target->IsQuestNPC() ||
         target->GetOwnerID() || target->GetPetType() != PetType::None || target->GetSwarmInfo() ||
@@ -394,7 +433,7 @@ void Adapter::Process()
             const bool admitted = !closing_ &&
                 (state.patrol == Patrol::Disabled || state.patrol == Patrol::Running) &&
                 (state.approach == Approach::Disabled || state.approach == Approach::Travelling) && npc &&
-                movement.NavigateActorTo(npc, target_x_, target_y_, target_z_);
+                movement.NavigateActorTo(npc, target_x_, target_y_, target_z_, state.public_hunt);
             Advance({admitted ? Kind::Admitted : Kind::Rejected,
                 state.epoch, state.generation, state.operation, 0, 0, 0});
         } else {
