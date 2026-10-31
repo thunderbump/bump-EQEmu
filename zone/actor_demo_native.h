@@ -59,6 +59,11 @@ public:
         interference = true;
         return false;
     }
+    bool AdmitClientAbility(uint16_t requested_target, uint16_t actual_target,
+        const NativeIdentity &attacker, const NativeIdentity &victim) {
+        if (!requested_target || requested_target != actual_target) { return false; }
+        return AdmitCombat(attacker, victim);
+    }
     void ObserveCounters(const NativeView &view, Counters current) {
         if (!OwnsRuntime(view)) { return; }
         // A counter regression cannot manufacture a huge unsigned delta.

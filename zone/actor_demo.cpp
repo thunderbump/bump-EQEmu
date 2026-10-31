@@ -107,6 +107,9 @@ public:
         type->emoteid = 0;
         type->show_name = true;
         auto npc = std::make_unique<NPC>(type.get(), nullptr, glm::vec4(target, 0), GravityBehavior::Ground);
+        // This owned training target stays in the viewing area at low HP.
+        // Public rats and the sealed native proof retain ordinary flee behavior.
+        npc->SetSpecialAbility(SpecialAbility::FleeingImmunity, 1);
         target.z += npc->GetZOffset();
         npc->SetPosition(target.x, target.y, target.z);
         npc->SaveGuardSpot(glm::vec4(target, 0));
@@ -276,6 +279,11 @@ bool CanCombat(Mob *attacker, Mob *target)
 bool AllowCombat(Mob *attacker, Mob *target)
 {
     return !demo || demo->custody.AdmitCombat(Identify(attacker), Identify(target));
+}
+bool AllowClientAbility(Mob *attacker, Mob *target, uint16_t requested_target)
+{
+    return !demo || demo->custody.AdmitClientAbility(requested_target, target ? target->GetID() : 0,
+        Identify(attacker), Identify(target));
 }
 
 void BeginTeardown()

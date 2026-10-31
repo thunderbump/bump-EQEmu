@@ -373,6 +373,11 @@ void Client::OPCombatAbility(const CombatAbility_Struct *ca_atk)
 		return;
 	}
 
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+    // A validated single Kick/Bash/ranged request is actual attack intent even
+    // with autoattack off. Latch it before the passive permission query.
+    if (!ActorDemo::AllowClientAbility(this, GetTarget(), ca_atk->m_target)) { return; }
+#endif
 	if (!IsAttackAllowed(GetTarget())) {
 		return;
 	}

@@ -209,13 +209,33 @@ void NativeKillOrdering()
     view.target_kill_pending = true; ++view.generation;
     Require(custody.TargetLost(view, false, false), "foreign runtime pending kill inherited authority");
 }
+
+void SingleClientAbility()
+{
+    // Single Kick/Bash and single ranged packets share OPCombatAbility. The
+    // production seam validates the packet target before passive permission.
+    Custody custody;
+    custody.actor = {10, 100}; custody.target = {20, 200};
+    Require(!custody.AdmitClientAbility(99, 10, {}, custody.actor) && !custody.interference,
+        "invalid ability packet aborted demo");
+    Require(!custody.AdmitClientAbility(10, 10, {}, custody.actor) && custody.interference,
+        "single client ability bypassed interference with autoattack off");
+    custody.interference = false;
+    Require(!custody.AdmitClientAbility(20, 20, {}, custody.target) && custody.interference,
+        "single ranged ability bypassed target guard");
+    custody.interference = false;
+    Require(custody.AdmitClientAbility(30, 30, {}, {30, 300}) && !custody.interference,
+        "ordinary NPC ability blocked");
+    Require(custody.AdmitClientAbility(40, 40, {}, {}) && !custody.interference,
+        "ordinary client ability blocked");
+}
 }
 
 int main()
 {
     try {
-        Commands(); EncountersAndStop(); Limits(); CapAndGap(); FailuresAndTeardown(); NativeCustody(); NativeKillOrdering();
-        std::cout << "actor demo controls: 7 groups passed\n";
+        Commands(); EncountersAndStop(); Limits(); CapAndGap(); FailuresAndTeardown(); NativeCustody(); NativeKillOrdering(); SingleClientAbility();
+        std::cout << "actor demo controls: 8 groups passed\n";
         return EXIT_SUCCESS;
     } catch (const std::exception &error) {
         std::cerr << "actor demo controls: " << error.what() << '\n';
