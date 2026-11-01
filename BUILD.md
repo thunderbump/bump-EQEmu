@@ -146,8 +146,8 @@ validation or cleanup result.
 
 The sanitizer interface is `scripts/validation-job start full-sanitizers`, with
 the same arguments plus `--config` selecting the exact admitted diagnostic
-configuration. Diagnostic activation is not yet available. Stack must review,
-admit and activate that separate worker release before using this command.
+configuration. Stack must review, admit and activate that separate worker release
+before using this command; the active release must match the selected configuration.
 The wrapper's CLI/process tests do not establish sanitizer qualification.
 
 ### T3 sanitizer validation

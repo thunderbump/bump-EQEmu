@@ -40,7 +40,6 @@
 #include "common/repositories/starting_items_repository.h"
 #include "common/rulesys.h"
 #include "common/strings.h"
-#include "zone/client.h"
 
 #include "fmt/format.h"
 #include <algorithm>
@@ -607,17 +606,9 @@ bool SharedDatabase::GetSharedBank(uint32 id, EQ::InventoryProfile *inv, bool is
 
 	return true;
 }
-// Overloaded: Retrieve character inventory based on character id (zone entry)
-//bool SharedDatabase::GetInventory(uint32 char_id, EQ::InventoryProfile *inv)
-bool SharedDatabase::GetInventory(Client *c)
+// Load zone-entry inventory without depending on zone's Client type in common.
+bool SharedDatabase::GetInventory(uint32 char_id, EQ::InventoryProfile &inv)
 {
-	if (!c) {
-		return false;
-	}
-
-	uint32                char_id = c->CharacterID();
-	EQ::InventoryProfile &inv     = c->GetInv();
-
 	// Retrieve character inventory
 	auto results   = InventoryRepository::GetWhere(*this, fmt::format("`character_id` = '{}' ORDER BY `slot_id`", char_id));
 	auto e_results = CharacterEvolvingItemsRepository::GetWhere(
