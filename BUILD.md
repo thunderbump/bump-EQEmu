@@ -117,6 +117,38 @@ them. Later expansion to other targets or diagnostics requires a separate
 noise/coverage decision; logger annotations and analyzer/sanitizer work remain
 out of scope.
 
+### T3 callback validation jobs
+
+From the reviewed Stack checkout containing `scripts/validation-job`, start
+ordinary full validation with `scripts/validation-job start full`. Supply
+`--repo` with the absolute Server checkout, `--commit` with its full committed
+SHA, `--websocketpp` with an absolute initialized websocketpp checkout,
+`--thread` with the exact callback destination, and `--t3-base-dir` with the
+current T3 instance's base directory. The source must be clean; dirty edits are
+rejected rather than captured. Native/Cargo candidate execution stays in the
+disposable worker.
+
+Start immediately returns JSON with `job_id` and `artifacts`. The optional
+`--jobs-dir` precedes the subcommand and defaults to
+`~/.local/state/eqemu-validation-jobs`. Run `scripts/validation-job status`,
+`scripts/validation-job cancel`, or `scripts/validation-job retry-notification`
+followed by that job ID, using the same `--jobs-dir` prefix when overridden.
+There is no `--wait`; completion uses the callback. The trusted
+`scripts/t3-validation-notify` adapter wraps the supported bundled T3 CLI.
+
+Retained `job.json` records the immutable source commit/tree, helper hashes and
+process identities. Inspect `result.json` for the raw validator exit and cleanup
+receipt or explicit unknown state, `validator-result.json` for its final JSON,
+and `validator.stdout.log` / `validator.stderr.log` for raw diagnostics.
+`notification.json` reports callback delivery separately; delivery is not a
+validation or cleanup result.
+
+The sanitizer interface is `scripts/validation-job start full-sanitizers`, with
+the same arguments plus `--config` selecting the exact admitted diagnostic
+configuration. Diagnostic activation is not yet available. Stack must review,
+admit and activate that separate worker release before using this command.
+The wrapper's CLI/process tests do not establish sanitizer qualification.
+
 ### T3 sanitizer validation
 
 Stack owns native/Cargo execution in the disposable worker. Configure a fresh
