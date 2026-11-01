@@ -136,9 +136,10 @@ followed by that job ID, using the same `--jobs-dir` prefix when overridden.
 There is no `--wait`; completion uses the callback. The trusted
 `scripts/t3-validation-notify` adapter wraps the supported bundled T3 CLI.
 
-Retained `job.json` records the immutable source commit/tree, helper hashes and
-process identities. Inspect `result.json` for the raw validator exit and cleanup
-receipt or explicit unknown state, `validator-result.json` for its final JSON,
+Retained `job.json` records immutable source commit/tree and helper hashes;
+`state.json` records process identities. Inspect `result.json` for the raw
+validator exit and cleanup receipt or explicit unknown state,
+`validator-result.json` for its final JSON,
 and `validator.stdout.log` / `validator.stderr.log` for raw diagnostics.
 `notification.json` reports callback delivery separately; delivery is not a
 validation or cleanup result.
@@ -174,7 +175,10 @@ nor Rust code has sanitizer instrumentation from this profile. Linking their
 archive into an instrumented executable does not close that gap.
 
 Use these exact worker runtime settings and an absolute installed
-`ASAN_SYMBOLIZER_PATH` pointing to llvm-symbolizer:
+`ASAN_SYMBOLIZER_PATH` supported by the selected sanitizer runtime. Stack's
+pinned GCC diagnostic worker selects `/usr/bin/addr2line`; LLVM is not required
+by this profile. Stack must qualify actual file/line reports from every deliberate
+control before accepting that symbolizer selection:
 
 ```sh
 ASAN_OPTIONS=halt_on_error=1:abort_on_error=0:detect_leaks=1:symbolize=1:exitcode=1
