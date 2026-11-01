@@ -44,6 +44,13 @@ pub struct Store {
     _lock: File,
     pub sync_us: u64,
 }
+impl Drop for Store {
+    fn drop(&mut self) {
+        // Close-on-exec still permits a brief inherited descriptor during
+        // subprocess startup. Dropping this owner must release its lock now.
+        let _ = self._lock.unlock();
+    }
+}
 impl Store {
     pub fn open(directory: &str) -> Result<Self, String> {
         let path = Path::new(directory);
@@ -233,8 +240,11 @@ mod tests {
             assert_eq!(l.saved[1].desired, Desired::Dead);
             assert_eq!(l.revision, revision);
         }
+        // A concurrent subprocess may briefly inherit this descriptor before exec.
+        let inherited = store._lock.try_clone().unwrap();
         drop(store);
         assert!(Store::open(p.to_str().unwrap()).is_ok());
+        drop(inherited);
         fs::remove_dir_all(p).unwrap();
     }
     #[test]

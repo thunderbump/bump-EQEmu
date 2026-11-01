@@ -129,9 +129,10 @@ public:
   void Detach(unsigned i) {
     auto &p = entries[i].permit;
     p.Close();
-    auto *body = Find(p.actor);
+    auto *body = ActorBody::PopulationAdapter(i).Body();
     auto *prey = Find(p.target);
-    if (!body) {
+    if (!body || !p.actor.Matches(Identify(body)) ||
+        !body->MatchesRustActor(p.epoch, p.generation)) {
       return;
     }
     if (prey && prey->CheckAggro(body)) {

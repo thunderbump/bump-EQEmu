@@ -436,6 +436,11 @@ impl Population {
                 self.save(false);
             }
         }
+        // Status publication can fail too. All I/O must precede the final
+        // failure pass so this return cancels navigation as well as combat.
+        if io || (!was_clean && self.clean) {
+            self.status(now, overflow);
+        }
         if self.failed() {
             actions.retain(|a| a.kind == core::ActionKind::Retire);
             // Disk failure inhibits all three immediately on this return,
@@ -454,9 +459,6 @@ impl Population {
                     });
                 }
             }
-        }
-        if io || (!was_clean && self.clean) {
-            self.status(now, overflow);
         }
         actions.into_iter().map(action).collect()
     }
@@ -593,34 +595,35 @@ mod tests {
         fs::remove_dir_all(d).unwrap();
     }
 
+    fn live(moving: bool) -> Vec<ffi::Body> {
+        (0..3)
+            .map(|i| ffi::Body {
+                actor: i,
+                id: 10 + i as u16,
+                incarnation: 100 + i as u64,
+                epoch: 1 + i as u64,
+                generation: 1,
+                alive: true,
+                present: true,
+                x: core::HOME.x,
+                y: core::HOME.y,
+                z: core::HOME.z,
+                hp: 47,
+                sitting: !moving,
+                moving,
+                ..ffi::Body::default()
+            })
+            .collect()
+    }
     #[test]
     fn storage_failure_drains_live_actors_and_leaves_dirty_evidence() {
         let d = dir();
         let mut p = population_open(d.to_str().unwrap(), "s").unwrap();
         fs::write(d.join("command"), "start s 1 all").unwrap();
         p.step(1, bodies(), Vec::new(), false, false);
-        let live = || {
-            (0..3)
-                .map(|i| ffi::Body {
-                    actor: i,
-                    id: 10 + i as u16,
-                    incarnation: 100 + i as u64,
-                    epoch: 1 + i as u64,
-                    generation: 1,
-                    alive: true,
-                    present: true,
-                    x: core::HOME.x,
-                    y: core::HOME.y,
-                    z: core::HOME.z,
-                    hp: 47,
-                    sitting: true,
-                    ..ffi::Body::default()
-                })
-                .collect()
-        };
-        p.step(2, live(), Vec::new(), false, false);
+        p.step(2, live(false), Vec::new(), false, false);
         fs::create_dir(d.join("checkpoint.json.tmp")).unwrap();
-        let actions = p.step(5001, live(), Vec::new(), false, false);
+        let actions = p.step(5001, live(false), Vec::new(), false, false);
         assert!(p.failed());
         assert_eq!(actions.len(), 3);
         assert!(actions.iter().all(|a| a.kind == ffi::Kind::Retire));
@@ -655,6 +658,22 @@ mod tests {
         assert!(p.step(1, bodies(), Vec::new(), false, false).is_empty());
         assert!(p.failed());
         assert_eq!(fs::read(d.join("checkpoint.json")).unwrap(), evidence);
+        drop(p);
+        fs::remove_dir_all(d).unwrap();
+    }
+    #[test]
+    fn status_failure_returns_retirement_with_the_same_moving_frame() {
+        let d = dir();
+        let mut p = population_open(d.to_str().unwrap(), "s").unwrap();
+        fs::write(d.join("command"), "start s 1 all").unwrap();
+        p.step(1, bodies(), Vec::new(), false, false);
+        p.step(2, live(false), Vec::new(), false, false);
+        fs::create_dir(d.join("status.json.tmp")).unwrap();
+        let actions = p.step(1001, live(true), Vec::new(), false, false);
+        assert_eq!(p.fault, "status_io_failed");
+        assert_eq!(actions.len(), 3);
+        assert!(actions.iter().all(|a| a.kind == ffi::Kind::Retire));
+        assert!(!p.store.load().unwrap().clean);
         drop(p);
         fs::remove_dir_all(d).unwrap();
     }
