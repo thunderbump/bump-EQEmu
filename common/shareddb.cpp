@@ -30,6 +30,7 @@
 #include "common/repositories/account_repository.h"
 #include "common/repositories/books_repository.h"
 #include "common/repositories/character_corpses_repository.h"
+#include "common/repositories/character_data_repository.h"
 #include "common/repositories/character_inspect_messages_repository.h"
 #include "common/repositories/character_item_recast_repository.h"
 #include "common/repositories/criteria/content_filter_criteria.h"
