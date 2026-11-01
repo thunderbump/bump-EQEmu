@@ -24,6 +24,11 @@ set(tests_headers
 
 add_executable(tests ${tests_sources} ${tests_headers})
 
+if(EQEMU_SANITIZERS)
+	# Deliberate faults run separately in the disposable worker, never in the suite.
+	add_executable(tests_sanitizer_controls EXCLUDE_FROM_ALL sanitizer_controls.cpp)
+endif()
+
 # Explicit target for result-propagation controls; it is not installed with the server.
 add_executable(tests_runner_controls EXCLUDE_FROM_ALL runner_controls.cpp suite_runner.h)
 target_link_libraries(tests_runner_controls cppunit)

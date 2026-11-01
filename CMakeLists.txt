@@ -40,6 +40,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(EQEMU_BUILD_PCH "Build with precompiled headers (Windows)" ON)
 
+include(Sanitizers)
+
 if(MSVC)
 	add_compile_options(/bigobj)
 	add_compile_definitions(_CRT_SECURE_NO_WARNINGS NOMINMAX WIN32_LEAN_AND_MEAN CRASH_LOGGING)
@@ -190,3 +192,6 @@ endif()
 if(EQEMU_BUILD_CLIENT_FILES)
 	add_subdirectory(client_files)
 endif()
+
+# Apply after subdirectories have declared their project-owned targets.
+eqemu_apply_sanitizers("${CMAKE_CURRENT_SOURCE_DIR}")
