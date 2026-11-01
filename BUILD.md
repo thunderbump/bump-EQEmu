@@ -117,6 +117,56 @@ them. Later expansion to other targets or diagnostics requires a separate
 noise/coverage decision; logger annotations and analyzer/sanitizer work remain
 out of scope.
 
+### T3 sanitizer validation
+
+Stack owns native/Cargo execution in the disposable worker. Configure a fresh
+build there with `-DEQEMU_SANITIZERS=ON -DEQEMU_BUILD_TESTS=ON` and
+`-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`. Keep its build, Cargo output and artifact
+identity separate from ordinary validation. The option defaults to OFF and
+requires Linux GCC or Clang with a GNU-style frontend.
+
+The profile applies `-fsanitize=address,undefined -fno-sanitize-recover=all`
+at compile and final link, plus `-g -O1 -fno-omit-frame-pointer
+-fno-optimize-sibling-calls` at compile. It covers common, utility tests, selected
+server/client-file executables including world/zone, and project libraries such
+as gm_commands_zone, lua_zone and perl_zone, including project object libraries.
+Separately built dependencies under libs/submodules, imported libraries and the
+vendored cppunit framework are excluded. Header code compiled in an instrumented
+target is covered. The private perlbind ASan option is not this profile.
+
+Initial coverage gap: Cargo still compiles generated CXX without these flags in
+`cmake/ActorBridge.cmake` and `rust/actors/bridge/build.rs`. Neither generated CXX
+nor Rust code has sanitizer instrumentation from this profile. Linking their
+archive into an instrumented executable does not close that gap.
+
+Use these exact worker runtime settings and an absolute installed
+`ASAN_SYMBOLIZER_PATH` pointing to llvm-symbolizer:
+
+```sh
+ASAN_OPTIONS=halt_on_error=1:abort_on_error=0:detect_leaks=1:symbolize=1:exitcode=1
+UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1:exitcode=1
+```
+
+Build `tests` and the non-installed, opt-in `tests_sanitizer_controls` target.
+Run the existing complete utility inventory and existing in-server assertions
+through Stack's selected validation path. Run each control separately through
+that same execution path: `pass` must exit 0; `use-after-free`, `out-of-bounds`,
+`undefined` and `leak` must exit nonzero with the corresponding diagnostic and
+symbolized file/line in `tests/sanitizer_controls.cpp`. Expected frames are
+`SanitizerUseAfterFree`, `SanitizerOutOfBounds`, `SanitizerUndefined` and
+`SanitizerLeak`. A crash without the expected report does not qualify a control.
+Leak checks require orderly process exit; killing world/zone cannot qualify
+their exit-time leak checks. Keep physical-memory budgets without an ASan-
+incompatible virtual-address limit. No suppressions are supplied.
+
+Stack must verify actual common/test/world/zone and project-library compile
+commands, final link flags, runtime/symbolizer availability, failing controls,
+and real suite results for the exact candidate SHA. Record elapsed time, peak
+physical memory and retained diagnostic bytes. Configure-only checks establish
+flag placement, not runtime qualification. Label any evaluation of the separate
+actor staging candidate with its own exact revision; this portable profile is
+based on master `bf50825db4d61a7b45026f5335975316615454f2`.
+
 ### Bootstrap Rust bridge (zone)
 
 On native x86-64 Linux builds, the zone target links the bootstrap
