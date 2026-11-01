@@ -28,6 +28,8 @@
 #include "zone/worldserver.h"
 #include "zone/zonedb.h"
 
+#include <algorithm>
+
 extern WorldServer worldserver;
 extern QueryServ  *QServ;
 
@@ -1519,10 +1521,7 @@ packet with the item number in it, but I cant seem to find it right now
 
 	const EQ::ItemData* item = inst->GetItem();
 	const char* name2 = &item->Name[0];
-	auto outapp = new EQApplicationPacket(OP_ItemLinkText, strlen(name2) + 68);
-	char buffer2[135] = {0};
-	char itemlink[135] = {0};
-	sprintf(itemlink,"%c0%06u0%05u-%05u-%05u-%05u-%05u00000000%c",
+	const auto itemlink = StringFormat("%c0%06u0%05u-%05u-%05u-%05u-%05u00000000%c",
 		0x12,
 		item->ID,
 		inst->GetAugmentItemID(0),
@@ -1531,17 +1530,20 @@ packet with the item number in it, but I cant seem to find it right now
 		inst->GetAugmentItemID(3),
 		inst->GetAugmentItemID(4),
 		0x12);
-	sprintf(buffer2,"%c%c%c%c%c%c%c%c%c%c%c%c%s",0x00,0x00,0x00,0x00,0xD3,0x01,0x00,0x00,0x1E,0x01,0x00,0x00,itemlink);
-	memcpy(outapp->pBuffer,buffer2,outapp->size);
+	auto buffer2 = StringFormat("%c%c%c%c%c%c%c%c%c%c%c%c%s",0x00,0x00,0x00,0x00,0xD3,0x01,0x00,0x00,0x1E,0x01,0x00,0x00,itemlink.c_str());
+	// Keep legacy padding, extending only when the full link and NUL need more room.
+	buffer2.resize(std::max(strlen(name2) + 68, buffer2.size() + 1), '\0');
+	auto outapp = new EQApplicationPacket(OP_ItemLinkText, buffer2.size());
+	memcpy(outapp->pBuffer, buffer2.data(), outapp->size);
 	QueuePacket(outapp);
 	safe_delete(outapp);
 	if (send_to_all==false)
 		return;
 	const char* charname = GetName();
-	outapp = new EQApplicationPacket(OP_ItemLinkText,strlen(itemlink)+14+strlen(charname));
-	char buffer3[150] = {0};
-	sprintf(buffer3,"%c%c%c%c%c%c%c%c%c%c%c%c%6s%c%s",0x00,0x00,0x00,0x00,0xD2,0x01,0x00,0x00,0x00,0x00,0x00,0x00,charname,0x00,itemlink);
-	memcpy(outapp->pBuffer,buffer3,outapp->size);
+	const auto buffer3 = StringFormat("%c%c%c%c%c%c%c%c%c%c%c%c%6s%c%s",0x00,0x00,0x00,0x00,0xD2,0x01,0x00,0x00,0x00,0x00,0x00,0x00,charname,0x00,itemlink.c_str());
+	// The reported size includes embedded NULs and any minimum-width name padding.
+	outapp = new EQApplicationPacket(OP_ItemLinkText, buffer3.size() + 1);
+	memcpy(outapp->pBuffer, buffer3.c_str(), outapp->size);
 	entity_list.QueueCloseClients(CastToMob(),outapp,true,200,0,false);
 	safe_delete(outapp);
 }

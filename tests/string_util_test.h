@@ -45,6 +45,12 @@ public:
 		auto s = StringFormat(fmt, c, i, f);
 		TEST_ASSERT_EQUALS(s.length(), 17);
 		TEST_ASSERT(s.compare("Test: a 2014 3.14") == 0);
+
+		const char binary_expected[] = "\0prefix\0link";
+		const auto binary = StringFormat("%c%s%c%s", 0, "prefix", 0, "link");
+		TEST_ASSERT_EQUALS(binary.size(), sizeof(binary_expected) - 1);
+		TEST_ASSERT(binary == std::string(binary_expected, sizeof(binary_expected) - 1));
+		TEST_ASSERT_EQUALS(binary.c_str()[binary.size()], '\0');
 	}
 
 	void EscapeStringTest() {
