@@ -225,6 +225,7 @@ public:
             custody = {};
             custody.public_hunt = public_hunt;
             target_type = target_spawn = eligible_count = 0;
+            selection = {}; selection_scan_ms = 0;
             selected_distance = 0; selected_from = {}; selected_position = {};
             next_search = 0;
             run_id = session + "-" + std::to_string(command.request);
@@ -321,6 +322,30 @@ public:
                 << ",\"eligible_count\":" << eligible_count << ",\"selected_distance_xy\":" << selected_distance
                 << ",\"selected_from_position\":[" << selected_from.x << ',' << selected_from.y << ',' << selected_from.z
                 << "],\"selected_target_position\":[" << selected_position.x << ',' << selected_position.y << ',' << selected_position.z << ']';
+            out << ",\"selection_scan_ms\":" << selection_scan_ms << ",\"selection_rejections\":{";
+            for (unsigned i = 1; i < static_cast<unsigned>(HuntRejection::Count); ++i) {
+                if (i > 1) { out << ','; }
+                out << '"' << HuntRejectionName(static_cast<HuntRejection>(i)) << "\":" << selection.rejected[i];
+            }
+            out << "},\"nearest_rejected\":";
+            if (!selection.nearest.id) { out << "null"; }
+            else {
+                auto number = [&](double value) { if (std::isfinite(value)) { out << value; } else { out << "null"; } };
+                out << "{\"id\":" << selection.nearest.id << ",\"incarnation\":" << selection.nearest.incarnation
+                    << ",\"reason\":\"" << HuntRejectionName(selection.reason) << "\",\"position\":["
+                    << selection.position.x << ',' << selection.position.y << ',' << selection.position.z
+                    << "],\"floor_valid\":" << (selection.floor_valid ? "true" : "false") << ",\"floor\":";
+                number(selection.floor);
+                out << ",\"z_offset\":"; number(selection.z_offset);
+                out << ",\"height_error\":"; number(selection.height_error);
+                out << ",\"los\":" << (selection.los ? "true" : "false")
+                    << ",\"endpoint\":[" << selection.endpoint.x << ',' << selection.endpoint.y << ',' << selection.endpoint.z
+                    << "],\"route_result\":\"" << selection.route.result << "\",\"route_nodes\":" << selection.route.nodes
+                    << ",\"route_direct_distance\":"; number(selection.route.direct_distance);
+                out << ",\"route_length\":"; number(selection.route.length);
+                out << ",\"route_endpoint_error\":"; number(selection.route.endpoint_error);
+                out << '}';
+            }
         }
         out << "}\n";
         out.close();
@@ -364,6 +389,8 @@ private:
         body->SetTarget(nullptr);
     }
     bool SelectPublicTarget(NPC *body) {
+        selection = {};
+        selection_scan_ms = Now();
         const auto from = Position(body);
         std::vector<HuntCandidate> candidates;
         for (const auto &entry : entity_list.GetNPCList()) {
@@ -383,20 +410,48 @@ private:
         eligible_count = candidates.size();
         for (const auto &c : candidates) {
             auto *npc = Find(c.key);
-            if (!npc || npc->IsEngaged() || !ActorBody::IsPublicHuntPrey(npc)) { continue; }
+            if (!npc || npc->IsEngaged() || !ActorBody::IsPublicHuntPrey(npc)) {
+                selection.Reject(HuntRejection::Identity);
+                if (!selection.nearest.id) { selection.nearest = c.key; selection.position = c.position; selection.reason = HuntRejection::Identity; }
+                continue;
+            }
             glm::vec3 position(npc->GetPosition());
             auto floor_probe = position + glm::vec3(0, 0, 20);
             const auto floor = zone->zonemap->FindBestZ(floor_probe, nullptr);
-            if (floor == BEST_Z_INVALID || !std::isfinite(floor) ||
-                std::abs(position.z - floor - npc->GetZOffset()) > 2 ||
-                zone->watermap->InLiquid(position) || !body->CheckLosFN(npc)) { continue; }
+            HuntSelectionEvidence probe;
+            probe.nearest = c.key; probe.position = c.position;
+            probe.floor = floor; probe.z_offset = npc->GetZOffset();
+            probe.floor_valid = floor != BEST_Z_INVALID && std::isfinite(floor);
+            probe.height_error = std::abs(position.z - floor - probe.z_offset);
+            probe.los = body->CheckLosFN(npc);
+            if (!probe.floor_valid) { probe.reason = HuntRejection::FloorInvalid; }
+            else if (probe.height_error > 2) { probe.reason = HuntRejection::FloorHeight; }
+            else if (zone->watermap->InLiquid(position)) { probe.reason = HuntRejection::Water; }
+            else if (!probe.los) { probe.reason = HuntRejection::Los; }
             const auto distance = std::sqrt(DistanceSquared(from, c.position));
-            if (distance > 5 || !body->CombatRange(npc)) {
-                // Same rounded two-unit-short destination as Rust's approach.
-                const auto scale = distance > 2 ? 2 / distance : 0;
-                const auto x = std::round(c.position.x - (c.position.x - from.x) * scale);
-                const auto y = std::round(c.position.y - (c.position.y - from.y) * scale);
-                if (!MobMovementManager::Get().CanNavigateActorTo(body, x, y, std::round(c.position.z), true)) { continue; }
+            // Same rounded two-unit-short destination as Rust's approach.
+            const auto scale = distance > 2 ? 2 / distance : 0;
+            probe.endpoint = {std::round(c.position.x - (c.position.x - from.x) * scale),
+                std::round(c.position.y - (c.position.y - from.y) * scale), std::round(c.position.z)};
+            // Also probe the nearest rejection after an earlier gate fails.
+            // This performs no movement or NPC writes, and adds at most one
+            // otherwise-unneeded path query per two-second selection scan.
+            if (probe.reason == HuntRejection::None || !selection.nearest.id) {
+                bool reachable = true;
+                if (distance > 5 || !body->CombatRange(npc)) {
+                    reachable = MobMovementManager::Get().CanNavigateActorTo(body, probe.endpoint.x, probe.endpoint.y,
+                        probe.endpoint.z, true, &probe.route);
+                } else { probe.route.result = "native_melee"; }
+                if (!reachable && probe.reason == HuntRejection::None) { probe.reason = HuntRejection::Route; }
+            }
+            if (probe.reason != HuntRejection::None) {
+                if (!selection.nearest.id) {
+                    const auto counts = selection.rejected;
+                    selection = probe;
+                    selection.rejected = counts;
+                }
+                selection.Reject(probe.reason);
+                continue;
             }
             custody.target = c.key;
             target_type = c.type; target_spawn = npc->GetSpawnPointID();
@@ -476,6 +531,8 @@ private:
     uint32_t target_type = 0, target_spawn = 0, eligible_count = 0;
     double selected_distance = 0;
     HuntPosition home{}, selected_from{}, selected_position{};
+    HuntSelectionEvidence selection;
+    uint64_t selection_scan_ms = 0;
     glm::vec3 last_position{};
     eqemu_proof::Approach last_approach = eqemu_proof::Approach::Disabled;
     float actor_x = 0, actor_y = 0, actor_z = 0, rat_x = 0, rat_y = 0, rat_z = 0;

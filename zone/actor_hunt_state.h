@@ -1,5 +1,6 @@
 #pragma once
 #include "actor_demo_native.h"
+#include <array>
 #include <cmath>
 
 namespace ActorDemo {
@@ -10,6 +11,36 @@ constexpr unsigned HuntRouteNodes = 64;
 constexpr uint64_t HuntSearchIntervalMs = 2000, HuntRestMinimumMs = 10000;
 constexpr int64_t HuntRestHPPercent = 90;
 struct HuntPosition { double x = 0, y = 0, z = 0; };
+// One bounded snapshot of read-only selection probes, replaced each search.
+struct HuntRouteEvidence {
+    const char *result = "not_checked";
+    double direct_distance = 0, length = 0, endpoint_error = 0;
+    unsigned nodes = 0;
+};
+enum class HuntRejection { None, Identity, FloorInvalid, FloorHeight, Water, Los, Route, Count };
+inline const char *HuntRejectionName(HuntRejection reason) {
+    switch (reason) {
+    case HuntRejection::None: return "none";
+    case HuntRejection::Identity: return "identity";
+    case HuntRejection::FloorInvalid: return "floor_invalid";
+    case HuntRejection::FloorHeight: return "floor_height";
+    case HuntRejection::Water: return "water";
+    case HuntRejection::Los: return "los";
+    case HuntRejection::Route: return "route";
+    case HuntRejection::Count: break;
+    }
+    return "none";
+}
+struct HuntSelectionEvidence {
+    std::array<unsigned, static_cast<unsigned>(HuntRejection::Count)> rejected{};
+    NativeIdentity nearest;
+    HuntPosition position, endpoint;
+    HuntRejection reason = HuntRejection::None;
+    double floor = 0, z_offset = 0, height_error = 0;
+    bool floor_valid = false, los = false;
+    HuntRouteEvidence route;
+    void Reject(HuntRejection why) { ++rejected[static_cast<unsigned>(why)]; }
+};
 inline double DistanceSquared(HuntPosition a, HuntPosition b) {
     return (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y);
 }

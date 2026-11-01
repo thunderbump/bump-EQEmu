@@ -871,50 +871,71 @@ MobMovementManager::ActorCombatMotion MobMovementManager::InspectActorCombatMoti
 }
 
 namespace {
-bool BuildActorRoute(Mob *who, float x, float y, float z, bool public_hunt, IPathfinder::IPath &route)
+bool BuildActorRoute(Mob *who, float x, float y, float z, bool public_hunt, IPathfinder::IPath &route,
+    ActorDemo::HuntRouteEvidence *evidence = nullptr)
 {
+    auto result = [&](const char *reason, bool accepted = false) {
+        if (evidence) { evidence->result = reason; }
+        return accepted;
+    };
     if (!MobMovementManager::ActorControlAllowsTravel(who) || !zone ||
         !zone->zonemap || !zone->pathing || !zone->watermap ||
-        !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) { return false; }
+        !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) { return result("native_context"); }
     const glm::vec3 start(who->GetX(), who->GetY(), who->GetZ()), end(x, y, z);
     // Intentionally local: the first proof does not admit detours, water,
     // portals or partial routes. Native map/navmesh remain authoritative.
     const auto distance = glm::distance(start, end);
-    if (!ActorDemo::ActorRouteDistanceAllowed(public_hunt, distance) || std::abs(z - start.z) > 6.0f ||
-        !zone->zonemap->CheckLoS(start, end)) { return false; }
+    if (evidence) { evidence->direct_distance = distance; }
+    if (!ActorDemo::ActorRouteDistanceAllowed(public_hunt, distance)) { return result("direct_distance"); }
+    if (std::abs(z - start.z) > 6.0f) { return result("z_range"); }
+    if (!zone->zonemap->CheckLoS(start, end)) { return result("direct_los"); }
     PathfinderOptions opts;
     opts.offset = who->GetZOffset();
     opts.flags = PathingNotDisabled ^ PathingZoneLine;
     bool partial = false, stuck = false;
     route = zone->pathing->FindPath(start, end, partial, stuck, opts);
-    if (partial || stuck || route.size() < 2 || route.size() > (public_hunt ? ActorDemo::HuntRouteNodes : 32u)) { return false; }
+    if (evidence) { evidence->nodes = route.size(); }
+    if (partial) { return result("partial_route"); }
+    if (stuck) { return result("stuck_route"); }
+    if (route.size() < 2 || route.size() > (public_hunt ? ActorDemo::HuntRouteNodes : 32u)) { return result("node_count"); }
     // Test teleport BEFORE inspecting pos (a teleport marker may have no pos).
-    for (const auto &node : route) { if (node.teleport) { return false; } }
+    for (const auto &node : route) { if (node.teleport) { return result("teleport"); } }
     AdjustRoute(route, who);
     auto previous = start;
     float length = 0;
     for (const auto &node : route) {
         if (!std::isfinite(node.pos.x) || !std::isfinite(node.pos.y) ||
-            !std::isfinite(node.pos.z) || zone->watermap->InLiquid(node.pos) ||
-            !zone->zonemap->CheckLoS(previous, node.pos)) { return false; }
+            !std::isfinite(node.pos.z)) { return result("node_position"); }
+        if (zone->watermap->InLiquid(node.pos)) { return result("node_water"); }
+        if (!zone->zonemap->CheckLoS(previous, node.pos)) { return result("node_los"); }
         if (public_hunt && std::hypot(node.pos.x - ActorDemo::HuntHomeX, node.pos.y - ActorDemo::HuntHomeY) >
-            ActorDemo::HuntLeash) { return false; }
+            ActorDemo::HuntLeash) { return result("node_leash"); }
         length += glm::distance(previous, node.pos);
+        if (evidence) { evidence->length = length; }
         previous = node.pos;
     }
-    if (zone->watermap->InLiquid(start) || glm::distance(previous, end) > 6.0f ||
-        length > distance * 1.5f || (public_hunt && length > ActorDemo::HuntRouteLimit)) { return false; }
-    return true;
+    const auto endpoint_error = glm::distance(previous, end);
+    if (evidence) { evidence->endpoint_error = endpoint_error; }
+    if (zone->watermap->InLiquid(start)) { return result("start_water"); }
+    if (endpoint_error > 6.0f) { return result("endpoint"); }
+    if (length > distance * 1.5f) { return result("detour"); }
+    if (public_hunt && length > ActorDemo::HuntRouteLimit) { return result("route_limit"); }
+    return result("accepted", true);
 }
 }
 
-bool MobMovementManager::CanNavigateActorTo(Mob *who, float x, float y, float z, bool public_hunt)
+bool MobMovementManager::CanNavigateActorTo(Mob *who, float x, float y, float z, bool public_hunt,
+    ActorDemo::HuntRouteEvidence *evidence)
 {
+    if (evidence) { *evidence = {}; }
     const auto iter = _impl->Entries.find(who);
     if (iter == _impl->Entries.end() || !iter->second.Commands.empty() ||
-        iter->second.actor_travel == ActorTravel::Moving) { return false; }
+        iter->second.actor_travel == ActorTravel::Moving) {
+        if (evidence) { evidence->result = "movement_busy"; }
+        return false;
+    }
     IPathfinder::IPath route;
-    return BuildActorRoute(who, x, y, z, public_hunt, route);
+    return BuildActorRoute(who, x, y, z, public_hunt, route, evidence);
 }
 
 bool MobMovementManager::NavigateActorTo(Mob *who, float x, float y, float z, bool public_hunt)

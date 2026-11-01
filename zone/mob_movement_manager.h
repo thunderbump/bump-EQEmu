@@ -21,6 +21,7 @@
 
 class Mob;
 class Client;
+namespace ActorDemo { struct HuntRouteEvidence; }
 
 struct RotateCommand;
 struct MovementCommand;
@@ -72,7 +73,8 @@ public:
 	// Narrow native-actor lane: complete short dry routes only, no stuck/warp fallback.
 	enum class ActorTravel { Idle, Moving, Completed, Interrupted };
 	bool NavigateActorTo(Mob *who, float x, float y, float z, bool public_hunt = false);
-    bool CanNavigateActorTo(Mob *who, float x, float y, float z, bool public_hunt = false);
+    bool CanNavigateActorTo(Mob *who, float x, float y, float z, bool public_hunt = false,
+        ActorDemo::HuntRouteEvidence *evidence = nullptr);
 	ActorTravel InspectActorTravel(Mob *who) const;
     enum class ActorCombatMotion { Stopped, Facing, Unsupported };
     // Only turns queued inside an authorized native actor swing qualify.
