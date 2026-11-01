@@ -142,11 +142,37 @@ void NativeReachAndShortApproaches() {
         "out-of-reach or wrong-floor target admitted");
     Require(!HuntRested(9, 11) && HuntRested(10, 11), "fractional native HP threshold rounding");
 }
+
+void IdlePublicSpawnFloor() {
+    // Root's read-only native capture: an untouched idle public rat keeps its
+    // spawn Z, while the owned actor and route nodes use adjusted floor Z.
+    const HuntPosition home{-917, 1224, 3.75}, actor{-917, 1224, 4.1};
+    auto rat = Prey(164, 164, -935, 1194);
+    rat.position.z = 9.1;
+    const double floor = -0.00000190735, offset = 4.375;
+    Require(HuntEligible(rat, actor, home), "captured natural idle rat excluded before geometry");
+    Require(std::abs(rat.position.z - floor - offset) > 2, "capture no longer reproduces old floor rejection");
+    // The production selector must admit this floor fact. It still separately
+    // requires dry geometry, native LOS and the native complete-route probe.
+    Require(HuntFloorAllowed(rat.position.z, floor, offset), "reachable untouched idle spawn Z rejected");
+    Require(HuntFloorAllowed(offset, 0, offset), "floor-adjusted standing prey rejected");
+    Require(HuntFloorAllowed(offset + 6, 0, offset) && !HuntFloorAllowed(offset + 6.001, 0, offset),
+        "upward floor discrepancy exceeded native six-unit Z envelope");
+    Require(HuntFloorAllowed(offset - 2, 0, offset) && !HuntFloorAllowed(offset - 2.001, 0, offset),
+        "existing lower floor tolerance relaxed");
+    for (const auto invalid : {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity()}) {
+        Require(!HuntFloorAllowed(invalid, 0, offset) && !HuntFloorAllowed(offset, invalid, offset) &&
+            !HuntFloorAllowed(offset, 0, invalid), "invalid native floor observation admitted");
+    }
+    rat.position.z = 10;
+    Require(HuntFloorAllowed(rat.position.z, 0, offset) && !HuntEligible(rat, actor, home),
+        "floor slack bypassed the independent home/current actor Z gate");
+}
 }
 int main() {
     try {
-        NearestAndEligibility(); PersistentRestAndNoTarget(); ImmediateContentionAndOnlyActorCleanup(); YieldRecoveryAndGoalCounters(); NativeReachAndShortApproaches();
-        std::cout << "public hunt controls: 5 groups passed\n";
+        NearestAndEligibility(); PersistentRestAndNoTarget(); ImmediateContentionAndOnlyActorCleanup(); YieldRecoveryAndGoalCounters(); NativeReachAndShortApproaches(); IdlePublicSpawnFloor();
+        std::cout << "public hunt controls: 6 groups passed\n";
         return EXIT_SUCCESS;
     } catch (const std::exception &error) {
         std::cerr << "public hunt controls: " << error.what() << '\n';

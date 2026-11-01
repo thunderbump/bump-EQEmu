@@ -319,6 +319,7 @@ public:
                 << ",\"home_position\":[" << home.x << ',' << home.y << ',' << home.z
                 << "],\"search_radius\":" << HuntSearchRadius << ",\"actor_leash\":" << HuntLeash
                 << ",\"z_range\":" << HuntZRange << ",\"route_limit\":" << HuntRouteLimit
+                << ",\"floor_upper_slack\":" << HuntZRange << ",\"floor_lower_slack\":" << HuntFloorLowerSlack
                 << ",\"eligible_count\":" << eligible_count << ",\"selected_distance_xy\":" << selected_distance
                 << ",\"selected_from_position\":[" << selected_from.x << ',' << selected_from.y << ',' << selected_from.z
                 << "],\"selected_target_position\":[" << selected_position.x << ',' << selected_position.y << ',' << selected_position.z << ']';
@@ -430,7 +431,7 @@ private:
             // cache for candidates rejected before the original LOS gate.
             probe.los = body->CheckLosFN(npc->GetX(), npc->GetY(), npc->GetZ(), npc->GetSize());
             if (!probe.floor_valid) { probe.reason = HuntRejection::FloorInvalid; }
-            else if (probe.height_error > 2) { probe.reason = HuntRejection::FloorHeight; }
+            else if (!HuntFloorAllowed(position.z, floor, probe.z_offset)) { probe.reason = HuntRejection::FloorHeight; }
             else if (zone->watermap->InLiquid(position)) { probe.reason = HuntRejection::Water; }
             else if (!body->CheckLosFN(npc)) { probe.reason = HuntRejection::Los; }
             const auto distance = std::sqrt(DistanceSquared(from, c.position));

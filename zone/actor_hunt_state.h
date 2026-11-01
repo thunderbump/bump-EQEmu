@@ -7,6 +7,7 @@
 namespace ActorDemo {
 constexpr float HuntHomeX = -917, HuntHomeY = 1224;
 constexpr float HuntSearchRadius = 150, HuntLeash = 180, HuntZRange = 6;
+constexpr double HuntFloorLowerSlack = 2;
 constexpr float HuntDirectRange = 350, HuntRouteLimit = 400;
 constexpr unsigned HuntRouteNodes = 64;
 constexpr uint64_t HuntSearchIntervalMs = 2000, HuntRestMinimumMs = 10000;
@@ -56,6 +57,14 @@ inline bool InsideHuntArea(HuntPosition p, HuntPosition home, double radius) {
 }
 inline bool HuntType(uint32_t type, uint8_t level) {
     return ((type == 2011 || type == 2104) && level == 1) || (type == 2000 && level == 2);
+}
+inline bool HuntFloorAllowed(double z, double floor, double z_offset) {
+    if (!std::isfinite(z) || !std::isfinite(floor) || !std::isfinite(z_offset)) { return false; }
+    // Idle natural NPCs can retain spawn Z above their floor-adjusted standing
+    // height. Admit that upward discrepancy within the existing native Z
+    // envelope, without relaxing the lower tolerance or rewriting the prey.
+    const auto above_standing = z - floor - z_offset;
+    return above_standing >= -HuntFloorLowerSlack && above_standing <= HuntZRange;
 }
 inline bool ActorRouteDistanceAllowed(bool public_hunt, double distance) {
     return std::isfinite(distance) && distance >= (public_hunt ? 0.5 : 4.0) &&
