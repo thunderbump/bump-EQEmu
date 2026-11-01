@@ -60,7 +60,7 @@ class EQEmuConfig
 		uint16 WorldHTTPPort;
 		std::string WorldHTTPMimeFile;
 		std::string SharedKey;
-		bool DisableConfigChecks;
+		bool DisableConfigChecks = false;
 
 		// From <database/>
 		std::string DatabaseHost;

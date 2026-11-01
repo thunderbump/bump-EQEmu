@@ -11,6 +11,7 @@ set(tests_headers
 	suite_runner.h
 	atobool_test.h
 	data_verification_test.h
+	eqemu_config_test.h
 	fixed_memory_test.h
 	fixed_memory_variable_test.h
 	hextoi_32_64_test.h

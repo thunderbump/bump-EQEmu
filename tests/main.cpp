@@ -18,6 +18,7 @@
 #include "tests/actor_runtime_test.h"
 #include "tests/atobool_test.h"
 #include "tests/data_verification_test.h"
+#include "tests/eqemu_config_test.h"
 #include "tests/fixed_memory_test.h"
 #include "tests/fixed_memory_variable_test.h"
 #include "tests/hextoi_32_64_test.h"
@@ -57,6 +58,7 @@ int main()
 		tests.add(new InserverTestProgressTest());
 		tests.add(new StringUtilTest());
 		tests.add(new DataVerificationTest());
+		tests.add(new EQEmuConfigTest());
 		tests.add(new SkillsUtilsTest());
 		tests.add(new TaskStateTest());
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
