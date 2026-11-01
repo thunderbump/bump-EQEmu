@@ -1,4 +1,4 @@
-use crate::checkpoint::{self, Store};
+use crate::checkpoint::Store;
 use actor_core::population as core;
 use std::{
     fs::{self, File},
@@ -226,10 +226,10 @@ fn population_open_inner(directory: &str, session: &str) -> Result<Box<Populatio
         Err(e) => (std::array::from_fn(core::Saved::initial), 0, false, e),
     };
     let old = store.directory.join("command");
-    if let Err(e) = fs::remove_file(old) {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            return Err(format!("command_cleanup: {e}"));
-        }
+    if let Err(e) = fs::remove_file(old)
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        return Err(format!("command_cleanup: {e}"));
     }
     Ok(Box::new(Population {
         store,
@@ -469,7 +469,7 @@ impl Population {
                 "goal":a.goal,"operation":b.operation,"target_id":a.target.id,"target_incarnation":a.target.incarnation,
                 "position":[a.saved.point.x,a.saved.point.y,a.saved.point.z],"hp":a.saved.hp,"rest_remaining_ms":a.saved.rest_ms,
                 "completed":a.saved.completed,"yielded":a.saved.yielded,"failed":a.saved.failed,"eligible":a.eligible,"claim_conflicts":a.claim_conflicts,
-                "swings":a.outgoing[0],"hits":a.outgoing[1],"damage":a.outgoing[2],"incoming_swings":a.incoming[0],"incoming_hits":a.incoming[1],"incoming_damage":a.incoming[2],
+                "swings":a.outgoing.swings,"hits":a.outgoing.hits,"damage":a.outgoing.damage,"incoming_swings":a.incoming.swings,"incoming_hits":a.incoming.hits,"incoming_damage":a.incoming.damage,
                 "minimum_hp":a.minimum_hp,"observed_rest_hp_gain":a.rest_hp_gain})
         }).collect();
         let claims:Vec<_>=self.core.claims.iter().map(|(k,c)|serde_json::json!({"target_id":k.id,"target_incarnation":k.incarnation,

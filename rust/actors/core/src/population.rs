@@ -22,14 +22,14 @@ pub struct Point {
     pub z: f64,
 }
 impl Point {
-    pub fn distance(self, p: Self) -> f64 {
+    pub fn distance_xy_squared(self, p: Self) -> f64 {
         (self.x - p.x).powi(2) + (self.y - p.y).powi(2)
     }
     pub fn inside(self, radius: f64) -> bool {
         self.x.is_finite()
             && self.y.is_finite()
             && self.z.is_finite()
-            && self.distance(HOME) <= radius * radius
+            && self.distance_xy_squared(HOME) <= radius * radius
             && (self.z - HOME.z).abs() <= Z_RANGE
     }
 }
@@ -233,6 +233,13 @@ pub struct Claim {
     pub goal: u64,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CombatCounters {
+    pub swings: u64,
+    pub hits: u64,
+    pub damage: u64,
+}
+
 pub struct Actor {
     pub saved: Saved,
     pub phase: Phase,
@@ -242,8 +249,8 @@ pub struct Actor {
     pub reason: &'static str,
     pub eligible: usize,
     pub claim_conflicts: u64,
-    pub outgoing: [u64; 3],
-    pub incoming: [u64; 3],
+    pub outgoing: CombatCounters,
+    pub incoming: CombatCounters,
     pub minimum_hp: i64,
     pub rest_hp_gain: u64,
     at: u64,
@@ -251,7 +258,7 @@ pub struct Actor {
     due: u64,
     observed_at: u64,
     last_point: Point,
-    last_native: [u64; 3],
+    last_native: CombatCounters,
     credited_goal: u64,
     rejected: Vec<Key>,
 }
@@ -267,8 +274,8 @@ impl Actor {
             reason: "ready",
             eligible: 0,
             claim_conflicts: 0,
-            outgoing: [0; 3],
-            incoming: [0; 3],
+            outgoing: CombatCounters::default(),
+            incoming: CombatCounters::default(),
             minimum_hp: hp,
             rest_hp_gain: 0,
             at: 0,
@@ -276,7 +283,7 @@ impl Actor {
             due: 0,
             observed_at: 0,
             last_point: Point::default(),
-            last_native: [0; 3],
+            last_native: CombatCounters::default(),
             credited_goal: 0,
             rejected: Vec::new(),
         }
@@ -399,16 +406,27 @@ impl Population {
             // Counters/terminals remain attributable after native body removal,
             // including the fatal incoming swing and a kill racing retirement.
             if bound {
-                a.incoming = [b.incoming_swings, b.incoming_hits, b.incoming_damage];
+                a.incoming = CombatCounters {
+                    swings: b.incoming_swings,
+                    hits: b.incoming_hits,
+                    damage: b.incoming_damage,
+                };
                 if b.goal == a.goal {
-                    let current = [b.swings, b.hits, b.damage];
-                    if current[0] > a.last_native[0] {
+                    let current = CombatCounters {
+                        swings: b.swings,
+                        hits: b.hits,
+                        damage: b.damage,
+                    };
+                    if current.swings > a.last_native.swings {
                         a.progress = now;
                     }
-                    if current.iter().zip(a.last_native).all(|(n, o)| *n >= o) {
-                        for k in 0..3 {
-                            a.outgoing[k] += current[k] - a.last_native[k];
-                        }
+                    if current.swings >= a.last_native.swings
+                        && current.hits >= a.last_native.hits
+                        && current.damage >= a.last_native.damage
+                    {
+                        a.outgoing.swings += current.swings - a.last_native.swings;
+                        a.outgoing.hits += current.hits - a.last_native.hits;
+                        a.outgoing.damage += current.damage - a.last_native.damage;
                         a.last_native = current;
                     }
                 }
@@ -516,8 +534,8 @@ impl Population {
                         prey.iter().filter(|p| p.eligible(b.point)).collect();
                     candidates.sort_by(|x, y| {
                         x.point
-                            .distance(b.point)
-                            .total_cmp(&y.point.distance(b.point))
+                            .distance_xy_squared(b.point)
+                            .total_cmp(&y.point.distance_xy_squared(b.point))
                             .then(x.key.cmp(&y.key))
                     });
                     a.eligible = candidates.len();
@@ -586,13 +604,15 @@ impl Population {
                         a.phase = Phase::Fighting;
                         a.at = now;
                         a.progress = now;
-                        a.last_native = [0; 3];
+                        a.last_native = CombatCounters::default();
                         a.last_point = b.point;
                         actions.push(a.action(i, ActionKind::Engage));
                     }
                 }
                 Phase::Fighting => {
-                    if b.swings > a.last_native[0] || b.point.distance(a.last_point) >= 0.0625 {
+                    if b.swings > a.last_native.swings
+                        || b.point.distance_xy_squared(a.last_point) >= 0.0625
+                    {
                         a.progress = now;
                         a.last_point = b.point;
                     }
@@ -836,7 +856,14 @@ mod tests {
         b[i].incoming_damage = 100;
         p.tick(41_002, &b, &[], false);
         assert_eq!(p.actors[i].saved.desired, Desired::Dead);
-        assert_eq!(p.actors[i].incoming, [9, 6, 100]);
+        assert_eq!(
+            p.actors[i].incoming,
+            CombatCounters {
+                swings: 9,
+                hits: 6,
+                damage: 100
+            }
+        );
         assert!(!p.start(Some(i)));
         let (mut p, mut b) = setup();
         b[0].lifetime.generation += 1;
