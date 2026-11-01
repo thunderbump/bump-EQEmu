@@ -340,9 +340,12 @@ public:
                 out << ",\"height_error\":"; number(selection.height_error);
                 out << ",\"los\":" << (selection.los ? "true" : "false")
                     << ",\"endpoint\":[" << selection.endpoint.x << ',' << selection.endpoint.y << ',' << selection.endpoint.z
-                    << "],\"route_result\":\"" << selection.route.result << "\",\"route_nodes\":" << selection.route.nodes
-                    << ",\"route_direct_distance\":"; number(selection.route.direct_distance);
-                out << ",\"route_length\":"; number(selection.route.length);
+                    << "],\"route_result\":\"" << selection.route.result << "\",\"route_nodes\":";
+                if (selection.route.queried) { out << selection.route.nodes; } else { out << "null"; }
+                out << ",\"route_direct_distance\":"; number(selection.route.direct_distance);
+                out << ",\"route_length\":";
+                if (selection.route.length_complete) { number(selection.route.length_prefix); } else { out << "null"; }
+                out << ",\"route_length_prefix\":"; number(selection.route.length_prefix);
                 out << ",\"route_endpoint_error\":"; number(selection.route.endpoint_error);
                 out << '}';
             }
@@ -423,11 +426,13 @@ private:
             probe.floor = floor; probe.z_offset = npc->GetZOffset();
             probe.floor_valid = floor != BEST_Z_INVALID && std::isfinite(floor);
             probe.height_error = std::abs(position.z - floor - probe.z_offset);
-            probe.los = body->CheckLosFN(npc);
+            // The coordinate overload does not overwrite the actor's LOS
+            // cache for candidates rejected before the original LOS gate.
+            probe.los = body->CheckLosFN(npc->GetX(), npc->GetY(), npc->GetZ(), npc->GetSize());
             if (!probe.floor_valid) { probe.reason = HuntRejection::FloorInvalid; }
             else if (probe.height_error > 2) { probe.reason = HuntRejection::FloorHeight; }
             else if (zone->watermap->InLiquid(position)) { probe.reason = HuntRejection::Water; }
-            else if (!probe.los) { probe.reason = HuntRejection::Los; }
+            else if (!body->CheckLosFN(npc)) { probe.reason = HuntRejection::Los; }
             const auto distance = std::sqrt(DistanceSquared(from, c.position));
             // Same rounded two-unit-short destination as Rust's approach.
             const auto scale = distance > 2 ? 2 / distance : 0;

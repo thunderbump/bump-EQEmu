@@ -2,6 +2,7 @@
 #include "actor_demo_native.h"
 #include <array>
 #include <cmath>
+#include <limits>
 
 namespace ActorDemo {
 constexpr float HuntHomeX = -917, HuntHomeY = 1224;
@@ -14,8 +15,11 @@ struct HuntPosition { double x = 0, y = 0, z = 0; };
 // One bounded snapshot of read-only selection probes, replaced each search.
 struct HuntRouteEvidence {
     const char *result = "not_checked";
-    double direct_distance = 0, length = 0, endpoint_error = 0;
+    double direct_distance = std::numeric_limits<double>::quiet_NaN();
+    double length_prefix = std::numeric_limits<double>::quiet_NaN();
+    double endpoint_error = std::numeric_limits<double>::quiet_NaN();
     unsigned nodes = 0;
+    bool queried = false, length_complete = false;
 };
 enum class HuntRejection { None, Identity, FloorInvalid, FloorHeight, Water, Los, Route, Count };
 inline const char *HuntRejectionName(HuntRejection reason) {
@@ -36,7 +40,9 @@ struct HuntSelectionEvidence {
     NativeIdentity nearest;
     HuntPosition position, endpoint;
     HuntRejection reason = HuntRejection::None;
-    double floor = 0, z_offset = 0, height_error = 0;
+    double floor = std::numeric_limits<double>::quiet_NaN();
+    double z_offset = std::numeric_limits<double>::quiet_NaN();
+    double height_error = std::numeric_limits<double>::quiet_NaN();
     bool floor_valid = false, los = false;
     HuntRouteEvidence route;
     void Reject(HuntRejection why) { ++rejected[static_cast<unsigned>(why)]; }

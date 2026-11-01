@@ -894,7 +894,7 @@ bool BuildActorRoute(Mob *who, float x, float y, float z, bool public_hunt, IPat
     opts.flags = PathingNotDisabled ^ PathingZoneLine;
     bool partial = false, stuck = false;
     route = zone->pathing->FindPath(start, end, partial, stuck, opts);
-    if (evidence) { evidence->nodes = route.size(); }
+    if (evidence) { evidence->nodes = route.size(); evidence->queried = true; }
     if (partial) { return result("partial_route"); }
     if (stuck) { return result("stuck_route"); }
     if (route.size() < 2 || route.size() > (public_hunt ? ActorDemo::HuntRouteNodes : 32u)) { return result("node_count"); }
@@ -903,6 +903,7 @@ bool BuildActorRoute(Mob *who, float x, float y, float z, bool public_hunt, IPat
     AdjustRoute(route, who);
     auto previous = start;
     float length = 0;
+    if (evidence) { evidence->length_prefix = 0; }
     for (const auto &node : route) {
         if (!std::isfinite(node.pos.x) || !std::isfinite(node.pos.y) ||
             !std::isfinite(node.pos.z)) { return result("node_position"); }
@@ -911,11 +912,11 @@ bool BuildActorRoute(Mob *who, float x, float y, float z, bool public_hunt, IPat
         if (public_hunt && std::hypot(node.pos.x - ActorDemo::HuntHomeX, node.pos.y - ActorDemo::HuntHomeY) >
             ActorDemo::HuntLeash) { return result("node_leash"); }
         length += glm::distance(previous, node.pos);
-        if (evidence) { evidence->length = length; }
+        if (evidence) { evidence->length_prefix = length; }
         previous = node.pos;
     }
     const auto endpoint_error = glm::distance(previous, end);
-    if (evidence) { evidence->endpoint_error = endpoint_error; }
+    if (evidence) { evidence->endpoint_error = endpoint_error; evidence->length_complete = true; }
     if (zone->watermap->InLiquid(start)) { return result("start_water"); }
     if (endpoint_error > 6.0f) { return result("endpoint"); }
     if (length > distance * 1.5f) { return result("detour"); }
