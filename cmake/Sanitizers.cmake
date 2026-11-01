@@ -26,6 +26,10 @@ function(eqemu_apply_sanitizers directory)
                 -g -O1 -fno-omit-frame-pointer -fno-optimize-sibling-calls)
             target_link_options("${target}" PRIVATE
                 -fsanitize=address,undefined -fno-sanitize-recover=all)
+            if(target STREQUAL "lua_zone")
+                # Keep each diagnostic Lua compilation to one binding source.
+                set_property(TARGET "${target}" PROPERTY UNITY_BUILD OFF)
+            endif()
         endif()
     endforeach()
 
