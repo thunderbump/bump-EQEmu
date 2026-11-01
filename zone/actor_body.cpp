@@ -372,6 +372,14 @@ bool Adapter::CombatAllowed(NPC *body, NPC *target) const
         body->CheckLosFN(target) && body->IsAttackAllowed(target);
 }
 
+bool Adapter::HasAdmittedPublicCombat(NPC *body, NPC *prey) const
+{
+    const auto s = Inspect();
+    return !closing_ && !combat_.killed && !combat_.defeated && s.public_hunt &&
+        s.approach == eqemu_proof::Approach::Engaging && s.phase == eqemu_proof::Phase::Admitted &&
+        CombatAllowed(body, prey);
+}
+
 void Adapter::ObserveDeath(NPC *victim, Mob *killer)
 {
     // No Rust calls, advancement or retained entity pointers in native callbacks.

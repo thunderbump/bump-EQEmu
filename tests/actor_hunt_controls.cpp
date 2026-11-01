@@ -168,11 +168,58 @@ void IdlePublicSpawnFloor() {
     Require(HuntFloorAllowed(rat.position.z, 0, offset) && !HuntEligible(rat, actor, home),
         "floor slack bypassed the independent home/current actor Z gate");
 }
+
+void NativeRetaliationAndIncoming() {
+    Custody c; c.public_hunt = c.combat_enabled = true;
+    c.epoch = 7; c.generation = 2; c.goal = 3;
+    c.actor = {258, 185}; c.target = {164, 164};
+    NativeView view{7, 2, true, c.actor, c.target, false, 3};
+    const bool admitted = c.CanRetaliate(view, c.target, c.actor, true);
+    Require(admitted && !NPCFactionWarWipeRequired(false, admitted),
+        "npc_aggro0 native target check wipes admitted sole actor hate");
+    Require(NPCFactionWarWipeRequired(false, false) && !NPCFactionWarWipeRequired(true, false),
+        "unrelated NPC faction-war behavior changed");
+    Require(!c.CanRetaliate(view, c.target, c.actor, false), "unadmitted native operation retained hate");
+    for (unsigned stale = 0; stale < 6; ++stale) {
+        auto old = view;
+        switch (stale) {
+        case 0: ++old.epoch; break;
+        case 1: ++old.generation; break;
+        case 2: ++old.goal; break;
+        case 3: ++old.actor.incarnation; break;
+        case 4: ++old.target.incarnation; break;
+        case 5: old.alive = false; break;
+        }
+        Require(!c.CanRetaliate(old, c.target, c.actor, true), "stale native identity inherited retaliation exception");
+    }
+    c.contested = true;
+    Require(!c.CanRetaliate(view, c.target, c.actor, true), "contention allowed another native retaliation");
+    c.contested = false; c.interference = true;
+    Require(!c.CanRetaliate(view, c.target, c.actor, true), "interference retained retaliation exception");
+    c.interference = false; c.public_hunt = false;
+    Require(!c.CanRetaliate(view, c.target, c.actor, true), "v1/proof inherited public retaliation policy");
+    c.public_hunt = true;
+    c.ObserveHP(100, false);
+    c.ObserveIncoming(view, c.target, c.actor, 100, 100); // actual native non-damaging swing
+    c.ObserveIncoming(view, c.target, c.actor, 100, 96);
+    c.ObserveHP(98, true); c.ObserveHP(100, true);
+    Require(c.incoming.swings == 2 && c.incoming.hits == 1 && c.incoming.damage == 4 &&
+        c.minimum_hp == 96 && c.rest_hp_gain == 4, "native swing/HP/rest telemetry conflated");
+    auto old = view; ++old.goal;
+    c.ObserveIncoming(old, c.target, c.actor, 100, 1);
+    c.combat_enabled = false;
+    c.ObserveIncoming(view, c.target, c.actor, 100, 1);
+    Require(c.incoming.damage == 4 && !c.CanRetaliate(view, c.target, c.actor, true), "released goal recorded incoming attacks");
+    Require(c.PlanRetirement(view).actor && !c.PlanRetirement(view).target, "retaliation changed public cleanup ownership");
+    c.combat_enabled = true;
+    c.ObserveIncoming(view, c.target, c.actor, 100, -4);
+    Require(c.incoming.damage == 104 && c.minimum_hp == 0, "fatal incoming loss did not clamp at zero HP");
+}
 }
 int main() {
     try {
-        NearestAndEligibility(); PersistentRestAndNoTarget(); ImmediateContentionAndOnlyActorCleanup(); YieldRecoveryAndGoalCounters(); NativeReachAndShortApproaches(); IdlePublicSpawnFloor();
-        std::cout << "public hunt controls: 6 groups passed\n";
+        NearestAndEligibility(); PersistentRestAndNoTarget(); ImmediateContentionAndOnlyActorCleanup(); YieldRecoveryAndGoalCounters(); NativeReachAndShortApproaches(); IdlePublicSpawnFloor(); NativeRetaliationAndIncoming();
+        std::cout << "public hunt controls: 7 groups passed\n";
         return EXIT_SUCCESS;
     } catch (const std::exception &error) {
         std::cerr << "public hunt controls: " << error.what() << '\n';

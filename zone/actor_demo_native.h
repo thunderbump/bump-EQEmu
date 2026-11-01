@@ -22,6 +22,9 @@ struct Retirement {
 struct Counters {
     uint64_t swings = 0, hits = 0, damage = 0;
 };
+inline bool NPCFactionWarWipeRequired(bool npc_aggro, bool retaliation) {
+    return !npc_aggro && !retaliation;
+}
 
 // The controller's native seam uses observed lifetime keys, never entity IDs
 // alone. Native lookups and Rust calls stay on the zone thread in actor_demo.cpp.
@@ -33,6 +36,12 @@ public:
     bool interference = false;
     bool public_hunt = false, combat_enabled = false, contested = false;
     Counters total, last;
+    Counters incoming;
+    int64_t minimum_hp = 0, last_hp = 0;
+    uint64_t rest_hp_gain = 0;
+    uint64_t retaliation_hate_preserved = 0;
+    int64_t incoming_last_native_result = 0;
+    bool hp_observed = false;
 
     bool OwnsRuntime(const NativeView &view) const {
         return epoch && generation && epoch == view.epoch && generation == view.generation;
@@ -61,6 +70,28 @@ public:
         }
         return !(attacker_is_actor || attacker_is_rat || victim_is_actor || victim_is_rat) ||
             (attacker_is_actor && victim_is_rat) || (attacker_is_rat && victim_is_actor);
+    }
+    bool CanRetaliate(const NativeView &view, const NativeIdentity &prey, const NativeIdentity &body,
+        bool native_admitted) const {
+        return public_hunt && native_admitted && OwnsRuntime(view) && view.alive && goal && view.goal == goal &&
+            actor.Matches(view.actor) && target.Matches(view.target) &&
+            target.Matches(prey) && actor.Matches(body) && CanCombat(prey, body);
+    }
+    void ObserveHP(int64_t hp, bool resting) {
+        hp = hp > 0 ? hp : 0;
+        if (!hp_observed) { minimum_hp = hp; hp_observed = true; }
+        if (hp < minimum_hp) { minimum_hp = hp; }
+        if (resting && hp > last_hp && last_hp > 0) { rest_hp_gain += uint64_t(hp - last_hp); }
+        last_hp = hp;
+    }
+    void ObserveIncoming(const NativeView &view, const NativeIdentity &prey, const NativeIdentity &body,
+        int64_t before, int64_t after, int64_t native_result = 0) {
+        if (!CanRetaliate(view, prey, body, true)) { return; }
+        ++incoming.swings;
+        incoming_last_native_result = native_result;
+        const auto loss = (before > 0 ? before : 0) - (after > 0 ? after : 0);
+        if (loss > 0) { ++incoming.hits; incoming.damage += uint64_t(loss); }
+        ObserveHP(after, false);
     }
     bool AdmitCombat(const NativeIdentity &attacker, const NativeIdentity &victim) {
         if (public_hunt && !actor.Matches(attacker) && !actor.Matches(victim) &&

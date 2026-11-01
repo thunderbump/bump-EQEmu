@@ -42,6 +42,7 @@ public:
     // Native Death can be latched by this tick's swing before Rust consumes it
     // on the next tick. This is evidence to wait, never a reported victory.
     bool HasPendingTargetKill(uint64_t target_incarnation) const;
+    bool HasAdmittedPublicCombat(NPC *body, NPC *prey) const;
 private:
     eqemu_proof::Report Advance(eqemu_proof::Input input, bool empty = false);
     void Apply(const eqemu_proof::Report &report);

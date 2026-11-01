@@ -61,6 +61,17 @@ public:
         return body && prey && InsideHuntArea(Position(body), home, HuntLeash) &&
             InsideHuntArea(Position(prey), home, HuntSearchRadius);
     }
+    bool PreserveRetaliationHate(Mob *prey) const {
+        if (!public_hunt || !custody.target.Matches(Identify(prey))) { return false; }
+        auto *body = Find(custody.actor);
+        auto *target = Find(custody.target);
+        const auto view = View();
+        return body && target && prey == target && target->GetHateListCount() == 1 && target->CheckAggro(body) &&
+            custody.CanRetaliate(view, Identify(target), Identify(body),
+                ActorBody::Get().HasAdmittedPublicCombat(body, target)) &&
+            PairInsideHuntArea(target, body) && target->CombatRange(body) &&
+            target->CheckLosFN(body->GetX(), body->GetY(), body->GetZ(), body->GetSize()) && target->IsAttackAllowed(body);
+    }
 
     std::string Path(const char *name) const { return dir + "/" + name; }
     NativeView View() const {
@@ -316,6 +327,16 @@ public:
                 << "\",\"actor_hp\":" << (body ? body->GetHP() : 0) << ",\"actor_max_hp\":" << (body ? body->GetMaxHP() : 0)
                 << ",\"rest_elapsed_ms\":" << run.RestElapsed(now) << ",\"rest_min_ms\":" << HuntRestMinimumMs
                 << ",\"rest_hp_percent\":" << HuntRestHPPercent
+                << ",\"incoming_swings\":" << custody.incoming.swings << ",\"incoming_hits\":" << custody.incoming.hits
+                << ",\"incoming_damage\":" << custody.incoming.damage << ",\"actor_min_hp\":" << custody.minimum_hp
+                << ",\"observed_rest_hp_gain\":" << custody.rest_hp_gain
+                << ",\"incoming_non_damaging_swings\":" << custody.incoming.swings - custody.incoming.hits
+                << ",\"incoming_last_native_result\":" << custody.incoming_last_native_result
+                << ",\"actor_hp_observed\":" << (custody.hp_observed ? "true" : "false")
+                << ",\"retaliation_hate_preserved\":" << custody.retaliation_hate_preserved;
+            const auto *prey = Find(custody.target);
+            out << ",\"prey_native_target_id\":" << (prey && prey->GetTarget() ? prey->GetTarget()->GetID() : 0)
+                << ",\"prey_hate_entries\":" << (prey ? prey->GetHateListCount() : 0)
                 << ",\"home_position\":[" << home.x << ',' << home.y << ',' << home.z
                 << "],\"search_radius\":" << HuntSearchRadius << ",\"actor_leash\":" << HuntLeash
                 << ",\"z_range\":" << HuntZRange << ",\"route_limit\":" << HuntRouteLimit
@@ -473,6 +494,8 @@ private:
         auto *body = Find(custody.actor);
         auto *target = Find(custody.target);
         auto view = View();
+        if (body) { custody.ObserveHP(body->GetHP(), run.phase == Phase::Resting &&
+            body->GetAppearance() == eaSitting && !body->IsEngaged()); }
         const bool swung = s.swings > custody.last.swings;
         custody.ObserveCounters(view, {s.swings, s.hits, s.damage});
         Facts facts;
@@ -573,6 +596,22 @@ bool AllowClientAbility(Mob *attacker, Mob *target, uint16_t requested_target)
 {
     return !demo || demo->custody.AdmitClientAbility(requested_target, target ? target->GetID() : 0,
         Identify(attacker), Identify(target));
+}
+bool PreserveRetaliationHate(Mob *prey)
+{
+    if (!demo || !demo->PreserveRetaliationHate(prey)) { return false; }
+    ++demo->custody.retaliation_hate_preserved;
+    return true;
+}
+void ObserveIncomingSwing(Mob *prey, Mob *body, int64_t before, int64_t after, int64_t native_result)
+{
+    if (!demo || !body || !prey || !demo->custody.public_hunt ||
+        !demo->custody.actor.Matches(Identify(body)) || !demo->custody.target.Matches(Identify(prey))) { return; }
+    const auto s = ActorBody::Get().Inspect();
+    // Native Attack owns these arguments through Damage/Death. Registration
+    // may already be gone for a fatal hit; incarnation and goal still correlate.
+    const auto actor = Identify(body), target = Identify(prey);
+    demo->custody.ObserveIncoming({s.epoch, s.generation, s.alive, actor, target, false, s.goal}, target, actor, before, after, native_result);
 }
 
 void BeginTeardown()

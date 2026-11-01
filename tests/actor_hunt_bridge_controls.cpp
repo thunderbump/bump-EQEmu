@@ -49,6 +49,13 @@ void PersistentBridge() {
         Require(runtime->observe(s.sequence + 1, s.tick + 1, std::move(o)).event == Event::AttackRequested,
             "bridge real policy target selection");
         Require(fact(Kind::AttackAdmitted).event == Event::AttackAdmitted, "native attack admission");
+        s = runtime->inspect();
+        ActorDemo::NativeView incoming_view{s.epoch, s.generation, s.alive, custody.actor, custody.target, false, s.goal};
+        const auto retaliation = custody.CanRetaliate(incoming_view, custody.target, custody.actor,
+            s.public_hunt && s.attacking && s.phase == Phase::Admitted && s.approach == Approach::Engaging);
+        Require(retaliation && !ActorDemo::NPCFactionWarWipeRequired(false, retaliation),
+            "real runtime admitted target loses native retaliation hate");
+        custody.ObserveIncoming(incoming_view, custody.target, custody.actor, 100, 97);
         Require(fact(Kind::SwingHit, 6).event == Event::SwingHit, "first native fixture hit");
         if (cycle == 3) {
             Require(custody.AdmitCombat({}, custody.target) && custody.contested, "public player damage blocked");
@@ -68,8 +75,11 @@ void PersistentBridge() {
         s = runtime->inspect();
         Require(s.alive && s.body == Body::Present && s.approach == Approach::Disabled && s.target == 0 &&
             s.epoch == initial.epoch && s.generation == initial.generation, "release lost body custody");
+        Require(!custody.CanRetaliate(incoming_view, custody.target, custody.actor,
+            s.attacking && s.phase == Phase::Admitted), "released runtime kept retaliation admission");
     }
     Require(custody.total.damage == 39 && custody.total.swings == 7, "native per-goal cumulative counters");
+    Require(custody.incoming.swings == 4 && custody.incoming.damage == 12, "incoming telemetry reset between native goals");
     Require(send(Kind::Retire).event == Event::RemovalRequested, "final actor-only retirement");
     auto s = runtime->inspect();
     Require(!custody.PlanRetirement({s.epoch, s.generation, s.alive, custody.actor, custody.target}).target,

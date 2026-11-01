@@ -2404,7 +2404,13 @@ bool NPC::Attack(Mob* other, int Hand, bool bRiposte, bool IsStrikethrough, bool
 	}
 
 	if (GetHP() > 0 && !other->HasDied()) {
+		const auto incoming_hp_before = other->GetHP();
 		other->Damage(this, my_hit.damage_done, SPELL_UNKNOWN, my_hit.skill, true, -1, false, m_specialattacks); // Not avoidable client already had thier chance to Avoid
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+        ActorDemo::ObserveIncomingSwing(this, other, incoming_hp_before, other->GetHP(), my_hit.damage_done);
+#else
+        (void)incoming_hp_before;
+#endif
 	} else {
 		return false;
 	}
