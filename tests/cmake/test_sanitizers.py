@@ -8,6 +8,7 @@ These tests do not qualify the guest toolchain or sanitizer runtime.
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -93,6 +94,12 @@ set(CMAKE_CXX_EXTENSIONS_COMPUTED_DEFAULT ON)
                     for flag in ("-fno-sanitize-recover=all", "-g", "-O1",
                                  "-fno-omit-frame-pointer", "-fno-optimize-sibling-calls"):
                         self.assertIn(flag, command)
+                    # Preserve the five existing patch-source -O0 exceptions.
+                    patch_o0 = source.as_posix() in {
+                        f"common/patches/{name}.cpp" for name in ("sod", "sof", "rof", "rof2", "uf")
+                    }
+                    self.assertEqual(re.findall(r"\s(-O\S+)", command)[-1],
+                                     "-O0" if patch_o0 else "-O1", command)
                     covered.add(source.parts[0])
             self.assertTrue({"common", "tests", "world", "zone"} <= covered)
             for target, directory in (("tests", "tests"), ("world", "world"),

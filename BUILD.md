@@ -130,6 +130,8 @@ at compile and final link, plus `-g -O1 -fno-omit-frame-pointer
 -fno-optimize-sibling-calls` at compile. It covers common, utility tests, selected
 server/client-file executables including world/zone, and project libraries such
 as gm_commands_zone, lua_zone and perl_zone, including project object libraries.
+The existing source-specific `-O0` for common/patches/{sod,sof,rof,rof2,uf}.cpp
+still overrides `-O1`; those five sources retain full sanitizer instrumentation.
 Separately built dependencies under libs/submodules, imported libraries and the
 vendored cppunit framework are excluded. Header code compiled in an instrumented
 target is covered. The private perlbind ASan option is not this profile.
