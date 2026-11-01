@@ -249,22 +249,9 @@ public:
            (body && prey->GetHateListCount() == 1 && prey->CheckAggro(body)));
       b.pending_kill =
           adapter.HasPendingTargetKill(e.permit.target.incarnation);
-      if (s.approach == eqemu_proof::Approach::Victory &&
-          s.last_terminal == eqemu_proof::Event::TargetKilled) {
-        b.outcome = 1;
-      } else if (s.approach == eqemu_proof::Approach::Lost) {
-        b.outcome = 2;
-      } else if (s.approach == eqemu_proof::Approach::Defeated) {
-        if (e.dead) {
-          b.outcome = 3;
-        } else {
-          b.error = true;
-        }
-      } else if (s.approach == eqemu_proof::Approach::Paused) {
-        b.outcome = 4;
-      }
-      if (e.dead) {
-        b.outcome = 3;
+      b.outcome = NativeOutcome(s, e.dead);
+      if (s.approach == eqemu_proof::Approach::Defeated && !e.dead) {
+        b.error = true;
       }
       b.swings = s.swings;
       b.hits = s.hits;

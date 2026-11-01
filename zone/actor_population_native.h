@@ -1,6 +1,26 @@
 #pragma once
+#include "actor-bridge/src/lib.rs.h"
+#include "actor-bridge/src/population.rs.h"
 #include "actor_demo_native.h"
 namespace ActorPopulation {
+// A latched native kill can complete after retirement began. The core retains
+// its correlated terminal operation/goal even while approach is Retiring.
+inline eqemu_population::Outcome
+NativeOutcome(const eqemu_proof::Snapshot &state, bool confirmed_death) {
+  using Result = eqemu_population::Outcome;
+  if (confirmed_death) {
+    return Result::Defeated;
+  }
+  if (state.public_hunt && state.last_operation &&
+      state.last_terminal == eqemu_proof::Event::TargetKilled) {
+    return Result::Victory;
+  }
+  if (state.approach == eqemu_proof::Approach::Lost) {
+    return Result::Lost;
+  }
+  return state.approach == eqemu_proof::Approach::Paused ? Result::Paused
+                                                         : Result::None;
+}
 // Materialized native permission, not a second controller. Only exact current
 // keys can authorize a pair; callbacks close it before Rust sees the event.
 struct Permit {

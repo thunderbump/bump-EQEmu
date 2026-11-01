@@ -32,7 +32,7 @@ struct NativeFixture {
   rust::Box<Runtime> runtime;
   ActorPopulation::Permit permit;
   Key probe;
-  bool probe_ready = false, sitting = false;
+  bool probe_ready = false, sitting = false, pending_kill = false;
   double x = -917, y = 1224, z = 3.75;
   int64_t hp = 100;
   uint64_t incoming = 0;
@@ -88,9 +88,7 @@ rust::Vec<eqemu_population::Body> Frame(std::vector<NativeFixture> &models) {
     b.probe_incarnation = m.probe.incarnation;
     b.probe_ready = m.probe_ready;
     b.probe_ok = true;
-    if (s.approach == Approach::Victory) {
-      b.outcome = 1;
-    }
+    b.outcome = ActorPopulation::NativeOutcome(s, false);
     result.push_back(b);
   }
   return result;
@@ -175,11 +173,9 @@ void Apply(std::vector<NativeFixture> &models,
       Send(m, a.kind == Pop::Release ? Kind::ReleasePublicHunt : Kind::Retire);
       auto s = m.runtime->inspect();
       if (s.attacking) {
-        Fact(m, Kind::AttackInterrupted);
+        Fact(m, m.pending_kill ? Kind::TargetKilled : Kind::AttackInterrupted);
       }
-      if (a.kind == Pop::Release) {
-        Send(m, Kind::ReleasePublicHunt);
-      } else {
+      if (a.kind == Pop::Retire) {
         s = m.runtime->inspect();
         if (s.body == Body::Present) {
           Send(m, Kind::Retire);
@@ -309,10 +305,47 @@ void ThreeActorsClaimsCallbacksAndRestore() {
   Require(fresh[0].runtime->inspect().epoch != m[0].runtime->inspect().epoch,
           "restore reused native runtime lifetime");
 }
+void ActiveCancelAndPendingKillDrain() {
+  Directory d;
+  std::vector<NativeFixture> m;
+  for (unsigned i = 0; i < 3; ++i) {
+    m.emplace_back(i);
+  }
+  auto pop = eqemu_population::population_open(d.path.string(), "pending");
+  Command(d, "start pending 1 all\n");
+  for (uint64_t now : {1, 2, 10002, 11000, 11201, 11402, 11603, 11804, 12005}) {
+    Apply(m, pop->step(now, Frame(m), Prey(), false, false));
+  }
+  const auto body = m[0].permit.actor;
+  m[0].permit.Interfere();
+  Apply(m, pop->step(13000, Frame(m), Prey(), false, false));
+  Require(m[0].runtime->inspect().approach == Approach::Paused,
+          "fixture hid the later native cancellation terminal");
+  Apply(m, pop->step(13001, Frame(m), Prey(), false, false));
+  Apply(m, pop->step(13002, Frame(m), Prey(), false, false));
+  Require(m[0].runtime->inspect().alive &&
+              m[0].runtime->inspect().approach == Approach::Disabled &&
+              m[0].permit.actor.Matches(body),
+          "active release never reset persistent body");
+  Fact(m[1], Kind::SwingHit, 11);
+  m[1].pending_kill = true;
+  Command(d, "drain pending 2\n");
+  Apply(m, pop->step(14000, Frame(m), Prey(), false, false));
+  Require(m[1].runtime->inspect().approach == Approach::Retiring &&
+              m[1].runtime->inspect().last_terminal == Event::TargetKilled,
+          "pending native kill did not race retirement");
+  Apply(m, pop->step(14001, Frame(m), Prey(), false, false));
+  const auto status = Read(d.path / "status.json");
+  Require(status.find("\"completed\":1") != std::string::npos &&
+              status.find("\"restart_safe\":true") != std::string::npos,
+          "clean drain lost correlated pending kill");
+}
+
 } // namespace
 int main() {
   try {
     ThreeActorsClaimsCallbacksAndRestore();
+    ActiveCancelAndPendingKillDrain();
     std::cout << "population CXX/Rust bridge: three actors, claims, callback "
                  "isolation, one/all drain and wounded restore passed\n";
     return EXIT_SUCCESS;

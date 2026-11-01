@@ -55,26 +55,23 @@ impl Lifetime {
     }
 }
 
+const PREY: &[(u32, u8, &str)] = &[
+    (2011, 1, "a_large_rat"),
+    (2104, 1, "a_decaying_skeleton"),
+    (2000, 2, "a_decaying_skeleton"),
+    (2002, 1, "a_gnoll_pup"),
+    (2003, 1, "a_grass_snake"),
+    (2017, 1, "a_brown_myotis_bat"),
+    (2101, 1, "a_gopher_snake"),
+    (2014, 2, "a_klicnik_worker"),
+    (2021, 2, "a_klicnik_drone"),
+    (2024, 2, "a_fire_beetle"),
+];
 pub fn prey_profile(id: u32, level: u8, name: &str) -> bool {
-    matches!(
-        (id, level, name),
-        (2011, 1, "a_large_rat")
-            | (2104, 1, "a_decaying_skeleton")
-            | (2000, 2, "a_decaying_skeleton")
-            | (2002, 1, "a_gnoll_pup")
-            | (2003, 1, "a_grass_snake")
-            | (2017, 1, "a_brown_myotis_bat")
-            | (2101, 1, "a_gopher_snake")
-            | (2014, 2, "a_klicnik_worker")
-            | (2021, 2, "a_klicnik_drone")
-            | (2024, 2, "a_fire_beetle")
-    )
+    PREY.contains(&(id, level, name))
 }
 pub fn prey_type(id: u32, level: u8) -> bool {
-    matches!(
-        (id, level),
-        (2011 | 2104 | 2002 | 2003 | 2017 | 2101, 1) | (2000 | 2014 | 2021 | 2024, 2)
-    )
+    PREY.iter().any(|p| (p.0, p.1) == (id, level))
 }
 #[derive(Clone, Debug)]
 pub struct Candidate {
@@ -377,7 +374,9 @@ impl Population {
                 a.lifetime = b.lifetime;
             }
             let bound = a.lifetime.valid() && a.lifetime == b.lifetime;
-            if bound && b.present && b.point.inside(LEASH) && b.hp > 0 {
+            // HP remains truthful even when bad geometry makes the body unsafe
+            // to continue. Keep the last validated position, never its old HP.
+            if bound && b.present && b.hp > 0 && b.hp <= 100 {
                 if a.phase == Phase::Resting {
                     if b.sitting && !b.moving && !b.engaged {
                         a.saved.rest_ms = a
@@ -391,9 +390,15 @@ impl Population {
                         a.rest_hp_gain += (b.hp - a.saved.hp) as u64;
                     }
                 }
-                a.saved.point = b.point;
+                if b.point.inside(LEASH) {
+                    a.saved.point = b.point;
+                }
                 a.saved.hp = b.hp;
                 a.minimum_hp = a.minimum_hp.min(b.hp);
+            }
+            // Counters/terminals remain attributable after native body removal,
+            // including the fatal incoming swing and a kill racing retirement.
+            if bound {
                 a.incoming = [b.incoming_swings, b.incoming_hits, b.incoming_damage];
                 if b.goal == a.goal {
                     let current = [b.swings, b.hits, b.damage];
@@ -631,6 +636,10 @@ impl Population {
                         a.phase = Phase::Retiring;
                         a.at = now;
                         actions.push(a.action(i, ActionKind::Retire));
+                    } else {
+                        // Cancellation has a later native terminal. Repeat
+                        // release until that terminal permits goal reset.
+                        actions.push(a.action(i, ActionKind::Release));
                     }
                 }
                 Phase::Retiring => {}
@@ -821,8 +830,13 @@ mod tests {
         assert!(p.claims.contains_key(&rat(20).key));
         b[i].outcome = Outcome::Defeated;
         b[i].hp = 0;
+        b[i].present = false;
+        b[i].incoming_swings = 9;
+        b[i].incoming_hits = 6;
+        b[i].incoming_damage = 100;
         p.tick(41_002, &b, &[], false);
         assert_eq!(p.actors[i].saved.desired, Desired::Dead);
+        assert_eq!(p.actors[i].incoming, [9, 6, 100]);
         assert!(!p.start(Some(i)));
         let (mut p, mut b) = setup();
         b[0].lifetime.generation += 1;
@@ -892,6 +906,53 @@ mod tests {
                 .any(|a| a.actor == i && a.kind == ActionKind::Rest)
         );
         assert_eq!(p.actors[i].saved.failed, 0);
+        assert!(p.claims.is_empty());
+    }
+    #[test]
+    fn invalid_geometry_cannot_restore_stale_higher_hp() {
+        for x in [HOME.x + LEASH + 1.0, f64::NAN] {
+            let (mut p, mut b) = setup();
+            b[0].point.x = x;
+            b[0].hp = 47;
+            p.tick(11_000, &b, &[], false);
+            assert_eq!(p.actors[0].saved.desired, Desired::Paused);
+            p.tick(11_001, &empty(), &[], false);
+            let saved = p.saved();
+            assert_eq!(saved[0].hp, 47);
+            assert_eq!(saved[0].point, HOME);
+            let mut restored = Population::new(saved);
+            restored.start(Some(0));
+            let actions = restored.tick(1, &empty(), &[], false);
+            assert!(
+                actions
+                    .iter()
+                    .any(|a| a.actor == 0 && a.kind == ActionKind::Spawn && a.hp == 47)
+            );
+        }
+    }
+
+    #[test]
+    fn watchdog_repeats_release_until_native_terminal_has_reset() {
+        let (mut p, mut b) = setup();
+        p.tick(11_000, &b, &[rat(20)], false);
+        let i = p.claims.values().next().unwrap().actor;
+        b[i].probe = p.actors[i].target;
+        b[i].probe_ready = true;
+        b[i].probe_ok = true;
+        p.tick(11_001, &b, &[], false);
+        b[i].idle = false;
+        for now in [71_001, 71_002] {
+            assert!(
+                p.tick(now, &b, &[], false)
+                    .iter()
+                    .any(|a| a.actor == i && a.kind == ActionKind::Release)
+            );
+            assert!(p.claims.contains_key(&rat(20).key));
+        }
+        b[i].idle = true;
+        p.tick(71_003, &b, &[], false);
+        assert_eq!(p.actors[i].phase, Phase::Resting);
+        assert_eq!(p.actors[i].saved.desired, Desired::Enabled);
         assert!(p.claims.is_empty());
     }
 }

@@ -27,7 +27,7 @@ mod ffi {
         moving: bool,
         sitting: bool,
         engaged: bool,
-        outcome: u8,
+        outcome: Outcome,
         contested: bool,
         target_viable: bool,
         pending_kill: bool,
@@ -55,6 +55,14 @@ mod ffi {
         name: String,
         safe: bool,
         idle: bool,
+    }
+    #[repr(u8)]
+    enum Outcome {
+        None,
+        Victory,
+        Lost,
+        Defeated,
+        Paused,
     }
     #[repr(u8)]
     enum Kind {
@@ -98,6 +106,11 @@ mod ffi {
         fn prey_profile(type_id: u32, level: u8, name: &str) -> bool;
     }
 }
+impl Default for ffi::Outcome {
+    fn default() -> Self {
+        Self::None
+    }
+}
 fn key(id: u16, incarnation: u64) -> core::Key {
     core::Key { id, incarnation }
 }
@@ -124,10 +137,10 @@ fn body(b: &ffi::Body) -> core::Body {
         sitting: b.sitting,
         engaged: b.engaged,
         outcome: match b.outcome {
-            1 => core::Outcome::Victory,
-            2 => core::Outcome::Lost,
-            3 => core::Outcome::Defeated,
-            4 => core::Outcome::Paused,
+            ffi::Outcome::Victory => core::Outcome::Victory,
+            ffi::Outcome::Lost => core::Outcome::Lost,
+            ffi::Outcome::Defeated => core::Outcome::Defeated,
+            ffi::Outcome::Paused => core::Outcome::Paused,
             _ => core::Outcome::None,
         },
         contested: b.contested,
@@ -142,7 +155,15 @@ fn body(b: &ffi::Body) -> core::Body {
         probe: key(b.probe_id, b.probe_incarnation),
         probe_ready: b.probe_ready,
         probe_ok: b.probe_ok,
-        error: b.error,
+        error: b.error
+            || !matches!(
+                b.outcome,
+                ffi::Outcome::None
+                    | ffi::Outcome::Victory
+                    | ffi::Outcome::Lost
+                    | ffi::Outcome::Defeated
+                    | ffi::Outcome::Paused
+            ),
         refused: b.refused,
     }
 }
