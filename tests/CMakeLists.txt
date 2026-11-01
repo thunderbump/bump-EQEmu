@@ -43,6 +43,8 @@ eqemu_link_actor_bridge(tests)
 if(TARGET actor_bridge)
     add_executable(tests_actor_hunt_bridge_controls EXCLUDE_FROM_ALL actor_hunt_bridge_controls.cpp)
     eqemu_link_actor_bridge(tests_actor_hunt_bridge_controls)
+    add_executable(tests_actor_population_bridge_controls EXCLUDE_FROM_ALL actor_population_bridge_controls.cpp)
+    eqemu_link_actor_bridge(tests_actor_population_bridge_controls)
 endif()
 
 install(TARGETS tests RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)

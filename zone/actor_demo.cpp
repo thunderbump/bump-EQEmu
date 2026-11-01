@@ -1,4 +1,5 @@
 #include "actor_demo.h"
+#include "actor_population.h"
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
 #include "actor_demo_state.h"
 #include "actor_demo_native.h"
@@ -571,6 +572,7 @@ std::unique_ptr<Demo> demo;
 
 void Process()
 {
+    if (ActorPopulation::Selected()) { ActorPopulation::Process(); return; }
     if (!zone || zone->GetZoneID() != 2 || zone->GetInstanceID() || zone->GetInstanceVersion()) { return; }
     if (!demo) {
         const auto *enabled = std::getenv("EQEMU_STAGING_ACTOR_DEMO");
@@ -586,25 +588,32 @@ void Process()
 
 bool CanCombat(Mob *attacker, Mob *target)
 {
+    if (ActorPopulation::Selected()) { return ActorPopulation::CanCombat(attacker,target); }
     return !demo || (demo->custody.CanCombat(Identify(attacker), Identify(target)) && demo->PairInsideHuntArea(attacker, target));
 }
 bool AllowCombat(Mob *attacker, Mob *target)
 {
+    if (ActorPopulation::Selected()) { return ActorPopulation::AllowCombat(attacker,target); }
     return !demo || (demo->custody.AdmitCombat(Identify(attacker), Identify(target)) && demo->PairInsideHuntArea(attacker, target));
 }
 bool AllowClientAbility(Mob *attacker, Mob *target, uint16_t requested_target)
 {
+    if (ActorPopulation::Selected()) {
+        return requested_target && target && requested_target==target->GetID() && ActorPopulation::AllowCombat(attacker,target);
+    }
     return !demo || demo->custody.AdmitClientAbility(requested_target, target ? target->GetID() : 0,
         Identify(attacker), Identify(target));
 }
 bool PreserveRetaliationHate(Mob *prey)
 {
+    if (ActorPopulation::Selected()) { return ActorPopulation::PreserveRetaliationHate(prey); }
     if (!demo || !demo->PreserveRetaliationHate(prey)) { return false; }
     ++demo->custody.retaliation_hate_preserved;
     return true;
 }
 void ObserveIncomingSwing(Mob *prey, Mob *body, int64_t before, int64_t after, int64_t native_result)
 {
+    if (ActorPopulation::Selected()) { ActorPopulation::ObserveIncomingSwing(prey,body,before,after);return; }
     if (!demo || !body || !prey || !demo->custody.public_hunt ||
         !demo->custody.actor.Matches(Identify(body)) || !demo->custody.target.Matches(Identify(prey))) { return; }
     const auto s = ActorBody::Get().Inspect();
@@ -616,6 +625,7 @@ void ObserveIncomingSwing(Mob *prey, Mob *body, int64_t before, int64_t after, i
 
 void BeginTeardown()
 {
+    if (ActorPopulation::Selected()) { ActorPopulation::BeginTeardown();return; }
     if (!demo) { return; }
     const auto now = Now();
     demo->Execute(demo->run.Stop(now, "zone_teardown"), now);

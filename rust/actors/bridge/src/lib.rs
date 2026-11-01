@@ -1,4 +1,6 @@
 #![deny(unsafe_op_in_unsafe_fn)]
+mod checkpoint;
+mod population;
 
 #[cxx::bridge(namespace = "eqemu_proof")]
 mod ffi {
@@ -190,6 +192,7 @@ mod ffi {
     extern "Rust" {
         type Runtime;
         fn construct(epoch: u64) -> Box<Runtime>;
+        fn construct_population(epoch: u64) -> Box<Runtime>;
         fn advance(self: &mut Runtime, sequence: u64, tick: u64, inputs: Vec<Input>) -> Report;
         fn inspect(self: &Runtime) -> Snapshot;
         fn combat(self: &mut Runtime, sequence: u64, tick: u64, fact: CombatFact) -> Report;
@@ -215,6 +218,9 @@ fn boundary<T>(f: impl FnOnce() -> T) -> T {
 
 fn construct(epoch: u64) -> Box<Runtime> {
     boundary(|| Box::new(Runtime(actor_core::Runtime::new(epoch))))
+}
+fn construct_population(epoch: u64) -> Box<Runtime> {
+    boundary(|| Box::new(Runtime(actor_core::Runtime::for_population(epoch))))
 }
 
 fn map_status(value: actor_core::Status) -> ffi::Status {

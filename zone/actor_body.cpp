@@ -1,6 +1,7 @@
 #include "actor_body.h"
 #include "actor_demo.h"
 #include "actor_hunt_state.h"
+#include "actor_population.h"
 #ifdef EQEMU_BUILD_TESTS
 #include "zone/inserver_tests.h"
 #endif
@@ -9,9 +10,13 @@
 #include "zone/npc.h"
 #include "zone/mob_movement_manager.h"
 #include "zone/zone.h"
+#include "zone/map.h"
+#include "zone/water_map.h"
+#include "actor-bridge/src/population.rs.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -23,6 +28,7 @@ namespace ActorBody {
 namespace {
 uint64_t next_epoch = 0;
 std::unique_ptr<Adapter> adapter;
+std::array<std::unique_ptr<Adapter>, 3> population_adapters;
 uint64_t NewEpoch()
 {
     if (next_epoch == std::numeric_limits<uint64_t>::max()) { std::abort(); }
@@ -30,7 +36,8 @@ uint64_t NewEpoch()
 }
 }
 
-Adapter::Adapter() : runtime_(eqemu_proof::construct(NewEpoch())) {}
+Adapter::Adapter(bool population) : runtime_(population ? eqemu_proof::construct_population(NewEpoch()) :
+    eqemu_proof::construct(NewEpoch())), population_(population) { snapshot_ = runtime_->inspect(); }
 
 NPC *Adapter::Lookup(uint64_t epoch, uint64_t generation, uint16_t id) const
 {
@@ -66,6 +73,7 @@ eqemu_proof::Report Adapter::Advance(eqemu_proof::Input input, bool empty)
     rust::Vec<eqemu_proof::Input> inputs;
     if (!empty) { inputs.push_back(input); }
     last_ = runtime_->advance(state.sequence + 1, state.tick + 1, std::move(inputs));
+    snapshot_ = runtime_->inspect();
     Apply(last_);
     return last_;
 }
@@ -110,7 +118,7 @@ eqemu_proof::Report Adapter::StartMelee(const std::vector<uint16_t> &scope)
     return StartGoal(scope, true);
 }
 
-bool IsPublicHuntPrey(NPC *npc)
+bool IsPublicHuntPrey(NPC *npc, bool population)
 {
     if (!npc || !npc->IsNPC() || npc->IsBot() || npc->IsMerc() || !npc->GetSpawn() ||
         npc->GetSpawn()->GetNPC() != npc || !npc->GetSpawnPointID() ||
@@ -119,6 +127,7 @@ bool IsPublicHuntPrey(NPC *npc)
         npc->IsRustActor() || npc->GetOwnerID() || npc->GetPetType() != PetType::None ||
         npc->GetSwarmInfo() || npc->Charmed() || !npc->IsTargetable() || npc->GetDepop() || npc->GetHP() <= 0) { return false; }
     const auto type = npc->GetNPCTypeID();
+    if (population) { return eqemu_population::prey_profile(type, npc->GetLevel(), npc->GetRawNPCTypeName()); }
     return (type == 2011 && npc->GetLevel() == 1 && npc->GetRace() == 36 && npc->GetBodyType() == 21 &&
             std::strcmp(npc->GetRawNPCTypeName(), "a_large_rat") == 0) ||
         (((type == 2104 && npc->GetLevel() == 1) || (type == 2000 && npc->GetLevel() == 2)) &&
@@ -153,6 +162,19 @@ eqemu_proof::Report Adapter::CreateVisibleMeleeBody(int32_t x, int32_t y, int32_
     return report;
 }
 
+bool Adapter::RestorePopulationBody(unsigned hunter, double x, double y, double z, int64_t hp)
+{
+    if (!population_ || hunter >= 3 || Inspect().alive || Body() || hp < 1 || hp > 100 || !zone ||
+        zone->GetZoneID() != 2 || zone->GetInstanceID() || zone->GetInstanceVersion() ||
+        !zone->zonemap || !zone->pathing || !zone->watermap ||
+        !ActorDemo::InsideHuntArea({x,y,z}, {ActorDemo::HuntHomeX,ActorDemo::HuntHomeY,3.75}, ActorDemo::HuntLeash)) { return false; }
+    glm::vec3 point(x,y,z), probe = point + glm::vec3(0,0,20);
+    const auto floor = zone->zonemap->FindBestZ(probe,nullptr);
+    if (floor == BEST_Z_INVALID || !std::isfinite(floor) || std::abs(z-floor-3.75) > 2 || zone->watermap->InLiquid(point)) { return false; }
+    hunter_ = hunter + 1; restore_x_ = x; restore_y_ = y; restore_z_ = z; restore_hp_ = hp;
+    return CreateVisibleMeleeBody(std::lround(x),std::lround(y),std::lround(z)).event == eqemu_proof::Event::BodyRequested;
+}
+
 eqemu_proof::Report Adapter::StartGoal(const std::vector<uint16_t> &scope, bool melee, bool public_hunt)
 {
     using namespace eqemu_proof;
@@ -165,7 +187,7 @@ eqemu_proof::Report Adapter::StartGoal(const std::vector<uint16_t> &scope, bool 
     for (size_t i = 0; i < scope.size(); ++i) {
         auto *npc = entity_list.GetNPCByID(scope[i]);
         if (!npc || entity_list.GetMob(scope[i]) != npc) { return refused; }
-        if (public_hunt && (!IsPublicHuntPrey(npc) || npc->IsEngaged())) { return refused; }
+        if (public_hunt && (!IsPublicHuntPrey(npc, population_) || npc->IsEngaged())) { return refused; }
         for (size_t j = 0; j < i; ++j) {
             if (scope[i] == scope[j]) { return refused; }
         }
@@ -224,7 +246,7 @@ void Adapter::Observe()
             fact.level = npc->GetLevel();
             fact.service = npc->GetClass() != 1 || npc->GetBodyType() != 21 ||
                 npc->MerchantType != 0 || npc->IsQuestNPC();
-            if (state.public_hunt) { fact.service = !IsPublicHuntPrey(npc); }
+            if (state.public_hunt) { fact.service = !IsPublicHuntPrey(npc, population_); }
             if (state.melee && state.target == fact.incarnation && npc->GetHateListCount() == 1 &&
                 npc->CheckAggro(body)) { fact.engaged = false; }
         }
@@ -237,6 +259,7 @@ void Adapter::Observe()
     if (state.sequence == std::numeric_limits<uint64_t>::max() ||
         state.tick == std::numeric_limits<uint64_t>::max()) { std::abort(); }
     last_ = runtime_->observe(state.sequence + 1, state.tick + 1, std::move(observation));
+    snapshot_ = runtime_->inspect();
     Apply(last_);
 }
 
@@ -262,6 +285,10 @@ void Adapter::Apply(const eqemu_proof::Report &report)
             type->gender = 0; // rendered male human, rather than neutral gender
             type->show_name = true;
         }
+        if (population_) {
+            std::snprintf(type->name, sizeof(type->name), "Hunter_%u", hunter_);
+            type->current_hp = restore_hp_;
+        }
         if (Inspect().combat_body) {
             // Explicit ordinary melee body; original noncombat profile is unchanged.
             type->bodytype = 1;
@@ -274,6 +301,10 @@ void Adapter::Apply(const eqemu_proof::Report &report)
         auto *npc = new NPC(type, nullptr,
             glm::vec4(report.x, report.y, report.z, 0), GravityBehavior::Flying);
         npc->GiveNPCTypeData(type);
+        if (population_) {
+            npc->SetPosition(restore_x_,restore_y_,restore_z_);
+            npc->SetHP(restore_hp_); // before registration/broadcast, never a running refill
+        }
         npc->actor_epoch_ = report.epoch;
         npc->actor_generation_ = report.generation;
         // Do not AI_Stop or clear IsAIControlled: the explicit gate owns decisions.
@@ -325,6 +356,7 @@ void Adapter::CombatFact(eqemu_proof::Kind kind, uint32_t damage)
     fact.kind = kind;
     fact.damage = damage;
     last_ = runtime_->combat(state.sequence + 1, state.tick + 1, fact);
+    snapshot_ = runtime_->inspect();
     Apply(last_);
     if (last_.status == eqemu_proof::Status::Ok && !Inspect().attacking) {
         // Every accepted combat terminal owns cancellation, including terminals
@@ -346,7 +378,7 @@ bool Adapter::CombatAllowed(NPC *body, NPC *target) const
         !zone->CanDoCombat() || !body || !target || !state.combat_body ||
         entity_list.GetNPCByID(combat_.id) != target || entity_list.GetMob(combat_.id) != target ||
         target->NativeIncarnation() != combat_.target ||
-        (state.public_hunt ? !IsPublicHuntPrey(target) :
+        (state.public_hunt ? !IsPublicHuntPrey(target, population_) :
             (target->GetNPCTypeID() != 2011 || target->GetLevel() != 1 ||
              target->GetClass() != 1 || target->GetBodyType() != 21)) ||
         target->IsRustActor() || !target->IsTargetable() || target->GetHP() <= 0 || target->GetDepop() ||
@@ -534,17 +566,31 @@ Adapter &Get()
     if (!adapter) { adapter = std::make_unique<Adapter>(); }
     return *adapter;
 }
-void Process() { if (adapter) { adapter->Process(); } }
+Adapter &PopulationAdapter(std::size_t hunter)
+{
+    if (hunter >= population_adapters.size()) { std::abort(); }
+    if (!population_adapters[hunter]) { population_adapters[hunter] = std::make_unique<Adapter>(true); }
+    return *population_adapters[hunter];
+}
+bool LegacyAlive() { return adapter && adapter->Inspect().alive; }
+void Process() {
+    if (adapter) { adapter->Process(); }
+    for (auto &entry : population_adapters) { if (entry) { entry->Process(); } }
+}
 void ObserveDeath(NPC *victim, Mob *killer)
 {
     if (adapter) { adapter->ObserveDeath(victim, killer); }
+    for (auto &entry : population_adapters) { if (entry) { entry->ObserveDeath(victim,killer); } }
+    ActorPopulation::ObserveDeath(victim);
 }
 void BeginTeardown() {
     ActorDemo::BeginTeardown();
     if (adapter) { adapter->BeginTeardown(); }
+    for (auto &entry : population_adapters) { if (entry) { entry->BeginTeardown(); } }
 }
 void FinishTeardown()
 {
+    for (auto &entry : population_adapters) { if (entry) { entry->FinishTeardown(); } }
     if (adapter) {
         adapter->FinishTeardown();
         ActorDemo::FinishTeardown();
@@ -553,6 +599,8 @@ void FinishTeardown()
 #endif
         adapter.reset();
     }
+    ActorPopulation::FinishTeardown();
+    for (auto &entry : population_adapters) { entry.reset(); }
 }
 } // namespace ActorBody
 #endif

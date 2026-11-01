@@ -9,6 +9,8 @@
 //!            Status::Ok);
 //! ```
 
+pub mod population;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Kind {
@@ -232,6 +234,7 @@ pub struct Runtime {
     next_endpoint: usize,
     target_point: [i32; 3],
     near_target: bool,
+    population_profile: bool,
 }
 
 impl Runtime {
@@ -266,11 +269,18 @@ impl Runtime {
             next_endpoint: 1,
             target_point: [0; 3],
             near_target: false,
+            population_profile: false,
         }
     }
 
     pub fn inspect(&self) -> Snapshot {
         self.state
+    }
+    /// New opt-in population lane only; legacy constructors retain proof filters.
+    pub fn for_population(epoch: u64) -> Self {
+        let mut runtime = Self::new(epoch);
+        runtime.population_profile = true;
+        runtime
     }
 
     /// Sequence must strictly increase; ticks may stay equal but cannot decrease.
@@ -385,7 +395,7 @@ impl Runtime {
                 .find(|c| c.incarnation == s.target);
             if let Some(c) = target.filter(|c| {
                 eligible(c)
-                    && (!s.melee || prey(c, s.public_hunt))
+                    && (!s.melee || prey(c, s.public_hunt, self.population_profile))
                     && within(c.point, self.target_point, 1000, 1000)
             }) {
                 self.near_target = within(observation.actor, c.point, 5000, 6000);
@@ -405,7 +415,7 @@ impl Runtime {
                 .filter(|c| {
                     eligible(c)
                         && (!s.melee
-                            || (prey(c, s.public_hunt)
+                            || (prey(c, s.public_hunt, self.population_profile)
                                 && (s.target == 0 || s.target == c.incarnation)))
                         && within(
                             observation.actor,
@@ -458,7 +468,7 @@ impl Runtime {
                 .find(|c| c.incarnation == self.state.target);
             if target.is_some_and(|c| {
                 eligible(c)
-                    && prey(c, s.public_hunt)
+                    && prey(c, s.public_hunt, self.population_profile)
                     && within(observation.actor, c.point, 5000, 6000)
             }) {
                 if let Some(operation) = self.high_operation.checked_add(1) {
@@ -908,7 +918,10 @@ fn within(a: [i32; 3], b: [i32; 3], xy: i32, z: i32) -> bool {
     distance_xy(a, b) <= i128::from(xy) * i128::from(xy)
         && (i64::from(a[2]) - i64::from(b[2])).abs() <= i64::from(z)
 }
-fn prey(c: &Candidate, public_hunt: bool) -> bool {
+fn prey(c: &Candidate, public_hunt: bool, population_profile: bool) -> bool {
+    if public_hunt && population_profile {
+        return !c.service && population::prey_type(c.type_id, c.level);
+    }
     !c.service
         && ((c.type_id == 2011 && c.level == 1)
             || (public_hunt
@@ -1002,6 +1015,30 @@ mod tests {
                 damage,
             },
         )
+    }
+
+    #[test]
+    fn population_filter_does_not_widen_legacy_public_hunt() {
+        let mut extra = candidate(8, 3000);
+        extra.type_id = 2002;
+        for population in [false, true] {
+            let mut runtime = if population {
+                Runtime::for_population(94)
+            } else {
+                Runtime::new(94)
+            };
+            send(&mut runtime, Kind::CreateMeleeBody, 0);
+            send(&mut runtime, Kind::BodyPresent, 0);
+            send(&mut runtime, Kind::StartPublicHunt, 0);
+            assert_eq!(
+                observe(&mut runtime, [0; 3], &[extra]).event,
+                if population {
+                    Event::AttackRequested
+                } else {
+                    Event::None
+                }
+            );
+        }
     }
 
     #[test]
