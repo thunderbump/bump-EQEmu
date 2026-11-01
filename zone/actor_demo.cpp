@@ -334,7 +334,7 @@ public:
                 << ",\"incoming_last_native_result\":" << custody.incoming_last_native_result
                 << ",\"actor_hp_observed\":" << (custody.hp_observed ? "true" : "false")
                 << ",\"retaliation_hate_preserved\":" << custody.retaliation_hate_preserved;
-            const auto *prey = Find(custody.target);
+            auto *prey = Find(custody.target);
             out << ",\"prey_native_target_id\":" << (prey && prey->GetTarget() ? prey->GetTarget()->GetID() : 0)
                 << ",\"prey_hate_entries\":" << (prey ? prey->GetHateListCount() : 0)
                 << ",\"home_position\":[" << home.x << ',' << home.y << ',' << home.z
