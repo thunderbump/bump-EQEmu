@@ -109,7 +109,9 @@ void LauncherList::Remove(std::shared_ptr<EQ::Net::ServertalkServerConnection> c
 	auto pendingLauncherIter = m_pendingLaunchers.begin();
 	while (pendingLauncherIter != m_pendingLaunchers.end()) {
 		if ((*pendingLauncherIter)->GetUUID() == conn->GetUUID()) {
+			std::unique_ptr<LauncherLink> removed(*pendingLauncherIter);
 			m_pendingLaunchers.erase(pendingLauncherIter);
+			removed->Close();
 			break;
 		}
 		++pendingLauncherIter;
@@ -118,7 +120,9 @@ void LauncherList::Remove(std::shared_ptr<EQ::Net::ServertalkServerConnection> c
 	auto launcherIter = m_launchers.begin();
 	while (launcherIter != m_launchers.end()) {
 		if (launcherIter->second->GetUUID() == conn->GetUUID()) {
+			std::unique_ptr<LauncherLink> removed(launcherIter->second);
 			m_launchers.erase(launcherIter);
+			removed->Close();
 			break;
 		}
 		++launcherIter;
