@@ -34,6 +34,9 @@ EQ::Net::ServertalkServerConnection::ServertalkServerConnection(std::shared_ptr<
 
 EQ::Net::ServertalkServerConnection::~ServertalkServerConnection()
 {
+	m_connection->OnRead({});
+	m_connection->OnDisconnect({});
+	m_connection->Disconnect();
 }
 
 void EQ::Net::ServertalkServerConnection::Send(uint16_t opcode, EQ::Net::Packet & p)

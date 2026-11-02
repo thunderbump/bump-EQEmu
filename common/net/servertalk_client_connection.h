@@ -19,6 +19,7 @@
 
 #include "common/event/timer.h"
 #include "common/net/packet.h"
+#include "common/net/dns.h"
 #include "common/net/servertalk_common.h"
 #include "common/net/tcp_connection.h"
 
@@ -31,6 +32,8 @@ namespace EQ
 		public:
 			ServertalkClient(const std::string &addr, int port, bool ipv6, const std::string &identifier, const std::string &credentials);
 			~ServertalkClient();
+			// Terminal owner-thread close; pending requests retire asynchronously.
+			void Close();
 
 			void Send(uint16_t opcode, EQ::Net::Packet &p);
 			void SendPacket(ServerPacket *p);
@@ -54,6 +57,9 @@ namespace EQ
 			void SendHandshake();
 
 			std::unique_ptr<EQ::Timer> m_timer;
+			std::shared_ptr<DNSRequest> m_dns;
+			std::shared_ptr<TCPConnectRequest> m_connect;
+			bool m_closing = false;
 
 			std::string m_addr;
 			std::string m_identifier;

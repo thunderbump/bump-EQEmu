@@ -18,13 +18,28 @@
 #pragma once
 
 #include <functional>
+#include <memory>
 #include <string>
+
+struct uv_getaddrinfo_s;
 
 namespace EQ::Net {
 
 using dns_callback_t = std::function<void(const std::string&)>;
 
-void DNSLookup(const std::string& addr, int port, bool ipv6, dns_callback_t cb);
+class DNSRequest
+{
+public:
+	// Owning loop thread only. Cancellation does not imply callback retirement.
+	int Cancel();
+	bool Pending() const { return m_request != nullptr; }
+private:
+	friend std::shared_ptr<DNSRequest> DNSLookup(const std::string&, int, bool, dns_callback_t);
+	uv_getaddrinfo_s* m_request = nullptr;
+	bool m_cancelled = false;
+};
+
+std::shared_ptr<DNSRequest> DNSLookup(const std::string& addr, int port, bool ipv6, dns_callback_t cb);
 
 std::string DNSLookupSync(const std::string& addr, int port, bool ipv6 = false);
 

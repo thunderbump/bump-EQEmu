@@ -59,6 +59,9 @@ EQ::Net::ConsoleServerConnection::ConsoleServerConnection(ConsoleServer *parent,
 
 EQ::Net::ConsoleServerConnection::~ConsoleServerConnection()
 {
+	m_connection->OnRead({});
+	m_connection->OnDisconnect({});
+	m_connection->Disconnect();
 }
 
 void EQ::Net::ConsoleServerConnection::SendClear()

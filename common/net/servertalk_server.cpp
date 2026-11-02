@@ -23,10 +23,14 @@ EQ::Net::ServertalkServer::ServertalkServer()
 
 EQ::Net::ServertalkServer::~ServertalkServer()
 {
+	Close();
 }
 
 void EQ::Net::ServertalkServer::Listen(const ServertalkServerOptions& opts)
 {
+	if (m_closing) {
+		return;
+	}
 	m_credentials = opts.credentials;
 	m_server = std::make_unique<EQ::Net::TCPServer>();
 	m_server->Listen(opts.port, opts.ipv6, [this](std::shared_ptr<EQ::Net::TCPConnection> connection) {
@@ -62,11 +66,13 @@ void EQ::Net::ServertalkServer::ConnectionDisconnected(ServertalkServerConnectio
 			auto iter = type->second.begin();
 			while (iter != type->second.end()) {
 				if (conn == iter->get()) {
+					auto connection = *iter;
 					auto on_disc = m_on_disc.find(conn->GetIdentifier());
-					if (on_disc != m_on_disc.end()) {
-						on_disc->second(*iter);
-					}
+					auto callback = on_disc == m_on_disc.end() ? decltype(on_disc->second){} : on_disc->second;
 					type->second.erase(iter);
+					if (callback) {
+						callback(connection);
+					}
 					return;
 				}
 				++iter;
@@ -109,4 +115,23 @@ bool EQ::Net::ServertalkServer::CheckCredentials(const std::string &credentials)
 	}
 
 	return false;
+}
+
+void EQ::Net::ServertalkServer::Close()
+{
+	if (m_closing) {
+		return;
+	}
+	m_closing = true;
+	if (m_server) {
+		m_server->Close();
+	}
+	for (auto& connection : m_unident_connections) {
+		connection->Handle()->Disconnect();
+	}
+	for (auto& entry : m_ident_connections) {
+		for (auto& connection : entry.second) {
+			connection->Handle()->Disconnect();
+		}
+	}
 }

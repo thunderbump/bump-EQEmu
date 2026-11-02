@@ -59,6 +59,8 @@ void EQ::Net::ReliableStreamConnectionManager::Attach(uv_loop_t *loop)
 			throw std::logic_error("Cannot attach streams to a closed event loop");
 		}
 		m_handles = std::make_unique<Handles>();
+		m_handles->owner = this;
+		m_handles->status = m_close_status;
 		m_attached = loop;
 		int rc = uv_timer_init(loop, &m_handles->timer);
 		if (rc != 0) {
@@ -66,16 +68,20 @@ void EQ::Net::ReliableStreamConnectionManager::Attach(uv_loop_t *loop)
 			throw std::runtime_error(uv_strerror(rc));
 		}
 		m_handles->timer_initialized = true;
-		m_handles->timer.data = this;
+		m_handles->timer.data = m_handles.get();
 
 		auto update_rate = (uint64_t)(1000.0 / m_options.tic_rate_hertz);
 
-		uv_timer_start(&m_handles->timer, [](uv_timer_t *handle) {
-			ReliableStreamConnectionManager *c = (ReliableStreamConnectionManager*)handle->data;
+		rc = uv_timer_start(&m_handles->timer, [](uv_timer_t *handle) {
+			auto c = static_cast<Handles*>(handle->data)->owner;
 			c->UpdateDataBudget();
 			c->Process();
 			c->ProcessResend();
 		}, update_rate, update_rate);
+		if (rc != 0) {
+			Detach();
+			throw std::runtime_error(uv_strerror(rc));
+		}
 
 		rc = uv_udp_init(loop, &m_handles->socket);
 		if (rc != 0) {
@@ -83,7 +89,7 @@ void EQ::Net::ReliableStreamConnectionManager::Attach(uv_loop_t *loop)
 			throw std::runtime_error(uv_strerror(rc));
 		}
 		m_handles->socket_initialized = true;
-		m_handles->socket.data = this;
+		m_handles->socket.data = m_handles.get();
 		struct sockaddr_in recv_addr;
 		uv_ip4_addr("0.0.0.0", m_options.port, &recv_addr);
 		rc = uv_udp_bind(&m_handles->socket, (const struct sockaddr *)&recv_addr, UV_UDP_REUSEADDR);
@@ -107,8 +113,9 @@ void EQ::Net::ReliableStreamConnectionManager::Attach(uv_loop_t *loop)
 				buf->len  = 65536;
 			},
 			[](uv_udp_t* handle, ssize_t nread, const uv_buf_t* buf, const struct sockaddr* addr, unsigned flags) {
-			ReliableStreamConnectionManager *c = (ReliableStreamConnectionManager*)handle->data;
-			if (nread < 0 || addr == nullptr) {
+			auto c = static_cast<Handles*>(handle->data)->owner;
+			if (!c || nread < 0 || addr == nullptr) {
+				if (buf->len > 65536) { delete[] buf->base; }
 				return;
 			}
 
@@ -129,9 +136,10 @@ void EQ::Net::ReliableStreamConnectionManager::Attach(uv_loop_t *loop)
 	}
 }
 
-void EQ::Net::ReliableStreamConnectionManager::Close()
+std::shared_ptr<const EQ::Net::ReliableStreamConnectionManager::CloseStatus> EQ::Net::ReliableStreamConnectionManager::Close()
 {
 	Detach();
+	return m_close_status;
 }
 
 void EQ::Net::ReliableStreamConnectionManager::Detach()
@@ -140,12 +148,15 @@ void EQ::Net::ReliableStreamConnectionManager::Detach()
 		return;
 	}
 	auto handles = m_handles.release();
+	handles->owner = nullptr;
 	m_attached = nullptr;
 	// Close callbacks run after pending UDP sends. Neither callback needs the manager.
 	auto closed = [](uv_handle_t* handle) {
 		auto handles = static_cast<Handles*>(handle->data);
 		if (--handles->closing == 0) {
+			auto status = handles->status;
 			delete handles;
+			status->handles_retired = true;
 		}
 	};
 	if (handles->timer_initialized) {
@@ -162,6 +173,7 @@ void EQ::Net::ReliableStreamConnectionManager::Detach()
 	}
 	if (handles->closing == 0) {
 		delete handles;
+		m_close_status->handles_retired = true;
 	}
 }
 
@@ -366,9 +378,14 @@ void EQ::Net::ReliableStreamConnectionManager::SendDisconnect(const std::string 
 	send_req->data = send_buffers[0].base;
 	int ret = uv_udp_send(send_req, &m_handles->socket, send_buffers, 1, (sockaddr*)&send_addr,
 		[](uv_udp_send_t* req, int status) {
+		auto handles = static_cast<Handles*>(req->handle->data);
+		--handles->status->pending_sends;
 		delete[](char*)req->data;
 		delete req;
 	});
+	if (ret == 0) {
+		++m_close_status->pending_sends;
+	}
 	if (ret != 0) {
 		delete[] data;
 		delete send_req;
@@ -1525,6 +1542,7 @@ void EQ::Net::ReliableStreamConnection::InternalSend(Packet &p) {
 	int send_result = uv_udp_send(
 		send_req, &m_owner->m_handles->socket, send_buffers, 1, (sockaddr *)&send_addr,
 		[](uv_udp_send_t *req, int status) {
+			auto handles = static_cast<ReliableStreamConnectionManager::Handles*>(req->handle->data);
 			auto *ctx = reinterpret_cast<EmbeddedContext *>(req->data);
 			if (!ctx) {
 				std::cerr << "Error: send_req->data is null in callback!" << std::endl;
@@ -1536,6 +1554,7 @@ void EQ::Net::ReliableStreamConnection::InternalSend(Packet &p) {
 			}
 
 			ctx->pool->release(ctx);
+			--handles->status->pending_sends;
 		}
 	);
 

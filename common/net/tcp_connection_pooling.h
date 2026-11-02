@@ -28,7 +28,7 @@
 #include <optional>
 #include <vector>
 
-namespace EQ { namespace Net { class TCPConnection; } }
+namespace EQ { namespace Net { struct TCPConnectionState; } }
 
 constexpr size_t TCP_BUFFER_SIZE = 8192;
 
@@ -36,7 +36,7 @@ struct TCPWriteReq {
 	uv_write_t req{};
 	std::array<char, TCP_BUFFER_SIZE> buffer{};
 	size_t buffer_index{};
-	EQ::Net::TCPConnection* connection{};
+	EQ::Net::TCPConnectionState* connection_state{};
 	uint32_t magic = 0xC0FFEE;
 };
 
@@ -55,6 +55,7 @@ public:
 
 			bool expected = false;
 			if (m_locks[index].compare_exchange_strong(expected, true, std::memory_order_acquire)) {
+				++m_in_use;
 				LogNetTCPDetail("[WriteReqPool] Acquired buffer index [{}]", index);
 				return m_reqs[index].get();
 			}
@@ -76,11 +77,16 @@ public:
 			return;
 		}
 
-		m_locks[index].store(false, std::memory_order_release);
+		if (m_locks[index].exchange(false, std::memory_order_release)) {
+			--m_in_use;
+		}
 		LogNetTCPDetail("[WriteReqPool] Released buffer index [{}]", index);
 	}
 
+	size_t in_use() const { return m_in_use.load(); }
+
 private:
+	std::atomic<size_t> m_in_use{0};
 	std::vector<std::unique_ptr<TCPWriteReq>> m_reqs;
 	std::unique_ptr<std::atomic_bool[]> m_locks;
 	std::atomic<size_t> m_capacity;
@@ -134,6 +140,7 @@ private:
 		for (size_t i = 0; i < cap; ++i) {
 			bool expected = false;
 			if (m_locks[i].compare_exchange_strong(expected, true, std::memory_order_acquire)) {
+				++m_in_use;
 				LogNetTCP("[WriteReqPool] Acquired buffer index [{}] after grow", i);
 				return m_reqs[i].get();
 			}

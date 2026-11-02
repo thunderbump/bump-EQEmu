@@ -21,7 +21,18 @@
 
 #include <iostream>
 
+namespace EQ::Net {
+struct TCPConnectionState {
+	TCPConnection* owner;
+};
+}
+
 WriteReqPool tcp_write_pool;
+
+size_t EQ::Net::TCPConnection::PendingWrites()
+{
+	return tcp_write_pool.in_use();
+}
 
 void on_close_handle(uv_handle_t* handle) {
 	delete (uv_tcp_t *)handle;
@@ -30,64 +41,98 @@ void on_close_handle(uv_handle_t* handle) {
 EQ::Net::TCPConnection::TCPConnection(uv_tcp_t *socket)
 {
 	m_socket = socket;
-	m_socket->data = this;
+	m_state = new TCPConnectionState{this};
+	m_socket->data = m_state;
 }
 
 EQ::Net::TCPConnection::~TCPConnection() {
+	if (m_state) {
+		m_state->owner = nullptr;
+	}
 	Disconnect();
 }
 
-void EQ::Net::TCPConnection::Connect(const std::string &addr, int port, bool ipv6, std::function<void(std::shared_ptr<TCPConnection>)> cb)
+void EQ::Net::TCPConnectRequest::Cancel()
 {
-	struct EQTCPConnectBaton
-	{
-		uv_tcp_t *socket;
-		std::function<void(std::shared_ptr<EQ::Net::TCPConnection>)> cb;
+	m_cancelled = true;
+	// uv_cancel does not support uv_connect_t. Socket close retires the request.
+	if (m_socket && !uv_is_closing(reinterpret_cast<uv_handle_t*>(m_socket))) {
+		uv_close(reinterpret_cast<uv_handle_t*>(m_socket), on_close_handle);
+	}
+}
+
+std::shared_ptr<EQ::Net::TCPConnectRequest> EQ::Net::TCPConnection::Connect(const std::string &addr, int port, bool ipv6, std::function<void(std::shared_ptr<TCPConnection>)> cb)
+{
+	struct EQTCPConnectBaton {
+		uv_tcp_t* socket;
+		std::function<void(std::shared_ptr<TCPConnection>)> cb;
+		std::shared_ptr<TCPConnectRequest> state;
 	};
-
+	auto state = std::make_shared<TCPConnectRequest>();
 	auto loop = EQ::EventLoop::Get().Handle();
-	uv_tcp_t *socket = new uv_tcp_t;
-	memset(socket, 0, sizeof(uv_tcp_t));
-	uv_tcp_init(loop, socket);
-
-	sockaddr_storage iaddr;
-	if (ipv6) {
-		uv_ip6_addr(addr.c_str(), port, (sockaddr_in6*)&iaddr);
+	if (!loop) {
+		cb(nullptr);
+		return state;
 	}
-	else {
-		uv_ip4_addr(addr.c_str(), port, (sockaddr_in*)&iaddr);
+	auto socket = new uv_tcp_t{};
+	const int initialized = uv_tcp_init(loop, socket);
+	if (initialized != 0) {
+		delete socket;
+		cb(nullptr);
+		return state;
 	}
-
-	uv_connect_t *connect = new uv_connect_t;
-	memset(connect, 0, sizeof(uv_connect_t));
-
-	EQTCPConnectBaton *baton = new EQTCPConnectBaton;
-	baton->cb = cb;
-	baton->socket = socket;
+	sockaddr_storage iaddr{};
+	const int address_result = ipv6
+		? uv_ip6_addr(addr.c_str(), port, reinterpret_cast<sockaddr_in6*>(&iaddr))
+		: uv_ip4_addr(addr.c_str(), port, reinterpret_cast<sockaddr_in*>(&iaddr));
+	if (address_result != 0) {
+		uv_close(reinterpret_cast<uv_handle_t*>(socket), on_close_handle);
+		cb(nullptr);
+		return state;
+	}
+	auto connect = new uv_connect_t{};
+	auto baton = new EQTCPConnectBaton{socket, std::move(cb), state};
 	connect->data = baton;
-	uv_tcp_connect(connect, socket, (sockaddr*)&iaddr,
+	state->m_socket = socket;
+	state->m_pending = true;
+	const int submitted = uv_tcp_connect(connect, socket, reinterpret_cast<sockaddr*>(&iaddr),
 		[](uv_connect_t* req, int status) {
-		EQTCPConnectBaton *baton = (EQTCPConnectBaton*)req->data;
-		auto socket = baton->socket;
-		auto cb = baton->cb;
-
+			auto baton = static_cast<EQTCPConnectBaton*>(req->data);
+			auto socket = baton->socket;
+			auto cb = std::move(baton->cb);
+			auto state = baton->state;
+			state->m_socket = nullptr;
+			state->m_pending = false;
+			delete baton;
+			delete req;
+			if (status < 0 || state->m_cancelled) {
+				if (!uv_is_closing(reinterpret_cast<uv_handle_t*>(socket))) {
+					uv_close(reinterpret_cast<uv_handle_t*>(socket), on_close_handle);
+				}
+				if (!state->m_cancelled) {
+					cb(nullptr);
+				}
+				return;
+			}
+			cb(std::make_shared<TCPConnection>(socket));
+		});
+	if (submitted != 0) {
+		state->m_socket = nullptr;
+		state->m_pending = false;
+		auto callback = std::move(baton->cb);
 		delete baton;
-
-		if (status < 0) {
-			uv_close((uv_handle_t*)socket, on_close_handle);
-			delete req;
-			cb(nullptr);
-		}
-		else {
-			delete req;
-			std::shared_ptr<EQ::Net::TCPConnection> connection(new EQ::Net::TCPConnection(socket));
-			cb(connection);
-		}
-	});
+		delete connect;
+		uv_close(reinterpret_cast<uv_handle_t*>(socket), on_close_handle);
+		callback(nullptr);
+	}
+	return state;
 }
 
 void EQ::Net::TCPConnection::Start()
 {
+	if (!m_socket) {
+		return;
+	}
 	uv_read_start(
 		(uv_stream_t *) m_socket, [](uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
 			if (suggested_size > 65536) {
@@ -100,15 +145,16 @@ void EQ::Net::TCPConnection::Start()
 			buf->base = temp_buf;
 			buf->len  = 65536;
 		}, [](uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
-			auto *connection = (TCPConnection *) stream->data;
+			auto state = static_cast<TCPConnectionState*>(stream->data);
+			auto connection = state->owner;
 
-			if (nread > 0) {
+			if (connection && nread > 0) {
 				connection->Read(buf->base, nread);
 			}
-			else if (nread == UV_EOF) {
+			else if (connection && nread == UV_EOF) {
 				connection->Disconnect();
 			}
-			else if (nread < 0) {
+			else if (connection && nread < 0) {
 				connection->Disconnect();
 			}
 
@@ -132,15 +178,20 @@ void EQ::Net::TCPConnection::OnDisconnect(std::function<void(TCPConnection*)> cb
 void EQ::Net::TCPConnection::Disconnect()
 {
 	if (m_socket) {
-		m_socket->data = this;
-		uv_close((uv_handle_t*)m_socket, [](uv_handle_t* handle) {
-			TCPConnection *connection = (TCPConnection*)handle->data;
-
-			if (connection->m_on_disconnect_cb) {
-				connection->m_on_disconnect_cb(connection);
+		uv_read_stop(reinterpret_cast<uv_stream_t*>(m_socket));
+		uv_close(reinterpret_cast<uv_handle_t*>(m_socket), [](uv_handle_t* handle) {
+			auto state = static_cast<TCPConnectionState*>(handle->data);
+			auto owner = state->owner;
+			if (owner) {
+				owner->m_state = nullptr;
+				// The callback may release the last wrapper/parent reference.
+				auto callback = owner->m_on_disconnect_cb;
+				if (callback) {
+					callback(owner);
+				}
 			}
-
-			delete (uv_tcp_t *)handle;
+			delete state;
+			delete reinterpret_cast<uv_tcp_t*>(handle);
 		});
 		m_socket = nullptr;
 	}
@@ -148,8 +199,9 @@ void EQ::Net::TCPConnection::Disconnect()
 
 void EQ::Net::TCPConnection::Read(const char *data, size_t count)
 {
-	if (m_on_read_cb) {
-		m_on_read_cb(this, (unsigned char*)data, count);
+	auto callback = m_on_read_cb;
+	if (callback) {
+		callback(this, (unsigned char*)data, count);
 	}
 }
 
@@ -171,7 +223,7 @@ void EQ::Net::TCPConnection::Write(const char* data, size_t count) {
 
 		// Fill buffer and set context
 		memcpy(write_req->buffer.data(), data, count);
-		write_req->connection = this;
+		write_req->connection_state = m_state;
 		write_req->magic = 0xC0FFEE;
 
 		uv_buf_t buf = uv_buf_init(write_req->buffer.data(), static_cast<unsigned int>(count));
@@ -188,12 +240,14 @@ void EQ::Net::TCPConnection::Write(const char* data, size_t count) {
 					return;
 				}
 
-				tcp_write_pool.release(full_req);
-
-				if (status < 0 && full_req->connection) {
+				// libuv retires pending writes before the socket close callback.
+				auto state = full_req->connection_state;
+				full_req->connection_state = nullptr;
+				if (status < 0 && state->owner) {
 					std::cerr << "uv_write failed: " << uv_strerror(status) << std::endl;
-					full_req->connection->Disconnect();
+					state->owner->Disconnect();
 				}
+				tcp_write_pool.release(full_req);
 			}
 		);
 

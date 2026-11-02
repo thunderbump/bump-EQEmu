@@ -32,6 +32,7 @@ EQ::Net::ConsoleServer::ConsoleServer(const std::string &addr, int port)
 
 EQ::Net::ConsoleServer::~ConsoleServer()
 {
+	Close();
 }
 
 void EQ::Net::ConsoleServer::RegisterCall(const std::string &command, int status_required, const std::string& help_definition, ConsoleServerCallback fn)
@@ -110,5 +111,17 @@ void EQ::Net::ConsoleServer::ProcessCommand(ConsoleServerConnection *c, const st
 	}
 	else {
 		c->SendPrompt();
+	}
+}
+
+void EQ::Net::ConsoleServer::Close()
+{
+	if (m_closing) {
+		return;
+	}
+	m_closing = true;
+	m_server->Close();
+	for (auto& entry : m_connections) {
+		entry.second->Close();
 	}
 }

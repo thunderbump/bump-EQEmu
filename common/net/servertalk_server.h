@@ -43,6 +43,8 @@ namespace EQ
 		public:
 			ServertalkServer();
 			~ServertalkServer();
+			// Close owned listener/children while retaining this parent through loop drain.
+			void Close();
 
 			void Listen(const ServertalkServerOptions& opts);
 			void OnConnectionIdentified(const std::string &type, std::function<void(std::shared_ptr<ServertalkServerConnection>)> cb);
@@ -53,6 +55,7 @@ namespace EQ
 			void ConnectionIdentified(ServertalkServerConnection *conn);
 			bool CheckCredentials(const std::string &credentials);
 
+			bool m_closing = false;
 			std::unique_ptr<EQ::Net::TCPServer> m_server;
 			std::vector<std::shared_ptr<ServertalkServerConnection>> m_unident_connections;
 			std::map<std::string, std::vector<std::shared_ptr<ServertalkServerConnection>>> m_ident_connections;
