@@ -79,6 +79,10 @@ void ZSList::Add(ZoneServer* zoneserver) {
 
 void ZSList::Remove(const std::string &uuid)
 {
+	// Shutdown retains parents and avoids normal disconnect database work during drain.
+	if (m_closing) {
+		return;
+	}
 	auto iter = zone_server_list.begin();
 	while (iter != zone_server_list.end()) {
 		if ((*iter)->GetUUID().compare(uuid) == 0) {
@@ -106,6 +110,7 @@ void ZSList::KillAll() {
 
 void ZSList::Close()
 {
+	m_closing = true;
 	m_tick->Stop();
 	if (m_keepalive) { m_keepalive->Stop(); }
 	for (auto& server : zone_server_list) {

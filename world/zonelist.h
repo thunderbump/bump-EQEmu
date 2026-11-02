@@ -105,6 +105,7 @@ public:
 	}
 
 private:
+	bool m_closing = false;
 	void OnTick(EQ::Timer *t);
 	uint32 NextID;
 	uint16	pLockedZones[MaxLockedZones];

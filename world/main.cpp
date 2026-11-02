@@ -481,6 +481,7 @@ int main(int argc, char **argv)
 		std::cerr << "Fatal: world event-loop shutdown failed: " << uv_strerror(close_result) << std::endl;
 		std::abort();
 	}
+	ZSList::Instance()->KillAll();
 	EQEmuLogSys::Instance()->CloseFileLogs();
 
 	WorldBoot::Shutdown();
