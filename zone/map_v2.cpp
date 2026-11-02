@@ -229,8 +229,8 @@ MapV2::Mesh DecodePayload(const std::vector<char> &buffer)
 		uint32 poly_count = reader.Read<uint32>();
 
 		reader.Require(vert_count, 3 * sizeof(float));
-		me->RequireCapacity(verts, vert_count);
-	verts.reserve(vert_count);
+		RequireCapacity(me->verts, vert_count);
+		me->verts.reserve(vert_count);
 		for (uint32 j = 0; j < vert_count; ++j) {
 			float x = reader.Read<float>();
 			float y = reader.Read<float>();
