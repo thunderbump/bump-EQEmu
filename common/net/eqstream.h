@@ -36,6 +36,7 @@ namespace EQ
 		public:
 			EQStreamManager(const EQStreamManagerInterfaceOptions &options);
 			~EQStreamManager();
+			void Close() { m_reliable_stream.Close(); }
 
 			virtual void SetOptions(const EQStreamManagerInterfaceOptions& options);
 			void OnNewConnection(std::function<void(std::shared_ptr<EQStream>)> func) { m_on_new_connection = func; }

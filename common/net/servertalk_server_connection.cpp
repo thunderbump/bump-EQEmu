@@ -34,6 +34,15 @@ EQ::Net::ServertalkServerConnection::ServertalkServerConnection(std::shared_ptr<
 
 EQ::Net::ServertalkServerConnection::~ServertalkServerConnection()
 {
+	DetachParent();
+}
+
+void EQ::Net::ServertalkServerConnection::DetachParent()
+{
+	m_parent = nullptr;
+	m_connection->OnRead({});
+	m_connection->OnDisconnect({});
+	m_connection->Disconnect();
 }
 
 void EQ::Net::ServertalkServerConnection::Send(uint16_t opcode, EQ::Net::Packet & p)
@@ -281,7 +290,9 @@ void EQ::Net::ServertalkServerConnection::ProcessOldReadBuffer()
 
 void EQ::Net::ServertalkServerConnection::OnDisconnect(TCPConnection *c)
 {
-	m_parent->ConnectionDisconnected(this);
+	if (m_parent) {
+		m_parent->ConnectionDisconnected(this);
+	}
 }
 
 void EQ::Net::ServertalkServerConnection::SendHello()

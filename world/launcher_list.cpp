@@ -75,6 +75,17 @@ void LauncherList::Process() {
 	}
 }
 
+void LauncherList::Close()
+{
+	m_closing = true;
+	for (auto launcher : m_pendingLaunchers) {
+		launcher->Close();
+	}
+	for (auto& entry : m_launchers) {
+		entry.second->Close();
+	}
+}
+
 LauncherLink *LauncherList::Get(const char *name) {
 	std::map<std::string, LauncherLink *>::iterator res;
 	res = m_launchers.find(name);
@@ -91,10 +102,16 @@ void LauncherList::Add(std::shared_ptr<EQ::Net::ServertalkServerConnection> conn
 
 void LauncherList::Remove(std::shared_ptr<EQ::Net::ServertalkServerConnection> conn)
 {
+	// Retain shutdown parents until their socket/timer callbacks have retired.
+	if (m_closing) {
+		return;
+	}
 	auto pendingLauncherIter = m_pendingLaunchers.begin();
 	while (pendingLauncherIter != m_pendingLaunchers.end()) {
 		if ((*pendingLauncherIter)->GetUUID() == conn->GetUUID()) {
+			std::unique_ptr<LauncherLink> removed(*pendingLauncherIter);
 			m_pendingLaunchers.erase(pendingLauncherIter);
+			removed->Close();
 			break;
 		}
 		++pendingLauncherIter;
@@ -103,7 +120,9 @@ void LauncherList::Remove(std::shared_ptr<EQ::Net::ServertalkServerConnection> c
 	auto launcherIter = m_launchers.begin();
 	while (launcherIter != m_launchers.end()) {
 		if (launcherIter->second->GetUUID() == conn->GetUUID()) {
+			std::unique_ptr<LauncherLink> removed(launcherIter->second);
 			m_launchers.erase(launcherIter);
+			removed->Close();
 			break;
 		}
 		++launcherIter;

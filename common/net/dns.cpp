@@ -30,10 +30,22 @@ struct DNSBaton
 {
 	dns_callback_t cb;
 	bool ipv6;
+	std::shared_ptr<DNSRequest> state;
 };
 
-void DNSLookup(const std::string& addr, int port, bool ipv6, dns_callback_t cb)
+int DNSRequest::Cancel()
 {
+	m_cancelled = true;
+	if (m_request) {
+		// EBUSY still requires the callback to retire the request.
+		return uv_cancel(reinterpret_cast<uv_req_t*>(m_request));
+	}
+	return 0;
+}
+
+std::shared_ptr<DNSRequest> DNSLookup(const std::string& addr, int port, bool ipv6, dns_callback_t cb)
+{
+	auto state = std::make_shared<DNSRequest>();
 	addrinfo hints = {};
 	hints.ai_family = PF_INET;
 	hints.ai_socktype = SOCK_STREAM;
@@ -41,24 +53,38 @@ void DNSLookup(const std::string& addr, int port, bool ipv6, dns_callback_t cb)
 
 	uv_loop_t* loop = EQ::EventLoop::Get().Handle();
 
+	if (!loop) {
+		cb({});
+		return state;
+	}
 	uv_getaddrinfo_t* resolver = new uv_getaddrinfo_t();
 	memset(resolver, 0, sizeof(uv_getaddrinfo_t));
 	std::string port_str = std::to_string(port);
 	DNSBaton* baton = new DNSBaton();
 	baton->cb = std::move(cb);
 	baton->ipv6 = ipv6;
+	baton->state = state;
+	state->m_request = resolver;
 	resolver->data = baton;
 
-	uv_getaddrinfo(loop, resolver, [](uv_getaddrinfo_t* req, int status, addrinfo* result)
+	const int submitted = uv_getaddrinfo(loop, resolver, [](uv_getaddrinfo_t* req, int status, addrinfo* result)
 	{
 		DNSBaton* baton = static_cast<DNSBaton*>(req->data);
 
 		dns_callback_t dns_callback = std::move(baton->cb);
 		bool ipv6 = baton->ipv6;
+		auto state = baton->state;
+		state->m_request = nullptr;
 
 		delete baton;
 		delete req;
 
+		if (state->m_cancelled) {
+			if (result) {
+				uv_freeaddrinfo(result);
+			}
+			return;
+		}
 		if (status < 0)
 		{
 			dns_callback({});
@@ -80,6 +106,14 @@ void DNSLookup(const std::string& addr, int port, bool ipv6, dns_callback_t cb)
 
 		dns_callback(addr);
 	}, addr.c_str(), port_str.c_str(), &hints);
+	if (submitted != 0) {
+		state->m_request = nullptr;
+		auto callback = std::move(baton->cb);
+		delete baton;
+		delete resolver;
+		callback({});
+	}
+	return state;
 }
 
 std::string DNSLookupSync(const std::string& addr, int port, bool ipv6 /* = false */)

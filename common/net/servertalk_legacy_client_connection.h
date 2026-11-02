@@ -20,6 +20,7 @@
 #include "common/event/timer.h"
 #include "common/net/tcp_connection.h"
 #include "common/net/packet.h"
+#include "common/net/dns.h"
 #include "common/net/servertalk_common.h"
 
 namespace EQ
@@ -31,13 +32,15 @@ namespace EQ
 		public:
 			ServertalkLegacyClient(const std::string &addr, int port, bool ipv6);
 			~ServertalkLegacyClient();
+			// Terminal owner-thread close; pending requests retire asynchronously.
+			void Close();
 
 			void Send(uint16_t opcode, EQ::Net::Packet &p);
 			void SendPacket(ServerPacket *p);
 			void OnConnect(std::function<void(ServertalkLegacyClient*)> cb) { m_on_connect_cb = cb; }
 			void OnMessage(uint16_t opcode, std::function<void(uint16_t, EQ::Net::Packet&)> cb);
 			void OnMessage(std::function<void(uint16_t, EQ::Net::Packet&)> cb);
-			bool Connected() const { return m_connecting != true; }
+			bool Connected() const { return !m_closing && m_connecting != true; }
 
 			std::shared_ptr<EQ::Net::TCPConnection> Handle() { return m_connection; }
 		private:
@@ -46,6 +49,9 @@ namespace EQ
 			void ProcessReadBuffer();
 
 			std::unique_ptr<EQ::Timer> m_timer;
+			std::shared_ptr<DNSRequest> m_dns;
+			std::shared_ptr<TCPConnectRequest> m_connect;
+			bool m_closing = false;
 
 			std::string m_addr;
 			bool m_connecting;

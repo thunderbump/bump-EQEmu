@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.20.0)
 add_subdirectory(cppunit)
 
 set(tests_sources
+	../zone/map_v2.cpp
 	main.cpp
 )
 
@@ -11,11 +12,14 @@ set(tests_headers
 	suite_runner.h
 	atobool_test.h
 	data_verification_test.h
+	eqemu_config_test.h
+	event_loop_test.h
 	fixed_memory_test.h
 	fixed_memory_variable_test.h
 	hextoi_32_64_test.h
 	inserver_test_progress_test.h
 	ipc_mutex_test.h
+	map_v2_test.h
 	memory_mapped_file_test.h
 	string_util_test.h
 	skills_util_test.h
@@ -23,6 +27,11 @@ set(tests_headers
 )
 
 add_executable(tests ${tests_sources} ${tests_headers})
+
+if(EQEMU_SANITIZERS)
+	# Deliberate faults run separately in the disposable worker, never in the suite.
+	add_executable(tests_sanitizer_controls EXCLUDE_FROM_ALL sanitizer_controls.cpp)
+endif()
 
 # Explicit target for result-propagation controls; it is not installed with the server.
 add_executable(tests_runner_controls EXCLUDE_FROM_ALL runner_controls.cpp suite_runner.h)

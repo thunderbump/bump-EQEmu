@@ -55,6 +55,7 @@ set(zone_sources
     loot.cpp
     main.cpp
     map.cpp
+    map_v2.cpp
     merc.cpp
     mob.cpp
     mob_ai.cpp
@@ -183,6 +184,7 @@ set(zone_headers
     lua_stat_bonuses.h
     lua_zone.h
     map.h
+    map_v2.h
     masterentity.h
     merc.h
     mob.h

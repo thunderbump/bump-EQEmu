@@ -30,13 +30,27 @@ namespace EQ
 {
 	namespace Net
 	{
+		struct TCPConnectionState;
+		class TCPConnectRequest
+		{
+		public:
+			void Cancel();
+			bool Pending() const { return m_pending; }
+		private:
+			friend class TCPConnection;
+			uv_tcp_t* m_socket = nullptr;
+			bool m_pending = false;
+			bool m_cancelled = false;
+		};
+
 		class TCPConnection
 		{
 		public:
 			TCPConnection(uv_tcp_t *socket);
 			~TCPConnection();
 
-			static void Connect(const std::string &addr, int port, bool ipv6, std::function<void(std::shared_ptr<TCPConnection>)> cb);
+			static std::shared_ptr<TCPConnectRequest> Connect(const std::string &addr, int port, bool ipv6, std::function<void(std::shared_ptr<TCPConnection>)> cb);
+			static size_t PendingWrites();
 
 			void Start();
 			void OnRead(std::function<void(TCPConnection*, const unsigned char *, size_t)> cb);
@@ -55,6 +69,7 @@ namespace EQ
 			TCPConnection();
 
 			uv_tcp_t *m_socket;
+			TCPConnectionState* m_state;
 			std::function<void(TCPConnection*, const unsigned char *, size_t)> m_on_read_cb;
 			std::function<void(TCPConnection*)> m_on_disconnect_cb;
 		};

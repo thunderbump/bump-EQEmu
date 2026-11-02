@@ -56,8 +56,15 @@ public:
 
 	bool DoesTableExist(const std::string& table_name);
 
+	// Borrow a handle without transferring ownership; its owner must outlive borrowers.
 	void SetMySQL(const DBcore& o)
 	{
+		if (mysql == o.mysql) {
+			return;
+		}
+		if (mysqlOwner) {
+			mysql_close(mysql);
+		}
 		mysql      = o.mysql;
 		mysqlOwner = false;
 	}

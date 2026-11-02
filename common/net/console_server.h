@@ -40,6 +40,8 @@ namespace EQ
 			typedef std::function<struct ConsoleLoginStatus(const std::string&, const std::string&)> ConsoleServerLoginCallback;
 			ConsoleServer(const std::string &addr, int port);
 			~ConsoleServer();
+			// Close owned listener/children while retaining this parent through loop drain.
+			void Close();
 
 			void RegisterCall(const std::string& command, int status_required, const std::string& help_definition, ConsoleServerCallback fn);
 			void RegisterLogin(ConsoleServerLoginCallback fn);
@@ -49,6 +51,7 @@ namespace EQ
 			void ConnectionDisconnected(ConsoleServerConnection *c);
 			void ProcessCommand(ConsoleServerConnection *c, const std::string& cmd);
 
+			bool m_closing = false;
 			std::unique_ptr<TCPServer> m_server;
 
 			std::map<std::string, std::unique_ptr<ConsoleServerConnection>> m_connections;

@@ -34,6 +34,7 @@ public:
 	~LauncherList();
 
 	void Process();
+	void Close();
 
 	void LoadList();
 	EQLConfig *GetConfig(const char *name);
@@ -45,6 +46,7 @@ public:
 
 	int GetLauncherCount();
 protected:
+	bool m_closing = false;
 	std::map<std::string, EQLConfig *> m_configs;	//we own these objects
 	std::map<std::string, LauncherLink *> m_launchers;	//we own these objects
 	std::vector<LauncherLink *> m_pendingLaunchers;	//we own these objects, have not yet identified themself

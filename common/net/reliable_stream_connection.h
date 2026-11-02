@@ -330,6 +330,12 @@ namespace EQ
 			~ReliableStreamConnectionManager();
 
 			void Connect(const std::string &addr, int port);
+			struct CloseStatus {
+				size_t pending_sends = 0;
+				bool handles_retired = false;
+			};
+			// Read status only on the owning loop thread, after processing completions.
+			std::shared_ptr<const CloseStatus> Close();
 			void Process();
 			void UpdateDataBudget();
 			void ProcessResend();
@@ -344,8 +350,17 @@ namespace EQ
 			void Detach();
 
 			EQ::Random m_rand;
-			uv_timer_t m_timer;
-			uv_udp_t m_socket;
+			struct Handles {
+				uv_timer_t timer{};
+				uv_udp_t socket{};
+				bool timer_initialized = false;
+				bool socket_initialized = false;
+				unsigned closing = 0;
+				ReliableStreamConnectionManager* owner = nullptr;
+				std::shared_ptr<CloseStatus> status;
+			};
+			std::unique_ptr<Handles> m_handles;
+			std::shared_ptr<CloseStatus> m_close_status = std::make_shared<CloseStatus>();
 			uv_loop_t *m_attached;
 			ReliableStreamConnectionManagerOptions m_options;
 			std::function<void(std::shared_ptr<ReliableStreamConnection>)> m_on_new_connection;

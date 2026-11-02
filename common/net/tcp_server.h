@@ -32,6 +32,7 @@ namespace EQ
 			void Listen(int port, bool ipv6, std::function<void(std::shared_ptr<TCPConnection>)> cb);
 			void Listen(const std::string &addr, int port, bool ipv6, std::function<void(std::shared_ptr<TCPConnection>)> cb);
 			void Close();
+			int LocalPort() const;
 			void AddClient(uv_tcp_t *c);
 
 		private:

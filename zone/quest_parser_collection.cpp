@@ -84,7 +84,9 @@ void QuestParserCollection::ReloadQuests(bool reset_timers)
 {
 	if (reset_timers) {
 		quest_manager.ClearAllTimers();
-		zone->StopAllTimers();
+		if (zone) {
+			zone->StopAllTimers();
+		}
 	}
 
 	MapOpcodes();

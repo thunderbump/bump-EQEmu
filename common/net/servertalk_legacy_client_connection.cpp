@@ -26,13 +26,36 @@ EQ::Net::ServertalkLegacyClient::ServertalkLegacyClient(const std::string &addr,
 	m_port = port;
 	m_ipv6 = ipv6;
 	m_connecting = false;
-	DNSLookup(addr, port, false, [this](const std::string &address) {
+	m_dns = DNSLookup(addr, port, false, [this](const std::string &address) {
 		m_addr = address;
 	});
 }
 
 EQ::Net::ServertalkLegacyClient::~ServertalkLegacyClient()
 {
+	Close();
+}
+
+void EQ::Net::ServertalkLegacyClient::Close()
+{
+	if (m_closing) {
+		return;
+	}
+	m_closing = true;
+	m_timer->Stop();
+	if (m_dns) {
+		m_dns->Cancel();
+	}
+	if (m_connect) {
+		m_connect->Cancel();
+	}
+	if (m_connection) {
+		m_connection->OnRead({});
+		m_connection->OnDisconnect({});
+		m_connection->Disconnect();
+		m_connection.reset();
+	}
+	m_on_connect_cb = {};
 }
 
 void EQ::Net::ServertalkLegacyClient::Send(uint16_t opcode, EQ::Net::Packet &p)
@@ -69,12 +92,13 @@ void EQ::Net::ServertalkLegacyClient::OnMessage(std::function<void(uint16_t, EQ:
 
 void EQ::Net::ServertalkLegacyClient::Connect()
 {
-	if (m_addr.length() == 0 || m_port == 0 || m_connection || m_connecting) {
+	if (m_closing || m_addr.length() == 0 || m_port == 0 || m_connection || m_connecting) {
 		return;
 	}
 
 	m_connecting = true;
-	EQ::Net::TCPConnection::Connect(m_addr, m_port, false, [this](std::shared_ptr<EQ::Net::TCPConnection> connection) {
+	m_connect = EQ::Net::TCPConnection::Connect(m_addr, m_port, false, [this](std::shared_ptr<EQ::Net::TCPConnection> connection) {
+		m_connecting = false;
 		if (connection == nullptr) {
 			LogNetTCP("Error connecting to {0}:{1}, attempting to reconnect...", m_addr, m_port);
 			m_connecting = false;

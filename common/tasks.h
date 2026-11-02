@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 
 #define MAXTASKSETS 1000
 #define MAXACTIVEQUESTS 19 // The Client has a hard cap of 19 active quests, 29 in SoD+
@@ -38,7 +39,8 @@
 #define RELOADTASKS 0
 #define RELOADTASKSETS 2
 
-enum TaskMethodType {
+// Preserve raw database methods, including legacy values outside the named methods.
+enum TaskMethodType : uint32_t {
 	METHODSINGLEID = 0,
 	METHODQUEST    = 2
 };

@@ -18,6 +18,7 @@
 #include "tcp_server.h"
 
 #include "common/event/event_loop.h"
+#include <stdexcept>
 
 void on_close_tcp_server_handle(uv_handle_t* handle) {
 	delete (uv_tcp_t *)handle;
@@ -51,22 +52,35 @@ void EQ::Net::TCPServer::Listen(const std::string &addr, int port, bool ipv6, st
 	m_on_new_connection = cb;
 
 	auto loop = EQ::EventLoop::Get().Handle();
+	if (!loop) {
+		throw std::logic_error("Cannot listen on a closed event loop");
+	}
 	m_socket = new uv_tcp_t;
 	memset(m_socket, 0, sizeof(uv_tcp_t));
-	uv_tcp_init(loop, m_socket);
-
-	sockaddr_storage iaddr;
-	if (ipv6) {
-		uv_ip6_addr(addr.c_str(), port, (sockaddr_in6*)&iaddr);
-	}
-	else {
-		uv_ip4_addr(addr.c_str(), port, (sockaddr_in*)&iaddr);
+	const int initialized = uv_tcp_init(loop, m_socket);
+	if (initialized != 0) {
+		delete m_socket;
+		m_socket = nullptr;
+		throw std::runtime_error(uv_strerror(initialized));
 	}
 
-	uv_tcp_bind(m_socket, (sockaddr*)&iaddr, 0);
+	sockaddr_storage iaddr{};
+	const int address_result = ipv6
+		? uv_ip6_addr(addr.c_str(), port, reinterpret_cast<sockaddr_in6*>(&iaddr))
+		: uv_ip4_addr(addr.c_str(), port, reinterpret_cast<sockaddr_in*>(&iaddr));
+	if (address_result != 0) {
+		Close();
+		throw std::runtime_error(uv_strerror(address_result));
+	}
+
+	const int bound = uv_tcp_bind(m_socket, (sockaddr*)&iaddr, 0);
+	if (bound != 0) {
+		Close();
+		throw std::runtime_error(uv_strerror(bound));
+	}
 	m_socket->data = this;
 
-	uv_listen((uv_stream_t*)m_socket, 128, [](uv_stream_t* server, int status) {
+	const int listening = uv_listen((uv_stream_t*)m_socket, 128, [](uv_stream_t* server, int status) {
 		if (status < 0) {
 			return;
 		}
@@ -74,16 +88,23 @@ void EQ::Net::TCPServer::Listen(const std::string &addr, int port, bool ipv6, st
 		auto loop = EQ::EventLoop::Get().Handle();
 		uv_tcp_t *client = new uv_tcp_t;
 		memset(client, 0, sizeof(uv_tcp_t));
-		uv_tcp_init(loop, client);
+		if (uv_tcp_init(loop, client) != 0) {
+			delete client;
+			return;
+		}
 
 		if (uv_accept(server, (uv_stream_t*)client) < 0) {
-			delete client;
+			uv_close(reinterpret_cast<uv_handle_t*>(client), on_close_tcp_server_handle);
 			return;
 		}
 
 		EQ::Net::TCPServer *s = (EQ::Net::TCPServer*)server->data;
 		s->AddClient(client);
 	});
+	if (listening != 0) {
+		Close();
+		throw std::runtime_error(uv_strerror(listening));
+	}
 }
 
 void EQ::Net::TCPServer::Close()
@@ -97,7 +118,23 @@ void EQ::Net::TCPServer::Close()
 void EQ::Net::TCPServer::AddClient(uv_tcp_t *c)
 {
 	std::shared_ptr<TCPConnection> client(new TCPConnection(c));
-	if (m_on_new_connection) {
-		m_on_new_connection(client);
+	auto callback = m_on_new_connection;
+	if (callback) {
+		callback(client);
 	}
+}
+
+int EQ::Net::TCPServer::LocalPort() const
+{
+	if (!m_socket) {
+		return 0;
+	}
+	sockaddr_storage addr{};
+	int length = sizeof(addr);
+	if (uv_tcp_getsockname(m_socket, reinterpret_cast<sockaddr*>(&addr), &length) != 0) {
+		return 0;
+	}
+	return addr.ss_family == AF_INET6
+		? ntohs(reinterpret_cast<const sockaddr_in6*>(&addr)->sin6_port)
+		: ntohs(reinterpret_cast<const sockaddr_in*>(&addr)->sin_port);
 }

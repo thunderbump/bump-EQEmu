@@ -1654,14 +1654,18 @@ void Client::ChannelMessageReceived(uint8 chan_num, uint8 language, uint8 lang_s
 		// crash protection -- cheater
 		message[1023] = '\0';
 		size_t msg_len = strlen(message);
-		if (msg_len > 512)
+		if (msg_len > 512) {
 			message[512] = '\0';
+			msg_len = 512;
+		}
 
-		auto outapp = new EQApplicationPacket(OP_Emote, 4 + msg_len + strlen(GetName()) + 2);
+		const size_t name_len = strlen(GetName());
+		auto outapp = new EQApplicationPacket(OP_Emote, sizeof(uint32) + name_len + msg_len + 2);
 		Emote_Struct* es = (Emote_Struct*)outapp->pBuffer;
-		char *Buffer = (char *)es;
-		Buffer += 4;
-		snprintf(Buffer, sizeof(Emote_Struct) - 4, "%s %s", GetName(), message);
+		memcpy(es->message, GetName(), name_len);
+		es->message[name_len] = ' ';
+		// Include the NUL in the copy, exactly filling the variable-length payload.
+		memcpy(es->message + name_len + 1, message, msg_len + 1);
 		entity_list.QueueCloseClients(this, outapp, true, RuleI(Range, Emote), 0, true, FilterSocials);
 		safe_delete(outapp);
 		break;
