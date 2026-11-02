@@ -24,6 +24,15 @@ EQ::Net::ServertalkServer::ServertalkServer()
 EQ::Net::ServertalkServer::~ServertalkServer()
 {
 	Close();
+	// Identified children may also be retained by world/zone consumers.
+	for (auto& connection : m_unident_connections) {
+		connection->DetachParent();
+	}
+	for (auto& entry : m_ident_connections) {
+		for (auto& connection : entry.second) {
+			connection->DetachParent();
+		}
+	}
 }
 
 void EQ::Net::ServertalkServer::Listen(const ServertalkServerOptions& opts)

@@ -7,12 +7,14 @@
 #include "common/net/tcp_server.h"
 #include "common/net/servertalk_client_connection.h"
 #include "common/net/servertalk_legacy_client_connection.h"
+#include "common/net/servertalk_server.h"
 #include "cppunit/cpptest.h"
 
 #include <future>
 #include <chrono>
 #include <memory>
 #include <stdexcept>
+#include <vector>
 
 class EventLoopTest : public Test::Suite
 {
@@ -23,6 +25,7 @@ public:
 		TEST_ADD(EventLoopTest::ReliableClose);
 		TEST_ADD(EventLoopTest::NetworkCancel);
 		TEST_ADD(EventLoopTest::TCPWrapperLifetime);
+		TEST_ADD(EventLoopTest::ServertalkParentLifetime);
 	}
 
 private:
@@ -187,6 +190,40 @@ private:
 			}
 			const bool closed = loop.Close(2000) == 0;
 			return connected && closed && notifications == 1 && !server && !peer
+				&& EQ::Net::TCPConnection::PendingWrites() == 0;
+		});
+		TEST_ASSERT(result.get());
+	}
+
+	void ServertalkParentLifetime()
+	{
+		auto result = std::async(std::launch::async, [] {
+			auto& loop = EQ::EventLoop::Get();
+			auto server = std::make_unique<EQ::Net::ServertalkServer>();
+			EQ::Net::ServertalkServerOptions options;
+			options.port = 0;
+			server->Listen(options);
+			std::vector<std::shared_ptr<EQ::Net::ServertalkServerConnection>> retained;
+			server->OnConnectionIdentified("Test", [&](auto child) { retained.push_back(child); });
+			int notifications = 0;
+			server->OnConnectionRemoved("Test", [&](auto) {
+				++notifications;
+				server.reset(); // The other externally retained child must detach its parent.
+			});
+			EQ::Net::ServertalkClient first("127.0.0.1", server->LocalPort(), false, "Test", "");
+			EQ::Net::ServertalkClient second("127.0.0.1", server->LocalPort(), false, "Test", "");
+			const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+			while (retained.size() < 2 && std::chrono::steady_clock::now() < deadline) {
+				loop.Process();
+				std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			}
+			const bool identified = retained.size() == 2;
+			first.Close();
+			second.Close();
+			server->Close();
+			const bool closed = loop.Close(2000) == 0;
+			retained.clear();
+			return identified && closed && !server && notifications == 1
 				&& EQ::Net::TCPConnection::PendingWrites() == 0;
 		});
 		TEST_ASSERT(result.get());

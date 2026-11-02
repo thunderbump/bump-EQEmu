@@ -45,6 +45,7 @@ namespace EQ
 			~ServertalkServer();
 			// Close owned listener/children while retaining this parent through loop drain.
 			void Close();
+			int LocalPort() const { return m_server ? m_server->LocalPort() : 0; }
 
 			void Listen(const ServertalkServerOptions& opts);
 			void OnConnectionIdentified(const std::string &type, std::function<void(std::shared_ptr<ServertalkServerConnection>)> cb);

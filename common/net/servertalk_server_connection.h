@@ -43,6 +43,8 @@ namespace EQ
 			std::shared_ptr<EQ::Net::TCPConnection> Handle() { return m_connection; }
 			std::string GetUUID() const { return m_uuid; }
 		private:
+			friend class ServertalkServer;
+			void DetachParent();
 			void OnRead(TCPConnection* c, const unsigned char* data, size_t sz);
 			void ProcessReadBuffer();
 			void ProcessOldReadBuffer();
