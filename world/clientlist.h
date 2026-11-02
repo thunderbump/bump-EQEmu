@@ -42,6 +42,7 @@ public:
 	~ClientList();
 
 	void Process();
+	void Close();
 
 	//from old ClientList
 	void	Add(Client* client);

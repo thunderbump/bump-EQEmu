@@ -34,6 +34,7 @@ public:
 	~LoginServer();
 
 	bool Connect();
+	void Close();
 	void SendInfo();
 	void SendStatus();
 
@@ -78,4 +79,5 @@ private:
 	std::string                                      m_login_password;
 	bool                                             m_can_account_update;
 	bool                                             m_is_legacy;
+	bool                                             m_closing = false;
 };

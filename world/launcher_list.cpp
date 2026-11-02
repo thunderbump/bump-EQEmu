@@ -75,6 +75,17 @@ void LauncherList::Process() {
 	}
 }
 
+void LauncherList::Close()
+{
+	m_closing = true;
+	for (auto launcher : m_pendingLaunchers) {
+		launcher->Close();
+	}
+	for (auto& entry : m_launchers) {
+		entry.second->Close();
+	}
+}
+
 LauncherLink *LauncherList::Get(const char *name) {
 	std::map<std::string, LauncherLink *>::iterator res;
 	res = m_launchers.find(name);
@@ -91,6 +102,10 @@ void LauncherList::Add(std::shared_ptr<EQ::Net::ServertalkServerConnection> conn
 
 void LauncherList::Remove(std::shared_ptr<EQ::Net::ServertalkServerConnection> conn)
 {
+	// Retain shutdown parents until their socket/timer callbacks have retired.
+	if (m_closing) {
+		return;
+	}
 	auto pendingLauncherIter = m_pendingLaunchers.begin();
 	while (pendingLauncherIter != m_pendingLaunchers.end()) {
 		if ((*pendingLauncherIter)->GetUUID() == conn->GetUUID()) {

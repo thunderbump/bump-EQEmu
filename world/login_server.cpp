@@ -53,6 +53,19 @@ LoginServer::LoginServer(const char *iAddress, uint16 iPort, const char *Account
 
 LoginServer::~LoginServer()
 {
+	Close();
+}
+
+void LoginServer::Close()
+{
+	if (m_closing) {
+		return;
+	}
+	m_closing = true;
+	if (m_keepalive) { m_keepalive->Stop(); }
+	if (m_statusupdate_timer) { m_statusupdate_timer->Stop(); }
+	if (m_client) { m_client->Close(); }
+	if (m_legacy_client) { m_legacy_client->Close(); }
 }
 
 void LoginServer::ProcessUsertoWorldReqLeg(uint16_t opcode, EQ::Net::Packet &p)
@@ -357,6 +370,9 @@ void LoginServer::ProcessLSAccountUpdate(uint16_t opcode, EQ::Net::Packet &p)
 
 bool LoginServer::Connect()
 {
+	if (m_closing) {
+		return false;
+	}
 	char errbuf[1024];
 	if ((m_loginserver_ip = ResolveIP(m_loginserver_address, errbuf)) == 0) {
 		LogInfo("Unable to resolve [{}] to an IP", m_loginserver_address);

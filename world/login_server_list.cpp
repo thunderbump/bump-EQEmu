@@ -46,8 +46,19 @@ LoginServerList::~LoginServerList() {
 
 void LoginServerList::Add(const char* iAddress, uint16 iPort, const char* Account, const char* Password, bool Legacy)
 {
+	if (m_closing) {
+		return;
+	}
 	auto loginserver = new LoginServer(iAddress, iPort, Account, Password, Legacy);
 	m_list.emplace_back(std::unique_ptr<LoginServer>(loginserver));
+}
+
+void LoginServerList::Close()
+{
+	m_closing = true;
+	for (auto& server : m_list) {
+		server->Close();
+	}
 }
 
 bool LoginServerList::SendStatus() {

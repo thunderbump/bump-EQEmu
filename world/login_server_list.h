@@ -36,6 +36,7 @@ public:
 	bool	SendPacket(ServerPacket *pack);
 	bool	SendAccountUpdate(ServerPacket *pack);
 	bool	Connected();
+	void Close();
 	size_t GetServerCount() const { return m_list.size(); }
 
 	static LoginServerList* Instance()
@@ -45,5 +46,6 @@ public:
 	}
 
 protected:
+	bool m_closing = false;
 	std::list<std::unique_ptr<LoginServer>> m_list;
 };

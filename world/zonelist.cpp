@@ -104,6 +104,15 @@ void ZSList::KillAll() {
 	}
 }
 
+void ZSList::Close()
+{
+	m_tick->Stop();
+	if (m_keepalive) { m_keepalive->Stop(); }
+	for (auto& server : zone_server_list) {
+		server->Close();
+	}
+}
+
 void ZSList::Process() {
 
 	if (shutdowntimer && shutdowntimer->Check()) {

@@ -39,6 +39,7 @@ public:
 
 	int GetID() const { return(ID); }
 	void Disconnect() { if (tcpc->Handle()) { tcpc->Handle()->Disconnect(); } }
+	void Close() { m_process_timer->Stop(); Disconnect(); }
 
 	inline bool	HasName() const		{ return(m_name.length() > 0); }
 	inline std::string GetIP() const { return tcpc->Handle() ? tcpc->Handle()->RemoteIP() : 0; }

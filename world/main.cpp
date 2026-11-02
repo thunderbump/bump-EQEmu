@@ -44,6 +44,7 @@
 #include "world/launcher_list.h"
 #include "world/lfplist.h"
 #include "world/login_server.h"
+#include "world/login_server_list.h"
 #include "world/queryserv.h"
 #include "world/shared_task_manager.h"
 #include "world/ucs.h"
@@ -58,8 +59,10 @@
 #include "world/zoneserver.h"
 
 #include "fmt/format.h"
+#include "uv.h"
 #include <csignal>
 #include <cstdlib>
+#include <iostream>
 #ifdef _WINDOWS
 #include <conio.h>
 #endif
@@ -461,10 +464,23 @@ int main(int argc, char **argv)
 	EQ::EventLoop::Get().Run();
 
 	LogInfo("World main loop completed");
+	RunLoops = false;
+	process_timer.Stop();
+	LoginServerList::Instance()->Close();
+	ClientList::Instance()->Close();
+	launcher_list.Close();
 	LogInfo("Shutting down zone connections (if any)");
-	ZSList::Instance()->KillAll();
+	ZSList::Instance()->Close();
+	server_connection->Close();
+	if (console) { console->Close(); }
+	eqsm.Close();
 	LogInfo("Zone (TCP) listener stopped");
 	LogInfo("Signaling HTTP service to stop");
+	const int close_result = EQ::EventLoop::Get().Close(5000);
+	if (close_result != 0) {
+		std::cerr << "Fatal: world event-loop shutdown failed: " << uv_strerror(close_result) << std::endl;
+		std::abort();
+	}
 	EQEmuLogSys::Instance()->CloseFileLogs();
 
 	WorldBoot::Shutdown();

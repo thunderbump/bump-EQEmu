@@ -53,6 +53,13 @@ ClientList::ClientList()
 ClientList::~ClientList() {
 }
 
+void ClientList::Close()
+{
+	m_tick->Stop();
+	// Client destruction can send UDP disconnects; the stream manager is still alive.
+	list.Clear();
+}
+
 void ClientList::Process() {
 
 	if (CLStale_timer.Check())

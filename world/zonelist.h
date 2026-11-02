@@ -66,6 +66,7 @@ public:
 	void Add(ZoneServer *zoneserver);
 	void GetZoneIDList(std::vector<uint32> &zones);
 	void KillAll();
+	void Close();
 	void ListLockedZones(const char *to, WorldTCPConnection *connection);
 	void NextGroupIDs(uint32 &start, uint32 &end);
 	void Process();
