@@ -22,11 +22,17 @@
 #include "common/tasks.h"
 #include "cppunit/cpptest.h"
 
+#include <cstdint>
+#include <limits>
+#include <unordered_map>
+#include <utility>
+
 class TaskStateTest: public Test::Suite
 {
 public:
 	TaskStateTest()
 	{
+		TEST_ADD(TaskStateTest::TestMethodValueRoundTrip);
 		TEST_ADD(TaskStateTest::TestSequenceMode);
 		TEST_ADD(TaskStateTest::TestSteps);
 		TEST_ADD(TaskStateTest::TestStepGaps);
@@ -46,6 +52,7 @@ public:
 	}
 
 private:
+	void TestMethodValueRoundTrip();
 	void TestSequenceMode();
 	void TestSteps();
 	void TestStepGaps();
@@ -116,6 +123,33 @@ private:
 		return states;
 	}
 };
+
+void TaskStateTest::TestMethodValueRoundTrip()
+{
+	const uint8_t reward_methods[] = {0, 1, 2, 4, 255};
+	const uint32_t activity_methods[] = {
+		0, 1, 2, 3, 4, 255, 256,
+		std::numeric_limits<uint32_t>::max() - 1,
+		std::numeric_limits<uint32_t>::max()
+	};
+	std::unordered_map<uint32_t, TaskInformation> tasks;
+	uint32_t task_id = 0;
+	for (const auto reward_method : reward_methods) {
+		for (const auto activity_method : activity_methods) {
+			TaskInformation task{};
+			task.reward_method = static_cast<TaskMethodType>(reward_method);
+			task.activity_count = 1;
+			task.activity_information[0].goal_method = static_cast<TaskMethodType>(activity_method);
+			const auto result = tasks.try_emplace(task_id++, std::move(task));
+			TEST_ASSERT(result.second);
+			const auto& stored = result.first->second;
+			TEST_ASSERT_EQUALS(static_cast<uint32_t>(reward_method), static_cast<uint32_t>(stored.reward_method));
+			TEST_ASSERT_EQUALS(activity_method, static_cast<uint32_t>(stored.activity_information[0].goal_method));
+			TEST_ASSERT_EQUALS(reward_method == 2, stored.reward_method == METHODQUEST);
+			TEST_ASSERT_EQUALS(activity_method == 2, stored.activity_information[0].goal_method == METHODQUEST);
+		}
+	}
+}
 
 void TaskStateTest::TestSequenceMode()
 {
