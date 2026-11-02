@@ -46,10 +46,14 @@ public:
 
 	// Load the config
 	static bool LoadConfig(const std::string& path = "") {
-		if (_world_config != nullptr)
-			delete _world_config;
-		_world_config=new WorldConfig;
-		_config=_world_config;
+		// Keep the current aliases intact if replacement allocation fails.
+		auto replacement = new WorldConfig;
+		if (_config != _world_config) {
+			delete _config;
+		}
+		delete _world_config;
+		_world_config = replacement;
+		_config = replacement;
 
 		return _config->parseFile(path);
 	}
