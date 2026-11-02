@@ -18,6 +18,7 @@
 
 #include "common/event/timer.h"
 #include "uv.h"
+#include <stdexcept>
 
 namespace EQ {
 
@@ -42,11 +43,18 @@ void Timer::Start(uint64_t duration_ms, bool repeats)
 	if (!m_timer)
 	{
 		uv_loop_t* loop = EventLoop::Get().Handle();
+		if (!loop) {
+			throw std::logic_error("Cannot start a timer on a closed event loop");
+		}
 
 		m_timer = std::make_unique<uv_timer_t>();
 		memset(m_timer.get(), 0, sizeof(uv_timer_t));
 
-		uv_timer_init(loop, m_timer.get());
+		const int result = uv_timer_init(loop, m_timer.get());
+		if (result != 0) {
+			m_timer.reset();
+			throw std::runtime_error(uv_strerror(result));
+		}
 		m_timer->data = this;
 
 		if (repeats)

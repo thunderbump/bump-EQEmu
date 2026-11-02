@@ -28,6 +28,7 @@
 #include "tests/skills_util_test.h"
 #include "tests/string_util_test.h"
 #include "tests/task_state_test.h"
+#include "tests/event_loop_test.h"
 #include "tests/suite_runner.h"
 
 #include "common/path_manager.h"
@@ -61,6 +62,7 @@ int main()
 		tests.add(new EQEmuConfigTest());
 		tests.add(new SkillsUtilsTest());
 		tests.add(new TaskStateTest());
+		tests.add(new EventLoopTest());
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
 		tests.add(new ActorRuntimeTest());
 #endif

@@ -330,6 +330,8 @@ namespace EQ
 			~ReliableStreamConnectionManager();
 
 			void Connect(const std::string &addr, int port);
+			// Stops producers and transfers initialized handles to their close callbacks.
+			void Close();
 			void Process();
 			void UpdateDataBudget();
 			void ProcessResend();
@@ -344,8 +346,14 @@ namespace EQ
 			void Detach();
 
 			EQ::Random m_rand;
-			uv_timer_t m_timer;
-			uv_udp_t m_socket;
+			struct Handles {
+				uv_timer_t timer{};
+				uv_udp_t socket{};
+				bool timer_initialized = false;
+				bool socket_initialized = false;
+				unsigned closing = 0;
+			};
+			std::unique_ptr<Handles> m_handles;
 			uv_loop_t *m_attached;
 			ReliableStreamConnectionManagerOptions m_options;
 			std::function<void(std::shared_ptr<ReliableStreamConnection>)> m_on_new_connection;

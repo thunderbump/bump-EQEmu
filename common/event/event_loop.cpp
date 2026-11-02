@@ -18,6 +18,7 @@
 
 #include "common/event/event_loop.h"
 #include "uv.h"
+#include <chrono>
 
 namespace EQ {
 
@@ -36,22 +37,65 @@ EventLoop::EventLoop()
 
 EventLoop::~EventLoop()
 {
-	uv_loop_close(m_loop.get());
+	if (!m_closed) {
+		uv_loop_close(m_loop.get());
+	}
 }
 
 void EventLoop::Process()
 {
+	if (m_closed || m_running) {
+		return;
+	}
+	m_running = true;
 	uv_run(m_loop.get(), UV_RUN_NOWAIT);
+	m_running = false;
 }
 
 void EventLoop::Run()
 {
+	if (m_closed || m_running) {
+		return;
+	}
+	m_running = true;
 	uv_run(m_loop.get(), UV_RUN_DEFAULT);
+	m_running = false;
 }
 
 void EventLoop::Shutdown()
 {
-	uv_stop(m_loop.get());
+	if (!m_closed) {
+		uv_stop(m_loop.get());
+	}
+}
+
+int EventLoop::Close(uint64_t timeout_ms)
+{
+	if (std::this_thread::get_id() != m_owner) {
+		return UV_EPERM;
+	}
+	if (m_running) {
+		return UV_EBUSY;
+	}
+	if (m_closed) {
+		return 0;
+	}
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+	for (;;) {
+		Process();
+		const int result = uv_loop_close(m_loop.get());
+		if (result == 0) {
+			m_closed = true;
+			return 0;
+		}
+		if (result != UV_EBUSY) {
+			return result;
+		}
+		if (std::chrono::steady_clock::now() >= deadline) {
+			return UV_ETIMEDOUT;
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	}
 }
 
 } // namespace EQ
