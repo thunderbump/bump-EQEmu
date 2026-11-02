@@ -19,8 +19,12 @@
 #include "common/compression.h"
 
 #include <cmath>
+#include <cstddef>
+#include <cstring>
+#include <limits>
 #include <map>
 #include <memory>
+#include <string>
 #include <tuple>
 #include <utility>
 
@@ -68,14 +72,87 @@ struct ModelEntry
 	std::vector<Poly> polys;
 };
 
+// V2 is a byte stream, not an array of aligned C++ objects.
+struct InvalidData {};
+
+class Cursor
+{
+public:
+	Cursor(const char *data, size_t size): m_data(data), m_remaining(size) {}
+
+	void Require(size_t count, size_t width) const
+	{
+		if (count > m_remaining / width) {
+			throw InvalidData{};
+		}
+	}
+
+	template <typename T>
+	T Read()
+	{
+		Require(1, sizeof(T));
+		T value;
+		std::memcpy(&value, m_data, sizeof(value));
+		Skip(1, sizeof(T));
+		return value;
+	}
+
+	std::string String()
+	{
+		const char *end = static_cast<const char *>(std::memchr(m_data, 0, m_remaining));
+		if (!end) {
+			throw InvalidData{};
+		}
+		std::string value(m_data, end);
+		Skip(value.size() + 1, 1);
+		return value;
+	}
+
+	void Skip(size_t count, size_t width)
+	{
+		Require(count, width);
+		size_t bytes = count * width;
+		m_data += bytes;
+		m_remaining -= bytes;
+	}
+
+	bool Empty() const { return m_remaining == 0; }
+
+private:
+	const char *m_data;
+	size_t m_remaining;
+};
+
+template <typename T>
+void RequireCapacity(const std::vector<T> &values, size_t count)
+{
+	if (count > values.max_size()) {
+		throw InvalidData{};
+	}
 }
 
-bool MapV2::Decode(const char *data, std::uint32_t data_size, std::uint32_t buffer_size, Mesh &output)
+void RequireAppend(const std::vector<glm::vec3> &vertices, const std::vector<uint32> &indices,
+	size_t vertex_count, size_t index_count)
 {
-	std::vector<char> buffer(buffer_size);
-	uint32 v = EQ::InflateData(data, data_size, &buffer[0], buffer_size);
+	const auto limit = std::numeric_limits<uint32>::max();
+	if (vertices.size() > limit || vertex_count > limit - vertices.size() ||
+		indices.size() > limit || index_count > limit - indices.size()) {
+		throw InvalidData{};
+	}
+	RequireCapacity(vertices, vertices.size() + vertex_count);
+	RequireCapacity(indices, indices.size() + index_count);
+}
 
-	char *buf = &buffer[0];
+void RequireIndices(const ModelEntry::Poly &poly, size_t vertex_count)
+{
+	if (poly.v1 >= vertex_count || poly.v2 >= vertex_count || poly.v3 >= vertex_count) {
+		throw InvalidData{};
+	}
+}
+
+MapV2::Mesh DecodePayload(const std::vector<char> &buffer)
+{
+	Cursor reader(buffer.data(), buffer.size());
 	uint32 vert_count;
 	uint32 ind_count;
 	uint32 nc_vert_count;
@@ -87,105 +164,89 @@ bool MapV2::Decode(const char *data, std::uint32_t data_size, std::uint32_t buff
 	uint32 quads_per_tile;
 	float units_per_vertex;
 
-	vert_count = *(uint32*)buf;
-	buf += sizeof(uint32);
+	vert_count = reader.Read<uint32>();
 
-	ind_count = *(uint32*)buf;
-	buf += sizeof(uint32);
+	ind_count = reader.Read<uint32>();
 
-	nc_vert_count = *(uint32*)buf;
-	buf += sizeof(uint32);
+	nc_vert_count = reader.Read<uint32>();
 
-	nc_ind_count = *(uint32*)buf;
-	buf += sizeof(uint32);
+	nc_ind_count = reader.Read<uint32>();
 
-	model_count = *(uint32*)buf;
-	buf += sizeof(uint32);
+	model_count = reader.Read<uint32>();
 
-	plac_count = *(uint32*)buf;
-	buf += sizeof(uint32);
+	plac_count = reader.Read<uint32>();
 
-	plac_group_count = *(uint32*)buf;
-	buf += sizeof(uint32);
+	plac_group_count = reader.Read<uint32>();
 
-	tile_count = *(uint32*)buf;
-	buf += sizeof(uint32);
+	tile_count = reader.Read<uint32>();
 
-	quads_per_tile = *(uint32*)buf;
-	buf += sizeof(uint32);
+	quads_per_tile = reader.Read<uint32>();
 
-	units_per_vertex = *(float*)buf;
-	buf += sizeof(float);
+	units_per_vertex = reader.Read<float>();
 
+	reader.Require(vert_count, 3 * sizeof(float));
 	std::vector<glm::vec3> verts;
+	RequireCapacity(verts, vert_count);
 	verts.reserve(vert_count);
 	std::vector<uint32> indices;
-	indices.reserve(ind_count);
 
 	for (uint32 i = 0; i < vert_count; ++i) {
 		float x;
 		float y;
 		float z;
 
-		x = *(float*)buf;
-		buf += sizeof(float);
+		x = reader.Read<float>();
 
-		y = *(float*)buf;
-		buf += sizeof(float);
+		y = reader.Read<float>();
 
-		z = *(float*)buf;
-		buf += sizeof(float);
+		z = reader.Read<float>();
 
 		verts.emplace_back(x, y, z);
 	}
 
+	reader.Require(ind_count, sizeof(uint32));
+	RequireCapacity(indices, ind_count);
+	indices.reserve(ind_count);
 	for (uint32 i = 0; i < ind_count; ++i) {
-		indices.emplace_back(*(uint32 *)buf);
-		buf += sizeof(uint32);
+		uint32 index = reader.Read<uint32>();
+		if (index >= verts.size()) {
+			throw InvalidData{};
+		}
+		indices.emplace_back(index);
 	}
 
-	for (uint32 i = 0; i < nc_vert_count; ++i) {
-		buf += sizeof(float) * 3;
-	}
+	reader.Skip(nc_vert_count, 3 * sizeof(float));
+	reader.Skip(nc_ind_count, sizeof(uint32));
 
-	for (uint32 i = 0; i < nc_ind_count; ++i) {
-		buf += sizeof(uint32);
-	}
-
+	reader.Require(model_count, 1 + 2 * sizeof(uint32));
 	std::map<std::string, std::unique_ptr<ModelEntry>> models;
 	for (uint32 i = 0; i < model_count; ++i) {
 		std::unique_ptr<ModelEntry> me(new ModelEntry);
-		std::string name = buf;
-		buf += name.length() + 1;
+		std::string name = reader.String();
 
-		uint32 vert_count = *(uint32*)buf;
-		buf += sizeof(uint32);
+		uint32 vert_count = reader.Read<uint32>();
 
-		uint32 poly_count = *(uint32*)buf;
-		buf += sizeof(uint32);
+		uint32 poly_count = reader.Read<uint32>();
 
-		me->verts.reserve(vert_count);
+		reader.Require(vert_count, 3 * sizeof(float));
+		me->RequireCapacity(verts, vert_count);
+	verts.reserve(vert_count);
 		for (uint32 j = 0; j < vert_count; ++j) {
-			float x = *(float*)buf;
-			buf += sizeof(float);
-			float y = *(float*)buf;
-			buf += sizeof(float);
-			float z = *(float*)buf;
-			buf += sizeof(float);
+			float x = reader.Read<float>();
+			float y = reader.Read<float>();
+			float z = reader.Read<float>();
 
 			me->verts.emplace_back(x, y, z);
 		}
 
+		reader.Require(poly_count, 3 * sizeof(uint32) + sizeof(uint8));
+		RequireCapacity(me->polys, poly_count);
 		me->polys.reserve(poly_count);
 		for (uint32 j = 0; j < poly_count; ++j) {
-			uint32 v1 = *(uint32*)buf;
-			buf += sizeof(uint32);
-			uint32 v2 = *(uint32*)buf;
-			buf += sizeof(uint32);
-			uint32 v3 = *(uint32*)buf;
-			buf += sizeof(uint32);
-			uint8 vis = *(uint8*)buf;
-			buf += sizeof(uint8);
+			uint32 v1 = reader.Read<uint32>();
+			uint32 v2 = reader.Read<uint32>();
+			uint32 v3 = reader.Read<uint32>();
+			uint8 vis = reader.Read<uint8>();
 
 			ModelEntry::Poly p;
 			p.v1 = v1;
@@ -198,30 +259,21 @@ bool MapV2::Decode(const char *data, std::uint32_t data_size, std::uint32_t buff
 		models[name] = std::move(me);
 	}
 
+	reader.Require(plac_count, 1 + 9 * sizeof(float));
 	for (uint32 i = 0; i < plac_count; ++i) {
-		std::string name = buf;
-		buf += name.length() + 1;
+		std::string name = reader.String();
 
-		float x = *(float*)buf;
-		buf += sizeof(float);
-		float y = *(float*)buf;
-		buf += sizeof(float);
-		float z = *(float*)buf;
-		buf += sizeof(float);
+		float x = reader.Read<float>();
+		float y = reader.Read<float>();
+		float z = reader.Read<float>();
 
-		float x_rot = *(float*)buf;
-		buf += sizeof(float);
-		float y_rot = *(float*)buf;
-		buf += sizeof(float);
-		float z_rot = *(float*)buf;
-		buf += sizeof(float);
+		float x_rot = reader.Read<float>();
+		float y_rot = reader.Read<float>();
+		float z_rot = reader.Read<float>();
 
-		float x_scale = *(float*)buf;
-		buf += sizeof(float);
-		float y_scale = *(float*)buf;
-		buf += sizeof(float);
-		float z_scale = *(float*)buf;
-		buf += sizeof(float);
+		float x_scale = reader.Read<float>();
+		float y_scale = reader.Read<float>();
+		float z_scale = reader.Read<float>();
 
 		if (models.count(name) == 0)
 			continue;
@@ -233,6 +285,8 @@ bool MapV2::Decode(const char *data, std::uint32_t data_size, std::uint32_t buff
 			auto &current_poly = mod_polys[j];
 			if (current_poly.vis == 0)
 				continue;
+			RequireIndices(current_poly, mod_verts.size());
+			RequireAppend(verts, indices, 3, 3);
 			auto v1 = mod_verts[current_poly.v1];
 			auto v2 = mod_verts[current_poly.v2];
 			auto v3 = mod_verts[current_poly.v3];
@@ -259,62 +313,41 @@ bool MapV2::Decode(const char *data, std::uint32_t data_size, std::uint32_t buff
 		}
 	}
 
+	reader.Require(plac_group_count, 12 * sizeof(float) + sizeof(uint32));
 	for (uint32 i = 0; i < plac_group_count; ++i) {
-		float x = *(float*)buf;
-		buf += sizeof(float);
-		float y = *(float*)buf;
-		buf += sizeof(float);
-		float z = *(float*)buf;
-		buf += sizeof(float);
+		float x = reader.Read<float>();
+		float y = reader.Read<float>();
+		float z = reader.Read<float>();
 
-		float x_rot = *(float*)buf;
-		buf += sizeof(float);
-		float y_rot = *(float*)buf;
-		buf += sizeof(float);
-		float z_rot = *(float*)buf;
-		buf += sizeof(float);
+		float x_rot = reader.Read<float>();
+		float y_rot = reader.Read<float>();
+		float z_rot = reader.Read<float>();
 
-		float x_scale = *(float*)buf;
-		buf += sizeof(float);
-		float y_scale = *(float*)buf;
-		buf += sizeof(float);
-		float z_scale = *(float*)buf;
-		buf += sizeof(float);
+		float x_scale = reader.Read<float>();
+		float y_scale = reader.Read<float>();
+		float z_scale = reader.Read<float>();
 
-		float x_tile = *(float*)buf;
-		buf += sizeof(float);
-		float y_tile = *(float*)buf;
-		buf += sizeof(float);
-		float z_tile = *(float*)buf;
-		buf += sizeof(float);
+		float x_tile = reader.Read<float>();
+		float y_tile = reader.Read<float>();
+		float z_tile = reader.Read<float>();
 
-		uint32 p_count = *(uint32*)buf;
-		buf += sizeof(uint32);
+		uint32 p_count = reader.Read<uint32>();
 
+		reader.Require(p_count, 1 + 9 * sizeof(float));
 		for (uint32 j = 0; j < p_count; ++j) {
-			std::string name = buf;
-			buf += name.length() + 1;
+			std::string name = reader.String();
 
-			float p_x = *(float*)buf;
-			buf += sizeof(float);
-			float p_y = *(float*)buf;
-			buf += sizeof(float);
-			float p_z = *(float*)buf;
-			buf += sizeof(float);
+			float p_x = reader.Read<float>();
+			float p_y = reader.Read<float>();
+			float p_z = reader.Read<float>();
 
-			float p_x_rot = *(float*)buf * 3.14159f / 180;
-			buf += sizeof(float);
-			float p_y_rot = *(float*)buf * 3.14159f / 180;
-			buf += sizeof(float);
-			float p_z_rot = *(float*)buf * 3.14159f / 180;
-			buf += sizeof(float);
+			float p_x_rot = reader.Read<float>() * 3.14159f / 180;
+			float p_y_rot = reader.Read<float>() * 3.14159f / 180;
+			float p_z_rot = reader.Read<float>() * 3.14159f / 180;
 
-			float p_x_scale = *(float*)buf;
-			buf += sizeof(float);
-			float p_y_scale = *(float*)buf;
-			buf += sizeof(float);
-			float p_z_scale = *(float*)buf;
-			buf += sizeof(float);
+			float p_x_scale = reader.Read<float>();
+			float p_y_scale = reader.Read<float>();
+			float p_z_scale = reader.Read<float>();
 
 			if (models.count(name) == 0)
 				continue;
@@ -325,6 +358,8 @@ bool MapV2::Decode(const char *data, std::uint32_t data_size, std::uint32_t buff
 				auto &poly = model->polys[k];
 				if (poly.vis == 0)
 					continue;
+				RequireIndices(poly, model->verts.size());
+				RequireAppend(verts, indices, 3, 3);
 				glm::vec3 v1, v2, v3;
 
 				v1 = model->verts[poly.v1];
@@ -398,29 +433,39 @@ bool MapV2::Decode(const char *data, std::uint32_t data_size, std::uint32_t buff
 		}
 	}
 
-	uint32 ter_quad_count = (quads_per_tile * quads_per_tile);
-	uint32 ter_vert_count = ((quads_per_tile + 1) * (quads_per_tile + 1));
+	reader.Require(tile_count, 1 + 3 * sizeof(float));
+	uint64 side = quads_per_tile;
+	uint64 quad_count = tile_count ? side * side : 0;
+	// Check addition before squaring: UINT32_MAX + 1 squared exceeds uint64.
+	if (tile_count && side == std::numeric_limits<uint32>::max()) {
+		throw InvalidData{};
+	}
+	uint64 vertex_count = tile_count ? (side + 1) * (side + 1) : 0;
+	if (quad_count > std::numeric_limits<uint32>::max() ||
+		vertex_count > std::numeric_limits<uint32>::max()) {
+		throw InvalidData{};
+	}
+	uint32 ter_quad_count = static_cast<uint32>(quad_count);
+	uint32 ter_vert_count = static_cast<uint32>(vertex_count);
 	std::vector<uint8> flags;
 	std::vector<float> floats;
-	flags.resize(ter_quad_count);
-	floats.resize(ter_vert_count);
 	for (uint32 i = 0; i < tile_count; ++i) {
-		bool flat;
-		flat = *(bool*)buf;
-		buf += sizeof(bool);
+		uint8 flat_byte = reader.Read<uint8>();
+		if (flat_byte > 1) {
+			throw InvalidData{};
+		}
+		bool flat = flat_byte == 1;
 
 		float x;
-		x = *(float*)buf;
-		buf += sizeof(float);
+		x = reader.Read<float>();
 
 		float y;
-		y = *(float*)buf;
-		buf += sizeof(float);
+		y = reader.Read<float>();
 
 		if (flat) {
+			RequireAppend(verts, indices, 4, 6);
 			float z;
-			z = *(float*)buf;
-			buf += sizeof(float);
+			z = reader.Read<float>();
 
 			float QuadVertex1X = x;
 			float QuadVertex1Y = y;
@@ -453,20 +498,24 @@ bool MapV2::Decode(const char *data, std::uint32_t data_size, std::uint32_t buff
 			indices.emplace_back(current_vert - 2);
 		}
 		else {
+			reader.Require(ter_quad_count, sizeof(uint8));
+			RequireCapacity(flags, ter_quad_count);
+			flags.resize(ter_quad_count);
 			//read flags
 			for (uint32 j = 0; j < ter_quad_count; ++j) {
 				uint8 f;
-				f = *(uint8*)buf;
-				buf += sizeof(uint8);
+				f = reader.Read<uint8>();
 
 				flags[j] = f;
 			}
 
+			reader.Require(ter_vert_count, sizeof(float));
+			RequireCapacity(floats, ter_vert_count);
+			floats.resize(ter_vert_count);
 			//read floats
 			for (uint32 j = 0; j < ter_vert_count; ++j) {
 				float f;
-				f = *(float*)buf;
-				buf += sizeof(float);
+				f = reader.Read<float>();
 
 				floats[j] = f;
 			}
@@ -497,6 +546,7 @@ bool MapV2::Decode(const char *data, std::uint32_t data_size, std::uint32_t buff
 				float QuadVertex4Y = QuadVertex1Y + units_per_vertex;
 				float QuadVertex4Z = floats[quad + row_number + 1];
 
+				RequireAppend(verts, indices, 0, 6);
 				uint32 i1, i2, i3, i4;
 				std::tuple<float, float, float> t = std::make_tuple(QuadVertex1X, QuadVertex1Y, QuadVertex1Z);
 				auto iter = cur_verts.find(t);
@@ -504,6 +554,7 @@ bool MapV2::Decode(const char *data, std::uint32_t data_size, std::uint32_t buff
 					i1 = iter->second;
 				}
 				else {
+					RequireAppend(verts, indices, 1, 0);
 					i1 = (uint32)verts.size();
 					verts.emplace_back(QuadVertex1X, QuadVertex1Y, QuadVertex1Z);
 					cur_verts[std::make_tuple(QuadVertex1X, QuadVertex1Y, QuadVertex1Z)] = i1;
@@ -515,6 +566,7 @@ bool MapV2::Decode(const char *data, std::uint32_t data_size, std::uint32_t buff
 					i2 = iter->second;
 				}
 				else {
+					RequireAppend(verts, indices, 1, 0);
 					i2 = (uint32)verts.size();
 					verts.emplace_back(QuadVertex2X, QuadVertex2Y, QuadVertex2Z);
 					cur_verts[std::make_tuple(QuadVertex2X, QuadVertex2Y, QuadVertex2Z)] = i2;
@@ -526,6 +578,7 @@ bool MapV2::Decode(const char *data, std::uint32_t data_size, std::uint32_t buff
 					i3 = iter->second;
 				}
 				else {
+					RequireAppend(verts, indices, 1, 0);
 					i3 = (uint32)verts.size();
 					verts.emplace_back(QuadVertex3X, QuadVertex3Y, QuadVertex3Z);
 					cur_verts[std::make_tuple(QuadVertex3X, QuadVertex3Y, QuadVertex3Z)] = i3;
@@ -537,6 +590,7 @@ bool MapV2::Decode(const char *data, std::uint32_t data_size, std::uint32_t buff
 					i4 = iter->second;
 				}
 				else {
+					RequireAppend(verts, indices, 1, 0);
 					i4 = (uint32)verts.size();
 					verts.emplace_back(QuadVertex4X, QuadVertex4Y, QuadVertex4Z);
 					cur_verts[std::make_tuple(QuadVertex4X, QuadVertex4Y, QuadVertex4Z)] = i4;
@@ -553,7 +607,34 @@ bool MapV2::Decode(const char *data, std::uint32_t data_size, std::uint32_t buff
 		}
 	}
 
-	output.vertices = std::move(verts);
-	output.indices = std::move(indices);
-	return true;
+	if (!reader.Empty() || verts.empty() || indices.empty() || indices.size() % 3 != 0) {
+		throw InvalidData{};
+	}
+	return {std::move(verts), std::move(indices)};
+}
+
+}
+
+bool MapV2::Decode(const char *data, std::uint32_t data_size, std::uint32_t buffer_size, Mesh &output)
+{
+	if (!data || !data_size || buffer_size < 9 * sizeof(uint32) + sizeof(float)) {
+		return false;
+	}
+	std::vector<char> buffer;
+	if (buffer_size > buffer.max_size()) {
+		return false;
+	}
+	buffer.resize(buffer_size);
+	if (EQ::InflateData(data, data_size, buffer.data(), buffer_size) != buffer_size) {
+		return false;
+	}
+	try {
+		auto mesh = DecodePayload(buffer);
+		output.vertices.swap(mesh.vertices);
+		output.indices.swap(mesh.indices);
+		return true;
+	}
+	catch (const InvalidData &) {
+		return false;
+	}
 }

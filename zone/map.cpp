@@ -450,9 +450,15 @@ bool Map::LoadV2(FILE *f) {
 		return false;
 	}
 
+	if (!data_size || buffer_size < 9 * sizeof(uint32) + sizeof(float)) {
+		return false;
+	}
 	std::vector<char> data;
+	if (data_size > data.max_size()) {
+		return false;
+	}
 	data.resize(data_size);
-	if (fread(&data[0], data_size, 1, f) != 1) {
+	if (fread(data.data(), 1, data_size, f) != data_size) {
 		return false;
 	}
 
@@ -472,7 +478,7 @@ bool Map::LoadV2(FILE *f) {
 		imp = new impl;
 	}
 
-	imp->rm = createRaycastMesh((RmUint32)verts.size(), (const RmReal*)&verts[0], face_count, &indices[0]);
+	imp->rm = createRaycastMesh((RmUint32)verts.size(), (const RmReal*)verts.data(), face_count, indices.data());
 
 	if (!imp->rm) {
 		delete imp;

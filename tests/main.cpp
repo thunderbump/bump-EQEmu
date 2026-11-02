@@ -24,6 +24,7 @@
 #include "tests/hextoi_32_64_test.h"
 #include "tests/inserver_test_progress_test.h"
 #include "tests/ipc_mutex_test.h"
+#include "tests/map_v2_test.h"
 #include "tests/memory_mapped_file_test.h"
 #include "tests/skills_util_test.h"
 #include "tests/string_util_test.h"
@@ -63,6 +64,7 @@ int main()
 		tests.add(new SkillsUtilsTest());
 		tests.add(new TaskStateTest());
 		tests.add(new EventLoopTest());
+		tests.add(new MapV2Test());
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
 		tests.add(new ActorRuntimeTest());
 #endif

@@ -19,6 +19,7 @@ set(tests_headers
 	hextoi_32_64_test.h
 	inserver_test_progress_test.h
 	ipc_mutex_test.h
+	map_v2_test.h
 	memory_mapped_file_test.h
 	string_util_test.h
 	skills_util_test.h

@@ -29,6 +29,7 @@ struct Mesh
 	std::vector<std::uint32_t> indices;
 };
 
-// Decode the compressed V2 payload; replace output only after successful decoding.
+// Decode native-format V2 bytes without padding or endian conversion.
+// False leaves output unchanged; decoding does not impose a resource budget.
 bool Decode(const char *data, std::uint32_t data_size, std::uint32_t buffer_size, Mesh &output);
 }
