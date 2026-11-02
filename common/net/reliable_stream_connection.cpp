@@ -1558,6 +1558,9 @@ void EQ::Net::ReliableStreamConnection::InternalSend(Packet &p) {
 		}
 	);
 
+	if (send_result == 0) {
+		++m_owner->m_close_status->pending_sends;
+	}
 	if (send_result < 0) {
 		std::cerr << "uv_udp_send() failed: " << uv_strerror(send_result) << std::endl;
 		send_buffer_pool.release(ctx);
