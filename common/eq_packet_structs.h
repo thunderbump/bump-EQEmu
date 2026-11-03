@@ -4019,6 +4019,9 @@ struct Make_Pet_Struct { //Simple struct for getting pet info
 	uint32 max_dmg;
 };
 
+// Server-only staging contains std::string and requires native layout.
+#pragma pack(push)
+#pragma pack()
 struct GroundSpawn {
 	float       max_x         = 0.0f;
 	float       max_y         = 0.0f;
@@ -4036,6 +4039,7 @@ struct GroundSpawn {
 struct GroundSpawns {
 	struct GroundSpawn spawn[50]; //Assigned max number to allow
 };
+#pragma pack(pop)
 
 //struct PetitionBug_Struct{
 //	uint32	petition_number;
