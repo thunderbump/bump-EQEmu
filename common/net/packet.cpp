@@ -21,115 +21,114 @@
 
 #include "fmt/format.h"
 #include <cctype>
+#include <cstring>
+#include <limits>
+
+// Preserve the existing native scalar representation and packet wire widths.
+static_assert(sizeof(int8_t) == 1 && sizeof(uint8_t) == 1, "Packet 8-bit scalar width");
+static_assert(sizeof(int16_t) == 2 && sizeof(uint16_t) == 2, "Packet 16-bit scalar width");
+static_assert(sizeof(int32_t) == 4 && sizeof(uint32_t) == 4, "Packet 32-bit scalar width");
+static_assert(sizeof(int64_t) == 8 && sizeof(uint64_t) == 8, "Packet 64-bit scalar width");
+static_assert(sizeof(float) == 4 && sizeof(double) == 8, "Packet floating-point scalar widths");
 
 void EQ::Net::Packet::PutInt8(size_t offset, int8_t value)
 {
-	if (Length() < offset + 1) {
-		if (!Resize(offset + 1)) {
-			throw std::out_of_range("Packet::PutInt8(), could not resize packet and would of written past the end.");
-		}
+	if (offset > std::numeric_limits<size_t>::max() - sizeof(value) ||
+		(Length() < offset + sizeof(value) && !Resize(offset + sizeof(value)))) {
+		throw std::out_of_range("Packet::PutInt8(), could not resize packet and would of written past the end.");
 	}
 
-	*(int8_t*)((char*)Data() + offset) = value;
+	std::memcpy(static_cast<char *>(Data()) + offset, &value, sizeof(value));
 }
 
 void EQ::Net::Packet::PutInt16(size_t offset, int16_t value)
 {
-	if (Length() < offset + 2) {
-		if (!Resize(offset + 2)) {
-			throw std::out_of_range("Packet::PutInt16(), could not resize packet and would of written past the end.");
-		}
+	if (offset > std::numeric_limits<size_t>::max() - sizeof(value) ||
+		(Length() < offset + sizeof(value) && !Resize(offset + sizeof(value)))) {
+		throw std::out_of_range("Packet::PutInt16(), could not resize packet and would of written past the end.");
 	}
 
-	*(int16_t*)((char*)Data() + offset) = value;
+	std::memcpy(static_cast<char *>(Data()) + offset, &value, sizeof(value));
 }
 
 void EQ::Net::Packet::PutInt32(size_t offset, int32_t value)
 {
-	if (Length() < offset + 4) {
-		if (!Resize(offset + 4)) {
-			throw std::out_of_range("Packet::PutInt32(), could not resize packet and would of written past the end.");
-		}
+	if (offset > std::numeric_limits<size_t>::max() - sizeof(value) ||
+		(Length() < offset + sizeof(value) && !Resize(offset + sizeof(value)))) {
+		throw std::out_of_range("Packet::PutInt32(), could not resize packet and would of written past the end.");
 	}
 
-	*(int32_t*)((char*)Data() + offset) = value;
+	std::memcpy(static_cast<char *>(Data()) + offset, &value, sizeof(value));
 }
 
 void EQ::Net::Packet::PutInt64(size_t offset, int64_t value)
 {
-	if (Length() < offset + 8) {
-		if (!Resize(offset + 8)) {
-			throw std::out_of_range("Packet::PutInt64(), could not resize packet and would of written past the end.");
-		}
+	if (offset > std::numeric_limits<size_t>::max() - sizeof(value) ||
+		(Length() < offset + sizeof(value) && !Resize(offset + sizeof(value)))) {
+		throw std::out_of_range("Packet::PutInt64(), could not resize packet and would of written past the end.");
 	}
 
-	*(int64_t*)((char*)Data() + offset) = value;
+	std::memcpy(static_cast<char *>(Data()) + offset, &value, sizeof(value));
 }
 
 void EQ::Net::Packet::PutUInt8(size_t offset, uint8_t value)
 {
-	if (Length() < offset + 1) {
-		if (!Resize(offset + 1)) {
-			throw std::out_of_range("Packet::PutUInt8(), could not resize packet and would of written past the end.");
-		}
+	if (offset > std::numeric_limits<size_t>::max() - sizeof(value) ||
+		(Length() < offset + sizeof(value) && !Resize(offset + sizeof(value)))) {
+		throw std::out_of_range("Packet::PutUInt8(), could not resize packet and would of written past the end.");
 	}
 
-	*(uint8_t*)((char*)Data() + offset) = value;
+	std::memcpy(static_cast<char *>(Data()) + offset, &value, sizeof(value));
 }
 
 void EQ::Net::Packet::PutUInt16(size_t offset, uint16_t value)
 {
-	if (Length() < offset + 2) {
-		if (!Resize(offset + 2)) {
-			throw std::out_of_range("Packet::PutUInt16(), could not resize packet and would of written past the end.");
-		}
+	if (offset > std::numeric_limits<size_t>::max() - sizeof(value) ||
+		(Length() < offset + sizeof(value) && !Resize(offset + sizeof(value)))) {
+		throw std::out_of_range("Packet::PutUInt16(), could not resize packet and would of written past the end.");
 	}
 
-	*(uint16_t*)((char*)Data() + offset) = value;
+	std::memcpy(static_cast<char *>(Data()) + offset, &value, sizeof(value));
 }
 
 void EQ::Net::Packet::PutUInt32(size_t offset, uint32_t value)
 {
-	if (Length() < offset + 4) {
-		if (!Resize(offset + 4)) {
-			throw std::out_of_range("Packet::PutUInt32(), could not resize packet and would of written past the end.");
-		}
+	if (offset > std::numeric_limits<size_t>::max() - sizeof(value) ||
+		(Length() < offset + sizeof(value) && !Resize(offset + sizeof(value)))) {
+		throw std::out_of_range("Packet::PutUInt32(), could not resize packet and would of written past the end.");
 	}
 
-	*(uint32_t*)((char*)Data() + offset) = value;
+	std::memcpy(static_cast<char *>(Data()) + offset, &value, sizeof(value));
 }
 
 void EQ::Net::Packet::PutUInt64(size_t offset, uint64_t value)
 {
-	if (Length() < offset + 8) {
-		if (!Resize(offset + 8)) {
-			throw std::out_of_range("Packet::PutUInt64(), could not resize packet and would of written past the end.");
-		}
+	if (offset > std::numeric_limits<size_t>::max() - sizeof(value) ||
+		(Length() < offset + sizeof(value) && !Resize(offset + sizeof(value)))) {
+		throw std::out_of_range("Packet::PutUInt64(), could not resize packet and would of written past the end.");
 	}
 
-	*(uint64_t*)((char*)Data() + offset) = value;
+	std::memcpy(static_cast<char *>(Data()) + offset, &value, sizeof(value));
 }
 
 void EQ::Net::Packet::PutFloat(size_t offset, float value)
 {
-	if (Length() < offset + 4) {
-		if (!Resize(offset + 4)) {
-			throw std::out_of_range("Packet::PutFloat(), could not resize packet and would of written past the end.");
-		}
+	if (offset > std::numeric_limits<size_t>::max() - sizeof(value) ||
+		(Length() < offset + sizeof(value) && !Resize(offset + sizeof(value)))) {
+		throw std::out_of_range("Packet::PutFloat(), could not resize packet and would of written past the end.");
 	}
 
-	*(float*)((char*)Data() + offset) = value;
+	std::memcpy(static_cast<char *>(Data()) + offset, &value, sizeof(value));
 }
 
 void EQ::Net::Packet::PutDouble(size_t offset, double value)
 {
-	if (Length() < offset + 8) {
-		if (!Resize(offset + 8)) {
-			throw std::out_of_range("Packet::PutDouble(), could not resize packet and would of written past the end.");
-		}
+	if (offset > std::numeric_limits<size_t>::max() - sizeof(value) ||
+		(Length() < offset + sizeof(value) && !Resize(offset + sizeof(value)))) {
+		throw std::out_of_range("Packet::PutDouble(), could not resize packet and would of written past the end.");
 	}
 
-	*(double*)((char*)Data() + offset) = value;
+	std::memcpy(static_cast<char *>(Data()) + offset, &value, sizeof(value));
 }
 
 void EQ::Net::Packet::PutString(size_t offset, const std::string &str)
@@ -188,92 +187,122 @@ void EQ::Net::Packet::PutData(size_t offset, void *data, size_t length)
 
 int8_t EQ::Net::Packet::GetInt8(size_t offset) const
 {
-	if (Length() < offset + 1) {
+	int8_t value;
+	const auto length = Length();
+	if (offset > length || length - offset < sizeof(value)) {
 		throw std::out_of_range("Packet read out of range.");
 	}
 
-	return *(int8_t*)((char*)Data() + offset);
+	std::memcpy(&value, static_cast<const char *>(Data()) + offset, sizeof(value));
+	return value;
 }
 
 int16_t EQ::Net::Packet::GetInt16(size_t offset) const
 {
-	if (Length() < offset + 2) {
+	int16_t value;
+	const auto length = Length();
+	if (offset > length || length - offset < sizeof(value)) {
 		throw std::out_of_range("Packet read out of range.");
 	}
 
-	return *(int16_t*)((char*)Data() + offset);
+	std::memcpy(&value, static_cast<const char *>(Data()) + offset, sizeof(value));
+	return value;
 }
 
 int32_t EQ::Net::Packet::GetInt32(size_t offset) const
 {
-	if (Length() < offset + 4) {
+	int32_t value;
+	const auto length = Length();
+	if (offset > length || length - offset < sizeof(value)) {
 		throw std::out_of_range("Packet read out of range.");
 	}
 
-	return *(int32_t*)((char*)Data() + offset);
+	std::memcpy(&value, static_cast<const char *>(Data()) + offset, sizeof(value));
+	return value;
 }
 
 int64_t EQ::Net::Packet::GetInt64(size_t offset) const
 {
-	if (Length() < offset + 8) {
+	int64_t value;
+	const auto length = Length();
+	if (offset > length || length - offset < sizeof(value)) {
 		throw std::out_of_range("Packet read out of range.");
 	}
 
-	return *(int64_t*)((char*)Data() + offset);
+	std::memcpy(&value, static_cast<const char *>(Data()) + offset, sizeof(value));
+	return value;
 }
 
 uint8_t EQ::Net::Packet::GetUInt8(size_t offset) const
 {
-	if (Length() < offset + 1) {
+	uint8_t value;
+	const auto length = Length();
+	if (offset > length || length - offset < sizeof(value)) {
 		throw std::out_of_range("Packet read out of range.");
 	}
 
-	return *(uint8_t*)((char*)Data() + offset);
+	std::memcpy(&value, static_cast<const char *>(Data()) + offset, sizeof(value));
+	return value;
 }
 
 uint16_t EQ::Net::Packet::GetUInt16(size_t offset) const
 {
-	if (Length() < offset + 2) {
+	uint16_t value;
+	const auto length = Length();
+	if (offset > length || length - offset < sizeof(value)) {
 		throw std::out_of_range("Packet read out of range.");
 	}
 
-	return *(uint16_t*)((char*)Data() + offset);
+	std::memcpy(&value, static_cast<const char *>(Data()) + offset, sizeof(value));
+	return value;
 }
 
 uint32_t EQ::Net::Packet::GetUInt32(size_t offset) const
 {
-	if (Length() < offset + 4) {
+	uint32_t value;
+	const auto length = Length();
+	if (offset > length || length - offset < sizeof(value)) {
 		throw std::out_of_range("Packet read out of range.");
 	}
 
-	return *(uint32_t*)((char*)Data() + offset);
+	std::memcpy(&value, static_cast<const char *>(Data()) + offset, sizeof(value));
+	return value;
 }
 
 uint64_t EQ::Net::Packet::GetUInt64(size_t offset) const
 {
-	if (Length() < offset + 8) {
+	uint64_t value;
+	const auto length = Length();
+	if (offset > length || length - offset < sizeof(value)) {
 		throw std::out_of_range("Packet read out of range.");
 	}
 
-	return *(uint64_t*)((char*)Data() + offset);
+	std::memcpy(&value, static_cast<const char *>(Data()) + offset, sizeof(value));
+	return value;
 }
 
 float EQ::Net::Packet::GetFloat(size_t offset) const
 {
-	if (Length() < offset + 4) {
+	float value;
+	const auto length = Length();
+	if (offset > length || length - offset < sizeof(value)) {
 		throw std::out_of_range("Packet read out of range.");
 	}
 
-	return *(float*)((char*)Data() + offset);
+	std::memcpy(&value, static_cast<const char *>(Data()) + offset, sizeof(value));
+	return value;
 }
 
 double EQ::Net::Packet::GetDouble(size_t offset) const
 {
-	if (Length() < offset + 8) {
+	double value;
+	const auto length = Length();
+	if (offset > length || length - offset < sizeof(value)) {
 		throw std::out_of_range("Packet read out of range.");
 	}
 
-	return *(double*)((char*)Data() + offset);
+	std::memcpy(&value, static_cast<const char *>(Data()) + offset, sizeof(value));
+	return value;
 }
 
 std::string EQ::Net::Packet::GetString(size_t offset, size_t length) const
