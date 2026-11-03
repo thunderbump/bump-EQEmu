@@ -16,6 +16,7 @@ set(tests_headers
 	event_loop_test.h
 	fixed_memory_test.h
 	fixed_memory_variable_test.h
+	ground_spawns_test.h
 	hextoi_32_64_test.h
 	inserver_test_progress_test.h
 	ipc_mutex_test.h

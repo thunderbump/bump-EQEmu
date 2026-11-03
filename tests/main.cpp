@@ -21,6 +21,7 @@
 #include "tests/eqemu_config_test.h"
 #include "tests/fixed_memory_test.h"
 #include "tests/fixed_memory_variable_test.h"
+#include "tests/ground_spawns_test.h"
 #include "tests/hextoi_32_64_test.h"
 #include "tests/inserver_test_progress_test.h"
 #include "tests/ipc_mutex_test.h"
@@ -60,6 +61,7 @@ int main()
 		tests.add(new InserverTestProgressTest());
 		tests.add(new StringUtilTest());
 		tests.add(new DataVerificationTest());
+		tests.add(new GroundSpawnsTest());
 		tests.add(new EQEmuConfigTest());
 		tests.add(new SkillsUtilsTest());
 		tests.add(new TaskStateTest());
