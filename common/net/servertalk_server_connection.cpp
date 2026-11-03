@@ -21,6 +21,8 @@
 #include "common/net/servertalk_server.h"
 #include "common/util/uuid.h"
 
+#include <cstring>
+
 EQ::Net::ServertalkServerConnection::ServertalkServerConnection(std::shared_ptr<EQ::Net::TCPConnection> c, EQ::Net::ServertalkServer *parent)
 {
 	m_connection = c;
@@ -159,8 +161,11 @@ void EQ::Net::ServertalkServerConnection::ProcessReadBuffer()
 			break;
 		}
 
-		auto leg_opcode = *(uint16_t*)&m_buffer[current];
-		auto leg_size = *(uint16_t*)&m_buffer[current + 2] - 4;
+		uint16_t leg_opcode = 0;
+		uint16_t raw_leg_size = 0;
+		std::memcpy(&leg_opcode, &m_buffer[current], sizeof(leg_opcode));
+		std::memcpy(&raw_leg_size, &m_buffer[current + 2], sizeof(raw_leg_size));
+		auto leg_size = raw_leg_size - 4;
 
 		//this creates a small edge case where the exact size of a
 		//packet from the modern protocol can't be "43061256"
@@ -178,16 +183,17 @@ void EQ::Net::ServertalkServerConnection::ProcessReadBuffer()
 		//uint32 length;
 		//uint8 type;
 		*/
-		size_t length = 0;
+		uint32_t raw_length = 0;
 		uint8_t type = 0;
 		if (left < 5) {
 			break;
 		}
 
-		length = *(uint32_t*)&m_buffer[current];
+		std::memcpy(&raw_length, &m_buffer[current], sizeof(raw_length));
+		const size_t length = raw_length;
 		type = *(uint8_t*)&m_buffer[current + 4];
 
-		if (current + 5 + length > total) {
+		if (length > left - 5) {
 			break;
 		}
 
@@ -247,8 +253,8 @@ void EQ::Net::ServertalkServerConnection::ProcessOldReadBuffer()
 
 		/*
 		//header:
-		//uint32 length;
-		//uint8 type;
+		//uint16 opcode;
+		//uint16 length;
 		*/
 		uint16_t length = 0;
 		uint16_t opcode = 0;
@@ -256,15 +262,15 @@ void EQ::Net::ServertalkServerConnection::ProcessOldReadBuffer()
 			break;
 		}
 
-		opcode = *(uint16_t*)&m_buffer[current];
-		length = *(uint16_t*)&m_buffer[current + 2];
+		std::memcpy(&opcode, &m_buffer[current], sizeof(opcode));
+		std::memcpy(&length, &m_buffer[current + 2], sizeof(length));
 		if (length < 4) {
 			break;
 		}
 
 		length -= 4;
 
-		if (current + 4 + length > total) {
+		if (length > left - 4) {
 			break;
 		}
 

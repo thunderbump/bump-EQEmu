@@ -20,6 +20,8 @@
 #include "common/net/dns.h"
 #include "common/eqemu_logsys.h"
 
+#include <cstring>
+
 EQ::Net::ServertalkLegacyClient::ServertalkLegacyClient(const std::string &addr, int port, bool ipv6)
 	: m_timer(std::make_unique<EQ::Timer>(100, true, std::bind(&EQ::Net::ServertalkLegacyClient::Connect, this)))
 {
@@ -147,15 +149,15 @@ void EQ::Net::ServertalkLegacyClient::ProcessReadBuffer()
 			break;
 		}
 
-		opcode = *(uint16_t*)&m_buffer[current];
-		length = *(uint16_t*)&m_buffer[current + 2];
+		std::memcpy(&opcode, &m_buffer[current], sizeof(opcode));
+		std::memcpy(&length, &m_buffer[current + 2], sizeof(length));
 		if (length < 4) {
 			break;
 		}
 
 		length -= 4;
 
-		if (current + 4 + length > total) {
+		if (length > left - 4) {
 			break;
 		}
 
