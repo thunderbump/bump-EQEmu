@@ -116,8 +116,8 @@ public:
 		// Fixed ASCII fields fit below the worker's 500-byte encoded context limit.
 		char context[480];
 		const int length = std::snprintf(context, sizeof(context),
-			"EQEMU_MAP_MEMORY_V1 stage=%s sample_fields=elapsed_ms,rss_kib,hwm_kib "
-			"elapsed_origin=pre_decode scope=process hwm_scope=lifetime pre=%s decoded=%s raycast=%s %s",
+			"EQEMU_MAP_MEMORY_V1 stage=%s elapsed_origin=pre_decode scope=process hwm_scope=lifetime "
+			"pre_ms_rssKiB_hwmKiB=%s decoded_ms_rssKiB_hwmKiB=%s raycast_ms_rssKiB_hwmKiB=%s %s",
 			stages[index], samples_[0], samples_[1], samples_[2], counts);
 		if (length >= 0 && static_cast<std::size_t>(length) < sizeof(context)) {
 			std::fprintf(stderr, "EQEMU_NATIVE_DIAGNOSTIC_CONTEXT %s\n", context);
