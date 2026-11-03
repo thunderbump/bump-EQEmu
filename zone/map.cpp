@@ -26,10 +26,117 @@
 #include "zone/zone.h"
 
 #include <algorithm>
+#include <cerrno>
+#include <charconv>
+#include <cstdio>
+#include <cstring>
+#include <limits>
 #include <map>
 #include <memory>
 #include <tuple>
 #include <vector>
+
+#if defined(__linux__)
+#include <time.h>
+#endif
+
+namespace {
+
+// Temporary diagnostic: repeat earlier samples in the latest bounded worker context.
+// KiB values are Linux /proc/self/status samples, not allocation or phase peaks.
+class MapMemoryDiagnostic
+{
+public:
+
+	enum class Stage { BeforeDecode, AfterDecode, AfterRaycast };
+
+	MapMemoryDiagnostic() noexcept
+	{
+		const int saved_errno = errno;
+#if defined(__linux__)
+		started_available_ = clock_gettime(CLOCK_MONOTONIC, &started_) == 0 && started_.tv_sec >= 0;
+#endif
+		errno = saved_errno;
+	}
+
+	void Record(Stage stage, const MapV2::Mesh *mesh = nullptr) noexcept
+	{
+		const int saved_errno = errno;
+		char elapsed[21] = "unavailable";
+		char rss[21] = "unavailable";
+		char hwm[21] = "unavailable";
+#if defined(__linux__)
+		timespec now{};
+		if (started_available_ && clock_gettime(CLOCK_MONOTONIC, &now) == 0 &&
+			(now.tv_sec > started_.tv_sec || (now.tv_sec == started_.tv_sec && now.tv_nsec >= started_.tv_nsec))) {
+			auto seconds = static_cast<unsigned long long>(now.tv_sec - started_.tv_sec);
+			long nanoseconds = now.tv_nsec - started_.tv_nsec;
+			if (nanoseconds < 0) {
+				--seconds;
+				nanoseconds += 1000000000L;
+			}
+			if (seconds <= (std::numeric_limits<unsigned long long>::max() - 999) / 1000) {
+				std::snprintf(elapsed, sizeof(elapsed), "%llu", seconds * 1000 + nanoseconds / 1000000);
+			}
+		}
+
+		if (FILE *status = std::fopen("/proc/self/status", "r")) {
+			char line[160];
+			const auto read_kib = [&line](const char *key, char *value, std::size_t capacity) {
+				const auto key_length = std::strlen(key);
+				if (std::strncmp(line, key, key_length) != 0) {
+					return;
+				}
+				const char *begin = line + key_length;
+				while (*begin == ' ' || *begin == '\t') {
+					++begin;
+				}
+				unsigned long long kib;
+				const auto parsed = std::from_chars(begin, line + std::strlen(line), kib);
+				if (parsed.ec == std::errc{} && std::strcmp(parsed.ptr, " kB\n") == 0) {
+					// Linux's status "kB" denotes 1024 bytes.
+					std::snprintf(value, capacity, "%llu", kib);
+				}
+			};
+			for (unsigned int lines = 0; lines < 128 && std::fgets(line, sizeof(line), status); ++lines) {
+				read_kib("VmRSS:", rss, sizeof(rss));
+				read_kib("VmHWM:", hwm, sizeof(hwm));
+			}
+			std::fclose(status);
+		}
+#endif
+		const auto index = static_cast<std::size_t>(stage);
+		std::snprintf(samples_[index], sizeof(samples_[index]), "%s,%s,%s", elapsed, rss, hwm);
+		char counts[128] = "v=unavailable i=unavailable t=unavailable";
+		if (mesh) {
+			std::snprintf(counts, sizeof(counts), "v=%zu i=%zu t=%zu",
+				mesh->vertices.size(), mesh->indices.size(), mesh->indices.size() / 3);
+		}
+		const char *stages[] = {"pre_decode", "post_decode", "post_raycast"};
+		// Fixed ASCII fields fit below the worker's 500-byte encoded context limit.
+		char context[480];
+		const int length = std::snprintf(context, sizeof(context),
+			"EQEMU_MAP_MEMORY_V1 stage=%s sample_fields=elapsed_ms,rss_kib,hwm_kib "
+			"elapsed_origin=pre_decode scope=process hwm_scope=lifetime pre=%s decoded=%s raycast=%s %s",
+			stages[index], samples_[0], samples_[1], samples_[2], counts);
+		if (length >= 0 && static_cast<std::size_t>(length) < sizeof(context)) {
+			std::fprintf(stderr, "EQEMU_NATIVE_DIAGNOSTIC_CONTEXT %s\n", context);
+		} else {
+			std::fprintf(stderr, "EQEMU_NATIVE_DIAGNOSTIC_CONTEXT EQEMU_MAP_MEMORY_V1 stage=%s record=unavailable\n", stages[index]);
+		}
+		std::fflush(stderr);
+		errno = saved_errno;
+	}
+
+private:
+	char samples_[3][64] = {"not_sampled", "not_sampled", "not_sampled"};
+#if defined(__linux__)
+	timespec started_{};
+	bool started_available_ = false;
+#endif
+};
+
+} // namespace
 
 struct Map::impl
 {
@@ -463,6 +570,8 @@ bool Map::LoadV2(FILE *f) {
 	}
 
 	MapV2::Mesh mesh;
+	MapMemoryDiagnostic diagnostic;
+	diagnostic.Record(MapMemoryDiagnostic::Stage::BeforeDecode);
 	if (!MapV2::Decode(data.data(), data_size, buffer_size, mesh)) {
 		return false;
 	}
@@ -478,7 +587,9 @@ bool Map::LoadV2(FILE *f) {
 		imp = new impl;
 	}
 
+	diagnostic.Record(MapMemoryDiagnostic::Stage::AfterDecode, &mesh);
 	imp->rm = createRaycastMesh((RmUint32)verts.size(), (const RmReal*)verts.data(), face_count, indices.data());
+	diagnostic.Record(MapMemoryDiagnostic::Stage::AfterRaycast, &mesh);
 
 	if (!imp->rm) {
 		delete imp;
