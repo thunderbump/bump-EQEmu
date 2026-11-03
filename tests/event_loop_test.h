@@ -12,8 +12,15 @@
 
 #include <future>
 #include <chrono>
+#include <cstdint>
+#include <initializer_list>
+#include <limits>
 #include <memory>
 #include <stdexcept>
+#include <string>
+#include <thread>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 class EventLoopTest : public Test::Suite
@@ -26,9 +33,234 @@ public:
 		TEST_ADD(EventLoopTest::NetworkCancel);
 		TEST_ADD(EventLoopTest::TCPWrapperLifetime);
 		TEST_ADD(EventLoopTest::ServertalkParentLifetime);
+		TEST_ADD(EventLoopTest::ServertalkModernFrames);
+		TEST_ADD(EventLoopTest::ServertalkLegacyFrames);
 	}
 
 private:
+	static constexpr uint16_t FrameOpcode = 0x4321;
+	using FrameRecord = std::tuple<char, uint16_t, std::string>;
+	using FrameRecords = std::vector<FrameRecord>;
+
+	template <typename T>
+	static void AppendFrameScalar(std::string &bytes, T value)
+	{
+		bytes.append(reinterpret_cast<const char *>(&value), sizeof(value));
+	}
+
+	// Construct native wire bytes independently of the receive implementation.
+	static std::string FrameBytes(bool legacy, const std::string &body, uint16_t opcode = FrameOpcode)
+	{
+		std::string bytes;
+		if (legacy) {
+			AppendFrameScalar(bytes, opcode);
+			AppendFrameScalar(bytes, static_cast<uint16_t>(body.size() + 4));
+		} else {
+			AppendFrameScalar(bytes, static_cast<uint32_t>(body.size() + 6));
+			AppendFrameScalar(bytes, static_cast<uint8_t>(EQ::Net::ServertalkMessage));
+			AppendFrameScalar(bytes, static_cast<uint32_t>(body.size()));
+			AppendFrameScalar(bytes, opcode);
+		}
+		bytes += body;
+		return bytes;
+	}
+
+	static void RecordFrame(FrameRecords &records, char route, uint16_t opcode, EQ::Net::Packet &packet)
+	{
+		std::string body;
+		// Empty legacy packets use DynamicPacket; its empty Data contract is separate.
+		if (packet.Length() != 0) {
+			body.assign(static_cast<const char *>(packet.Data()), packet.Length());
+		}
+		records.emplace_back(route, opcode, std::move(body));
+	}
+
+	struct FrameFixture
+	{
+		EQ::EventLoop &loop = EQ::EventLoop::Get();
+		FrameRecords client_records, server_records;
+		std::unique_ptr<EQ::Net::ServertalkServer> server;
+		std::unique_ptr<EQ::Net::ServertalkClient> client;
+		std::unique_ptr<EQ::Net::ServertalkLegacyClient> legacy_client;
+		std::shared_ptr<EQ::Net::ServertalkServerConnection> child;
+		bool close_attempted = false;
+		bool closed = false;
+
+		~FrameFixture() { Close(); }
+
+		bool Close()
+		{
+			if (!close_attempted) {
+				close_attempted = true;
+				if (client) { client->Close(); }
+				if (legacy_client) { legacy_client->Close(); }
+				if (server) { server->Close(); }
+				// Keep every owner and callback record alive through the bounded drain.
+				closed = loop.Close(2000) == 0;
+			}
+			return closed;
+		}
+
+		template <typename Ready>
+		bool Wait(Ready ready)
+		{
+			const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+			while (!ready() && std::chrono::steady_clock::now() < deadline) {
+				loop.Process();
+				std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			}
+			return ready();
+		}
+
+		bool Start(bool legacy)
+		{
+			server = std::make_unique<EQ::Net::ServertalkServer>();
+			EQ::Net::ServertalkServerOptions options;
+			options.port = 0;
+			server->Listen(options);
+			server->OnConnectionIdentified(legacy ? "World" : "Test", [this](auto connection) {
+				child = connection;
+				child->OnMessage(FrameOpcode, [this](auto opcode, auto &packet) {
+					RecordFrame(server_records, 's', opcode, packet);
+				});
+				child->OnMessage([this](auto opcode, auto &packet) {
+					RecordFrame(server_records, 'g', opcode, packet);
+				});
+			});
+			if (legacy) {
+				legacy_client = std::make_unique<EQ::Net::ServertalkLegacyClient>("127.0.0.1", server->LocalPort(), false);
+				legacy_client->OnMessage(FrameOpcode, [this](auto opcode, auto &packet) {
+					RecordFrame(client_records, 's', opcode, packet);
+				});
+				legacy_client->OnMessage([this](auto opcode, auto &packet) {
+					RecordFrame(client_records, 'g', opcode, packet);
+				});
+				if (!Wait([this] { return legacy_client->Handle() != nullptr; })) { return false; }
+				const std::string body(sizeof(LoginserverNewWorldRequest), '\0');
+				const auto hello = FrameBytes(true, body, ServerOP_NewLSInfo);
+				legacy_client->Handle()->Write(hello.data(), 4);
+				if (!Wait([this] { return child && EQ::Net::TCPConnection::PendingWrites() == 0; })) { return false; }
+				if (!server_records.empty()) { return false; }
+				// The real sniff consumed no body. Finish its buffered header without pumping peers.
+				const auto tail = hello.substr(4) + FrameBytes(true, "a") + FrameBytes(true, "bc") + FrameBytes(true, "def");
+				child->Handle()->Read(tail.data(), tail.size());
+				const FrameRecords expected = {{'g', ServerOP_NewLSInfo, body},
+					{'s', FrameOpcode, "a"}, {'g', FrameOpcode, "a"},
+					{'s', FrameOpcode, "bc"}, {'g', FrameOpcode, "bc"},
+					{'s', FrameOpcode, "def"}, {'g', FrameOpcode, "def"}};
+				if (server_records != expected || !client_records.empty()) { return false; }
+				server_records.clear();
+			} else {
+				client = std::make_unique<EQ::Net::ServertalkClient>("127.0.0.1", server->LocalPort(), false, "Test", "");
+				client->OnMessage(FrameOpcode, [this](auto opcode, auto &packet) {
+					RecordFrame(client_records, 's', opcode, packet);
+				});
+				client->OnMessage([this](auto opcode, auto &packet) {
+					RecordFrame(client_records, 'g', opcode, packet);
+				});
+				if (!Wait([this] { return child && client->Handle() && EQ::Net::TCPConnection::PendingWrites() == 0; })) { return false; }
+			}
+			return client_records.empty() && server_records.empty();
+		}
+	};
+
+	static bool CheckFrameStream(const std::shared_ptr<EQ::Net::TCPConnection> &connection, FrameRecords &records, bool legacy)
+	{
+		const std::vector<std::string> bodies = legacy ? std::vector<std::string>{"a", "bc", "def"}
+			: std::vector<std::string>{"ab", "cde", "f"};
+		FrameRecords expected;
+		const auto delivered = [&](const std::string &body) {
+			expected.emplace_back('s', FrameOpcode, body);
+			expected.emplace_back('g', FrameOpcode, body);
+		};
+		std::string joined;
+		for (const auto &body : bodies) { joined += FrameBytes(legacy, body); delivered(body); }
+		// Modern totals 13/14/12 and legacy totals 5/6/7 force odd later headers.
+		connection->Read(joined.data(), joined.size());
+		if (records != expected) { return false; }
+		for (const auto &body : bodies) {
+			const auto frame = FrameBytes(legacy, body);
+			for (size_t cut = 1; cut < frame.size(); ++cut) {
+				connection->Read(frame.data(), cut);
+				if (records != expected) { return false; }
+				connection->Read(frame.data() + cut, frame.size() - cut);
+				delivered(body);
+				if (records != expected) { return false; }
+			}
+		}
+		const auto first = FrameBytes(legacy, bodies[0]);
+		const auto second = FrameBytes(legacy, bodies[1]);
+		const auto partial = first + second.substr(0, 3);
+		connection->Read(partial.data(), partial.size());
+		delivered(bodies[0]);
+		if (records != expected) { return false; }
+		connection->Read(second.data() + 3, second.size() - 3);
+		delivered(bodies[1]);
+		if (records != expected) { return false; }
+
+		std::string empty;
+		if (legacy) {
+			empty = FrameBytes(true, "");
+			delivered("");
+		} else {
+			AppendFrameScalar(empty, uint32_t{0});
+			AppendFrameScalar(empty, uint8_t{255}); // Unknown type is consumed, without dispatch.
+		}
+		empty += first;
+		connection->Read(empty.data(), empty.size());
+		delivered(bodies[0]);
+		return records == expected;
+	}
+
+	static bool CheckFrameSession(bool legacy, uint32_t terminal_length)
+	{
+		FrameFixture fixture;
+		bool passed = false;
+		try {
+			if (fixture.Start(legacy)) {
+				const auto client = legacy ? fixture.legacy_client->Handle() : fixture.client->Handle();
+				const auto server = fixture.child->Handle();
+				passed = CheckFrameStream(client, fixture.client_records, legacy)
+					&& CheckFrameStream(server, fixture.server_records, legacy);
+				std::string pending;
+				if (legacy) {
+					AppendFrameScalar(pending, FrameOpcode);
+					AppendFrameScalar(pending, static_cast<uint16_t>(terminal_length));
+				} else {
+					AppendFrameScalar(pending, terminal_length);
+					AppendFrameScalar(pending, static_cast<uint8_t>(EQ::Net::ServertalkMessage));
+				}
+				const auto client_before = fixture.client_records;
+				const auto server_before = fixture.server_records;
+				client->Read(pending.data(), pending.size());
+				server->Read(pending.data(), pending.size());
+				passed = passed && fixture.client_records == client_before && fixture.server_records == server_before
+					&& client->IsConnected() && server->IsConnected();
+			}
+		} catch (...) {
+			passed = false;
+		}
+		const bool closed = fixture.Close();
+		return passed && closed && EQ::Net::TCPConnection::PendingWrites() == 0;
+	}
+
+	void ServertalkModernFrames()
+	{
+		// Controlled receive-callback boundaries, not assumptions about TCP segmentation.
+		auto result = std::async(std::launch::async, [] {
+			return CheckFrameSession(false, std::numeric_limits<uint32_t>::max());
+		});
+		TEST_ASSERT(result.get());
+	}
+
+	void ServertalkLegacyFrames()
+	{
+		for (uint16_t length : {uint16_t{0}, uint16_t{1}, uint16_t{2}, uint16_t{3}, std::numeric_limits<uint16_t>::max()}) {
+			auto result = std::async(std::launch::async, [length] { return CheckFrameSession(true, length); });
+			TEST_ASSERT(result.get());
+		}
+	}
+
 	void TimerClose()
 	{
 		auto result = std::async(std::launch::async, [] {
