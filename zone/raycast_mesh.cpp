@@ -21,11 +21,25 @@
 #include "common/memory/ksm.h"
 
 #include <cassert>
+#include <cerrno>
+#include <charconv>
 #include <cmath>
+#include <cstdio>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <vector>
+
+#if defined(__linux__)
+#include <fcntl.h>
+#include <time.h>
+#endif
+#if defined(_WIN32)
+#include <io.h>
+#elif defined(__linux__) || defined(__unix__) || defined(__APPLE__)
+#include <unistd.h>
+#endif
 
 // This code snippet allows you to create an axis aligned bounding volume tree for a triangle mesh so that you can do
 // high-speed raycasting.
@@ -61,6 +75,286 @@ namespace RAYCAST_MESH
 {
 
 typedef std::vector<RmUint32, PageAlignedAllocator<RmUint32>> TriVector;
+
+namespace {
+
+// Temporary construction-only accounting. Capacities are requested payload bytes,
+// not RSS, allocator overhead, or the transient old+new overlap during reallocation.
+class BvhMemoryDiagnostic
+{
+public:
+
+	using Count = unsigned long long;
+	enum class Stage { Entry, Fixed, Complete };
+
+	void Fixed(std::size_t node_bytes, std::size_t real_bytes, std::size_t id_bytes,
+		RmUint32 nodes, RmUint32 vertices, RmUint32 triangles) noexcept
+	{
+		node_bytes_ = node_bytes;
+		real_bytes_ = real_bytes;
+		id_bytes_ = id_bytes;
+		Add(fixed_bytes_, Multiply(Size(node_bytes), nodes));
+		Add(fixed_bytes_, Multiply(Multiply(Size(real_bytes), 3), vertices));
+		Add(fixed_bytes_, Multiply(Multiply(Size(id_bytes), 3), triangles));
+		Add(fixed_bytes_, Multiply(Size(id_bytes), triangles));
+		Add(fixed_bytes_, Multiply(Multiply(Size(real_bytes), 3), triangles));
+	}
+
+	// Node progress is split-entry count and maximum visited depth, not pool capacity.
+	void Node(RmUint32 depth) noexcept
+	{
+		Add(nodes_, 1);
+		if (depth > depth_) { depth_ = depth; }
+	}
+
+	void Duplicate() noexcept { Add(duplicates_, 1); }
+
+	void LeafAppend(const TriVector &leaf, bool count_header) noexcept
+	{
+		Add(count_header ? leaves_ : references_, 1);
+		leaf_size_ = Size(leaf.size());
+		const auto capacity = leaf.capacity();
+		if (capacity != leaf_capacity_) {
+			Transition(leaf_capacity_, capacity, false);
+			leaf_capacity_ = capacity;
+			Progress();
+		}
+	}
+
+	void ScratchTransition(std::size_t before, std::size_t after) noexcept
+	{
+		Transition(before, after, true);
+		Progress();
+	}
+
+	// Called by a guard declared BEFORE its vector, after that vector has destructed.
+	void ScratchReleased(std::size_t capacity) noexcept
+	{
+		const auto bytes = Bytes(capacity);
+		Subtract(scratch_live_, bytes);
+		Add(released_, bytes);
+	}
+
+	void Record(Stage stage) noexcept
+	{
+		const char *names[] = {"entry", "fixed", "complete"};
+		Emit(names[static_cast<std::size_t>(stage)]);
+	}
+
+private:
+	Count Size(std::size_t value) noexcept
+	{
+		if constexpr (sizeof(std::size_t) > sizeof(Count)) {
+			if (value > std::numeric_limits<Count>::max()) { valid_ = false; return 0; }
+		}
+		return static_cast<Count>(value);
+	}
+
+	Count Multiply(Count a, Count b) noexcept
+	{
+		if (a && b > std::numeric_limits<Count>::max() / a) { valid_ = false; return 0; }
+		return a * b;
+	}
+
+	Count Bytes(std::size_t capacity) noexcept { return Multiply(Size(capacity), sizeof(RmUint32)); }
+
+	void Add(Count &value, Count amount) noexcept
+	{
+		if (!valid_) { return; }
+		if (amount > std::numeric_limits<Count>::max() - value) { valid_ = false; return; }
+		value += amount;
+	}
+
+	void Subtract(Count &value, Count amount) noexcept
+	{
+		if (!valid_) { return; }
+		if (amount > value) { valid_ = false; return; }
+		value -= amount;
+	}
+
+	// Combined scratch+leaf traffic, after the original reserve/push returns and
+	// deallocates its previous buffer. Failed in-progress allocations are uncounted;
+	// final member-owned leaf destruction occurs after this local diagnostic ends.
+	void Transition(std::size_t before, std::size_t after, bool scratch) noexcept
+	{
+		const auto old_bytes = Bytes(before);
+		const auto new_bytes = Bytes(after);
+		Add(allocated_, new_bytes);
+		Add(released_, old_bytes);
+		if (scratch) {
+			Subtract(scratch_live_, old_bytes);
+			Add(scratch_live_, new_bytes);
+			if (scratch_live_ > scratch_high_) { scratch_high_ = scratch_live_; }
+		} else {
+			leaf_bytes_ = new_bytes;
+		}
+	}
+
+	void Progress() noexcept
+	{
+		// At most 29 progress emissions leave room for all three phase records.
+		// Accounting continues after progress logging stops.
+		if (progress_ >= 29 || progress_disabled_) { return; }
+		if (!valid_) {
+			progress_disabled_ = true;
+		} else {
+			if (!next_traffic_ || allocated_ < next_traffic_) { return; }
+			do {
+				if (next_traffic_ > std::numeric_limits<Count>::max() / 2) {
+					next_traffic_ = 0;
+					break;
+				}
+				next_traffic_ *= 2;
+			} while (next_traffic_ <= allocated_);
+		}
+		++progress_;
+		Emit("progress");
+	}
+
+	void Emit(const char *stage) noexcept
+	{
+		if (emissions_ >= 32) { return; }
+		++emissions_;
+		const int saved_errno = errno;
+		char ms[21] = "unavailable", rss[21] = "unavailable", hwm[21] = "unavailable";
+#if defined(__linux__)
+		timespec now{};
+		const bool have_now = clock_gettime(CLOCK_MONOTONIC, &now) == 0 && now.tv_sec >= 0;
+		if (!clock_attempted_) {
+			clock_attempted_ = true;
+			started_available_ = have_now;
+			if (have_now) { started_ = now; }
+		}
+		if (started_available_ && have_now &&
+			(now.tv_sec > started_.tv_sec || (now.tv_sec == started_.tv_sec && now.tv_nsec >= started_.tv_nsec))) {
+			auto seconds = static_cast<Count>(now.tv_sec - started_.tv_sec);
+			long ns = now.tv_nsec - started_.tv_nsec;
+			if (ns < 0) { --seconds; ns += 1000000000L; }
+			if (seconds <= (std::numeric_limits<Count>::max() - 999) / 1000) {
+				const int formatted = std::snprintf(ms, sizeof(ms), "%llu", seconds * 1000 + ns / 1000000);
+				if (formatted < 0 || static_cast<std::size_t>(formatted) >= sizeof(ms)) {
+					std::memcpy(ms, "unavailable", sizeof("unavailable"));
+				}
+			}
+		}
+		const int fd = open("/proc/self/status", O_RDONLY | O_CLOEXEC);
+		if (fd >= 0) {
+			char status[8192];
+			const auto length = read(fd, status, sizeof(status) - 1);
+			close(fd);
+			if (length > 0) {
+				status[length] = '\0';
+				char *line = status;
+				for (unsigned int lines = 0; lines < 128; ++lines) {
+					char *end = std::strchr(line, '\n');
+					if (!end) { break; }
+					*end = '\0';
+					const auto field = [line, end](const char *key, char *value, std::size_t capacity) {
+						const auto key_length = std::strlen(key);
+						if (std::strncmp(line, key, key_length) != 0) { return; }
+						const char *begin = line + key_length;
+						while (*begin == ' ' || *begin == '\t') { ++begin; }
+						Count kib;
+						const auto parsed = std::from_chars(begin, end, kib);
+						if (parsed.ec == std::errc{} && std::strcmp(parsed.ptr, " kB") == 0) {
+							const int formatted = std::snprintf(value, capacity, "%llu", kib);
+							if (formatted < 0 || static_cast<std::size_t>(formatted) >= capacity) {
+								std::memcpy(value, "unavailable", sizeof("unavailable"));
+							}
+						}
+					};
+					field("VmRSS:", rss, sizeof(rss));
+					field("VmHWM:", hwm, sizeof(hwm));
+					line = end + 1;
+				}
+			}
+		}
+#endif
+		char context[496];
+		int length = -1;
+		if (valid_) {
+			length = std::snprintf(context, sizeof(context),
+				"EQEMU_BVH_MEMORY_V1 stage=%s seq=%u p=%u scope=process hwm=lifetime "
+				"entry_ms=%s rss_kib=%s hwm_kib=%s node_real_id_B=%zu,%zu,%zu fixed_B=%llu "
+				"leaf_size_refs_leaves=%llu,%llu,%llu leaf_cap_B=%llu scratch_live_hi_B=%llu,%llu "
+				"alloc_free_B=%llu,%llu dup_maxdepth_visits=%llu,%u,%llu",
+				stage, emissions_, progress_, ms, rss, hwm, node_bytes_, real_bytes_, id_bytes_, fixed_bytes_,
+				leaf_size_, references_, leaves_, leaf_bytes_, scratch_live_, scratch_high_,
+				allocated_, released_, duplicates_, depth_, nodes_);
+		}
+		if (length < 0 || static_cast<std::size_t>(length) >= sizeof(context)) {
+			length = std::snprintf(context, sizeof(context),
+				"EQEMU_BVH_MEMORY_V1 stage=%s seq=%u p=%u limit=%s scope=process hwm=lifetime "
+				"entry_ms=%s rss_kib=%s hwm_kib=%s",
+				stage, emissions_, progress_, valid_ ? "format" : "accounting_unavailable", ms, rss, hwm);
+			if (length < 0 || static_cast<std::size_t>(length) >= sizeof(context)) {
+				std::memcpy(context, "EQEMU_BVH_MEMORY_V1 limit=format", sizeof("EQEMU_BVH_MEMORY_V1 limit=format"));
+			}
+		}
+		char record[544];
+		constexpr char prefix[] = "EQEMU_NATIVE_DIAGNOSTIC_CONTEXT ";
+		const auto context_length = std::strlen(context);
+		const auto record_length = sizeof(prefix) - 1 + context_length + 1;
+		if (record_length <= sizeof(record)) {
+			std::memcpy(record, prefix, sizeof(prefix) - 1);
+			std::memcpy(record + sizeof(prefix) - 1, context, context_length);
+			record[record_length - 1] = '\n';
+			std::size_t sent = 0;
+			// Unbuffered descriptor writes need no stdio allocation or delayed flush.
+			for (unsigned int attempts = 0; attempts < 4 && sent < record_length; ++attempts) {
+#if defined(_WIN32)
+				const auto written = _write(2, record + sent, static_cast<unsigned int>(record_length - sent));
+#elif defined(__linux__) || defined(__unix__) || defined(__APPLE__)
+				const auto written = write(STDERR_FILENO, record + sent, record_length - sent);
+#else
+				break; // No unbuffered backend here; missing context is inconclusive.
+#endif
+#if defined(_WIN32) || defined(__linux__) || defined(__unix__) || defined(__APPLE__)
+				if (written > 0) { sent += static_cast<std::size_t>(written); }
+				else if (written == 0 || errno != EINTR) { break; }
+#endif
+			}
+		}
+		errno = saved_errno;
+	}
+
+	Count fixed_bytes_ = 0, allocated_ = 0, released_ = 0;
+	Count scratch_live_ = 0, scratch_high_ = 0, leaf_bytes_ = 0, leaf_size_ = 0;
+	Count references_ = 0, leaves_ = 0, duplicates_ = 0, nodes_ = 0;
+	Count next_traffic_ = 1024 * 1024;
+	std::size_t leaf_capacity_ = 0, node_bytes_ = 0, real_bytes_ = 0, id_bytes_ = 0;
+	unsigned int depth_ = 0, emissions_ = 0, progress_ = 0;
+	bool valid_ = true, progress_disabled_ = false;
+#if defined(__linux__)
+	timespec started_{};
+	bool clock_attempted_ = false, started_available_ = false;
+#endif
+};
+
+// This guard owns only a scalar observation, never the vector or its storage.
+class BvhScratchLifetime
+{
+public:
+	explicit BvhScratchLifetime(BvhMemoryDiagnostic &diagnostic) noexcept : diagnostic_(diagnostic) {}
+	~BvhScratchLifetime() noexcept { diagnostic_.ScratchReleased(capacity_); }
+	BvhScratchLifetime(const BvhScratchLifetime &) = delete;
+	BvhScratchLifetime &operator=(const BvhScratchLifetime &) = delete;
+
+	void Observe(const TriVector &vector) noexcept
+	{
+		const auto capacity = vector.capacity();
+		if (capacity != capacity_) {
+			diagnostic_.ScratchTransition(capacity_, capacity);
+			capacity_ = capacity;
+		}
+	}
+
+private:
+	BvhMemoryDiagnostic &diagnostic_;
+	std::size_t capacity_ = 0;
+};
+
+} // namespace
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /**
@@ -459,14 +753,17 @@ public:
 			RmUint32 minLeafSize,	// minimum triangles to treat as a 'leaf' node.
 			RmReal	minAxisSize,
 			NodeInterface *callback,
-			TriVector &leafTriangles)	// once a particular axis is less than this size, stop sub-dividing.
+			TriVector &leafTriangles,
+			BvhMemoryDiagnostic &diagnostic)	// once a particular axis is less than this size, stop sub-dividing.
 
 		{
 			mLeft = NULL;
 			mRight = NULL;
 			mLeafTriangleIndex = TRI_EOF;
+			BvhScratchLifetime triangles_lifetime(diagnostic);
 			TriVector triangles;
 			triangles.reserve(tcount);
+			triangles_lifetime.Observe(triangles);
 			for (RmUint32 i=0; i<tcount; i++)
 			{
 				triangles.push_back(i);
@@ -479,7 +776,7 @@ public:
 				mBounds.include( vtx );
 				vtx+=3;
 			}
-			split(triangles,vcount,vertices,tcount,indices,0,maxDepth,minLeafSize,minAxisSize,callback,leafTriangles);
+			split(triangles,vcount,vertices,tcount,indices,0,maxDepth,minLeafSize,minAxisSize,callback,leafTriangles,diagnostic);
 		}
 
 		NodeAABB(const BoundsAABB &aabb)
@@ -505,9 +802,11 @@ public:
 			RmUint32 minLeafSize,	// minimum triangles to treat as a 'leaf' node.
 			RmReal	minAxisSize,
 			NodeInterface *callback,
-			TriVector &leafTriangles)	// once a particular axis is less than this size, stop sub-dividing.
+			TriVector &leafTriangles,
+			BvhMemoryDiagnostic &diagnostic)	// once a particular axis is less than this size, stop sub-dividing.
 
 		{
+			diagnostic.Node(depth);
 			// Find the longest axis of the bounding volume of this node
 			RmReal dx = mBounds.mMax[0] - mBounds.mMin[0];
 			RmReal dy = mBounds.mMax[1] - mBounds.mMin[1];
@@ -539,9 +838,11 @@ public:
 				// Copy the triangle indices into the leaf triangles array
 				mLeafTriangleIndex = leafTriangles.size(); // assign the array start location for these leaf triangles.
 				leafTriangles.push_back(count);
+				diagnostic.LeafAppend(leafTriangles, true);
 				for (auto i = triangles.begin(); i != triangles.end(); ++i) {
 					RmUint32 tri = *i;
 					leafTriangles.push_back(tri);
+					diagnostic.LeafAppend(leafTriangles, false);
 				}
 			}
 			else
@@ -555,7 +856,9 @@ public:
 
 				BoundsAABB leftBounds,rightBounds;
 
+				BvhScratchLifetime left_lifetime(diagnostic);
 				TriVector leftTriangles;
+				BvhScratchLifetime right_lifetime(diagnostic);
 				TriVector rightTriangles;
 
 
@@ -588,6 +891,7 @@ public:
 							leftBounds.include(p2);
 							leftBounds.include(p3);
 							leftTriangles.push_back(tri); // Add this triangle to the 'left triangles' array and revise the left triangles bounding volume
+							left_lifetime.Observe(leftTriangles);
 						}
 						// if the orCode is zero; meaning the triangle was fully self-contiained int he left bounding box; then we don't need to test against the right
 						if ( orCode && b2.containsTriangleExact(p1,p2,p3,orCode))
@@ -602,6 +906,8 @@ public:
 							rightBounds.include(p2);
 							rightBounds.include(p3);
 							rightTriangles.push_back(tri); // Add this triangle to the 'right triangles' array and revise the right triangles bounding volume.
+							if (addCount == 2) { diagnostic.Duplicate(); }
+							right_lifetime.Observe(rightTriangles);
 						}
 						assert( addCount );
 					}
@@ -613,7 +919,7 @@ public:
 					mLeft = callback->getNode();	// get a new AABB node
 					new ( mLeft ) NodeAABB(leftBounds);		// initialize it to default constructor values.
 					// Then recursively split this node.
-					mLeft->split(leftTriangles,vcount,vertices,tcount,indices,depth+1,maxDepth,minLeafSize,minAxisSize,callback,leafTriangles);
+					mLeft->split(leftTriangles,vcount,vertices,tcount,indices,depth+1,maxDepth,minLeafSize,minAxisSize,callback,leafTriangles,diagnostic);
 				}
 
 				if ( !rightTriangles.empty() ) // If there are triangles in the right half then..
@@ -622,7 +928,7 @@ public:
 					mRight = callback->getNode(); // allocate and default initialize a new node
 					new ( mRight ) NodeAABB(rightBounds);
 					// Recursively split this node.
-					mRight->split(rightTriangles,vcount,vertices,tcount,indices,depth+1,maxDepth,minLeafSize,minAxisSize,callback,leafTriangles);
+					mRight->split(rightTriangles,vcount,vertices,tcount,indices,depth+1,maxDepth,minLeafSize,minAxisSize,callback,leafTriangles,diagnostic);
 				}
 
 			}
@@ -760,6 +1066,7 @@ public:
 
 	MyRaycastMesh(RmUint32 vcount,const RmReal *vertices,RmUint32 tcount,const RmUint32 *indices,RmUint32 maxDepth,RmUint32 minLeafSize,RmReal minAxisSize)
 	{
+		BvhMemoryDiagnostic diagnostic;
 		mRaycastFrame = 0;
 		if ( maxDepth < 2 )
 		{
@@ -775,6 +1082,8 @@ public:
 		{
 			mMaxNodeCount+=pow2Table[i];
 		}
+		diagnostic.Fixed(sizeof(NodeAABB), sizeof(RmReal), sizeof(RmUint32), mMaxNodeCount, vcount, tcount);
+		diagnostic.Record(BvhMemoryDiagnostic::Stage::Entry);
 		// Allocate page-aligned memory
 		mNodes = static_cast<NodeAABB*>(KSM::AllocatePageAligned(sizeof(NodeAABB) * mMaxNodeCount));
 		if (!mNodes) {
@@ -817,7 +1126,9 @@ public:
 
 		mRoot = getNode();
 		mFaceNormals = NULL;
-		new ( mRoot ) NodeAABB(mVcount,mVertices,mTcount,mIndices,maxDepth,minLeafSize,minAxisSize,this,mLeafTriangles);
+		diagnostic.Record(BvhMemoryDiagnostic::Stage::Fixed);
+		new ( mRoot ) NodeAABB(mVcount,mVertices,mTcount,mIndices,maxDepth,minLeafSize,minAxisSize,this,mLeafTriangles,diagnostic);
+		diagnostic.Record(BvhMemoryDiagnostic::Stage::Complete);
 
 		KSM::MarkMemoryForKSM(mLeafTriangles.data(), mLeafTriangles.size() * sizeof(RmUint32));
 	}
