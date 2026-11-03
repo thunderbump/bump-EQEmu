@@ -75,6 +75,8 @@ namespace RAYCAST_MESH
 {
 
 typedef std::vector<RmUint32, PageAlignedAllocator<RmUint32>> TriVector;
+// Construction scratch is temporary; persistent leaf storage keeps its KSM alignment.
+using ScratchTriVector = std::vector<RmUint32>;
 
 namespace {
 
@@ -340,7 +342,7 @@ public:
 	BvhScratchLifetime(const BvhScratchLifetime &) = delete;
 	BvhScratchLifetime &operator=(const BvhScratchLifetime &) = delete;
 
-	void Observe(const TriVector &vector) noexcept
+	void Observe(const ScratchTriVector &vector) noexcept
 	{
 		const auto capacity = vector.capacity();
 		if (capacity != capacity_) {
@@ -761,7 +763,7 @@ public:
 			mRight = NULL;
 			mLeafTriangleIndex = TRI_EOF;
 			BvhScratchLifetime triangles_lifetime(diagnostic);
-			TriVector triangles;
+			ScratchTriVector triangles;
 			triangles.reserve(tcount);
 			triangles_lifetime.Observe(triangles);
 			for (RmUint32 i=0; i<tcount; i++)
@@ -792,7 +794,7 @@ public:
 		}
 
 		// here is where we split the mesh..
-		void split(const TriVector &triangles,
+		void split(const ScratchTriVector &triangles,
 			RmUint32 vcount,
 			const RmReal *vertices,
 			RmUint32 tcount,
@@ -857,9 +859,9 @@ public:
 				BoundsAABB leftBounds,rightBounds;
 
 				BvhScratchLifetime left_lifetime(diagnostic);
-				TriVector leftTriangles;
+				ScratchTriVector leftTriangles;
 				BvhScratchLifetime right_lifetime(diagnostic);
-				TriVector rightTriangles;
+				ScratchTriVector rightTriangles;
 
 
 				// Create two arrays; one of all triangles which intersect the 'left' half of the bounding volume node
