@@ -568,7 +568,7 @@ void Object::RandomSpawn(bool send_packet) {
 		}
 	}
 
-	LogInfo("[{}] [{}] ([{}] [{}] [{}])", m_data.object_name, m_inst->GetID(), m_data.x, m_data.y, m_data.z);
+	LogInfo("[{}] [{}] ([{}] [{}] [{}])", m_data.object_name, m_inst->GetID(), static_cast<float>(m_data.x), static_cast<float>(m_data.y), static_cast<float>(m_data.z));
 
 	respawn_timer.Disable();
 
