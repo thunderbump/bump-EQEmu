@@ -570,6 +570,11 @@ impl Population {
             self.core.drain();
         } else {
             self.latest = std::array::from_fn(|i| body(&bodies[i]));
+            // Observer admission must not inspect frames rejected by the native
+            // shape guard, including an excess fourth logical actor.
+            for (i, body) in bodies.iter().enumerate() {
+                crate::integration::native_body(i, body, &self.core.actors[i].saved);
+            }
         }
         let mut pending_boots = Vec::new();
         let io = now >= self.io_at;
@@ -620,9 +625,6 @@ impl Population {
                 })
                 .collect()
         };
-        for (i, body) in bodies.iter().enumerate() {
-            crate::integration::native_body(i, body, &self.core.actors[i].saved);
-        }
         let before = self.core.saved();
         let mut actions = self.core.tick(now, &self.latest, &candidates, scanned);
         for (i, saved) in pending_boots {
@@ -789,6 +791,23 @@ fn parse(bytes: &[u8]) -> Option<(&str, &str, u64, Option<usize>)> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn rejected_native_frame_never_indexes_observer_past_actor_count() {
+        for length in [2, 4] {
+            let directory=dir();
+            let mut population=population_open(directory.to_str().unwrap(),"invalid-frame").unwrap();
+            let frames=(0..length).map(|index|ffi::Body {
+                actor:index as u8,
+                ..ffi::Body::default()
+            }).collect();
+            let actions=population.step_inner(1,frames,Vec::new(),false,false);
+            assert_eq!(population.fault,"invalid_native_frame");
+            assert!(actions.is_empty());
+            assert!(population.latest.iter().all(|body|body.drained));
+            drop(population);
+            fs::remove_dir_all(directory).unwrap();
+        }
+    }
     #[test]
     fn travel_cost_includes_reaching_the_exit_before_destination_prey() {
         let mut native = ffi::Body {
