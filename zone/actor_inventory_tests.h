@@ -59,6 +59,20 @@ Result ActorEquipment()
             body->GetAttackTimer().GetSetAtTrigger() != static_cast<uint32>(std::max(RuleI(Combat, MinHastedDelay), 100 * sword->GetItem()->Delay))) {
             return fail("equipment snapshot/armor/weapon delay effects changed");
         }
+        bool long_route = false;
+        for (const auto &offset : {glm::vec2(100,0), glm::vec2(-100,0), glm::vec2(0,100), glm::vec2(0,-100)}) {
+            glm::vec3 point(body->GetX()+offset.x, body->GetY()+offset.y, body->GetZ()+20);
+            const auto floor = zone->zonemap->FindBestZ(point, nullptr);
+            if (!std::isfinite(floor) || floor == BEST_Z_INVALID) { continue; }
+            point.z = floor + body->GetZOffset();
+            auto &movement = MobMovementManager::Get();
+            if (movement.CanNavigateActorTo(body, point.x, point.y, point.z, MobMovementManager::ActorRoutePurpose::Transfer)) {
+                if (movement.CanNavigateActorTo(body, point.x, point.y, point.z, false)) { return fail("transfer widened proof route limit"); }
+                long_route = true;
+                break;
+            }
+        }
+        if (!long_route) { return fail("no actual transfer navmesh route beyond proof80 admitted"); }
         const auto hp = other->GetHP();
         if (body->Attack(other.get()) || body->Mob::Attack(other.get()) || other->GetHP() != hp) {
             return fail("equipment path admitted unauthorized actor swing");

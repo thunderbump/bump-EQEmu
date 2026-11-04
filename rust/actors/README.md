@@ -689,13 +689,12 @@ incremental-build, fresh-consumer or broader gameplay qualification is asserted.
 
 ## Staging population MVP
 
-`population-hunt-v1` is an independent opt-in profile layered on the accepted
-single-actor demo. The default slot, sealed proof limits and old demo controls
-are retained. This source note describes its code contract; Root owns live
-configuration, deployment, recovery decisions and authoritative Operations
-records under the bump-eqemu multi-actor persistence plan.
+`population-hunt-v1` remains an opt-in staging profile. The single-actor proof,
+its movement limits and demo controls are retained. Authoritative plans and
+validation evidence belong in Operations under `content/projects/bump-eqemu/`.
+This section describes the source contract, not runtime qualification.
 
-Enable only in staging, with all three variables:
+Set these variables for world and every participating zone process:
 
 ```sh
 EQEMU_STAGING_ACTOR_DEMO=1
@@ -703,20 +702,18 @@ EQEMU_STAGING_ACTOR_SCENARIO=population-hunt-v1
 EQEMU_STAGING_ACTOR_POPULATION_DIR=/home/eqemu/server/actor-population
 ```
 
-The existing directory must be absolute, private mode0700 and writable by the
-server user. Only Qeynos2 zone2, instance0, version0 opens it. `owner.lock` holds
-an OS lock until teardown; a second owner refuses startup. An empty directory
-starts with three paused records and creates no bodies. `hunter-1`, `hunter-2`
-and `hunter-3` are stable durable identities, rendered as distinguishable male
-humans. Each has its own C++ Adapter and Rust core Runtime. Native lifetimes
-are fresh after restart; stable IDs are not NPC IDs.
+The directory must be absolute, private mode0700, writable by the server user
+and shared by participating processes on the same filesystem. The profile has
+three stable identities, `hunter-1` through `hunter-3`, initially paused in zone2
+at the existing starter home. Bodies are male human warriors with agnostic
+player faction identity. Native entity IDs and lifetimes are process-local;
+actor IDs and durable ownership epochs survive restart and transfer.
 
-The bridge consumes/removes `command` once per second, discards old commands
-when opening a new session, and writes `status.json` atomically at most once
-per second except for a final clean-drain acknowledgement. Root's CLI must write
-commands atomically, read the current session from status and use increasing
-positive uint64 request IDs. Commands are ASCII, at most128 bytes including one
-optional final LF or CRLF; embedded newlines are invalid.
+### Commands and status
+
+Zone2 retains `command` and `status.json`. Other base-version, instance-zero
+zones use `command-zone-<zoneid>` and `status-zone-<zoneid>.json`. Read the owning
+zone's current session and use an increasing positive uint64 request ID:
 
 ```text
 start <session> <request> <all|hunter-1|hunter-2|hunter-3>
@@ -724,108 +721,117 @@ stop <session> <request> <all|hunter-1|hunter-2|hunter-3>
 drain <session> <request>
 ```
 
-`start` enables living selected actors continuously. `stop` persists paused
-intent and queues actor-only retirement. `drain` inhibits all actions and keeps
-enabled intent for clean restart. Once draining, this session refuses start.
-`stop_queued` and `drain_queued` acknowledge queued work, not completed cleanup.
-For a one-actor stop, wait for that actor's `drained=true`, `body_present=false`
-and no claim owned by it. For all stop, also wait for `live_owned=0`,
-`custody_drained=true` and `checkpoint_clean=true`. A restart-safe drain further
-requires `restart_safe=true`. An unresponsive zone or disk cannot promise a
-bounded acknowledgement; native actions and policy watchdogs are bounded.
+Write commands atomically. Commands are ASCII, bounded128 bytes, with one
+optional final LF/CRLF. A zone only controls actors whose leases it owns.
+`stop_queued`/`drain_queued` acknowledge requests; wait for native bodies/claims
+to drain and `checkpoint_clean=true`. A clean restart drain additionally reports
+`restart_safe=true`. Dirty/corrupt state and storage faults override command
+acknowledgements. No reset, resurrection or automatic dirty-recovery command is
+provided. Stop all relevant owners and retain evidence before operator recovery.
 
-`command_result` is one of `ready`, `invalid_command`, `stale_session`,
-`replayed_request`, `recovery_required`, `busy`, `start_accepted`, `dead_actor`,
-`storage_failed`, `stop_queued`, `drain_queued`. For `start all`, dead actors stay
-dead while other selected living actors can start. `dead_actor` means no selected
-living actor could be enabled. Status `phase=recovery_required` and nonempty
-`error` override any earlier command acknowledgement. Native IDs/epoch/generation
-in a drained row identify its last lifetime; `body_present`, `runtime_alive` and
-`drained` report current custody. Row `hp`/`position` are the latest validated
-saved facts, while `native_hp` is current observed HP or null with no body.
+### Inventory and progression
 
-Rust population policy rotates selection priority across three controllers,
-staggers selection and caps native path probes at one per200ms. One shared
-native scan every2s projects at most512 NPCs; overflow selects none and reports
-`scan_overflow`. Search is150XY/6Z around fixed home(-917,1224,3.75), actor leash
-180XY/6Z. Selection is nearest from current actor XY, with native key tie-break.
-Only exact type/name/level profiles2011/2104/2000/2002/2003/2017/2101/2014/2021/2024
-are accepted, with native ownership/service/class/spell/idle/map/water/LOS/path
-checks. Route admission remains hunt-only350 direct,64 nodes,400 total length.
-The local field has few spawns; healthy no-target waits are expected.
+Rust saves typed native item-instance records. Native reconstruction uses
+`CreateItem` and RoF2 `InventoryProfile` possession, bag, augment and cursor
+storage. Snapshots include charges, colors, attunement, custom data, ornaments,
+serials, recast timestamps, scaling and evolving-item state. Trees are bounded
+512 records, depth3, native ten-slot bag/six-socket addressing, and4096 bytes of
+custom data per item. Unsupported/missing items or malformed trees are refused;
+a failed restoration cannot replace saved inventory with a partial body.
 
-A Rust session claim binds prey ID+incarnation to stable actor ID, full current
-native/Rust lifetime and goal before approach. Claims remain until the old action
-is inhibited and drained. They never own public NPCs or block public combat.
-Native attempt/death hooks close the affected actor's permission immediately
-before a later swing, then Rust yields and releases only actor-related hate.
-Player/bot/pet participation wins. No public stats, positions, flags, loot,
-spawns or respawn times are changed. Rest requires at least10s native sitting
-and observed HP>=90 of the body's100 max HP; no forced heal or counterattack.
-Targets lost, contested or unreachable yield; missing actor authority pauses;
-confirmed native actor death stays dead. Actions have existing native deadlines
-plus spawn10s, probe5s, progress30s, encounter60s and drain/release10s watchdogs.
-No-target and wounded rest are healthy indefinite waits.
+Starting inventory uses the configured player starting-item selection once.
+Equipment uses shared native item bonuses, caps, armor, weapon damage,
+recommended-level scaling, haste, attack timers and weapon/augment proc entry
+points. Voluntary attacks and procs still require the adapter's authorized
+primary-swing window. This does not add player AA, extra attack rounds, social
+behavior, auto-loot policy or loot-driven spawn-group selection. Body base stats
+remain the actor profile's native stats. Restore equipment before applying saved
+HP so an item HP bonus cannot clamp a persisted wound.
 
-`checkpoint.json` is Rust bridge-owned, schema1 and capped64KiB. It stores three
-ordered unique stable IDs, enabled/paused/dead intent, fixed profile/home,
-validated position, actual HP, remaining minimum rest and completed/yielded/failed
-counts. It never stores native IDs, claims, core snapshots or in-flight actions.
-The pure core performs no I/O. Pinned serde1.0.229 and serde_json1.0.145 encode the
-checkpoint in the bridge; Cargo.lock pins transitive versions for offline builds.
+Owned native death latches supply normal solo XP and faction changes. The player
+normal-XP stages and default kill/level calculations are shared, including
+configured con/ZEM/race-class/hotzone/level/final modifiers and percent caps.
+Actors have no per-character XP override or Client quest callbacks; those remain
+at the Client boundary with AA and leadership. Rust credits a native lifetime
+and goal once, checks faction before/after values, and publishes XP/reputation
+in the same record. Level changes require native threshold facts and a later
+matching level acknowledgement. Rest uses at least10 seconds of observed sitting
+and90% of actual maximum HP; offline time grants neither rest nor healing.
 
-Before any spawn the bridge durably writes dirty state using temp file, file
-sync, rename and directory sync. While running it checkpoints at most every5s
-plus control/defeat transitions; `last_sync_us` measures the latest successful
-checkpoint barrier duration, not a hard I/O bound. Status does not fsync at1Hz.
-Clean shutdown inhibits, captures native facts, drains every body and claim,
-then writes/acknowledges clean state. A clean restart restores enabled living
-actors exactly once with saved HP applied before spawn broadcast, fresh runtime
-lifetimes, remaining sitting rest and fresh observation/replanning. Offline time
-provides no healing or rest credit. Paused/dead remain stopped. Dirty state,
-corruption, unknown schema/profile, duplicate IDs or invalid HP/location refuse
-automatic spawn and preserve checkpoint evidence. I/O failure inhibits/drains and
-reports failure. There is deliberately no reset/recovery/resurrection command;
-Root must preserve evidence and decide recovery outside this MVP.
+### Hunting and travel
 
-Counters for completed/yielded/failed persist across restarts. Native outgoing
-swings/hits/damage and incoming swings/actual-HP-loss hits/damage accumulate over
-the current process, retained across goals and stop/start. Minimum HP and observed positive sitting,
-unengaged HP deltas are observational; rest gain does not prove healing source.
-Claims expose exact owner/target lifetimes. Native and checkpoint errors remain
-visible instead of silently creating replacement bodies.
+Level1 retains the exact starter type/name/level list and fixed home
+`(-917,1224,3.75)`,150XY/6Z search and180XY leash. Above level1, Rust owns the
+level window and requires the actor-specific threatening/scowling player faction
+reaction. Native evaluation includes race, class, deity, earned reputation and
+item/spell faction bonuses. Native attack gates re-evaluate reaction and identity;
+attackability or NPC-to-NPC faction alone is insufficient. Native ownership,
+service, class, spell, control and map safety exclusions remain in force.
 
-Tests cover fake-clock production policy, claims/fairness/reuse/watchdogs,
-checkpoint corruption/locking/real write and rename failures, wounded/rest
-roundtrips and dirty recovery refusal. `actor_population_bridge_controls.cpp`
-uses actual CXX and three Rust runtimes plus the production native permit helper,
-with explicit native facts; it covers callback isolation and one/all retirement.
-It does not instantiate zone NPC AI, map geometry or a connected client. Final
-same-runtime build and independent source reviews precede release; Root separately
-qualifies three visible bodies, real combat/rest, public contention/cleanup,
-wounded clean restart, unclean refusal and Brian's client observations. No
-persistent-player in-server regression suite is authorized. XP, inventory, loot,
-parties, arbitrary behaviors/homes, cross-zone travel and offline simulation are
-outside this profile.
+Shared scans are bounded512 NPCs every2 seconds; overflow selects none. Claims
+precede probes, native incarnations break distance ties, and probes are staggered.
+If local candidates are exhausted, claimed or rejected, progressed actors may
+select a reachable connected zone. Static spawn rows are travel hints only;
+arrival requires fresh live NPC identity, hostility and navigation validation.
+Connection choice prefers a different neighbor over immediate backtracking,
+then distance, destination ID and zone-point ID.
 
-This integration preserves actor source through
-`788c86269d9b53ca2b11ca8fa7183826f6c330d6`. Its historical persistence acceptance
-does not establish a complete ordinary-suite result for this composition. The
-existing 21 in-server scenarios and 19 Rust population cases gain no new cases
-here. Population policy, checkpoint and CXX control coverage does not establish
-live NPC AI, map, combat or client behavior. Earlier ordinary and sanitizer runs remain attributed
-to their own source pins; exact-head review and Stack validation are still needed.
+Connections use loaded content-filtered zone points, the RoF2 client mask,
+shared player minimum/maximum level, status and flag checks, current expansion
+and routing rules. This initial profile has ordinary status and no zone flags.
+Sharded/public-instance/version rerouting and wildcard source triggers are refused
+rather than bypassed. Preserve-coordinate destination sentinels are resolved
+again from the actual exit position. Transfer navigation uses complete dry
+navmesh routes with at most4000 direct units,512 nodes and10000 route units;
+per-node geometry, water, teleport and partial/stuck rejection remain enforced.
+The80-unit proof and local hunt bounds are unchanged.
 
-`bin/tests` registers `ActorStagingTest` and calls the existing demo and hunt
-native control fixtures directly. With the Linux x86-64 CXX bridge enabled, it
-also calls the existing hunt and population bridge fixtures. Each fixture is one
-CPPUnit method that asserts its return code is zero using `TEST_ASSERT`, which
-remains active with `NDEBUG`; failures enter the normal aggregate utility verdict.
-The four original control bodies are reused without new fixture cases or a
-subprocess launcher. Their standalone targets and entry points remain available;
-only the utility target defines `EQEMU_ACTOR_CONTROLS_IN_UTILITY_SUITE` to omit
-their standalone `main` functions. The source inventory on Linux with the bridge
-enabled is 91 existing utility methods plus four fixture registrations, or 95.
-This expected count is unexecuted and is not a validation result. Population
-controls retain their private temporary-directory/checkpoint I/O and explicit
-native facts; they do not boot a zone or add in-server scenarios.
+World only boots/confirms the destination; it does not own actor state. Replies
+bind actor ID, durable owner epoch and native generation/incarnation. The source
+walks to the exit, waits for destination readiness, saves full transfer intent and
+state, then requests retirement. Only observed native drain permits publication
+of the clean destination record and release of its lease. The destination acquires
+that lease, increments the durable epoch and publishes dirty state before spawning.
+Duplicate arrivals cannot acquire a second body. Clean pending destination records
+drive idempotent boot retries; an unavailable destination does not destroy source
+state. Dirty process failures require explicit recovery and are not a claim of
+arbitrary crash exactly-once awards.
+
+### Checkpoints and migration
+
+Current authority is `actors-v3/actor-<n>.json`, schema3, with an independent
+`actor-<n>.lock` held throughout native custody. Distinct actors in different
+processes write different files. Each record is bounded1MiB and uses temp-write,
+file sync, rename and directory sync. Stable actor/profile identity, ownership
+epoch, HP/rest, XP/level, reputation, inventory and transfer intent are persisted;
+entity pointers, native IDs, claims and in-flight runtime snapshots are not.
+
+A clean legacy schema1 or2 population checkpoint migrates under `owner.lock`.
+The original bytes are retained in `checkpoint.pre-v3.json`; the legacy authority
+is marked dirty before a complete temporary actor directory is atomically
+published. This prevents an older binary from replaying a stale clean checkpoint.
+A dirty/corrupt legacy save or interrupted migration refuses automatic recovery
+and retains its evidence. Once v3 exists, `checkpoint.json` is historical downgrade
+inhibition, not current actor state. Do not restore that old file over live v3
+owners. Unknown records/profiles, invalid ownership/state or failed writes never
+silently reset an actor.
+
+XP/faction awards, inventory changes and transfer transitions force durable
+publication. Other running facts are saved periodically and on clean drain.
+Native combat counters remain process observations, while completed/yielded/
+failed counts persist. Native/storage errors pause or drain owned bodies.
+
+### Validation meaning
+
+Rust controls cover duplicate/stale credit, atomic XP/faction changes, level
+acknowledgements, inventory trees/roundtrips, restore failure, custody contention,
+concurrent distinct owners, migration, failed publication and transfer ordering.
+The native equipment scenario exercises possession/bag/cursor data, armor,
+weapon delay and unauthorized attack entry points. Utility controls cover shared
+faction and player zone access; existing actor lifetime/combat controls remain.
+
+These source controls are not runtime qualification. The historical shared-rule
+checkpoint `5e088801fcf3655594bfd5e27318e8730626a3f6` passed98 aggregate utility
+methods and22 named in-server cases. Later inventory/progression/transfer code
+requires its own exact-head worker build/tests and integrated game scenarios.
+No host Cargo/native candidate execution or shared game deployment is implied.

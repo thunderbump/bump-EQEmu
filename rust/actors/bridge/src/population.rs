@@ -7,6 +7,7 @@ use std::{
 
 #[cxx::bridge(namespace = "eqemu_population")]
 mod ffi {
+    struct HuntBounds { minimum: u8, maximum: u8 }
     struct Route {
         id: u32,
         zone: u32,
@@ -131,7 +132,9 @@ mod ffi {
         connection: u32,
         destination: u32,
         experience: u64,
-        arrival_x: f64, arrival_y: f64, arrival_z: f64,
+        arrival_x: f64,
+        arrival_y: f64,
+        arrival_z: f64,
     }
     extern "Rust" {
         type Population;
@@ -155,6 +158,7 @@ mod ffi {
         fn failed(self: &Population) -> bool;
         fn active(self: &Population) -> bool;
         fn prey_profile(type_id: u32, level: u8, name: &str) -> bool;
+        fn hunting_bounds(level: u8) -> HuntBounds;
     }
 }
 impl Default for ffi::Outcome {
@@ -396,6 +400,11 @@ fn population_open_inner(
         }),
     }))
 }
+fn hunting_bounds(level: u8) -> ffi::HuntBounds {
+    let (minimum, maximum) = core::hunting_bounds(level);
+    ffi::HuntBounds { minimum, maximum }
+}
+
 fn prey_profile(type_id: u32, level: u8, name: &str) -> bool {
     core::prey_profile(type_id, level, name)
 }

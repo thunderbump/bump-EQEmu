@@ -71,8 +71,11 @@ struct Entry {
   ActorDemo::HuntPosition home{ActorDemo::HuntHomeX, ActorDemo::HuntHomeY, 3.75};
   std::map<int32_t, int32_t> reputation;
   std::vector<ActorZones::Connection> routes;
+  ActorZones::HuntBounds bounds;
+  uint8_t bounds_level = 0;
   uint64_t owner_epoch = 0, travel_operation = 0;
   uint32_t boot_destination = 0, boot_connection = 0;
+  uint32_t travel_connection = 0, travel_destination = 0;
   ActorDemo::HuntPosition boot_arrival{};
   bool destination_ready = false;
   Key probe;
@@ -124,6 +127,11 @@ public:
            (body->GetLevel() == 1 || PlayerHostile(body, prey)) &&
            InArea(body, ActorDemo::HuntLeash, body) &&
            InArea(prey, ActorDemo::HuntSearchRadius, body);
+  }
+  bool OwnsOrPublic(Mob *mob) const {
+    if (!mob || !mob->IsNPC() || !mob->CastToNPC()->IsRustActor()) { return true; }
+    for (const auto &entry : entries) { if (entry.permit.actor.Matches(Identify(mob))) { return true; } }
+    return false;
   }
   bool Can(Key a, Key b) const {
     for (unsigned i = 0; i < entries.size(); ++i) {
@@ -203,7 +211,7 @@ public:
   void Scan() {
     for (unsigned i = 0; i < entries.size(); ++i) {
       auto *body = ActorBody::PopulationAdapter(i).Body();
-      entries[i].routes = body ? ActorZones::Nearby(*body, entries[i].reputation) : std::vector<ActorZones::Connection>{};
+      entries[i].routes = body ? ActorZones::Nearby(*body, entries[i].reputation, entries[i].bounds) : std::vector<ActorZones::Connection>{};
     }
     observations.clear();
     overflow = false;
@@ -270,13 +278,18 @@ public:
       b.travel_complete = e.travel_operation && s.phase == eqemu_proof::Phase::Idle && s.last_operation == e.travel_operation && s.last_terminal == eqemu_proof::Event::Completed;
       b.travel_failed = e.travel_operation && s.phase == eqemu_proof::Phase::Idle && s.last_operation == e.travel_operation && (s.last_terminal == eqemu_proof::Event::Interrupted || s.last_terminal == eqemu_proof::Event::Rejected);
       ActorZones::Connection current_route;
-      b.destination_ready = e.destination_ready && b.travel_complete && body &&
-          ActorZones::Resolve(*body, e.boot_connection, e.boot_destination, current_route) &&
+      bool resolved = e.travel_destination && body && ActorZones::Resolve(*body, e.travel_connection, e.travel_destination, current_route);
+      if (!e.travel_operation && resolved && !body->IsMoving() && !body->IsEngaged() &&
+          std::hypot(body->GetX()-current_route.exit.x, body->GetY()-current_route.exit.y) <= 5 && std::abs(body->GetZ()-current_route.exit.z) <= 6) { b.travel_complete = true; }
+      resolved = resolved && b.travel_complete;
+      b.destination_ready = e.destination_ready && resolved && e.boot_connection == current_route.id && e.boot_destination == current_route.zone &&
           std::hypot(body->GetX()-current_route.exit.x, body->GetY()-current_route.exit.y) <= 5 &&
           std::abs(body->GetZ()-current_route.exit.z) <= 6 && !body->IsMoving() && !body->IsEngaged() &&
           std::hypot(e.boot_arrival.x-current_route.arrival.x, e.boot_arrival.y-current_route.arrival.y) < 0.001 &&
           std::abs(e.boot_arrival.z-current_route.arrival.z) < 0.001;
-      for (const auto &route : e.routes) {
+      auto projected_routes = e.routes;
+      if (b.travel_complete) { projected_routes.clear(); if (resolved) { projected_routes.push_back(current_route); } }
+      for (const auto &route : projected_routes) {
         eqemu_population::Route r{};
         r.id = route.id; r.zone = route.zone;
         r.x = route.exit.x; r.y = route.exit.y; r.z = route.exit.z;
@@ -361,7 +374,8 @@ public:
       e.error = false;
       e.owner_epoch = a.owner_epoch;
       e.travel_operation = 0;
-      e.boot_destination = 0;
+      e.travel_connection = e.travel_destination = 0;
+      e.boot_destination = e.boot_connection = 0;
       e.destination_ready = false;
       e.refused = e.dead = false;
       e.permit.Close();
@@ -373,6 +387,7 @@ public:
       auto *body = adapter.Body();
       const auto fresh = adapter.Inspect();
       try {
+        if (!ActorZones::MayEnter(*body, zone->GetZoneID())) { throw std::runtime_error("actor_zone_access_changed"); }
         if (body->GetBaseExperienceForLevel(a.level) > a.experience) { throw std::runtime_error("actor_experience_level_mismatch"); }
         ActorInventory::Restore(*body, std::string(a.inventory_json));
         body->SetHP(a.hp); // item HP must be applied before restoring the wound
@@ -416,9 +431,12 @@ public:
         e.permit.Close();
         e.destination_ready = false;
         e.boot_destination = 0;
+        e.travel_connection = a.connection; e.travel_destination = a.destination;
+        if (std::hypot(body->GetX()-route.exit.x, body->GetY()-route.exit.y) <= 5 && std::abs(body->GetZ()-route.exit.z) <= 6) { e.travel_operation = 0; return; }
         const auto report = adapter.StartTransferMove(std::lround(route.exit.x), std::lround(route.exit.y), std::lround(route.exit.z));
         if (report.status != eqemu_proof::Status::Ok) { e.refused = true; return; }
         e.travel_operation = report.operation;
+        e.travel_connection = a.connection; e.travel_destination = a.destination;
       } else {
         if (body->IsMoving() || body->IsEngaged() || std::hypot(body->GetX()-route.exit.x, body->GetY()-route.exit.y) > 5 || std::abs(body->GetZ()-route.exit.z) > 6) { e.refused = true; return; }
         e.boot_destination = a.destination;
@@ -506,6 +524,11 @@ public:
     for (unsigned i = 0; i < entries.size(); ++i) {
       auto *body = ActorBody::PopulationAdapter(i).Body();
       if (body && !entries[i].permit.enabled && !body->IsMoving()) { entries[i].home = Position(body); }
+      if (body) {
+        const auto bounds = eqemu_population::hunting_bounds(body->GetLevel());
+        entries[i].bounds = {bounds.minimum, bounds.maximum};
+        entries[i].bounds_level = body->GetLevel();
+      }
       entries[i].reputation.clear();
       for (const auto &standing : policy->reputation(i)) {
         entries[i].reputation.emplace(standing.id, standing.value);
@@ -618,10 +641,9 @@ std::vector<FactionChange> FactionAwards(NPC *actor, NPC *victim) {
 bool PlayerHostile(NPC *actor, NPC *observer) {
   if (!native || !actor || !observer || !actor->IsRustActor() || actor->GetLevel() <= 1) { return false; }
   // Revalidation is native-only, including callbacks before another Rust tick.
-  if (observer->GetLevel() == 0 || observer->GetLevel() + 2 < actor->GetLevel() ||
-      observer->GetLevel() > actor->GetLevel() + 2) { return false; }
   for (const auto &entry : native->entries) {
     if (!entry.permit.actor.Matches(Identify(actor))) { continue; }
+    if (entry.bounds_level != actor->GetLevel() || observer->GetLevel() < entry.bounds.minimum || observer->GetLevel() > entry.bounds.maximum) { return false; }
     const auto faction = observer->GetPrimaryFaction();
     const auto found = entry.reputation.find(faction);
     const auto standing = found == entry.reputation.end() ? 0 : found->second;
@@ -632,10 +654,10 @@ bool PlayerHostile(NPC *actor, NPC *observer) {
   return false;
 }
 bool CanCombat(Mob *a, Mob *b) {
-  return native ? native->Can(Identify(a), Identify(b)) : !((a && a->IsNPC() && a->CastToNPC()->IsRustActor()) || (b && b->IsNPC() && b->CastToNPC()->IsRustActor()));
+  return native ? native->OwnsOrPublic(a) && native->OwnsOrPublic(b) && native->Can(Identify(a), Identify(b)) : !((a && a->IsNPC() && a->CastToNPC()->IsRustActor()) || (b && b->IsNPC() && b->CastToNPC()->IsRustActor()));
 }
 bool AllowCombat(Mob *a, Mob *b) {
-  return native ? native->Allow(Identify(a), Identify(b)) : CanCombat(a,b);
+  return native ? native->OwnsOrPublic(a) && native->OwnsOrPublic(b) && native->Allow(Identify(a), Identify(b)) : CanCombat(a,b);
 }
 bool PreserveRetaliationHate(Mob *prey) {
   if (!native) {

@@ -19,9 +19,9 @@ extern Zone *zone;
 extern ZoneDatabase content_db;
 namespace ActorZones {
 namespace {
-bool Allowed(NPC &actor, uint32_t destination) {
+bool Access(NPC &actor, uint32_t destination) {
   auto *data = GetZoneVersionWithFallback(destination, 0);
-  if (!data || destination == zone->GetZoneID()) { return false; }
+  if (!data || data->shard_at_player_count > 0) { return false; }
   const bool flag = !data->flag_needed.empty() && Strings::IsNumber(data->flag_needed) && Strings::ToBool(data->flag_needed);
   // MVP actors are ordinary status-zero, non-GM characters without zone flags.
   if (0 < RuleI(GM, MinStatusToZoneAnywhere) && CheckPlayerZoneAccess(actor.GetLevel(), 0, false, data->min_level, data->max_level,
@@ -35,7 +35,7 @@ bool Allowed(NPC &actor, uint32_t destination) {
 }
 bool Project(NPC &actor, const ZonePoint &point, Connection &connection) {
   if (!(point.client_version_mask & EQ::versions::bitRoF2) || point.target_zone_instance ||
-      !point.target_zone_id || !Allowed(actor, point.target_zone_id) ||
+      !point.target_zone_id || point.target_zone_id == zone->GetZoneID() || !Access(actor, point.target_zone_id) ||
       !std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z) ||
       std::abs(point.x) >= 999999 || std::abs(point.y) >= 999999 || std::abs(point.z) >= 999999 ||
       !zone->zonemap || !zone->watermap || !zone->pathing) { return false; }
@@ -43,7 +43,7 @@ bool Project(NPC &actor, const ZonePoint &point, Connection &connection) {
   const auto floor = zone->zonemap->FindBestZ(probe, nullptr);
   if (!std::isfinite(floor) || floor == BEST_Z_INVALID) { return false; }
   const glm::vec3 exit(point.x, point.y, floor + actor.GetZOffset());
-  if (zone->watermap->InLiquid(exit) || (std::hypot(actor.GetX()-exit.x, actor.GetY()-exit.y) > 5 && !MobMovementManager::Get().CanNavigateActorTo(&actor, exit.x, exit.y, exit.z, false))) { return false; }
+  if (zone->watermap->InLiquid(exit) || (std::hypot(actor.GetX()-exit.x, actor.GetY()-exit.y) > 5 && !MobMovementManager::Get().CanNavigateActorTo(&actor, exit.x, exit.y, exit.z, MobMovementManager::ActorRoutePurpose::Transfer))) { return false; }
   const auto x = std::abs(point.target_x) == 999999 ? actor.GetX() : point.target_x;
   const auto y = std::abs(point.target_y) == 999999 ? actor.GetY() : point.target_y;
   const auto z = std::abs(point.target_z) == 999999 ? actor.GetZ() : point.target_z;
@@ -52,6 +52,7 @@ bool Project(NPC &actor, const ZonePoint &point, Connection &connection) {
   return true;
 }
 }
+bool MayEnter(NPC &actor, uint32_t destination) { return Access(actor, destination); }
 bool Resolve(NPC &actor, uint32_t id, uint32_t destination, Connection &connection) {
   LinkedListIterator<ZonePoint *> points(zone->zone_point_list);
   for (points.Reset(); points.MoreElements(); points.Advance()) {
@@ -60,7 +61,7 @@ bool Resolve(NPC &actor, uint32_t id, uint32_t destination, Connection &connecti
   }
   return false;
 }
-std::vector<Connection> Nearby(NPC &actor, const std::map<int32_t, int32_t> &reputation) {
+std::vector<Connection> Nearby(NPC &actor, const std::map<int32_t, int32_t> &reputation, HuntBounds bounds) {
   std::vector<Connection> connections;
   if (actor.GetLevel() <= 1 || actor.IsMoving() || actor.IsEngaged()) { return connections; }
   LinkedListIterator<ZonePoint *> points(zone->zone_point_list);
@@ -76,7 +77,7 @@ std::vector<Connection> Nearby(NPC &actor, const std::map<int32_t, int32_t> &rep
         "JOIN spawnentry e ON e.spawngroupID=s.spawngroupID JOIN npc_types n ON n.id=e.npcID "
         "JOIN npc_faction f ON f.id=n.npc_faction_id WHERE s.zone='{}' AND (s.version=0 OR s.version=-1) AND s.enabled=1 "
         "AND n.level BETWEEN {} AND {} AND n.merchant_id=0 ORDER BY s.id,n.id LIMIT 4097",
-        Strings::Escape(name), std::max(1, int(actor.GetLevel())-2), int(actor.GetLevel())+2));
+        Strings::Escape(name), bounds.minimum, bounds.maximum));
     if (!rows.Success() || rows.RowCount() > 4096) { continue; }
     auto distance = std::numeric_limits<double>::infinity();
     for (auto row = rows.begin(); row != rows.end(); ++row) {

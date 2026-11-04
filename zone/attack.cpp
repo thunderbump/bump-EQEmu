@@ -5021,6 +5021,11 @@ void Mob::TryDefensiveProc(Mob *on, uint16 hand)
 
 void Mob::TryCombatProcs(const EQ::ItemInstance* weapon_g, Mob *on, uint16 hand, const EQ::ItemData* weapon_data) {
 
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+    if (UsesActorInventory() && IsNPC() &&
+        (!CastToNPC()->IsAuthorizedActorSwing() || hand != EQ::invslot::slotPrimary)) { return; }
+#endif
+
 	if (!on) {
 		SetTarget(nullptr);
 		LogError("A null Mob object was passed to Mob::TryWeaponProc for evaluation!");

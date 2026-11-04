@@ -89,12 +89,12 @@ pub fn prey_type(id: u32, level: u8) -> bool {
 }
 // The starter profile is an explicit exception to faction hostility. Beyond it,
 // suitable prey is within two levels and has a native player-hostile reaction.
+pub fn hunting_bounds(actor_level: u8) -> (u8, u8) {
+    (actor_level.saturating_sub(2).max(1), actor_level.saturating_add(2))
+}
 pub fn appropriate_hostile(actor_level: u8, target_level: u8, hostile: bool) -> bool {
-    actor_level > 1
-        && target_level > 0
-        && hostile
-        && target_level >= actor_level.saturating_sub(2)
-        && target_level <= actor_level.saturating_add(2)
+    let (minimum, maximum) = hunting_bounds(actor_level);
+    actor_level > 1 && hostile && target_level >= minimum && target_level <= maximum
 }
 
 #[derive(Clone, Debug)]
@@ -538,8 +538,12 @@ impl Population {
             // HP remains truthful even when bad geometry makes the body unsafe
             // to continue. Keep the last validated position, never its old HP.
             let max_hp = if b.max_hp > 0 { b.max_hp } else { 100 };
-            if bound && b.present && b.hp > 0 && b.hp <= max_hp
-                && (a.admitted_body || (a.phase == Phase::Spawning && !b.error)) {
+            if bound
+                && b.present
+                && b.hp > 0
+                && b.hp <= max_hp
+                && (a.admitted_body || (a.phase == Phase::Spawning && !b.error))
+            {
                 if a.phase == Phase::Resting {
                     if b.sitting && !b.moving && !b.engaged {
                         a.saved.rest_ms = a
@@ -557,7 +561,9 @@ impl Population {
                     a.saved.point = b.point;
                 }
                 if !b.error {
-                    if let Some(items) = &b.inventory { a.saved.inventory = Some(items.clone()); }
+                    if let Some(items) = &b.inventory {
+                        a.saved.inventory = Some(items.clone());
+                    }
                 }
                 a.saved.hp = b.hp;
                 a.saved.max_hp = max_hp;
@@ -636,7 +642,10 @@ impl Population {
                 a.credited_goal = a.goal;
                 a.reason = "target_killed";
             }
-            if bound && (a.admitted_body || !b.error) && (b.outcome == Outcome::Defeated || (b.present && b.hp <= 0)) {
+            if bound
+                && (a.admitted_body || !b.error)
+                && (b.outcome == Outcome::Defeated || (b.present && b.hp <= 0))
+            {
                 a.saved.desired = Desired::Dead;
                 a.saved.hp = 0;
                 a.minimum_hp = 0;
@@ -804,7 +813,7 @@ impl Population {
                         } else {
                             "claimed_or_unreachable"
                         };
-                        if a.eligible == 0 && a.saved.level > 1 {
+                        if a.saved.level > 1 {
                             let route = b
                                 .routes
                                 .iter()
@@ -921,6 +930,9 @@ impl Population {
                         a.phase = Phase::Retiring;
                         actions.push(a.action(i, ActionKind::Retire));
                     } else if b.travel_complete {
+                        if let Some(previous) = a.saved.transfer {
+                            if let Some(current) = b.routes.iter().find(|r| r.id == previous.id && r.zone == previous.zone && r.valid()) { a.saved.transfer = Some(*current); }
+                        }
                         a.phase = Phase::PreparingTransfer;
                         a.at = now;
                         a.due = now + 2000;
@@ -928,6 +940,9 @@ impl Population {
                     }
                 }
                 Phase::PreparingTransfer => {
+                    if let Some(previous) = a.saved.transfer {
+                        if let Some(current) = b.routes.iter().find(|r| r.id == previous.id && r.zone == previous.zone && r.valid()) { a.saved.transfer = Some(*current); }
+                    }
                     if b.refused || b.contested {
                         a.saved.desired = Desired::Paused;
                         a.saved.failed += 1;
@@ -1037,8 +1052,20 @@ mod tests {
         p.tick(1, &empty(), &[], false);
         let mut b = empty();
         b[0] = Body {
-            lifetime: Lifetime { key: Key { id: 10, incarnation: 10 }, epoch: 1, generation: 1 },
-            present: true, runtime_alive: true, point: HOME, hp: 100, max_hp: 100, error: true,
+            lifetime: Lifetime {
+                key: Key {
+                    id: 10,
+                    incarnation: 10,
+                },
+                epoch: 1,
+                generation: 1,
+            },
+            present: true,
+            runtime_alive: true,
+            point: HOME,
+            hp: 100,
+            max_hp: 100,
+            error: true,
             ..Body::default()
         };
         p.tick(2, &b, &[], false);
@@ -1051,13 +1078,57 @@ mod tests {
     #[test]
     fn native_restore_error_cannot_replace_saved_inventory_with_partial_items() {
         let (mut p, mut b) = setup();
-        let item = crate::inventory::Item { id: 1001, parent: -1, kind: 0, slot: 2, ..crate::inventory::Item::default() };
+        let item = crate::inventory::Item {
+            id: 1001,
+            parent: -1,
+            kind: 0,
+            slot: 2,
+            ..crate::inventory::Item::default()
+        };
         p.actors[0].saved.inventory = Some(vec![item.clone()]);
         b[0].inventory = Some(Vec::new());
         b[0].error = true;
         p.tick(11_000, &b, &[], false);
         assert_eq!(p.actors[0].saved.inventory, Some(vec![item]));
         assert_eq!(p.actors[0].saved.desired, Desired::Paused);
+    }
+
+    #[test]
+    fn rejected_local_prey_does_not_starve_a_reachable_connection() {
+        let (mut p, mut b) = setup();
+        p.actors[0].saved.level = 2;
+        let mut target = rat(20);
+        target.hostile_mask = 1;
+        b[0].routes = vec![Route { id: 4, zone: 3, exit: HOME, arrival: HOME, distance: 10.0 }];
+        p.tick(11_000, &b, &[target.clone()], false);
+        assert_eq!(p.actors[0].phase, Phase::Probing);
+        b[0].probe = target.key;
+        b[0].probe_ready = true;
+        b[0].probe_ok = false;
+        p.tick(11_001, &b, &[], false);
+        let actions = p.tick(11_202, &b, &[target], false);
+        assert!(actions.iter().any(|a| a.actor == 0 && a.kind == ActionKind::Travel));
+    }
+
+    #[test]
+    fn preserve_coordinate_arrival_is_refreshed_from_native_exit_position() {
+        let (mut p, mut b) = setup();
+        p.actors[0].saved.level = 2;
+        let original = Route { id: 4, zone: 3, exit: HOME, arrival: HOME, distance: 10.0 };
+        p.actors[0].saved.transfer = Some(original);
+        p.actors[0].phase = Phase::Travelling;
+        let actual = Route { arrival: Point { x: HOME.x + 100.0, ..HOME }, ..original };
+        b[0].routes = vec![actual];
+        b[0].travel_complete = true;
+        p.tick(11_000, &b, &[], false);
+        assert_eq!(p.actors[0].saved.transfer.unwrap().arrival, actual.arrival);
+        b[0].destination_ready = true;
+        p.tick(11_100, &b, &[], false);
+        b[0].present = false;
+        b[0].drained = true;
+        p.tick(11_200, &b, &[], false);
+        assert_eq!(p.actors[0].saved.point, actual.arrival);
+        assert_eq!(p.actors[0].saved.zone, 3);
     }
 
     #[test]

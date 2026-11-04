@@ -495,9 +495,22 @@ void Adapter::ProcessCombat()
     const auto before = target->GetHP();
     body->SetTarget(target);
     body->actor_swing_authorized_ = true;
-    body->Attack(target);
-    body->actor_swing_authorized_ = false;
-    const auto loss = std::max<int64_t>(0, before - std::max<int64_t>(0, target->GetHP()));
+    auto revoke = [](NPC *actor) { actor->actor_swing_authorized_ = false; };
+    std::unique_ptr<NPC, decltype(revoke)> authorization(body, revoke);
+    if (population_) {
+        // Player attack rounds run weapon/augment/buff procs before the swing.
+        body->TryCombatProcs(body->GetInv().GetItem(EQ::invslot::slotPrimary), target, EQ::invslot::slotPrimary);
+        body->TriggerDefensiveProcs(target, EQ::invslot::slotPrimary, false);
+    }
+    auto *current = entity_list.GetNPCByID(combat_.id);
+    if (!combat_.killed && current == target && current->NativeIncarnation() == combat_.target &&
+        current->GetHP() > 0 && !current->GetDepop() && body->GetHP() > 0 && CombatAllowed(body, current)) {
+        body->Attack(current);
+    }
+    current = entity_list.GetNPCByID(combat_.id);
+    const auto after = combat_.killed ? int64_t{0} : current && current == target && current->NativeIncarnation() == combat_.target ? current->GetHP() : before;
+    authorization.reset();
+    const auto loss = std::max<int64_t>(0, before - std::max<int64_t>(0, after));
     const auto actual = static_cast<uint32_t>(std::min<int64_t>(loss, std::numeric_limits<uint32_t>::max()));
     CombatFact(actual ? Kind::SwingHit : Kind::SwingMiss, actual);
 }
@@ -516,7 +529,7 @@ void Adapter::Process()
             const bool admitted = !closing_ &&
                 (state.patrol == Patrol::Disabled || state.patrol == Patrol::Running) &&
                 (state.approach == Approach::Disabled || state.approach == Approach::Travelling) && npc &&
-                movement.NavigateActorTo(npc, target_x_, target_y_, target_z_, state.public_hunt && !transfer_move_);
+                movement.NavigateActorTo(npc, target_x_, target_y_, target_z_, transfer_move_ ? MobMovementManager::ActorRoutePurpose::Transfer : state.public_hunt ? MobMovementManager::ActorRoutePurpose::Hunt : MobMovementManager::ActorRoutePurpose::Proof);
             Advance({admitted ? Kind::Admitted : Kind::Rejected,
                 state.epoch, state.generation, state.operation, 0, 0, 0});
         } else {
@@ -526,7 +539,7 @@ void Adapter::Process()
             // Empty native command queue is not alone proof of arrival. Observe
             // the real body coordinates, never the Rust request/snapshot.
             const bool arrived = npc && travel == MobMovementManager::ActorTravel::Completed &&
-                std::hypot(npc->GetX() - target_x_, npc->GetY() - target_y_) <= 2.0f &&
+                std::hypot(npc->GetX() - target_x_, npc->GetY() - target_y_) <= (transfer_move_ ? 5.0f : 2.0f) &&
                 std::abs(npc->GetZ() - target_z_) <= 6.0f;
             Advance({arrived ? Kind::Completed : Kind::Interrupted,
                 state.epoch, state.generation, state.operation, 0, 0, 0});

@@ -872,9 +872,11 @@ MobMovementManager::ActorCombatMotion MobMovementManager::InspectActorCombatMoti
 }
 
 namespace {
-bool BuildActorRoute(Mob *who, float x, float y, float z, bool public_hunt, IPathfinder::IPath &route,
+bool BuildActorRoute(Mob *who, float x, float y, float z, MobMovementManager::ActorRoutePurpose purpose, IPathfinder::IPath &route,
     ActorDemo::HuntRouteEvidence *evidence = nullptr)
 {
+    const bool public_hunt = purpose == MobMovementManager::ActorRoutePurpose::Hunt;
+    const bool transfer = purpose == MobMovementManager::ActorRoutePurpose::Transfer;
     auto result = [&](const char *reason, bool accepted = false) {
         if (evidence) { evidence->result = reason; }
         return accepted;
@@ -882,14 +884,16 @@ bool BuildActorRoute(Mob *who, float x, float y, float z, bool public_hunt, IPat
     if (!MobMovementManager::ActorControlAllowsTravel(who) || !zone ||
         !zone->zonemap || !zone->pathing || !zone->watermap ||
         !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) { return result("native_context"); }
+    if (transfer && (!who->IsNPC() || !who->CastToNPC()->UsesActorInventory())) { return result("transfer_body"); }
     const glm::vec3 start(who->GetX(), who->GetY(), who->GetZ()), end(x, y, z);
-    // Intentionally local: the first proof does not admit detours, water,
-    // portals or partial routes. Native map/navmesh remain authoritative.
+    // Proof and hunt profiles retain their local limits. Transfers may follow
+    // longer dry navmesh paths around obstacles and over elevation changes.
+    // No profile admits teleport nodes, partial paths or stuck recovery.
     const auto distance = glm::distance(start, end);
     if (evidence) { evidence->direct_distance = distance; }
-    if (!ActorDemo::ActorRouteDistanceAllowed(public_hunt, distance)) { return result("direct_distance"); }
-    if (std::abs(z - start.z) > 6.0f) { return result("z_range"); }
-    if (!zone->zonemap->CheckLoS(start, end)) { return result("direct_los"); }
+    if (transfer ? (!std::isfinite(distance) || distance < 0.5 || distance > 4000) : !ActorDemo::ActorRouteDistanceAllowed(public_hunt, distance)) { return result("direct_distance"); }
+    if (!transfer && std::abs(z - start.z) > 6.0f) { return result("z_range"); }
+    if (!transfer && !zone->zonemap->CheckLoS(start, end)) { return result("direct_los"); }
     PathfinderOptions opts;
     opts.offset = who->GetZOffset();
     opts.flags = PathingNotDisabled ^ PathingZoneLine;
@@ -898,7 +902,7 @@ bool BuildActorRoute(Mob *who, float x, float y, float z, bool public_hunt, IPat
     if (evidence) { evidence->nodes = route.size(); evidence->queried = true; }
     if (partial) { return result("partial_route"); }
     if (stuck) { return result("stuck_route"); }
-    if (route.size() < 2 || route.size() > (public_hunt ? ActorDemo::HuntRouteNodes : 32u)) { return result("node_count"); }
+    if (route.size() < 2 || route.size() > (transfer ? 512u : public_hunt ? ActorDemo::HuntRouteNodes : 32u)) { return result("node_count"); }
     // Test teleport BEFORE inspecting pos (a teleport marker may have no pos).
     for (const auto &node : route) { if (node.teleport) { return result("teleport"); } }
     AdjustRoute(route, who);
@@ -912,7 +916,7 @@ bool BuildActorRoute(Mob *who, float x, float y, float z, bool public_hunt, IPat
         if (!zone->zonemap->CheckLoS(previous, node.pos)) { return result("node_los"); }
         if (public_hunt) {
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
-            if (who->UsesActorInventory() && who->IsNPC() && who->GetLevel() > 1) {
+            if (who->IsNPC() && who->CastToNPC()->UsesActorInventory() && who->GetLevel() > 1) {
                 if (!ActorPopulation::InsideArea(who->CastToNPC(), node.pos.x, node.pos.y, node.pos.z, ActorDemo::HuntLeash)) { return result("node_leash"); }
             } else
 #endif
@@ -925,14 +929,20 @@ bool BuildActorRoute(Mob *who, float x, float y, float z, bool public_hunt, IPat
     const auto endpoint_error = glm::distance(previous, end);
     if (evidence) { evidence->endpoint_error = endpoint_error; evidence->length_complete = true; }
     if (zone->watermap->InLiquid(start)) { return result("start_water"); }
-    if (endpoint_error > 6.0f) { return result("endpoint"); }
-    if (length > distance * 1.5f) { return result("detour"); }
+    if (endpoint_error > (transfer ? 5.0f : 6.0f)) { return result("endpoint"); }
+    if (transfer ? length > 10000.0f : length > distance * 1.5f) { return result("detour"); }
     if (public_hunt && length > ActorDemo::HuntRouteLimit) { return result("route_limit"); }
     return result("accepted", true);
 }
 }
 
 bool MobMovementManager::CanNavigateActorTo(Mob *who, float x, float y, float z, bool public_hunt,
+    ActorDemo::HuntRouteEvidence *evidence)
+{
+    return CanNavigateActorTo(who, x, y, z, public_hunt ? ActorRoutePurpose::Hunt : ActorRoutePurpose::Proof, evidence);
+}
+
+bool MobMovementManager::CanNavigateActorTo(Mob *who, float x, float y, float z, ActorRoutePurpose purpose,
     ActorDemo::HuntRouteEvidence *evidence)
 {
     if (evidence) { *evidence = {}; }
@@ -943,17 +953,22 @@ bool MobMovementManager::CanNavigateActorTo(Mob *who, float x, float y, float z,
         return false;
     }
     IPathfinder::IPath route;
-    return BuildActorRoute(who, x, y, z, public_hunt, route, evidence);
+    return BuildActorRoute(who, x, y, z, purpose, route, evidence);
 }
 
 bool MobMovementManager::NavigateActorTo(Mob *who, float x, float y, float z, bool public_hunt)
+{
+    return NavigateActorTo(who, x, y, z, public_hunt ? ActorRoutePurpose::Hunt : ActorRoutePurpose::Proof);
+}
+
+bool MobMovementManager::NavigateActorTo(Mob *who, float x, float y, float z, ActorRoutePurpose purpose)
 {
     const auto iter = _impl->Entries.find(who);
     if (iter == _impl->Entries.end()) { return false; }
     auto &ent = iter->second;
     if (!ent.Commands.empty() || ent.actor_travel == ActorTravel::Moving) { return false; }
     IPathfinder::IPath route;
-    if (!BuildActorRoute(who, x, y, z, public_hunt, route)) { return false; }
+    if (!BuildActorRoute(who, x, y, z, purpose, route)) { return false; }
     // Reuse native interpolation/packets/collision observations; never invoke
     // generic stuck handling (which may teleport). No logical position writes.
     for (const auto &node : route) {

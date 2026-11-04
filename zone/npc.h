@@ -121,6 +121,7 @@ public:
     // Independent of IsAIControlled: native mechanics continue, voluntary AI does not.
     // Process-local, nonwrapping lifetime identity; independent of address/ID/tick.
     uint64 NativeIncarnation() const { return native_incarnation_; }
+    EQ::InventoryProfile &GetInv() override { return Mob::GetInv(); }
     bool UsesActorInventory() const override { return actor_player_inventory_; }
     void RefreshActorEquipment();
     bool IsRustActor() const { return actor_epoch_ != 0; }

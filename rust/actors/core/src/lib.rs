@@ -290,7 +290,6 @@ impl Runtime {
         self.high_operation.checked_add(1)
     }
 
-
     /// Sequence must strictly increase; ticks may stay equal but cannot decrease.
     /// Refusals do not consume ordering inputs or mutate state. Empty advances
     /// may select one patrol effect. No queued outputs: caller owns each report.

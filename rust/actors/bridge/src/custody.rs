@@ -75,11 +75,13 @@ fn migrate(directory: &str) -> Result<PathBuf, String> {
     if records.exists() {
         let metadata = fs::metadata(directory).map_err(|e| format!("directory: {e}"))?;
         if !Path::new(directory).is_absolute()
+            || directory.len() > 512
             || !metadata.is_dir()
             || metadata.permissions().mode() & 0o077 != 0
         {
             return Err("private_directory_required".into());
         }
+        File::open(directory).and_then(|file| file.sync_all()).map_err(|error| format!("migration_sync: {error}"))?;
         return Ok(records);
     }
     let mut old = LegacyStore::open(directory)?;
