@@ -293,6 +293,8 @@
 #define ServerOP_QSSendQuery 0x5000
 #define ServerOP_PlayerEvent 0x5100
 #define ServerOP_SendPlayerEventSettings 0x5101
+#define ServerOP_ActorZoneBoot 0x5200
+#define ServerOP_ActorZoneReady 0x5201
 
 enum {
 	CZUpdateType_Character,
@@ -459,6 +461,16 @@ public:
 struct SPackSendQueue {
 	uint16 size;
 	uchar buffer[0];
+};
+
+// Zone/world delivery only. Actor state stays in Rust-owned checkpoint files.
+// Durable ownership epoch prevents delayed acknowledgements reaching a new owner.
+struct ServerActorZoneBoot_Struct {
+    uint32 destination;
+    uint32 actor;
+    uint64 owner_epoch;
+    uint64 generation;
+    uint64 incarnation;
 };
 
 struct ServerZoneStateChange_Struct {

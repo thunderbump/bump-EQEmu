@@ -24,6 +24,7 @@
 #include "zone/mob.h"
 #include "zone/npc.h"
 #include "zone/actor_hunt_state.h"
+#include "zone/actor_population.h"
 #include <cmath>
 #include "zone/position.h"
 #include "zone/water_map.h"
@@ -909,8 +910,14 @@ bool BuildActorRoute(Mob *who, float x, float y, float z, bool public_hunt, IPat
             !std::isfinite(node.pos.z)) { return result("node_position"); }
         if (zone->watermap->InLiquid(node.pos)) { return result("node_water"); }
         if (!zone->zonemap->CheckLoS(previous, node.pos)) { return result("node_los"); }
-        if (public_hunt && std::hypot(node.pos.x - ActorDemo::HuntHomeX, node.pos.y - ActorDemo::HuntHomeY) >
-            ActorDemo::HuntLeash) { return result("node_leash"); }
+        if (public_hunt) {
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+            if (who->UsesActorInventory() && who->IsNPC() && who->GetLevel() > 1) {
+                if (!ActorPopulation::InsideArea(who->CastToNPC(), node.pos.x, node.pos.y, node.pos.z, ActorDemo::HuntLeash)) { return result("node_leash"); }
+            } else
+#endif
+            if (std::hypot(node.pos.x - ActorDemo::HuntHomeX, node.pos.y - ActorDemo::HuntHomeY) > ActorDemo::HuntLeash) { return result("node_leash"); }
+        }
         length += glm::distance(previous, node.pos);
         if (evidence) { evidence->length_prefix = length; }
         previous = node.pos;

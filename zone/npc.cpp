@@ -2261,6 +2261,17 @@ void NPC::PetOnSpawn(NewSpawn_Struct* ns)
 	}
 }
 
+void NPC::RefreshActorEquipment()
+{
+    if (!UsesActorInventory()) { return; }
+    for (int slot = EQ::invslot::EQUIPMENT_BEGIN; slot <= EQ::invslot::EQUIPMENT_END; ++slot) {
+        const auto *item = GetInv().GetItem(slot);
+        equipment[slot] = item ? item->GetID() : 0;
+    }
+    for (int material = 0; material < EQ::textures::materialCount; ++material) { SendWearChange(material); }
+    UpdateEquipmentLight();
+}
+
 void NPC::SetLevel(uint8 in_level, bool command)
 {
 	if(in_level > level)

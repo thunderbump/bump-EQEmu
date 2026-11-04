@@ -5424,6 +5424,7 @@ uint16 Mob::GetInstanceVersion() const {
 
 int Mob::GetHaste()
 {
+	if (UsesActorInventory()) { return CalculatePlayerHaste(); }
 	// See notes in Client::CalcHaste
 	// Need to check if the effect of inhibit melee differs for NPCs
 	if (spellbonuses.haste < 0) {
@@ -7326,6 +7327,60 @@ int32 Mob::GetItemFactionBonus(uint32 pFactionID) {
 
 void Mob::ClearItemFactionBonuses() {
 	item_faction_bonuses.clear();
+}
+
+// Native random Heroic CHA adjustment and repair/clamp rules shared with Client.
+// Persistence is the caller's responsibility.
+bool Mob::ApplyPersonalFaction(int32 &current_value, int32 npc_value,
+	int32 this_faction_min, int32 this_faction_max, bool gm)
+{
+	bool repair = false;
+	bool change = false;
+
+	if (itembonuses.HeroicCHA)
+	{
+		int faction_mod = itembonuses.HeroicCHA / 5;
+		// If our result isn't truncated, then just do that
+		if (npc_value * faction_mod / 100 != 0)
+			npc_value += npc_value * faction_mod / 100;
+		// If our result is truncated, then double a mob's value every once and a while to equal what they would have got
+		else
+		{
+			if (zone->random.Int(0, 100) < faction_mod)
+				npc_value *= 2;
+		}
+	}
+
+	// Set flag when to update db
+	// Repair needed, as db changes could modify a base value for a faction
+	// and we need to auto correct when that happens.
+	if (current_value > this_faction_max)
+	{
+		current_value = this_faction_max;
+		repair = true;
+	}
+	else if (current_value < this_faction_min)
+	{
+		current_value = this_faction_min;
+		repair = true;
+	}
+	else if ((!gm) && (npc_value != 0) &&
+		((npc_value > 0 && current_value != this_faction_max) ||
+		((npc_value < 0 && current_value != this_faction_min))))
+		change = true;
+
+	if (change || repair)
+	{
+		current_value += npc_value;
+
+		if (current_value > this_faction_max)
+			current_value = this_faction_max;
+		else if (current_value < this_faction_min)
+			current_value = this_faction_min;
+
+	}
+
+	return change || repair;
 }
 
 FACTION_VALUE Mob::GetPlayerFactionLevel(Mob* observer, int32 faction, uint32 race,

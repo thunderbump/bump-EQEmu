@@ -32,6 +32,10 @@ void Mob::CalcBonuses()
 {
 	CalcSpellBonuses(&spellbonuses);
 	CalcAABonuses(&aabonuses);
+	if (UsesActorInventory()) {
+		CalcHeroicBonuses(&itembonuses);
+		ProcessItemCaps();
+	}
 	CalcMaxHP();
 	CalcMaxMana();
 	SetAttackTimer();
@@ -50,7 +54,7 @@ void NPC::CalcBonuses()
 {
 	memset(&itembonuses, 0, sizeof(StatBonuses));
 
-	if (GetOwner() || RuleB(NPC, UseItemBonusesForNonPets)) {
+	if (GetOwner() || UsesActorInventory() || RuleB(NPC, UseItemBonusesForNonPets)) {
 		CalcItemBonuses(&itembonuses);
 	}
 
@@ -237,11 +241,11 @@ void Mob::ProcessItemCaps()
 
 	itembonuses.ATK = std::min(itembonuses.ATK, CalcItemATKCap());
 
-	if (IsOfClientBotMerc() && itembonuses.SpellDmg > RuleI(Character, ItemSpellDmgCap)) {
+	if ((IsOfClientBotMerc() || UsesActorInventory()) && itembonuses.SpellDmg > RuleI(Character, ItemSpellDmgCap)) {
 		itembonuses.SpellDmg = RuleI(Character, ItemSpellDmgCap);
 	}
 
-	if (IsOfClientBotMerc() && itembonuses.HealAmt > RuleI(Character, ItemHealAmtCap)) {
+	if ((IsOfClientBotMerc() || UsesActorInventory()) && itembonuses.HealAmt > RuleI(Character, ItemHealAmtCap)) {
 		itembonuses.HealAmt = RuleI(Character, ItemHealAmtCap);
 	}
 }
@@ -260,7 +264,7 @@ void Mob::AddItemBonuses(const EQ::ItemInstance* inst, StatBonuses* b, bool is_a
 		return;
 	}
 
-	if (IsClient() && !is_tribute && !inst->IsEquipable(GetBaseRace(), GetClass())) {
+	if ((IsClient() || UsesActorInventory()) && !is_tribute && !inst->IsEquipable(GetBaseRace(), GetClass())) {
 		if (item->ItemType != EQ::item::ItemTypeFood && item->ItemType != EQ::item::ItemTypeDrink) {
 			return;
 		}
@@ -268,7 +272,7 @@ void Mob::AddItemBonuses(const EQ::ItemInstance* inst, StatBonuses* b, bool is_a
 
 	const auto current_level = GetLevel();
 
-	if (IsClient() && current_level < inst->GetItemRequiredLevel(true)) {
+	if ((IsClient() || UsesActorInventory()) && current_level < inst->GetItemRequiredLevel(true)) {
 		return;
 	}
 
@@ -277,7 +281,7 @@ void Mob::AddItemBonuses(const EQ::ItemInstance* inst, StatBonuses* b, bool is_a
 	}
 
 	const auto recommended_level = is_augment ? recommended_level_override : inst->GetItemRecommendedLevel(true);
-	const bool meets_recommended = (IsNPC() && !RuleB(Items, NPCUseRecommendedLevels)) || current_level >= recommended_level;
+	const bool meets_recommended = (IsNPC() && !UsesActorInventory() && !RuleB(Items, NPCUseRecommendedLevels)) || current_level >= recommended_level;
 
 	auto CalcItemBonus = [&](int statValue) -> int {
 		return meets_recommended ? statValue : CalcRecommendedLevelBonus(current_level, recommended_level, statValue);
@@ -285,7 +289,7 @@ void Mob::AddItemBonuses(const EQ::ItemInstance* inst, StatBonuses* b, bool is_a
 
 	auto CalcCappedItemBonus = [&](int currentStat, int bonus, int cap) -> int {
 		int calc_stat = currentStat + CalcItemBonus(bonus);
-		return IsOfClientBotMerc() ? std::min(cap, calc_stat) : calc_stat;
+		return (IsOfClientBotMerc() || UsesActorInventory()) ? std::min(cap, calc_stat) : calc_stat;
 	};
 
 	b->HP += CalcItemBonus(item->HP);

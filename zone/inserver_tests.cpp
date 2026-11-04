@@ -8,6 +8,9 @@
 #include "common/rulesys.h"
 #include "zone/beacon.h"
 #include "zone/actor_body.h"
+#include "zone/actor_inventory.h"
+#include "common/item_instance.h"
+#include <memory>
 #include "zone/npc.h"
 #include "zone/entity.h"
 #include "zone/worldserver.h"
@@ -112,6 +115,17 @@ Result PlayerExperienceRules()
 		!RuleManager::Instance()->SetRule("Character:ExperiencePercentCapPerKill", "0") ||
 		npc->FinishNormalExperience(10, 100, 1000, 4.0f) != 100) {
 		return {Outcome::Failed, "shared XP percent cap changed"};
+	}
+	int32 standing = 0;
+	if (!npc->ApplyPersonalFaction(standing, -15, -100, 100) || standing != -15 ||
+		!npc->ApplyPersonalFaction(standing, -100, -100, 100) || standing != -100 ||
+		npc->ApplyPersonalFaction(standing, -1, -100, 100) || standing != -100 ||
+		npc->ApplyPersonalFaction(standing, 20, -100, 100, true) || standing != -100) {
+		return {Outcome::Failed, "shared personal faction adjustment or GM immunity changed"};
+	}
+	standing = 500;
+	if (!npc->ApplyPersonalFaction(standing, -10, -100, 100) || standing != 90) {
+		return {Outcome::Failed, "shared faction repair/clamp ordering changed"};
 	}
 	return {Outcome::Passed, "shared normal XP thresholds, con/ZEM/level/final/character modifiers and cap"};
 }
@@ -1251,6 +1265,7 @@ Result ActorApproach()
 }
 #include "actor_melee_tests.h"
 #include "actor_melee_facing_tests.h"
+#include "actor_inventory_tests.h"
 #endif
 
 struct Scenario {
@@ -1267,6 +1282,7 @@ constexpr std::array scenarios = {
 	, Scenario{"native_player_experience_rules", PlayerExperienceRules}
 	, Scenario{"native_unique_name_bounds", UniqueNameBounds}
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+    , Scenario{"rust_native_actor_equipment", ActorEquipment, CleanupMelee, 30000}
     // Exercises real shutdown, then boots a replacement in the same zone host.
     , Scenario{"rust_native_actor_body_lifetime", ActorBodyLifetime, CleanupActorBody}
     , Scenario{"rust_native_actor_patrol", ActorTravel<TravelCase::Patrol>, CleanupActorBody}

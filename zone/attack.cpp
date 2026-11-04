@@ -899,8 +899,8 @@ int Mob::ACSum(bool skip_caps)
 	int ac = 0; // this should be base AC whenever shrouds come around
 	ac += itembonuses.AC; // items + food + tribute
 	int shield_ac = 0;
-	if (HasShieldEquipped() && IsOfClientBot()) {
-		auto inst = (IsClient()) ? GetInv().GetItem(EQ::invslot::slotSecondary) : CastToBot()->GetBotItem(EQ::invslot::slotSecondary);
+	if (HasShieldEquipped() && (IsOfClientBot() || UsesActorInventory())) {
+		auto inst = (IsClient() || UsesActorInventory()) ? GetInv().GetItem(EQ::invslot::slotSecondary) : CastToBot()->GetBotItem(EQ::invslot::slotSecondary);
 		if (inst) {
 			if (inst->GetItemRecommendedLevel(true) <= GetLevel()) {
 				shield_ac = inst->GetItemArmorClass(true);
@@ -913,11 +913,11 @@ int Mob::ACSum(bool skip_caps)
 	// EQ math
 	ac = (ac * 4) / 3;
 	// anti-twink
-	if (!skip_caps && IsOfClientBot() && GetLevel() < RuleI(Combat, LevelToStopACTwinkControl)) {
+	if (!skip_caps && (IsOfClientBot() || UsesActorInventory()) && GetLevel() < RuleI(Combat, LevelToStopACTwinkControl)) {
 		ac = std::min(ac, 25 + 6 * GetLevel());
 	}
 	ac = std::max(0, ac + GetClassRaceACBonus());
-	if (IsNPC()) {
+	if (IsNPC() && !UsesActorInventory()) {
 		// This is the developer tweaked number
 		// for the VAST amount of NPCs in EQ this number didn't exceed 600 until recently (PoWar)
 		// According to the guild hall Combat Dummies, a level 50 classic EQ mob it should be ~115
@@ -944,7 +944,7 @@ int Mob::ACSum(bool skip_caps)
 	if (ac < 0)
 		ac = 0;
 
-	if (!skip_caps && IsOfClientBot()) {
+	if (!skip_caps && (IsOfClientBot() || UsesActorInventory())) {
 		auto softcap = GetACSoftcap();
 		auto returns = GetSoftcapReturns();
 		int total_aclimitmod = aabonuses.CombatStability + itembonuses.CombatStability + spellbonuses.CombatStability;
@@ -1264,8 +1264,8 @@ int64 Mob::GetWeaponDamage(Mob *against, const EQ::ItemInstance *weapon_item, in
 			bool MagicWeapon = weapon_item->GetItemMagical(true) || spellbonuses.MagicWeapon || itembonuses.MagicWeapon;
 			if (MagicWeapon) {
 				auto rec_level = weapon_item->GetItemRecommendedLevel(true);
-				if (IsClient() && GetLevel() < rec_level)
-					dmg = CastToClient()->CalcRecommendedLevelBonus(
+				if ((IsClient() || UsesActorInventory()) && GetLevel() < rec_level)
+					dmg = CalcRecommendedLevelBonus(
 						GetLevel(), rec_level, weapon_item->GetItemWeaponDamage(true));
 				else
 					dmg = weapon_item->GetItemWeaponDamage(true);
@@ -1277,8 +1277,8 @@ int64 Mob::GetWeaponDamage(Mob *against, const EQ::ItemInstance *weapon_item, in
 		}
 		else {
 			bool MagicGloves = false;
-			if (IsClient()) {
-				const EQ::ItemInstance *gloves = CastToClient()->GetInv().GetItem(EQ::invslot::slotHands);
+			if (IsClient() || UsesActorInventory()) {
+				const EQ::ItemInstance *gloves = GetInv().GetItem(EQ::invslot::slotHands);
 				if (gloves)
 					MagicGloves = gloves->GetItemMagical(true);
 			}
@@ -1306,8 +1306,8 @@ int64 Mob::GetWeaponDamage(Mob *against, const EQ::ItemInstance *weapon_item, in
 		if (weapon_item) {
 			if (weapon_item->GetItem()) {
 				auto rec_level = weapon_item->GetItemRecommendedLevel(true);
-				if (IsClient() && GetLevel() < rec_level) {
-					dmg = CastToClient()->CalcRecommendedLevelBonus(
+				if ((IsClient() || UsesActorInventory()) && GetLevel() < rec_level) {
+					dmg = CalcRecommendedLevelBonus(
 						GetLevel(), rec_level, weapon_item->GetItemWeaponDamage(true));
 				}
 				else {
@@ -1567,6 +1567,8 @@ bool Mob::Attack(Mob* other, int Hand, bool bRiposte, bool IsStrikethrough, bool
 {
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
     if (!ActorDemo::AllowCombat(this, other)) { return false; }
+    if (UsesActorInventory() && IsNPC() &&
+        (!CastToNPC()->IsAuthorizedActorSwing() || bRiposte || IsFromSpell || Hand != EQ::invslot::slotPrimary)) { return false; }
 #endif
 	if (!other || (other && other->IsCorpse())) {
 		SetTarget(nullptr);
@@ -1591,7 +1593,7 @@ bool Mob::Attack(Mob* other, int Hand, bool bRiposte, bool IsStrikethrough, bool
 		return false; // Only bards can attack while casting
 	}
 
-	if (DivineAura() && !CastToClient()->GetGM()) { //cant attack while invulnerable unless your a gm
+	if (DivineAura() && (!IsClient() || !CastToClient()->GetGM())) { //cant attack while invulnerable unless your a gm
 		LogCombat("Attack cancelled, Divine Aura is in effect");
 		MessageString(Chat::DefaultText, DIVINE_AURA_NO_ATK);
 		return false;
@@ -1609,11 +1611,11 @@ bool Mob::Attack(Mob* other, int Hand, bool bRiposte, bool IsStrikethrough, bool
 	}
 
 	if (Hand == EQ::invslot::slotSecondary) {
-		weapon = (IsClient()) ? GetInv().GetItem(EQ::invslot::slotSecondary) : CastToBot()->GetBotItem(EQ::invslot::slotSecondary);
+		weapon = (IsClient() || UsesActorInventory()) ? GetInv().GetItem(EQ::invslot::slotSecondary) : CastToBot()->GetBotItem(EQ::invslot::slotSecondary);
 		OffHandAtk(true);
 	}
 	else {
-		weapon = (IsClient()) ? GetInv().GetItem(EQ::invslot::slotPrimary) : CastToBot()->GetBotItem(EQ::invslot::slotPrimary);
+		weapon = (IsClient() || UsesActorInventory()) ? GetInv().GetItem(EQ::invslot::slotPrimary) : CastToBot()->GetBotItem(EQ::invslot::slotPrimary);
 		OffHandAtk(false);
 	}
 	if (weapon != nullptr) {
@@ -1759,7 +1761,7 @@ bool Mob::Attack(Mob* other, int Hand, bool bRiposte, bool IsStrikethrough, bool
 	///////////////////////////////////////////////////////////
 	other->Damage(this, my_hit.damage_done, SPELL_UNKNOWN, my_hit.skill, true, -1, false, m_specialattacks);
 
-	if (CastToClient()->IsDead() || (IsBot() && GetAppearance() == eaDead)) {
+	if ((IsClient() && CastToClient()->IsDead()) || (!IsClient() && GetHP() <= 0) || (IsBot() && GetAppearance() == eaDead)) {
 		return false;
 	}
 
@@ -2210,6 +2212,7 @@ bool NPC::Attack(Mob* other, int Hand, bool bRiposte, bool IsStrikethrough, bool
     // Retaliation against the body remains ordinary native NPC behavior.
     if (IsRustActor() && (!actor_swing_authorized_ || bRiposte || IsFromSpell ||
         Hand != EQ::invslot::slotPrimary)) { return false; }
+    if (UsesActorInventory()) { return Mob::Attack(other, Hand, bRiposte, IsStrikethrough, IsFromSpell, opts); }
 #endif
 	if (!other) {
 		SetTarget(nullptr);
@@ -6654,7 +6657,12 @@ void Mob::SetAttackTimer()
 
 void Client::SetAttackTimer()
 {
-	float haste_mod = GetHaste() * 0.01f;
+	SetPlayerAttackTimers();
+}
+
+void Mob::SetPlayerAttackTimers()
+{
+	float haste_mod = (IsClient() ? CastToClient()->GetHaste() : CalculatePlayerHaste()) * 0.01f;
 	int primary_speed = 0;
 	int secondary_speed = 0;
 
@@ -6725,7 +6733,7 @@ void Client::SetAttackTimer()
 		if (ItemToUse && ItemToUse->ItemType == EQ::item::ItemTypeBow) {
 			// Live actually had a bug here where they would return the non-modified attack speed
 			// rather than the cap ...
-			speed = std::max(speed - GetQuiverHaste(speed), RuleI(Combat, QuiverHasteCap));
+			speed = std::max(speed - PlayerQuiverHaste(speed), RuleI(Combat, QuiverHasteCap));
 		}
 		else {
 			if (RuleB(Spells, Jun182014HundredHandsRevamp))
@@ -6756,6 +6764,7 @@ void Client::SetAttackTimer()
 
 void NPC::SetAttackTimer()
 {
+	if (UsesActorInventory()) { SetPlayerAttackTimers(); return; }
 	float haste_mod = GetHaste() * 0.01f;
 
 	//default value for attack timer in case they have

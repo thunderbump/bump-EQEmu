@@ -658,13 +658,16 @@ public:
 	inline int64 GetHP() const { return current_hp; }
 	inline int64 GetMaxHP() const { return max_hp; }
 	virtual int64 CalcMaxHP();
-	virtual int64 CalcHPRegenCap() { return 0; }
+	virtual int64 CalcHPRegenCap() { return UsesActorInventory() ? PlayerCalcHPRegenCap() : 0; }
+	int64 PlayerCalcHPRegenCap();
 	inline int64 GetMaxMana() const { return max_mana; }
-	virtual int64 CalcManaRegenCap() { return 0; }
+	virtual int64 CalcManaRegenCap() { return UsesActorInventory() ? PlayerCalcManaRegenCap() : 0; }
+	int64 PlayerCalcManaRegenCap();
 	inline int64 GetMana() const { return current_mana; }
 	virtual int64 GetEndurance() const { return 0; }
 	virtual int64 GetMaxEndurance() const { return 0; }
-	virtual int64 CalcEnduranceRegenCap() { return 0; }
+	virtual int64 CalcEnduranceRegenCap() { return UsesActorInventory() ? PlayerCalcEnduranceRegenCap() : 0; }
+	int64 PlayerCalcEnduranceRegenCap();
 	virtual void SetEndurance(int32 newEnd) { return; }
 	int64 GetItemHPBonuses();
 	int64 GetSpellHPBonuses();
@@ -702,7 +705,8 @@ public:
 	virtual int32 GetHealAmt() const { return 0; }
 	virtual int32 GetSpellDmg() const { return 0; }
 	void ProcessItemCaps();
-	virtual int32 CalcItemATKCap() { return 0; }
+	virtual int32 CalcItemATKCap() { return UsesActorInventory() ? PlayerCalcItemATKCap() : 0; }
+	int32 PlayerCalcItemATKCap();
 	virtual bool IsSitting() const { return false; }
 
 	void CopyHateList(Mob* to);
@@ -1132,6 +1136,9 @@ public:
 	void SetExtraHaste(int haste, bool need_to_save = true);
 	inline int GetExtraHaste() { return extra_haste; }
 	virtual int GetHaste();
+	int CalculatePlayerHaste();
+	int PlayerQuiverHaste(int delay);
+	void SetPlayerAttackTimers();
 	int32 GetMeleeMitigation();
 
 	uint8 GetWeaponDamageBonus(const EQ::ItemData* weapon, bool offhand = false);
@@ -1208,6 +1215,8 @@ public:
 		uint32 experience_for_level, float character_modifier);
 	uint32 GetBaseExperienceForLevel(uint16 check_level);
 	uint64 GetBaseExperienceForKill(Mob* against);
+	bool ApplyPersonalFaction(int32 &current_value, int32 npc_value,
+		int32 faction_min, int32 faction_max, bool gm = false);
 	FACTION_VALUE GetSpecialFactionCon(Mob* iOther);
 	// What observer thinks of a player identity. Standing is supplied by its owner;
 	// actor reputation can live in Rust without using the NPC ally table.
@@ -1672,6 +1681,7 @@ protected:
 	uint16 GetWeaponSpeedbyHand(uint16 hand);
 	virtual int GetBaseSkillDamage(EQ::skills::SkillType skill, Mob *target = nullptr);
 	virtual int64 GetFocusEffect(focusType type, uint16 spell_id, Mob *caster = nullptr, bool from_buff_tic = false);
+	virtual bool UsesActorInventory() const { return false; }
 	virtual EQ::InventoryProfile& GetInv() { return m_inv; }
 	void CalculateNewFearpoint();
 	float FindGroundZ(float new_x, float new_y, float z_offset=0.0);

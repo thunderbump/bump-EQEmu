@@ -8349,54 +8349,9 @@ int32 Client::GetCharacterFactionLevel(int32 faction_id)
 
 void Client::UpdatePersonalFaction(int32 char_id, int32 npc_value, int32 faction_id, int32 *current_value, int32 temp, int32 this_faction_min, int32 this_faction_max)
 {
-	bool repair = false;
-	bool change = false;
-
-	if (itembonuses.HeroicCHA)
-	{
-		int faction_mod = itembonuses.HeroicCHA / 5;
-		// If our result isn't truncated, then just do that
-		if (npc_value * faction_mod / 100 != 0)
-			npc_value += npc_value * faction_mod / 100;
-		// If our result is truncated, then double a mob's value every once and a while to equal what they would have got
-		else
-		{
-			if (zone->random.Int(0, 100) < faction_mod)
-				npc_value *= 2;
-		}
-	}
-
-	// Set flag when to update db
-	// Repair needed, as db changes could modify a base value for a faction
-	// and we need to auto correct when that happens.
-	if (*current_value > this_faction_max)
-	{
-		*current_value = this_faction_max;
-		repair = true;
-	}
-	else if (*current_value < this_faction_min)
-	{
-		*current_value = this_faction_min;
-		repair = true;
-	}
-	else if ((m_pp.gm != 1) && (npc_value != 0) &&
-		((npc_value > 0 && *current_value != this_faction_max) ||
-		((npc_value < 0 && *current_value != this_faction_min))))
-		change = true;
-
-	if (change || repair)
-	{
-		*current_value += npc_value;
-
-		if (*current_value > this_faction_max)
-			*current_value = this_faction_max;
-		else if (*current_value < this_faction_min)
-			*current_value = this_faction_min;
-
+	if (ApplyPersonalFaction(*current_value, npc_value, this_faction_min, this_faction_max, m_pp.gm == 1)) {
 		database.SetCharacterFactionLevel(char_id, faction_id, *current_value, temp, factionvalues);
 	}
-
-return;
 }
 
 // returns the character's faction level, adjusted for racial, class, and deity modifiers
@@ -8929,6 +8884,11 @@ void Client::ExpeditionSay(const char *str, int ExpID) {
 }
 
 int Client::GetQuiverHaste(int delay)
+{
+	return PlayerQuiverHaste(delay);
+}
+
+int Mob::PlayerQuiverHaste(int delay)
 {
 	const EQ::ItemInstance *pi = nullptr;
 	for (int r = EQ::invslot::GENERAL_BEGIN; r <= EQ::invslot::GENERAL_END; r++) {

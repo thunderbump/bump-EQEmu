@@ -9,6 +9,7 @@
 //!            Status::Ok);
 //! ```
 
+pub mod inventory;
 pub mod population;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -206,6 +207,8 @@ pub struct Candidate {
     pub type_id: u32,
     pub level: u8,
     pub service: bool,
+    pub actor_level: u8,
+    pub hostile: bool,
 }
 
 /// Owned native combat fact. Every result names the entire authority.
@@ -282,6 +285,11 @@ impl Runtime {
         runtime.population_profile = true;
         runtime
     }
+
+    pub fn next_operation(&self) -> Option<u64> {
+        self.high_operation.checked_add(1)
+    }
+
 
     /// Sequence must strictly increase; ticks may stay equal but cannot decrease.
     /// Refusals do not consume ordering inputs or mutate state. Empty advances
@@ -920,7 +928,12 @@ fn within(a: [i32; 3], b: [i32; 3], xy: i32, z: i32) -> bool {
 }
 fn prey(c: &Candidate, public_hunt: bool, population_profile: bool) -> bool {
     if public_hunt && population_profile {
-        return !c.service && population::prey_type(c.type_id, c.level);
+        return !c.service
+            && if c.actor_level <= 1 {
+                population::prey_type(c.type_id, c.level)
+            } else {
+                population::appropriate_hostile(c.actor_level, c.level, c.hostile)
+            };
     }
     !c.service
         && ((c.type_id == 2011 && c.level == 1)
@@ -974,6 +987,8 @@ mod tests {
             type_id: 2011,
             level: 1,
             service: false,
+            actor_level: 1,
+            hostile: false,
         }
     }
 

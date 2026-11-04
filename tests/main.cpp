@@ -29,6 +29,7 @@
 #include "tests/string_util_test.h"
 #include "tests/task_state_test.h"
 #include "tests/player_faction_test.h"
+#include "tests/player_zone_access_test.h"
 #include "tests/suite_runner.h"
 
 #include "common/path_manager.h"
@@ -62,6 +63,7 @@ int main()
 		tests.add(new SkillsUtilsTest());
 		tests.add(new TaskStateTest());
 		tests.add(new PlayerFactionTest());
+		tests.add(new PlayerZoneAccessTest());
 		tests.add(new ActorStagingTest());
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
 		tests.add(new ActorRuntimeTest());
