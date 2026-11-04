@@ -231,7 +231,8 @@ void SingleClientAbility()
 }
 }
 
-int main()
+// Shared by the utility suite and the standalone control executable.
+int RunActorDemoControls()
 {
     try {
         Commands(); EncountersAndStop(); Limits(); CapAndGap(); FailuresAndTeardown(); NativeCustody(); NativeKillOrdering(); SingleClientAbility();
@@ -242,3 +243,10 @@ int main()
         return EXIT_FAILURE;
     }
 }
+
+#ifndef EQEMU_ACTOR_CONTROLS_IN_UTILITY_SUITE
+int main()
+{
+    return RunActorDemoControls();
+}
+#endif

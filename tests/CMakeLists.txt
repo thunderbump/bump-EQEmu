@@ -2,16 +2,19 @@ cmake_minimum_required(VERSION 3.20.0)
 
 add_subdirectory(cppunit)
 
-# Opt-in controller/protocol seam checks. No server, DB, client or Rust fixtures.
+# Standalone entry points for controls also registered in the utility suite.
 add_executable(tests_actor_demo_controls EXCLUDE_FROM_ALL actor_demo_controls.cpp)
 add_executable(tests_actor_hunt_controls EXCLUDE_FROM_ALL actor_hunt_controls.cpp)
 
 set(tests_sources
 	main.cpp
+	actor_demo_controls.cpp
+	actor_hunt_controls.cpp
 )
 
 set(tests_headers
 	actor_runtime_test.h
+	actor_staging_test.h
 	suite_runner.h
 	atobool_test.h
 	data_verification_test.h
@@ -26,7 +29,8 @@ set(tests_headers
 	task_state_test.h
 )
 
-add_executable(tests ${tests_sources} ${tests_headers})
+add_executable(tests ${tests_headers})
+target_compile_definitions(tests PRIVATE EQEMU_ACTOR_CONTROLS_IN_UTILITY_SUITE)
 
 if(EQEMU_SANITIZERS)
 	# Deliberate faults run separately in the disposable worker, never in the suite.
@@ -46,11 +50,13 @@ target_include_directories(tests PRIVATE ..)
 include("${CMAKE_SOURCE_DIR}/cmake/ActorBridge.cmake")
 eqemu_link_actor_bridge(tests)
 if(TARGET actor_bridge)
+    list(APPEND tests_sources actor_hunt_bridge_controls.cpp actor_population_bridge_controls.cpp)
     add_executable(tests_actor_hunt_bridge_controls EXCLUDE_FROM_ALL actor_hunt_bridge_controls.cpp)
     eqemu_link_actor_bridge(tests_actor_hunt_bridge_controls)
     add_executable(tests_actor_population_bridge_controls EXCLUDE_FROM_ALL actor_population_bridge_controls.cpp)
     eqemu_link_actor_bridge(tests_actor_population_bridge_controls)
 endif()
+target_sources(tests PRIVATE ${tests_sources})
 
 install(TARGETS tests RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
 

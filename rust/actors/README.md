@@ -811,9 +811,21 @@ outside this profile.
 This integration preserves actor source through
 `788c86269d9b53ca2b11ca8fa7183826f6c330d6`. Its historical persistence acceptance
 does not establish a complete ordinary-suite result for this composition. The
-existing 21 in-server scenarios, two native actor policy controls and 19 Rust
-population cases gain no new cases here. The separate hunt/population CXX controls
-remain conditional on the Linux x86-64 bridge and opt-in build targets. Population
-policy, checkpoint and CXX control coverage does not establish live NPC AI, map,
-combat or client behavior. Earlier ordinary and sanitizer runs remain attributed
+existing 21 in-server scenarios and 19 Rust population cases gain no new cases
+here. Population policy, checkpoint and CXX control coverage does not establish
+live NPC AI, map, combat or client behavior. Earlier ordinary and sanitizer runs remain attributed
 to their own source pins; exact-head review and Stack validation are still needed.
+
+`bin/tests` registers `ActorStagingTest` and calls the existing demo and hunt
+native control fixtures directly. With the Linux x86-64 CXX bridge enabled, it
+also calls the existing hunt and population bridge fixtures. Each fixture is one
+CPPUnit method that asserts its return code is zero using `TEST_ASSERT`, which
+remains active with `NDEBUG`; failures enter the normal aggregate utility verdict.
+The four original control bodies are reused without new fixture cases or a
+subprocess launcher. Their standalone targets and entry points remain available;
+only the utility target defines `EQEMU_ACTOR_CONTROLS_IN_UTILITY_SUITE` to omit
+their standalone `main` functions. The source inventory on Linux with the bridge
+enabled is 91 existing utility methods plus four fixture registrations, or 95.
+This expected count is unexecuted and is not a validation result. Population
+controls retain their private temporary-directory/checkpoint I/O and explicit
+native facts; they do not boot a zone or add in-server scenarios.

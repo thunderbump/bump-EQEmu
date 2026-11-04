@@ -90,7 +90,8 @@ void PersistentBridge() {
         "surviving public target prevented actor drain");
 }
 }
-int main() {
+// Shared by the utility suite and the standalone control executable.
+int RunActorHuntBridgeControls() {
     try {
         PersistentBridge();
         std::cout << "public hunt CXX/Rust bridge: 4 persistent goals passed\n";
@@ -100,3 +101,10 @@ int main() {
         return EXIT_FAILURE;
     }
 }
+
+#ifndef EQEMU_ACTOR_CONTROLS_IN_UTILITY_SUITE
+int main()
+{
+    return RunActorHuntBridgeControls();
+}
+#endif

@@ -342,7 +342,8 @@ void ActiveCancelAndPendingKillDrain() {
 }
 
 } // namespace
-int main() {
+// Shared by the utility suite and the standalone control executable.
+int RunActorPopulationBridgeControls() {
   try {
     ThreeActorsClaimsCallbacksAndRestore();
     ActiveCancelAndPendingKillDrain();
@@ -354,3 +355,10 @@ int main() {
     return EXIT_FAILURE;
   }
 }
+
+#ifndef EQEMU_ACTOR_CONTROLS_IN_UTILITY_SUITE
+int main()
+{
+    return RunActorPopulationBridgeControls();
+}
+#endif

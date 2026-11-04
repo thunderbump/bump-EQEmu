@@ -216,7 +216,8 @@ void NativeRetaliationAndIncoming() {
     Require(c.incoming.damage == 104 && c.minimum_hp == 0, "fatal incoming loss did not clamp at zero HP");
 }
 }
-int main() {
+// Shared by the utility suite and the standalone control executable.
+int RunActorHuntControls() {
     try {
         NearestAndEligibility(); PersistentRestAndNoTarget(); ImmediateContentionAndOnlyActorCleanup(); YieldRecoveryAndGoalCounters(); NativeReachAndShortApproaches(); IdlePublicSpawnFloor(); NativeRetaliationAndIncoming();
         std::cout << "public hunt controls: 7 groups passed\n";
@@ -226,3 +227,10 @@ int main() {
         return EXIT_FAILURE;
     }
 }
+
+#ifndef EQEMU_ACTOR_CONTROLS_IN_UTILITY_SUITE
+int main()
+{
+    return RunActorHuntControls();
+}
+#endif
