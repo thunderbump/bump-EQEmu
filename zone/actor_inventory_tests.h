@@ -17,7 +17,8 @@ Result ActorEquipment()
 				regions.emplace_back(RegionTypeWater, OrientedBoundingBox({1224,-917,floor+1}, glm::vec3(0), glm::vec3(1), {5,5,5}));
 			}
 		};
-		const auto floor = zone->zonemap->FindBestZ({-917,1224,60}, nullptr);
+		glm::vec3 probe(-917,1224,60);
+		const auto floor = zone->zonemap->FindBestZ(probe, nullptr);
 		if (!std::isfinite(floor) || floor == BEST_Z_INVALID) { return fail("restoration floor fixture unavailable"); }
 		WetFloor water(floor);
 		struct RestoreMap {
