@@ -563,10 +563,10 @@ impl Population {
                 if b.point.allowed(a.saved.level) {
                     a.saved.point = b.point;
                 }
-                if !b.error {
-                    if let Some(items) = &b.inventory {
-                        a.saved.inventory = Some(items.clone());
-                    }
+                if !b.error
+                    && let Some(items) = &b.inventory
+                {
+                    a.saved.inventory = Some(items.clone());
                 }
                 a.saved.hp = b.hp;
                 a.saved.max_hp = max_hp;
@@ -933,12 +933,12 @@ impl Population {
                         a.phase = Phase::Retiring;
                         actions.push(a.action(i, ActionKind::Retire));
                     } else if b.travel_complete {
-                        if let Some(previous) = a.saved.transfer {
-                            if let Some(current) = b.routes.iter().find(|r| {
+                        if let Some(previous) = a.saved.transfer
+                            && let Some(current) = b.routes.iter().find(|r| {
                                 r.id == previous.id && r.zone == previous.zone && r.valid()
-                            }) {
-                                a.saved.transfer = Some(*current);
-                            }
+                            })
+                        {
+                            a.saved.transfer = Some(*current);
                         }
                         a.phase = Phase::PreparingTransfer;
                         a.at = now;
@@ -947,14 +947,13 @@ impl Population {
                     }
                 }
                 Phase::PreparingTransfer => {
-                    if let Some(previous) = a.saved.transfer {
-                        if let Some(current) = b
+                    if let Some(previous) = a.saved.transfer
+                        && let Some(current) = b
                             .routes
                             .iter()
                             .find(|r| r.id == previous.id && r.zone == previous.zone && r.valid())
-                        {
-                            a.saved.transfer = Some(*current);
-                        }
+                    {
+                        a.saved.transfer = Some(*current);
                     }
                     if b.refused || b.contested {
                         a.saved.desired = Desired::Paused;
