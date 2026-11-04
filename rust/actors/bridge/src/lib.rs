@@ -1,6 +1,7 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 mod checkpoint;
 mod custody;
+mod integration;
 mod population;
 
 #[cxx::bridge(namespace = "eqemu_proof")]

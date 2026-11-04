@@ -11,6 +11,7 @@
 #include "zone/beacon.h"
 #include "zone/actor_body.h"
 #include "zone/actor_inventory.h"
+#include "zone/actor_integration.h"
 #include "zone/actor_zones.h"
 #include "common/item_instance.h"
 #include <memory>
@@ -1293,6 +1294,11 @@ constexpr std::array scenarios = {
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
     , Scenario{"rust_native_actor_equipment", ActorEquipment, CleanupMelee, 30000}
     , Scenario{"rust_native_actor_spawn_hints", ActorSpawnHints}
+    , Scenario{"rust_native_actor_observation_buffer", []() -> Result {
+        return ActorIntegration::CaptureBufferControl()
+            ? Result{Outcome::Passed,"callback POD prefix, 64-bit widths and fail-closed overflow; no Rust or actor authority"}
+            : Result{Outcome::Failed,"callback capture buffer overwrote or lost its complete prefix"};
+    }}
     // Exercises real shutdown, then boots a replacement in the same zone host.
     , Scenario{"rust_native_actor_body_lifetime", ActorBodyLifetime, CleanupActorBody}
     , Scenario{"rust_native_actor_patrol", ActorTravel<TravelCase::Patrol>, CleanupActorBody}

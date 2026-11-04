@@ -838,3 +838,33 @@ checkpoint `5e088801fcf3655594bfd5e27318e8730626a3f6` passed98 aggregate utility
 methods and22 named in-server cases. Later inventory/progression/transfer code
 requires its own exact-head worker build/tests and integrated game scenarios.
 No host Cargo/native candidate execution or shared game deployment is implied.
+
+### Bounded integration observations
+
+The test-only observer uses the exact controller and artifact schemas in
+[`bridge/protocol/integration-v1.3.json`](bridge/protocol/integration-v1.3.json),
+which clarifies the retained v2 event contract without changing actor authority.
+It requires both native test and Rust bridge builds, the existing population
+opt-in, and the explicit observer environment in that protocol. Ordinary actor
+operation does not enable the observer. Requests support only read-only flush
+and whole-three-record snapshots at zone safe points. Inventory fixtures enter
+through stopped offline records and the normal native restoration path.
+
+Native callbacks copy fixed scalar records into a bounded zone-thread buffer.
+Rust drains it outside callbacks, assigns immutable contexts and process-local
+sequences, and records successful per-actor durable publications with native
+OpenSSL SHA-256. Failed writes emit no committed publication or credit.
+A later failure writing a different actor does not erase an earlier committed
+actor's credit observation. These are per-actor commits, not a transaction over
+all three actors.
+
+The private shard basename is `central-cdau-integration-v1.json`. Stack owns
+launching, global cap enforcement, context remapping and the one final artifact.
+A live flush proves only its retained prefix. Orderly teardown exports a final
+prefix after actual lease releases; expected fault kills use the preceding live
+flush and independent process identity/reap evidence. Overflow, unknown data,
+gaps or incomplete export invalidate acceptance without changing gameplay.
+Neither the source contracts nor the ordinary suite qualify live population
+inventory, earned progression or cross-process travel. The new observer and
+spawn-schema regression still require coherent worker validation and the
+separately authorized fixed integration fixture.

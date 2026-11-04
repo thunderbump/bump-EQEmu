@@ -15,6 +15,7 @@
 	You should have received a copy of the GNU General Public License
 	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
+#include "actor_integration.h"
 #include "common/data_verification.h"
 #include "common/eq_constants.h"
 #include "common/eq_packet_structs.h"
@@ -1566,9 +1567,12 @@ void Mob::DoAttack(Mob *other, DamageHitInfo &hit, ExtraAttackOptions *opts, boo
 bool Mob::Attack(Mob* other, int Hand, bool bRiposte, bool IsStrikethrough, bool IsFromSpell, ExtraAttackOptions *opts)
 {
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
-    if (!ActorDemo::AllowCombat(this, other)) { return false; }
-    if (UsesActorInventory() && IsNPC() &&
-        (!CastToNPC()->IsAuthorizedActorSwing() || bRiposte || IsFromSpell || Hand != EQ::invslot::slotPrimary)) { return false; }
+    const bool actor_allowed = ActorDemo::AllowCombat(this, other);
+    const bool actor_swing = !(UsesActorInventory() && IsNPC() &&
+        (!CastToNPC()->IsAuthorizedActorSwing() || bRiposte || IsFromSpell || Hand != EQ::invslot::slotPrimary));
+    ActorIntegration::Attack actor_observation(this,other,actor_allowed && actor_swing);
+    if (!actor_allowed) { return false; }
+    if (!actor_swing) { return false; }
 #endif
 	if (!other || (other && other->IsCorpse())) {
 		SetTarget(nullptr);
@@ -2207,11 +2211,14 @@ bool Client::CheckIfAlreadyDead()
 bool NPC::Attack(Mob* other, int Hand, bool bRiposte, bool IsStrikethrough, bool IsFromSpell, ExtraAttackOptions *opts)
 {
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
-    if (!ActorDemo::AllowCombat(this, other)) { return false; }
+    const bool actor_allowed = ActorDemo::AllowCombat(this, other);
+    const bool actor_swing = !(IsRustActor() && (!actor_swing_authorized_ || bRiposte || IsFromSpell ||
+        Hand != EQ::invslot::slotPrimary));
+    ActorIntegration::Attack actor_observation(this,other,actor_allowed && actor_swing);
+    if (!actor_allowed) { return false; }
     // Only the serialized adapter's timer-bound primary swing is voluntary.
     // Retaliation against the body remains ordinary native NPC behavior.
-    if (IsRustActor() && (!actor_swing_authorized_ || bRiposte || IsFromSpell ||
-        Hand != EQ::invslot::slotPrimary)) { return false; }
+    if (!actor_swing) { return false; }
     if (UsesActorInventory()) { return Mob::Attack(other, Hand, bRiposte, IsStrikethrough, IsFromSpell, opts); }
 #endif
 	if (!other) {

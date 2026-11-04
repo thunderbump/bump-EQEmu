@@ -26,7 +26,11 @@ struct Owned {
 }
 impl Drop for Owned {
     fn drop(&mut self) {
-        let _ = self.file.unlock();
+        if self.file.unlock().is_ok() {
+            crate::integration::lease(self.record.id, &self.record.saved, self.record.revision, false);
+        } else {
+            crate::integration::storage_failure(self.record.id);
+        }
     }
 }
 pub struct Store {
@@ -61,12 +65,14 @@ fn read(directory: &Path, index: usize) -> Result<Record, String> {
     }
     Ok(record)
 }
-fn publish(directory: &Path, index: usize, record: &Record) -> Result<(), String> {
+fn publish(directory: &Path, index: usize, record: &Record, cause: u8) -> Result<(), String> {
     let bytes = serde_json::to_vec(record).map_err(|e| format!("actor_encode: {e}"))?;
     if bytes.len() as u64 > checkpoint::LIMIT {
         return Err("actor_record_too_large".into());
     }
-    checkpoint::atomic(directory, &record_name(index), &bytes)
+    checkpoint::atomic(directory, &record_name(index), &bytes)?;
+    crate::integration::publication(index, &record.saved, record.revision, record.clean, cause, &bytes);
+    Ok(())
 }
 fn migrate(directory: &str) -> Result<PathBuf, String> {
     // The legacy owner lock serializes migration and excludes a running old
@@ -110,6 +116,7 @@ fn migrate(directory: &str) -> Result<PathBuf, String> {
                 clean: true,
                 saved,
             },
+            0,
         )?;
     }
     File::open(&temporary)
@@ -194,9 +201,11 @@ impl Store {
                 let _ = file.unlock();
                 continue;
             }
+            crate::integration::lease(i, &record.saved, record.revision, true);
             self.owned[i] = Some(Owned { file, record });
             let owned = self.owned[i].as_mut().unwrap();
             if !owned.record.clean {
+                crate::integration::dirty_refusal(owned.record.revision);
                 return Err(format!("actor_{}_recovery_required", i + 1));
             }
             owned.record.saved.owner_epoch = owned
@@ -212,7 +221,7 @@ impl Store {
                 .ok_or("revision_exhausted")?;
             // No body exists yet. A clean acquisition record remains restartable;
             // every Spawn still requires a separate dirty durable publication.
-            publish(&self.records, i, &owned.record)?;
+            publish(&self.records, i, &owned.record, 1)?;
             adopted.push((i, owned.record.saved.clone()));
         }
         if adopted.is_empty() && self.mask() == 0 && contended {
@@ -290,8 +299,21 @@ impl Store {
                 clean: departing || clean,
                 saved: saved[i].clone(),
             };
-            publish(&self.records, i, &record)?;
+            let old = &owned.record;
+            let cause = if departing { 7 } else if clean { 8 }
+                else if record.saved.completed != old.saved.completed { 4 }
+                else if record.saved.level != old.saved.level { 9 }
+                else if record.saved.inventory != old.saved.inventory { 5 }
+                else if record.saved.transfer.is_some() && record.saved.transfer != old.saved.transfer { 6 }
+                else if old.clean { 2 } else { 3 };
+            if let Err(error)=publish(&self.records, i, &record, cause) {
+                crate::integration::storage_failure(i);
+                return Err(error);
+            }
             published_revision = published_revision.max(next);
+            if record.saved.completed != owned.record.saved.completed {
+                crate::integration::credit(i, &owned.record.saved, &record.saved);
+            }
             owned.record = record;
             if departing {
                 self.owned[i] = None;

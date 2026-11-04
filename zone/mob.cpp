@@ -16,6 +16,7 @@
 	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 #include "mob.h"
+#include "actor_integration.h"
 
 #include "common/data_bucket.h"
 #include "common/data_verification.h"
@@ -7386,33 +7387,41 @@ bool Mob::ApplyPersonalFaction(int32 &current_value, int32 npc_value,
 FACTION_VALUE Mob::GetPlayerFactionLevel(Mob* observer, int32 faction, uint32 race,
 	uint32 class_id, uint32 deity_id, uint32 character_id, int32 standing)
 {
+	const auto personal_standing=standing;
+	int32 item_bonus=0,spell_bonus=0;
+	auto observed=[&](FACTION_VALUE result) {
+		ActorIntegration::Reaction(this,observer,faction,personal_standing,item_bonus,spell_bonus,result);
+		return result;
+	};
 	if (faction < 0) {
-		return CalculatePlayerSpecialFaction(faction);
+		return observed(CalculatePlayerSpecialFaction(faction));
 	}
 	if (GetFeigned() || !zone->CanDoCombat() ||
 		(invisible_undead && observer && !observer->SeeInvisibleUndead()) ||
 		IsInvisible(observer)) {
-		return FACTION_INDIFFERENTLY;
+		return observed(FACTION_INDIFFERENTLY);
 	}
 	if (observer && observer->GetOwnerID()) {
 		auto *owner = observer->GetOwner();
-		return owner && owner->IsClient() && character_id &&
+		return observed(owner && owner->IsClient() && character_id &&
 			character_id == owner->CastToClient()->CharacterID()
-			? FACTION_AMIABLY : FACTION_INDIFFERENTLY;
+			? FACTION_AMIABLY : FACTION_INDIFFERENTLY);
 	}
 	if (faction <= 0) {
-		return FACTION_INDIFFERENTLY;
+		return observed(FACTION_INDIFFERENTLY);
 	}
 	FactionMods modifiers;
 	auto reaction = FACTION_INDIFFERENTLY;
 	if (content_db.GetFactionData(&modifiers, class_id, race, deity_id, faction)) {
-		standing += GetFactionBonus(faction);
-		standing += GetItemFactionBonus(faction);
+		spell_bonus=GetFactionBonus(faction);
+		item_bonus=GetItemFactionBonus(faction);
+		standing += spell_bonus;
+		standing += item_bonus;
 		reaction = CalculateFaction(&modifiers, standing);
 	}
-	return AdjustPlayerFaction(reaction,
+	return observed(AdjustPlayerFaction(reaction,
 		observer && observer->IsNPC() && observer->CastToNPC()->MerchantType,
-		observer && observer->IsNPC() && observer->CastToNPC()->CheckAggro(this));
+		observer && observer->IsNPC() && observer->CastToNPC()->CheckAggro(this)));
 }
 
 FACTION_VALUE Mob::GetSpecialFactionCon(Mob* iOther) {

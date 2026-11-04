@@ -6,7 +6,7 @@ use std::{
 };
 
 #[cxx::bridge(namespace = "eqemu_population")]
-mod ffi {
+pub(crate) mod ffi {
     struct HuntBounds {
         minimum: u8,
         maximum: u8,
@@ -386,6 +386,7 @@ fn population_open_inner(
     let mut core = core::Population::new(saved);
     core.zone = zone;
     core.owned = store.mask();
+    crate::integration::bind_session(session);
     Ok(Box::new(Population {
         store,
         core,
@@ -500,6 +501,7 @@ impl Population {
             return;
         }
         self.last_request = request;
+        crate::integration::command(request, verb);
         if self.failed() {
             self.command_result = "recovery_required";
             return;
@@ -618,6 +620,9 @@ impl Population {
                 })
                 .collect()
         };
+        for (i, body) in bodies.iter().enumerate() {
+            crate::integration::native_body(i, body, &self.core.actors[i].saved);
+        }
         let before = self.core.saved();
         let mut actions = self.core.tick(now, &self.latest, &candidates, scanned);
         for (i, saved) in pending_boots {
@@ -667,6 +672,13 @@ impl Population {
             {
                 self.save_at = now + 5000;
                 self.save(false);
+            }
+        }
+        if !self.failed() {
+            for action in &actions {
+                if action.kind == core::ActionKind::LevelUp {
+                    crate::integration::level_request(action.actor, &self.core.actors[action.actor].saved);
+                }
             }
         }
         // Status publication can fail too. All I/O must precede the final

@@ -1,4 +1,5 @@
 #include "actor_body.h"
+#include "actor_integration.h"
 #include "actor_demo.h"
 #include "actor_hunt_state.h"
 #include "actor_population.h"
@@ -457,13 +458,17 @@ void Adapter::ObserveDeath(NPC *victim, Mob *killer)
         combat_.killed = true;
         if (population_) {
             const auto con = body->GetLevelCon(victim->GetLevel());
-            const auto scaled = body->ScaleNormalExperience(body->GetBaseExperienceForKill(victim), con);
+            const auto base = body->GetBaseExperienceForKill(victim);
+            const auto scaled = body->ScaleNormalExperience(base, con);
             const auto delta = body->GetBaseExperienceForLevel(body->GetLevel() + 1) -
                 body->GetBaseExperienceForLevel(body->GetLevel());
             // Actors have no per-character XP override or AA/leadership allocation.
             // The same native normal-XP stages are used by Client::CalculateExp.
             combat_.experience = body->FinishNormalExperience(scaled, 0, delta, 1.0f);
             combat_.factions = ActorPopulation::FactionAwards(body, victim);
+            const auto award_ref=ActorIntegration::Award(body,victim,base,scaled,combat_.experience,
+                body->GetBaseExperienceForLevel(body->GetLevel()+1),combat_.factions.size());
+            for(const auto &f:combat_.factions){ActorIntegration::Faction(body,victim,award_ref,f.id,f.before,f.after);}
         }
     }
 }
@@ -635,6 +640,7 @@ void Process() {
 }
 void ObserveDeath(NPC *victim, Mob *killer)
 {
+    ActorIntegration::Death(victim);
     if (adapter) { adapter->ObserveDeath(victim, killer); }
     for (auto &entry : population_adapters) { if (entry) { entry->ObserveDeath(victim,killer); } }
     ActorPopulation::ObserveDeath(victim);

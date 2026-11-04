@@ -1,4 +1,5 @@
 #include "actor_population.h"
+#include "actor_integration.h"
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
 #include "actor-bridge/src/population.rs.h"
 #include "actor_body.h"
@@ -83,14 +84,16 @@ struct Entry {
   bool refused = false, dead = false;
   uint64_t incoming_swings = 0, incoming_hits = 0, incoming_damage = 0;
 };
+rust::Box<eqemu_population::Population> OpenPopulation(const char *directory) {
+  ActorIntegration::Open(directory);
+  return eqemu_population::population_open_zone(directory,
+    std::to_string(getpid()) + "-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()),
+    zone->GetZoneID());
+}
 class Native {
 public:
   Native(const char *directory)
-      : policy(eqemu_population::population_open_zone(
-            directory, std::to_string(getpid()) + "-" +
-                           std::to_string(std::chrono::steady_clock::now()
-                                              .time_since_epoch()
-                                              .count()), zone->GetZoneID())) {
+      : policy(OpenPopulation(directory)) {
     for (unsigned i = 0; i < entries.size(); ++i) {
       (void)ActorBody::PopulationAdapter(i);
     }
@@ -272,6 +275,7 @@ public:
                   entity_list.GetMob(body->GetID()) == body &&
                   entity_list.GetNPCByID(body->GetID()) == body;
       b.drained = !s.alive && !body;
+      ActorIntegration::ObserveDrain(i,b.drained);
       b.contested = e.permit.contested;
       b.error = e.error;
       b.refused = e.refused;
@@ -282,6 +286,8 @@ public:
       if (!e.travel_operation && resolved && !body->IsMoving() && !body->IsEngaged() &&
           std::hypot(body->GetX()-current_route.exit.x, body->GetY()-current_route.exit.y) <= 5 && std::abs(body->GetZ()-current_route.exit.z) <= 6) { b.travel_complete = true; }
       resolved = resolved && b.travel_complete;
+      if(resolved){ActorIntegration::Route(body,current_route.id,current_route.zone,current_route.exit.x,current_route.exit.y,current_route.exit.z,
+        current_route.arrival.x,current_route.arrival.y,current_route.arrival.z,true);}
       b.destination_ready = e.destination_ready && resolved && e.boot_connection == current_route.id && e.boot_destination == current_route.zone &&
           std::hypot(body->GetX()-current_route.exit.x, body->GetY()-current_route.exit.y) <= 5 &&
           std::abs(body->GetZ()-current_route.exit.z) <= 6 && !body->IsMoving() && !body->IsEngaged() &&
@@ -366,6 +372,7 @@ public:
         payload->destination = a.destination; payload->actor = i; payload->owner_epoch = a.owner_epoch;
         payload->generation = payload->incarnation = 0;
         worldserver.SendPacket(&request);
+        ActorIntegration::Boot(i,a.owner_epoch,a.level);
         pending_boot_until = Now() + 3000;
       }
       return;
@@ -409,6 +416,7 @@ public:
     // Retiring is safe even after native disappearance: the adapter checks
     // its own tags and never borrows authority from the requested key.
     if (a.kind == Kind::Retire) {
+      ActorIntegration::Body(adapter.Body(),5);
       Detach(i);
       if (s.alive) {
         adapter.Send(
@@ -436,6 +444,7 @@ public:
         if (std::hypot(body->GetX()-route.exit.x, body->GetY()-route.exit.y) <= 5 && std::abs(body->GetZ()-route.exit.z) <= 6) { e.travel_operation = 0; return; }
         const auto report = adapter.StartTransferMove(std::lround(route.exit.x), std::lround(route.exit.y), std::lround(route.exit.z));
         if (report.status != eqemu_proof::Status::Ok) { e.refused = true; return; }
+        ActorIntegration::Route(body,route.id,route.zone,route.exit.x,route.exit.y,route.exit.z,route.arrival.x,route.arrival.y,route.arrival.z);
         e.travel_operation = report.operation;
         e.travel_connection = a.connection; e.travel_destination = a.destination;
       } else {
@@ -449,6 +458,7 @@ public:
           payload->destination = a.destination; payload->actor = i; payload->owner_epoch = e.owner_epoch;
           payload->generation = e.permit.generation; payload->incarnation = e.permit.actor.incarnation;
           worldserver.SendPacket(&request);
+          ActorIntegration::Boot(body);
         }
       }
       return;
@@ -460,9 +470,11 @@ public:
         e.permit.Close();
         return;
       }
+      const auto old_level=body->GetLevel();
       body->SetLevel(a.level);
       body->RecalculateSkills();
       body->CalcBonuses();
+      ActorIntegration::Level(body,old_level,a.experience);
       return;
     }
     if (a.kind == Kind::Probe) {
@@ -536,6 +548,7 @@ public:
         entries[i].reputation.emplace(standing.id, standing.value);
       }
     }
+    ActorIntegration::Drain();
     const auto scan = policy->needs_scan(now);
     if (scan) {
       Scan();
@@ -561,6 +574,18 @@ public:
         Apply(a);
       }
     }
+    if(ActorIntegration::Enabled()) {
+      ActorIntegration::Drain();
+      auto *actor=ActorBody::PopulationAdapter(0).Body();NPC *hostile=nullptr,*friendly=nullptr;
+      if(actor && actor->GetLevel()>1 && !actor->IsMoving()) {
+        for(const auto &[id,npc]:entity_list.GetNPCList()) {
+          if(npc->GetNPCTypeID()==2014 && npc->GetHP()>0 && !npc->GetDepop() && (!hostile || npc->NativeIncarnation()<hostile->NativeIncarnation())){hostile=npc;}
+          if(npc->GetNPCTypeID()==2021 && npc->GetHP()>0 && !npc->GetDepop() && (!friendly || npc->NativeIncarnation()<friendly->NativeIncarnation())){friendly=npc;}
+        }
+        ActorIntegration::Geometry(actor,hostile,friendly);
+      }
+      ActorIntegration::Poll();
+    }
     zone->quest_idle_override = prior_idle || policy->active() || now < pending_boot_until;
   }
 };
@@ -568,6 +593,22 @@ std::unique_ptr<Native> native;
 bool attempted = false;
 uint64_t retry_at = 0;
 } // namespace
+eqemu_integration::Context ObservationContext(NPC *npc) {
+  eqemu_integration::Context c{};c.zone=zone?zone->GetZoneID():0;c.kind=3;
+  if(!npc){return c;}
+  c.native_id=npc->GetID();c.incarnation=npc->NativeIncarnation();c.race=npc->GetFactionRace();
+  c.class_id=npc->GetClass();c.deity=npc->GetDeity();c.level=npc->GetLevel();c.kind=2;
+  if(native && npc->UsesActorInventory()) {
+    for(unsigned i=0;i<native->entries.size();++i) {
+      const auto state=ActorBody::PopulationAdapter(i).Inspect();
+      if(npc->MatchesRustActor(state.epoch,state.generation)) {
+        c.actor=i+1;c.kind=1;c.owner_epoch=native->entries[i].owner_epoch;c.epoch=state.epoch;
+        c.generation=state.generation;c.goal=state.goal;c.operation=state.operation;break;
+      }
+    }
+  }
+  return c;
+}
 bool Selected() {
   const auto *s = std::getenv("EQEMU_STAGING_ACTOR_SCENARIO");
   return s && std::strcmp(s, "population-hunt-v1") == 0;
@@ -607,6 +648,7 @@ void DestinationReady(uint32_t actor, uint64_t owner_epoch, uint64_t generation,
   if (generation && incarnation && entry.owner_epoch == owner_epoch && entry.permit.generation == generation &&
       entry.permit.actor.incarnation == incarnation && entry.boot_destination == destination && Find(entry.permit.actor)) {
     entry.destination_ready = true;
+    ActorIntegration::Body(Find(entry.permit.actor),3,destination);
   }
 }
 bool InsideArea(NPC *actor, double x, double y, double z, float radius) {
@@ -659,7 +701,9 @@ bool CanCombat(Mob *a, Mob *b) {
   return native ? native->OwnsOrPublic(a) && native->OwnsOrPublic(b) && native->Can(Identify(a), Identify(b)) : !((a && a->IsNPC() && a->CastToNPC()->IsRustActor()) || (b && b->IsNPC() && b->CastToNPC()->IsRustActor()));
 }
 bool AllowCombat(Mob *a, Mob *b) {
-  return native ? native->OwnsOrPublic(a) && native->OwnsOrPublic(b) && native->Allow(Identify(a), Identify(b)) : CanCombat(a,b);
+  const bool allowed=native ? native->OwnsOrPublic(a) && native->OwnsOrPublic(b) && native->Allow(Identify(a), Identify(b)) : CanCombat(a,b);
+  ActorIntegration::Gate(a,b,allowed);
+  return allowed;
 }
 bool PreserveRetaliationHate(Mob *prey) {
   if (!native) {
@@ -712,6 +756,7 @@ void ObserveDeath(NPC *victim) {
     const auto key = Identify(victim);
     if (key.incarnation && e.permit.actor.incarnation == key.incarnation &&
         (!key.id || e.permit.actor.id == key.id)) {
+      if(!e.dead){ActorIntegration::Body(victim,8);}
       e.dead = true;
     }
     e.permit.Death(Identify(victim));
@@ -731,6 +776,8 @@ void FinishTeardown() {
   if (native) {
     native->Tick(true);
     native.reset();
+    ActorIntegration::Drain();
+    ActorIntegration::Finish();
   }
   attempted = false;
 }

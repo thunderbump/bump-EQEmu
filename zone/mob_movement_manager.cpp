@@ -16,6 +16,7 @@
 	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 #include "mob_movement_manager.h"
+#include "actor_integration.h"
 
 #include "common/data_verification.h"
 #include "common/eq_packet_structs.h"
@@ -972,6 +973,7 @@ bool MobMovementManager::NavigateActorTo(Mob *who, float x, float y, float z, Ac
     if (!ent.Commands.empty() || ent.actor_travel == ActorTravel::Moving) { return false; }
     IPathfinder::IPath route;
     if (!BuildActorRoute(who, x, y, z, purpose, route)) { return false; }
+    if(purpose==ActorRoutePurpose::Transfer){ActorIntegration::PathAdmitted(who,x,y,z);}
     // Reuse native interpolation/packets/collision observations; never invoke
     // generic stuck handling (which may teleport). No logical position writes.
     for (const auto &node : route) {
