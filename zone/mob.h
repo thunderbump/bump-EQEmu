@@ -1465,6 +1465,7 @@ public:
 	bool CheckAATimer(int timer);
 
 	void CalcItemBonuses(StatBonuses* b);
+	void CalcCarriedEdibleBonuses(StatBonuses* bonuses);
 	void AddItemBonuses(const EQ::ItemInstance* inst, StatBonuses* b, bool is_augment = false, bool is_tribute = false, int recommended_level_override = 0, bool is_ammo_item = false);
 	void AdditiveWornBonuses(const EQ::ItemInstance* inst, StatBonuses* b, bool is_augment = false);
 	int CalcRecommendedLevelBonus(uint8 current_level, uint8 recommended_level, int base_stat);

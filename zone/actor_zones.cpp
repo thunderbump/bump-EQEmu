@@ -9,6 +9,7 @@
 #include "common/content/world_content_service.h"
 #include "common/player_zone_access.h"
 #include "common/rulesys.h"
+#include "common/repositories/criteria/content_filter_criteria.h"
 #include "common/strings.h"
 #include "common/zone_store.h"
 #include <cmath>
@@ -76,8 +77,8 @@ std::vector<Connection> Nearby(NPC &actor, const std::map<int32_t, int32_t> &rep
         "SELECT s.id,s.x,s.y,n.level,f.primaryfaction FROM spawn2 s "
         "JOIN spawnentry e ON e.spawngroupID=s.spawngroupID JOIN npc_types n ON n.id=e.npcID "
         "JOIN npc_faction f ON f.id=n.npc_faction_id WHERE s.zone='{}' AND (s.version=0 OR s.version=-1) AND s.enabled=1 "
-        "AND n.level BETWEEN {} AND {} AND n.merchant_id=0 ORDER BY s.id,n.id LIMIT 4097",
-        Strings::Escape(name), bounds.minimum, bounds.maximum));
+        "AND n.level BETWEEN {} AND {} AND n.merchant_id=0 {} {} ORDER BY s.id,n.id LIMIT 4097",
+        Strings::Escape(name), bounds.minimum, bounds.maximum, ContentFilterCriteria::apply("s"), ContentFilterCriteria::apply("e")));
     if (!rows.Success() || rows.RowCount() > 4096) { continue; }
     auto distance = std::numeric_limits<double>::infinity();
     for (auto row = rows.begin(); row != rows.end(); ++row) {
@@ -88,12 +89,11 @@ std::vector<Connection> Nearby(NPC &actor, const std::map<int32_t, int32_t> &rep
       if (reaction != FACTION_THREATENINGLY && reaction != FACTION_SCOWLS) { continue; }
       const auto x = Strings::ToFloat(row[1]), y = Strings::ToFloat(row[2]);
       if (!std::isfinite(x) || !std::isfinite(y)) { continue; }
-      const auto candidate = std::hypot(actor.GetX()-connection.exit.x, actor.GetY()-connection.exit.y) +
-          std::hypot(x-connection.arrival.x, y-connection.arrival.y);
+      const auto candidate = std::hypot(x-connection.arrival.x, y-connection.arrival.y);
       distance = std::min(distance, candidate);
     }
     if (std::isfinite(distance)) {
-      connection.distance = distance;
+      connection.hint_distance = distance;
       connections.push_back(connection);
     }
     if (connections.size() > 64) { return {}; }

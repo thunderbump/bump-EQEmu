@@ -32,10 +32,7 @@ void Mob::CalcBonuses()
 {
 	CalcSpellBonuses(&spellbonuses);
 	CalcAABonuses(&aabonuses);
-	if (UsesActorInventory()) {
-		CalcHeroicBonuses(&itembonuses);
-		ProcessItemCaps();
-	}
+	if (UsesActorInventory()) { ProcessItemCaps(); }
 	CalcMaxHP();
 	CalcMaxMana();
 	SetAttackTimer();
@@ -58,6 +55,10 @@ void NPC::CalcBonuses()
 		CalcItemBonuses(&itembonuses);
 	}
 
+	if (UsesActorInventory()) {
+		CalcHeroicBonuses(&itembonuses);
+		CalcCarriedEdibleBonuses(&itembonuses);
+	}
 	// This has to happen last, so we actually take the item bonuses into account.
 	Mob::CalcBonuses();
 }
@@ -551,6 +552,10 @@ void Mob::AdditiveWornBonuses(const EQ::ItemInstance* inst, StatBonuses* b, bool
 }
 
 void Client::CalcEdibleBonuses(StatBonuses* newbon) {
+	CalcCarriedEdibleBonuses(newbon);
+}
+
+void Mob::CalcCarriedEdibleBonuses(StatBonuses* newbon) {
 	uint32 i;
 
 	bool food = false;

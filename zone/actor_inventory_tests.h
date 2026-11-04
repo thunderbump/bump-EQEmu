@@ -85,7 +85,36 @@ Result ActorEquipment()
         if (!refused || ActorInventory::Snapshot(*other) != before) {
             return fail("missing item restored a partial inventory");
         }
-        return FinishMelee({Outcome::Passed, "native carried/bag/cursor data, armor, weapon delay and unauthorized swing controls"});
+        // Synthetic immutable item definitions isolate first-food/first-drink
+        // semantics from changing content data, while using native instances.
+        static const auto food_data = [] { EQ::ItemData item{}; item.ItemType = EQ::item::ItemTypeFood; item.HP = 17; return item; }();
+        static const auto drink_data = [] { EQ::ItemData item{}; item.ItemType = EQ::item::ItemTypeDrink; item.HP = 11; return item; }();
+        const EQ::ItemInstance food(&food_data, 1), drink(&drink_data, 1);
+        const auto item_hp = body->GetItemBonuses().HP;
+        inventory.PutItem(EQ::invslot::GENERAL_BEGIN + 1, food);
+        inventory.PutItem(EQ::invslot::GENERAL_BEGIN + 2, food);
+        inventory.GetItem(EQ::invslot::GENERAL_BEGIN)->PutItem(3, drink);
+        body->CalcBonuses();
+        const bool edible_ok = body->GetItemBonuses().HP == item_hp + 28;
+        inventory.DeleteItem(EQ::invslot::GENERAL_BEGIN + 1);
+        inventory.DeleteItem(EQ::invslot::GENERAL_BEGIN + 2);
+        inventory.GetItem(EQ::invslot::GENERAL_BEGIN)->DeleteItem(3);
+        body->CalcBonuses();
+        if (!edible_ok || body->GetItemBonuses().HP != item_hp) { return fail("carried food/drink first-item bonuses"); }
+        body->SetLevel(5);
+        body->RecalculateSkills();
+        auto *restored_type = new NPCType{};
+        std::strcpy(restored_type->name, "RestoredSkillControl");
+        restored_type->race = 1; restored_type->class_ = 1; restored_type->level = 5;
+        restored_type->current_hp = restored_type->max_hp = 100;
+        auto restored = std::make_unique<NPC>(restored_type, nullptr, glm::vec4(0), GravityBehavior::Flying);
+        restored->GiveNPCTypeData(restored_type);
+        for (int skill = 0; skill <= EQ::skills::HIGHEST_SKILL; ++skill) {
+            if (body->GetSkill(static_cast<EQ::skills::SkillType>(skill)) != restored->GetSkill(static_cast<EQ::skills::SkillType>(skill))) {
+                return fail("live level-up and fresh restored skills differ");
+            }
+        }
+        return FinishMelee({Outcome::Passed, "native inventory, armor, weapon delay, edible bonuses, restored skills and unauthorized swings"});
     } catch (const std::exception &error) {
         return FinishMelee({Outcome::Failed, std::string("equipment exception: ") + error.what()});
     }

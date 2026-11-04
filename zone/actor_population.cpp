@@ -294,7 +294,7 @@ public:
         r.id = route.id; r.zone = route.zone;
         r.x = route.exit.x; r.y = route.exit.y; r.z = route.exit.z;
         r.arrival_x = route.arrival.x; r.arrival_y = route.arrival.y; r.arrival_z = route.arrival.z;
-        r.distance = route.distance;
+        r.hint_distance = route.hint_distance;
         b.routes.push_back(r);
       }
       if (body) {
@@ -389,6 +389,7 @@ public:
       try {
         if (!ActorZones::MayEnter(*body, zone->GetZoneID())) { throw std::runtime_error("actor_zone_access_changed"); }
         if (body->GetBaseExperienceForLevel(a.level) > a.experience) { throw std::runtime_error("actor_experience_level_mismatch"); }
+        body->RecalculateSkills();
         ActorInventory::Restore(*body, std::string(a.inventory_json));
         body->SetHP(a.hp); // item HP must be applied before restoring the wound
         if (body->GetHP() != a.hp) { throw std::runtime_error("actor_inventory_hp_changed"); }
@@ -460,6 +461,7 @@ public:
         return;
       }
       body->SetLevel(a.level);
+      body->RecalculateSkills();
       body->CalcBonuses();
       return;
     }

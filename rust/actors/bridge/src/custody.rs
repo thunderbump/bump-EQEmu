@@ -81,7 +81,9 @@ fn migrate(directory: &str) -> Result<PathBuf, String> {
         {
             return Err("private_directory_required".into());
         }
-        File::open(directory).and_then(|file| file.sync_all()).map_err(|error| format!("migration_sync: {error}"))?;
+        File::open(directory)
+            .and_then(|file| file.sync_all())
+            .map_err(|error| format!("migration_sync: {error}"))?;
         return Ok(records);
     }
     let mut old = LegacyStore::open(directory)?;

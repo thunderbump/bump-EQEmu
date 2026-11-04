@@ -17,6 +17,8 @@
 #include "zone/zone.h"
 #include "zone/zonedb.h"
 #include "zone/water_map.h"
+#include "zone/water_map_v1.h"
+#include "zone/water_map_v2.h"
 #include "zone/mob_movement_manager.h"
 #include <cmath>
 
@@ -38,6 +40,8 @@ extern volatile bool is_zone_loaded;
 
 namespace InserverTests {
 namespace {
+
+#include "water_map_tests.h"
 
 // Exercise the production formatter without depending on ambient zone names.
 // No entities are registered or retained by this scenario.
@@ -1281,6 +1285,7 @@ constexpr std::array scenarios = {
 	Scenario{"native_beacon_lifetime", BeaconLifetime}
 	, Scenario{"native_player_experience_rules", PlayerExperienceRules}
 	, Scenario{"native_unique_name_bounds", UniqueNameBounds}
+	, Scenario{"native_water_segment_geometry", WaterSegmentGeometry}
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
     , Scenario{"rust_native_actor_equipment", ActorEquipment, CleanupMelee, 30000}
     // Exercises real shutdown, then boots a replacement in the same zone host.

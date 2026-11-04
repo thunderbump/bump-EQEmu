@@ -897,6 +897,7 @@ bool BuildActorRoute(Mob *who, float x, float y, float z, MobMovementManager::Ac
     PathfinderOptions opts;
     opts.offset = who->GetZOffset();
     opts.flags = PathingNotDisabled ^ PathingZoneLine;
+    if (transfer) { opts.flags &= ~(PathingWater | PathingLava | PathingVWater | PathingSlime | PathingPortal); }
     bool partial = false, stuck = false;
     route = zone->pathing->FindPath(start, end, partial, stuck, opts);
     if (evidence) { evidence->nodes = route.size(); evidence->queried = true; }
@@ -913,6 +914,8 @@ bool BuildActorRoute(Mob *who, float x, float y, float z, MobMovementManager::Ac
         if (!std::isfinite(node.pos.x) || !std::isfinite(node.pos.y) ||
             !std::isfinite(node.pos.z)) { return result("node_position"); }
         if (zone->watermap->InLiquid(node.pos)) { return result("node_water"); }
+        if (transfer && (zone->watermap->SegmentInLiquid(previous, node.pos) ||
+            zone->watermap->SegmentInLiquid(previous - glm::vec3(0,0,who->GetZOffset()), node.pos - glm::vec3(0,0,who->GetZOffset())))) { return result("segment_water"); }
         if (!zone->zonemap->CheckLoS(previous, node.pos)) { return result("node_los"); }
         if (public_hunt) {
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE

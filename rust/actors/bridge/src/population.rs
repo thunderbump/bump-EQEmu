@@ -7,7 +7,10 @@ use std::{
 
 #[cxx::bridge(namespace = "eqemu_population")]
 mod ffi {
-    struct HuntBounds { minimum: u8, maximum: u8 }
+    struct HuntBounds {
+        minimum: u8,
+        maximum: u8,
+    }
     struct Route {
         id: u32,
         zone: u32,
@@ -17,7 +20,7 @@ mod ffi {
         arrival_x: f64,
         arrival_y: f64,
         arrival_z: f64,
-        distance: f64,
+        hint_distance: f64,
     }
     struct FactionChange {
         id: i32,
@@ -245,7 +248,7 @@ fn body(b: &ffi::Body) -> core::Body {
                     y: r.arrival_y,
                     z: r.arrival_z,
                 },
-                distance: r.distance,
+                distance: (b.x - r.x).hypot(b.y - r.y) + r.hint_distance,
             })
             .collect(),
         travel_complete: b.travel_complete,
@@ -773,6 +776,40 @@ fn parse(bytes: &[u8]) -> Option<(&str, &str, u64, Option<usize>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn travel_cost_includes_reaching_the_exit_before_destination_prey() {
+        let mut native = ffi::Body::default();
+        native.routes = vec![
+            ffi::Route {
+                id: 1,
+                zone: 3,
+                x: 100.0,
+                y: 0.0,
+                z: 0.0,
+                arrival_x: 0.0,
+                arrival_y: 0.0,
+                arrival_z: 0.0,
+                hint_distance: 1.0,
+            },
+            ffi::Route {
+                id: 2,
+                zone: 4,
+                x: 2.0,
+                y: 0.0,
+                z: 0.0,
+                arrival_x: 0.0,
+                arrival_y: 0.0,
+                arrival_z: 0.0,
+                hint_distance: 20.0,
+            },
+        ];
+        let projected = body(&native);
+        assert!(projected.routes[1].distance < projected.routes[0].distance);
+        native.x = 100.0;
+        let moved = body(&native);
+        assert!(moved.routes[0].distance < moved.routes[1].distance);
+    }
     fn dir() -> std::path::PathBuf {
         use std::os::unix::fs::PermissionsExt;
         let p = std::env::temp_dir().join(format!(

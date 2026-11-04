@@ -90,7 +90,10 @@ pub fn prey_type(id: u32, level: u8) -> bool {
 // The starter profile is an explicit exception to faction hostility. Beyond it,
 // suitable prey is within two levels and has a native player-hostile reaction.
 pub fn hunting_bounds(actor_level: u8) -> (u8, u8) {
-    (actor_level.saturating_sub(2).max(1), actor_level.saturating_add(2))
+    (
+        actor_level.saturating_sub(2).max(1),
+        actor_level.saturating_add(2),
+    )
 }
 pub fn appropriate_hostile(actor_level: u8, target_level: u8, hostile: bool) -> bool {
     let (minimum, maximum) = hunting_bounds(actor_level);
@@ -931,7 +934,11 @@ impl Population {
                         actions.push(a.action(i, ActionKind::Retire));
                     } else if b.travel_complete {
                         if let Some(previous) = a.saved.transfer {
-                            if let Some(current) = b.routes.iter().find(|r| r.id == previous.id && r.zone == previous.zone && r.valid()) { a.saved.transfer = Some(*current); }
+                            if let Some(current) = b.routes.iter().find(|r| {
+                                r.id == previous.id && r.zone == previous.zone && r.valid()
+                            }) {
+                                a.saved.transfer = Some(*current);
+                            }
                         }
                         a.phase = Phase::PreparingTransfer;
                         a.at = now;
@@ -941,7 +948,13 @@ impl Population {
                 }
                 Phase::PreparingTransfer => {
                     if let Some(previous) = a.saved.transfer {
-                        if let Some(current) = b.routes.iter().find(|r| r.id == previous.id && r.zone == previous.zone && r.valid()) { a.saved.transfer = Some(*current); }
+                        if let Some(current) = b
+                            .routes
+                            .iter()
+                            .find(|r| r.id == previous.id && r.zone == previous.zone && r.valid())
+                        {
+                            a.saved.transfer = Some(*current);
+                        }
                     }
                     if b.refused || b.contested {
                         a.saved.desired = Desired::Paused;
@@ -1099,7 +1112,13 @@ mod tests {
         p.actors[0].saved.level = 2;
         let mut target = rat(20);
         target.hostile_mask = 1;
-        b[0].routes = vec![Route { id: 4, zone: 3, exit: HOME, arrival: HOME, distance: 10.0 }];
+        b[0].routes = vec![Route {
+            id: 4,
+            zone: 3,
+            exit: HOME,
+            arrival: HOME,
+            distance: 10.0,
+        }];
         p.tick(11_000, &b, &[target.clone()], false);
         assert_eq!(p.actors[0].phase, Phase::Probing);
         b[0].probe = target.key;
@@ -1107,17 +1126,33 @@ mod tests {
         b[0].probe_ok = false;
         p.tick(11_001, &b, &[], false);
         let actions = p.tick(11_202, &b, &[target], false);
-        assert!(actions.iter().any(|a| a.actor == 0 && a.kind == ActionKind::Travel));
+        assert!(
+            actions
+                .iter()
+                .any(|a| a.actor == 0 && a.kind == ActionKind::Travel)
+        );
     }
 
     #[test]
     fn preserve_coordinate_arrival_is_refreshed_from_native_exit_position() {
         let (mut p, mut b) = setup();
         p.actors[0].saved.level = 2;
-        let original = Route { id: 4, zone: 3, exit: HOME, arrival: HOME, distance: 10.0 };
+        let original = Route {
+            id: 4,
+            zone: 3,
+            exit: HOME,
+            arrival: HOME,
+            distance: 10.0,
+        };
         p.actors[0].saved.transfer = Some(original);
         p.actors[0].phase = Phase::Travelling;
-        let actual = Route { arrival: Point { x: HOME.x + 100.0, ..HOME }, ..original };
+        let actual = Route {
+            arrival: Point {
+                x: HOME.x + 100.0,
+                ..HOME
+            },
+            ..original
+        };
         b[0].routes = vec![actual];
         b[0].travel_complete = true;
         p.tick(11_000, &b, &[], false);

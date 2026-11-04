@@ -1,6 +1,6 @@
 # Bounded actor runtime and native body slice
 
-`core` is deterministic, dependency-free safe Rust (`forbid(unsafe_code)`).
+`core` is deterministic safe Rust (`forbid(unsafe_code)`), with pinned serde for portable actor state.
 `bridge` exposes that policy as CXX-owned values and an opaque `rust::Box`.
 The original logical protocol below remains available. `CreateBody` additionally
 requests one native NPC through the zone-owned adapter described below. The R2
@@ -783,7 +783,8 @@ Sharded/public-instance/version rerouting and wildcard source triggers are refus
 rather than bypassed. Preserve-coordinate destination sentinels are resolved
 again from the actual exit position. Transfer navigation uses complete dry
 navmesh routes with at most4000 direct units,512 nodes and10000 route units;
-per-node geometry, water, teleport and partial/stuck rejection remain enforced.
+per-node geometry, full liquid-segment checks, dry polygon flags, teleport and
+partial/stuck rejection remain enforced.
 The80-unit proof and local hunt bounds are unchanged.
 
 World only boots/confirms the destination; it does not own actor state. Replies
@@ -827,7 +828,9 @@ Rust controls cover duplicate/stale credit, atomic XP/faction changes, level
 acknowledgements, inventory trees/roundtrips, restore failure, custody contention,
 concurrent distinct owners, migration, failed publication and transfer ordering.
 The native equipment scenario exercises possession/bag/cursor data, armor,
-weapon delay and unauthorized attack entry points. Utility controls cover shared
+weapon delay, carried edible bonuses, restored level-derived skills and unauthorized
+attack entry points. A native geometry scenario covers V1/V2 liquid strips between
+dry endpoints, rotated volumes and dry carve-outs. Utility controls cover shared
 faction and player zone access; existing actor lifetime/combat controls remain.
 
 These source controls are not runtime qualification. The historical shared-rule
