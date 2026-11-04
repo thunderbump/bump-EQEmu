@@ -8188,55 +8188,8 @@ FACTION_VALUE Client::GetFactionLevel(uint32 char_id, uint32 npc_id, uint32 p_ra
 {
 	if (pFaction < 0)
 		return GetSpecialFactionCon(tnpc);
-	FACTION_VALUE fac = FACTION_INDIFFERENTLY;
-	int32 tmpFactionValue;
-	FactionMods fmods;
-
-	// few optimizations
-	if (GetFeigned())
-		return FACTION_INDIFFERENTLY;
-	if(!zone->CanDoCombat())
-		return FACTION_INDIFFERENTLY;
-	if (invisible_undead && tnpc && !tnpc->SeeInvisibleUndead())
-		return FACTION_INDIFFERENTLY;
-	if (IsInvisible(tnpc))
-		return FACTION_INDIFFERENTLY;
-	if (tnpc && tnpc->GetOwnerID() != 0) // pets con amiably to owner and indiff to rest
-	{
-		if (char_id == tnpc->GetOwner()->CastToClient()->CharacterID())
-			return FACTION_AMIABLY;
-		else
-			return FACTION_INDIFFERENTLY;
-	}
-
-	//First get the NPC's Primary faction
-	if(pFaction > 0)
-	{
-		//Get the faction data from the database
-		if(content_db.GetFactionData(&fmods, p_class, p_race, p_deity, pFaction))
-		{
-			//Get the players current faction with pFaction
-			tmpFactionValue = GetCharacterFactionLevel(pFaction);
-			//Tack on any bonuses from Alliance type spell effects
-			tmpFactionValue += GetFactionBonus(pFaction);
-			tmpFactionValue += GetItemFactionBonus(pFaction);
-			//Return the faction to the client
-			fac = CalculateFaction(&fmods, tmpFactionValue);
-		}
-	}
-	else
-	{
-		return(FACTION_INDIFFERENTLY);
-	}
-
-	// merchant fix
-	if (tnpc && tnpc->IsNPC() && tnpc->CastToNPC()->MerchantType && (fac == FACTION_THREATENINGLY || fac == FACTION_SCOWLS))
-		fac = FACTION_DUBIOUSLY;
-
-	if (tnpc != 0 && fac != FACTION_SCOWLS && tnpc->CastToNPC()->CheckAggro(this))
-		fac = FACTION_THREATENINGLY;
-
-	return fac;
+	return GetPlayerFactionLevel(tnpc, pFaction, p_race, p_class, p_deity,
+		char_id, pFaction > 0 ? GetCharacterFactionLevel(pFaction) : 0);
 }
 
 //Sets the characters faction standing with the specified NPC.

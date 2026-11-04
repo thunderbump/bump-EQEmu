@@ -75,3 +75,10 @@ struct NPCFaction
 
 const char *FactionValueToString(FACTION_VALUE faction_value);
 FACTION_VALUE CalculateFaction(FactionMods* fm, int32 tmpCharacter_value);
+
+// Player interpretation of negative primary factions, independent of AI control.
+// Autonomous player-like actors must not use the NPC-to-NPC special table.
+FACTION_VALUE CalculatePlayerSpecialFaction(int32 primary_faction);
+
+// Apply the same merchant and existing-hate corrections used by player cons.
+FACTION_VALUE AdjustPlayerFaction(FACTION_VALUE faction, bool merchant, bool aggro);

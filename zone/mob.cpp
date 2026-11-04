@@ -7328,6 +7328,38 @@ void Mob::ClearItemFactionBonuses() {
 	item_faction_bonuses.clear();
 }
 
+FACTION_VALUE Mob::GetPlayerFactionLevel(Mob* observer, int32 faction, uint32 race,
+	uint32 class_id, uint32 deity_id, uint32 character_id, int32 standing)
+{
+	if (faction < 0) {
+		return CalculatePlayerSpecialFaction(faction);
+	}
+	if (GetFeigned() || !zone->CanDoCombat() ||
+		(invisible_undead && observer && !observer->SeeInvisibleUndead()) ||
+		IsInvisible(observer)) {
+		return FACTION_INDIFFERENTLY;
+	}
+	if (observer && observer->GetOwnerID()) {
+		auto *owner = observer->GetOwner();
+		return owner && owner->IsClient() && character_id &&
+			character_id == owner->CastToClient()->CharacterID()
+			? FACTION_AMIABLY : FACTION_INDIFFERENTLY;
+	}
+	if (faction <= 0) {
+		return FACTION_INDIFFERENTLY;
+	}
+	FactionMods modifiers;
+	auto reaction = FACTION_INDIFFERENTLY;
+	if (content_db.GetFactionData(&modifiers, class_id, race, deity_id, faction)) {
+		standing += GetFactionBonus(faction);
+		standing += GetItemFactionBonus(faction);
+		reaction = CalculateFaction(&modifiers, standing);
+	}
+	return AdjustPlayerFaction(reaction,
+		observer && observer->IsNPC() && observer->CastToNPC()->MerchantType,
+		observer && observer->IsNPC() && observer->CastToNPC()->CheckAggro(this));
+}
+
 FACTION_VALUE Mob::GetSpecialFactionCon(Mob* iOther) {
 	if (!iOther)
 		return FACTION_INDIFFERENTLY;
@@ -7339,6 +7371,10 @@ FACTION_VALUE Mob::GetSpecialFactionCon(Mob* iOther) {
 	bool iOtherAIControlled = iOther->IsAIControlled();
 	int selfPrimaryFaction = self->GetPrimaryFaction();
 	int iOtherPrimaryFaction = iOther->GetPrimaryFaction();
+
+	if (!selfAIcontrolled) {
+		return CalculatePlayerSpecialFaction(iOtherPrimaryFaction);
+	}
 
 	if (selfPrimaryFaction >= 0 && selfAIcontrolled)
 		return FACTION_INDIFFERENTLY;

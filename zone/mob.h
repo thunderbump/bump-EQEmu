@@ -1203,6 +1203,11 @@ public:
 	void AI_Event_NoLongerEngaged();
 
 	FACTION_VALUE GetSpecialFactionCon(Mob* iOther);
+	// What observer thinks of a player identity. Standing is supplied by its owner;
+	// actor reputation can live in Rust without using the NPC ally table.
+	FACTION_VALUE GetPlayerFactionLevel(Mob* observer, int32 faction, uint32 race,
+		uint32 class_id, uint32 deity_id, uint32 character_id, int32 standing);
+
 	inline const bool IsAIControlled() const { return pAIControlled; }
 	inline const float GetAggroRange() const { return (spellbonuses.AggroRange == -1) ? pAggroRange : spellbonuses.AggroRange; }
 	inline const float GetAssistRange() const { return (spellbonuses.AssistRange == -1) ? pAssistRange : spellbonuses.AssistRange; }
