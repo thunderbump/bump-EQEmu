@@ -807,3 +807,13 @@ wounded clean restart, unclean refusal and Brian's client observations. No
 persistent-player in-server regression suite is authorized. XP, inventory, loot,
 parties, arbitrary behaviors/homes, cross-zone travel and offline simulation are
 outside this profile.
+
+This integration preserves actor source through
+`788c86269d9b53ca2b11ca8fa7183826f6c330d6`. Its historical persistence acceptance
+does not establish a complete ordinary-suite result for this composition. The
+existing 21 in-server scenarios, two native actor policy controls and 19 Rust
+population cases gain no new cases here. The separate hunt/population CXX controls
+remain conditional on the Linux x86-64 bridge and opt-in build targets. Population
+policy, checkpoint and CXX control coverage does not establish live NPC AI, map,
+combat or client behavior. Earlier ordinary and sanitizer runs remain attributed
+to their own source pins; exact-head review and Stack validation are still needed.

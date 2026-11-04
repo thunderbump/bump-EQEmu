@@ -203,9 +203,14 @@ Stack must verify actual common/test/world/zone and project-library compile
 commands, final link flags, runtime/symbolizer availability, failing controls,
 and real suite results for the exact candidate SHA. Record elapsed time, peak
 physical memory and retained diagnostic bytes. Configure-only checks establish
-flag placement, not runtime qualification. Label any evaluation of the separate
-actor staging candidate with its own exact revision; this portable profile is
-based on master `bf50825db4d61a7b45026f5335975316615454f2`.
+flag placement, not runtime qualification. This source combines master
+`bf50825db4d61a7b45026f5335975316615454f2`, actor staging history through
+`788c86269d9b53ca2b11ca8fa7183826f6c330d6`, and the selected sanitizer build
+support. Actor staging scenarios remain default-off and require explicit opt-in;
+the native-only platform path and conditional Linux x86-64 CXX bridge remain.
+Historical results qualify only their recorded revisions. This composition has
+no new ordinary full-suite or sanitizer qualification result. Dedicated population
+controls do not replace live population qualification; see `rust/actors/README.md`.
 
 ### Bootstrap Rust bridge (zone)
 
