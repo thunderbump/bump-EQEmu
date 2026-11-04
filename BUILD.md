@@ -117,6 +117,101 @@ them. Later expansion to other targets or diagnostics requires a separate
 noise/coverage decision; logger annotations and analyzer/sanitizer work remain
 out of scope.
 
+### T3 callback validation jobs
+
+From the reviewed Stack checkout containing `scripts/validation-job`, start
+ordinary full validation with `scripts/validation-job start full`. Supply
+`--repo` with the absolute Server checkout, `--commit` with its full committed
+SHA, `--websocketpp` with an absolute initialized websocketpp checkout,
+`--thread` with the exact callback destination, and `--t3-base-dir` with the
+current T3 instance's base directory. The source must be clean; dirty edits are
+rejected rather than captured. Native/Cargo candidate execution stays in the
+disposable worker.
+
+Start immediately returns JSON with `job_id` and `artifacts`. The optional
+`--jobs-dir` precedes the subcommand and defaults to
+`~/.local/state/eqemu-validation-jobs`. Run `scripts/validation-job status`,
+`scripts/validation-job cancel`, or `scripts/validation-job retry-notification`
+followed by that job ID, using the same `--jobs-dir` prefix when overridden.
+There is no `--wait`; completion uses the callback. The trusted
+`scripts/t3-validation-notify` adapter wraps the supported bundled T3 CLI.
+
+Retained `job.json` records immutable source commit/tree and helper hashes;
+`state.json` records process identities. Inspect `result.json` for the raw
+validator exit and cleanup receipt or explicit unknown state,
+`validator-result.json` for its final JSON,
+and `validator.stdout.log` / `validator.stderr.log` for raw diagnostics.
+`notification.json` reports callback delivery separately; delivery is not a
+validation or cleanup result.
+
+The sanitizer interface is `scripts/validation-job start full-sanitizers`, with
+the same arguments plus `--config` selecting the exact admitted diagnostic
+configuration. Stack must review, admit and activate that separate worker release
+before using this command; the active release must match the selected configuration.
+The wrapper's CLI/process tests do not establish sanitizer qualification.
+
+### T3 sanitizer validation
+
+Stack owns native/Cargo execution in the disposable worker. Configure a fresh
+build there with `-DEQEMU_SANITIZERS=ON -DEQEMU_BUILD_TESTS=ON` and
+`-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`. Keep its build, Cargo output and artifact
+identity separate from ordinary validation. The option defaults to OFF and
+requires Linux GCC or Clang with a GNU-style frontend.
+
+The profile applies `-fsanitize=address,undefined -fno-sanitize-recover=all`
+at compile and final link, plus `-g -O1 -fno-omit-frame-pointer
+-fno-optimize-sibling-calls` at compile. It covers common, utility tests, selected
+server/client-file executables including world/zone, and project libraries such
+as gm_commands_zone, lua_zone and perl_zone, including project object libraries.
+The existing source-specific `-O0` for common/patches/{sod,sof,rof,rof2,uf}.cpp
+still overrides `-O1`; those five sources retain full sanitizer instrumentation.
+Sanitizer builds compile each lua_zone binding source separately. Ordinary builds
+retain Lua unity batches of eight; other targets keep their existing unity settings.
+Separately built dependencies under libs/submodules, imported libraries and the
+vendored cppunit framework are excluded. Header code compiled in an instrumented
+target is covered. The private perlbind ASan option is not this profile.
+
+Initial coverage gap: Cargo still compiles generated CXX without these flags in
+`cmake/ActorBridge.cmake` and `rust/actors/bridge/build.rs`. Neither generated CXX
+nor Rust code has sanitizer instrumentation from this profile. Linking their
+archive into an instrumented executable does not close that gap.
+
+Use these exact worker runtime settings and an absolute installed
+`ASAN_SYMBOLIZER_PATH` supported by the selected sanitizer runtime. Stack's
+pinned GCC diagnostic worker selects `/usr/bin/addr2line`; LLVM is not required
+by this profile. Stack must qualify actual file/line reports from every deliberate
+control before accepting that symbolizer selection:
+
+```sh
+ASAN_OPTIONS=halt_on_error=1:abort_on_error=0:detect_leaks=1:symbolize=1:exitcode=1
+UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1:exitcode=1
+```
+
+Build `tests` and the non-installed, opt-in `tests_sanitizer_controls` target.
+Run the existing complete utility inventory and existing in-server assertions
+through Stack's selected validation path. Run each control separately through
+that same execution path: `pass` must exit 0; `use-after-free`, `out-of-bounds`,
+`undefined` and `leak` must exit nonzero with the corresponding diagnostic and
+symbolized file/line in `tests/sanitizer_controls.cpp`. Expected frames are
+`SanitizerUseAfterFree`, `SanitizerOutOfBounds`, `SanitizerUndefined` and
+`SanitizerLeak`. A crash without the expected report does not qualify a control.
+Leak checks require orderly process exit; killing world/zone cannot qualify
+their exit-time leak checks. Keep physical-memory budgets without an ASan-
+incompatible virtual-address limit. No suppressions are supplied.
+
+Stack must verify actual common/test/world/zone and project-library compile
+commands, final link flags, runtime/symbolizer availability, failing controls,
+and real suite results for the exact candidate SHA. Record elapsed time, peak
+physical memory and retained diagnostic bytes. Configure-only checks establish
+flag placement, not runtime qualification. This source combines master
+`bf50825db4d61a7b45026f5335975316615454f2`, actor staging history through
+`788c86269d9b53ca2b11ca8fa7183826f6c330d6`, and the selected sanitizer build
+support. Actor staging scenarios remain default-off and require explicit opt-in;
+the native-only platform path and conditional Linux x86-64 CXX bridge remain.
+Historical results qualify only their recorded revisions. This composition has
+no new ordinary full-suite or sanitizer qualification result. Dedicated population
+controls do not replace live population qualification; see `rust/actors/README.md`.
+
 ### Bootstrap Rust bridge (zone)
 
 On native x86-64 Linux builds, the zone target links the bootstrap

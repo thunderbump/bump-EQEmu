@@ -16,6 +16,8 @@
 	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 #include "mob.h"
+#include "actor_demo.h"
+#include "actor_demo_native.h"
 
 #include "common/data_verification.h"
 #include "common/features.h"
@@ -1067,11 +1069,15 @@ void Mob::AI_Process() {
 			SetTarget(hate_list.GetClosestEntOnHateList(this));
 		else {
 			if (AI_target_check_timer->Check()) {
+                bool hunt_retaliation = false;
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+                hunt_retaliation = ActorDemo::PreserveRetaliationHate(this);
+#endif
 				if (
 					IsNPC() &&
 					!CastToNPC()->GetSwarmInfo() &&
 					(!IsPet() || (HasOwner() && GetOwner()->IsNPC())) &&
-					!CastToNPC()->GetNPCAggro()
+					ActorDemo::NPCFactionWarWipeRequired(CastToNPC()->GetNPCAggro(), hunt_retaliation)
 				) {
 					WipeHateList(true); // wipe NPCs from hate list to prevent faction war
 				}

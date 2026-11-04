@@ -9,6 +9,8 @@
 //!            Status::Ok);
 //! ```
 
+pub mod population;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Kind {
@@ -39,6 +41,8 @@ pub enum Kind {
     TargetKilled,
     TargetLost,
     ActorDefeated,
+    StartPublicHunt,
+    ReleasePublicHunt,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -158,6 +162,7 @@ pub struct Snapshot {
     pub swings: u64,
     pub hits: u64,
     pub damage: u64,
+    pub public_hunt: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -229,6 +234,7 @@ pub struct Runtime {
     next_endpoint: usize,
     target_point: [i32; 3],
     near_target: bool,
+    population_profile: bool,
 }
 
 impl Runtime {
@@ -256,17 +262,25 @@ impl Runtime {
                 swings: 0,
                 hits: 0,
                 damage: 0,
+                public_hunt: false,
             },
             high_operation: 0,
             endpoints: [[0; 3]; 2],
             next_endpoint: 1,
             target_point: [0; 3],
             near_target: false,
+            population_profile: false,
         }
     }
 
     pub fn inspect(&self) -> Snapshot {
         self.state
+    }
+    /// New opt-in population lane only; legacy constructors retain proof filters.
+    pub fn for_population(epoch: u64) -> Self {
+        let mut runtime = Self::new(epoch);
+        runtime.population_profile = true;
+        runtime
     }
 
     /// Sequence must strictly increase; ticks may stay equal but cannot decrease.
@@ -381,7 +395,7 @@ impl Runtime {
                 .find(|c| c.incarnation == s.target);
             if let Some(c) = target.filter(|c| {
                 eligible(c)
-                    && (!s.melee || prey(c))
+                    && (!s.melee || prey(c, s.public_hunt, self.population_profile))
                     && within(c.point, self.target_point, 1000, 1000)
             }) {
                 self.near_target = within(observation.actor, c.point, 5000, 6000);
@@ -400,8 +414,15 @@ impl Runtime {
                 .iter()
                 .filter(|c| {
                     eligible(c)
-                        && (!s.melee || (prey(c) && (s.target == 0 || s.target == c.incarnation)))
-                        && within(observation.actor, c.point, 30000, 6000)
+                        && (!s.melee
+                            || (prey(c, s.public_hunt, self.population_profile)
+                                && (s.target == 0 || s.target == c.incarnation)))
+                        && within(
+                            observation.actor,
+                            c.point,
+                            if s.public_hunt { 350000 } else { 30000 },
+                            6000,
+                        )
                 })
                 .min_by_key(|c| (distance_xy(observation.actor, c.point), c.incarnation));
             if let Some(c) = selected {
@@ -446,7 +467,9 @@ impl Runtime {
                 .iter()
                 .find(|c| c.incarnation == self.state.target);
             if target.is_some_and(|c| {
-                eligible(c) && prey(c) && within(observation.actor, c.point, 5000, 6000)
+                eligible(c)
+                    && prey(c, s.public_hunt, self.population_profile)
+                    && within(observation.actor, c.point, 5000, 6000)
             }) {
                 if let Some(operation) = self.high_operation.checked_add(1) {
                     self.high_operation = operation;
@@ -555,6 +578,7 @@ impl Runtime {
                 s.approach = Approach::Disabled;
                 s.target = 0;
                 s.combat_body = input.kind == Kind::CreateMeleeBody;
+                s.public_hunt = false;
                 s.melee = false;
                 s.attacking = false;
                 s.swings = 0;
@@ -621,7 +645,7 @@ impl Runtime {
                 self.endpoints[1] = input.point;
                 s.patrol = Patrol::Running;
             }
-            Kind::StartApproach | Kind::StartMelee => {
+            Kind::StartApproach | Kind::StartMelee | Kind::StartPublicHunt => {
                 if s.patrol != Patrol::Disabled
                     || s.approach != Approach::Disabled
                     || s.phase != Phase::Idle
@@ -632,12 +656,42 @@ impl Runtime {
                 let Some(goal) = s.goal.checked_add(1) else {
                     return Status::Exhausted;
                 };
-                if input.kind == Kind::StartMelee && !s.combat_body {
+                if matches!(input.kind, Kind::StartMelee | Kind::StartPublicHunt) && !s.combat_body
+                {
                     return Status::InvalidInput;
                 }
                 s.goal = goal;
-                s.melee = input.kind == Kind::StartMelee;
+                s.melee = matches!(input.kind, Kind::StartMelee | Kind::StartPublicHunt);
+                s.public_hunt = input.kind == Kind::StartPublicHunt;
+                if s.public_hunt {
+                    s.target = 0;
+                    s.swings = 0;
+                    s.hits = 0;
+                    s.damage = 0;
+                    s.last_terminal = Event::None;
+                    s.last_operation = 0;
+                    self.near_target = false;
+                }
                 s.approach = Approach::Observing;
+            }
+            Kind::ReleasePublicHunt => {
+                if !s.public_hunt || s.body != Body::Present || s.approach == Approach::Retiring {
+                    return Status::Busy;
+                }
+                if s.phase != Phase::Idle {
+                    // Keep authority until the later correlated native stop/death
+                    // terminal. A repeated release resets only after that drain.
+                    s.approach = Approach::Paused;
+                    if s.phase == Phase::Admitted {
+                        s.phase = Phase::Stopping;
+                        *event = Event::StopRequested;
+                    }
+                } else {
+                    s.approach = Approach::Disabled;
+                    s.melee = false;
+                    s.target = 0;
+                    self.near_target = false;
+                }
             }
             Kind::Resume if s.approach != Approach::Disabled => {
                 if s.approach != Approach::Paused
@@ -864,8 +918,14 @@ fn within(a: [i32; 3], b: [i32; 3], xy: i32, z: i32) -> bool {
     distance_xy(a, b) <= i128::from(xy) * i128::from(xy)
         && (i64::from(a[2]) - i64::from(b[2])).abs() <= i64::from(z)
 }
-fn prey(c: &Candidate) -> bool {
-    c.type_id == 2011 && c.level == 1 && !c.service
+fn prey(c: &Candidate, public_hunt: bool, population_profile: bool) -> bool {
+    if public_hunt && population_profile {
+        return !c.service && population::prey_type(c.type_id, c.level);
+    }
+    !c.service
+        && ((c.type_id == 2011 && c.level == 1)
+            || (public_hunt
+                && ((c.type_id == 2104 && c.level == 1) || (c.type_id == 2000 && c.level == 2))))
 }
 fn eligible(c: &Candidate) -> bool {
     c.present
@@ -955,6 +1015,164 @@ mod tests {
                 damage,
             },
         )
+    }
+
+    #[test]
+    fn population_filter_does_not_widen_legacy_public_hunt() {
+        let mut extra = candidate(8, 3000);
+        extra.type_id = 2002;
+        for population in [false, true] {
+            let mut runtime = if population {
+                Runtime::for_population(94)
+            } else {
+                Runtime::new(94)
+            };
+            send(&mut runtime, Kind::CreateMeleeBody, 0);
+            send(&mut runtime, Kind::BodyPresent, 0);
+            send(&mut runtime, Kind::StartPublicHunt, 0);
+            assert_eq!(
+                observe(&mut runtime, [0; 3], &[extra]).event,
+                if population {
+                    Event::AttackRequested
+                } else {
+                    Event::None
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn public_hunt_repeats_truthful_kills_on_one_body() {
+        let mut r = Runtime::new(91);
+        send(&mut r, Kind::CreateMeleeBody, 0);
+        send(&mut r, Kind::BodyPresent, 0);
+        let body = r.inspect();
+        let mut prior_goal = 0;
+        for (index, (type_id, level, hp)) in [(2011, 1, 11), (2104, 1, 11), (2000, 2, 24)]
+            .into_iter()
+            .enumerate()
+        {
+            assert_eq!(send(&mut r, Kind::StartPublicHunt, 0).status, Status::Ok);
+            assert!(r.inspect().public_hunt && r.inspect().goal > prior_goal);
+            prior_goal = r.inspect().goal;
+            assert_eq!((r.inspect().swings, r.inspect().damage), (0, 0));
+            let mut prey = candidate(100 + index as u64, 3000);
+            prey.type_id = type_id;
+            prey.level = level;
+            assert_eq!(
+                observe(&mut r, [0; 3], &[prey]).event,
+                Event::AttackRequested
+            );
+            combat(&mut r, Kind::AttackAdmitted, 0);
+            // A nonlethal hit and natural target motion inside reach do not
+            // intrinsically pause this opt-in goal. Native reach remains required.
+            let mut remaining = hp;
+            while remaining > 0 {
+                let damage = remaining.min(6);
+                assert_eq!(combat(&mut r, Kind::SwingHit, damage).status, Status::Ok);
+                remaining -= damage;
+                prey.point[0] = 4000;
+                assert_eq!(observe(&mut r, [0; 3], &[prey]).event, Event::None);
+                assert_eq!(r.inspect().approach, Approach::Engaging);
+            }
+            // SwingHit is not victory. The following native Death latch is.
+            assert_eq!(r.inspect().approach, Approach::Engaging);
+            assert_eq!(
+                combat(&mut r, Kind::TargetKilled, 0).event,
+                Event::TargetKilled
+            );
+            assert_eq!(r.inspect().approach, Approach::Victory);
+            assert_eq!(send(&mut r, Kind::ReleasePublicHunt, 0).status, Status::Ok);
+            assert_eq!(r.inspect().approach, Approach::Disabled);
+            assert_eq!(r.inspect().target, 0);
+            assert!(r.inspect().alive && r.inspect().body == Body::Present);
+            assert_eq!(
+                (r.inspect().epoch, r.inspect().generation),
+                (body.epoch, body.generation)
+            );
+        }
+    }
+
+    #[test]
+    fn public_hunt_cancel_loss_and_stale_facts_drain_before_restart() {
+        for admitted in [false, true] {
+            let mut r = Runtime::new(92);
+            send(&mut r, Kind::CreateMeleeBody, 0);
+            send(&mut r, Kind::BodyPresent, 0);
+            send(&mut r, Kind::StartPublicHunt, 0);
+            observe(&mut r, [0; 3], &[candidate(1, 3000)]);
+            if admitted {
+                combat(&mut r, Kind::AttackAdmitted, 0);
+                combat(&mut r, Kind::SwingHit, 3);
+            }
+            let old = r.inspect();
+            send(&mut r, Kind::ReleasePublicHunt, 0);
+            assert_eq!(send(&mut r, Kind::StartPublicHunt, 0).status, Status::Busy);
+            // External/player death reports loss, never the actor's victory.
+            assert_eq!(combat(&mut r, Kind::TargetLost, 0).event, Event::TargetLost);
+            assert_eq!(r.inspect().approach, Approach::Lost);
+            send(&mut r, Kind::ReleasePublicHunt, 0);
+            assert_eq!(send(&mut r, Kind::StartPublicHunt, 0).status, Status::Ok);
+            observe(&mut r, [0; 3], &[candidate(2, 3000)]);
+            let current = r.inspect();
+            assert_eq!(
+                r.combat(
+                    current.sequence + 1,
+                    current.tick + 1,
+                    CombatFact {
+                        epoch: old.epoch,
+                        generation: old.generation,
+                        goal: old.goal,
+                        operation: old.operation,
+                        target: old.target,
+                        kind: Kind::TargetKilled,
+                        damage: 0,
+                    }
+                )
+                .status,
+                Status::InvalidResult
+            );
+            assert_eq!(r.inspect(), current);
+            assert_eq!(
+                combat(&mut r, Kind::TargetKilled, 0).status,
+                Status::InvalidResult
+            );
+        }
+    }
+
+    #[test]
+    fn public_hunt_range_and_skeletons_are_explicit_only() {
+        let mut original = melee();
+        assert_eq!(
+            observe(&mut original, [0; 3], &[candidate(1, 100000)]).event,
+            Event::None
+        );
+        let mut r = Runtime::new(93);
+        send(&mut r, Kind::CreateMeleeBody, 0);
+        send(&mut r, Kind::BodyPresent, 0);
+        send(&mut r, Kind::StartPublicHunt, 0);
+        let mut skeleton = candidate(8, 100000);
+        skeleton.type_id = 2000;
+        skeleton.level = 2;
+        let mut tie = skeleton;
+        tie.incarnation = 7;
+        tie.type_id = 2104;
+        tie.level = 1;
+        assert_eq!(
+            observe(&mut r, [0; 3], &[skeleton, tie]).event,
+            Event::MoveRequested
+        );
+        assert_eq!(r.inspect().target, 7);
+        send(&mut r, Kind::ReleasePublicHunt, 0);
+        let operation = r.inspect().operation;
+        send(&mut r, Kind::Rejected, operation);
+        send(&mut r, Kind::ReleasePublicHunt, 0);
+        assert_eq!(send(&mut r, Kind::StartMelee, 0).status, Status::Ok);
+        assert!(!r.inspect().public_hunt);
+        assert_eq!(
+            observe(&mut r, [99000, 0, 0], &[skeleton, tie]).event,
+            Event::None
+        );
     }
 
     #[test]

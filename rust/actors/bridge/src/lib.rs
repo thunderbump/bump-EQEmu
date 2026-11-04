@@ -1,4 +1,6 @@
 #![deny(unsafe_op_in_unsafe_fn)]
+mod checkpoint;
+mod population;
 
 #[cxx::bridge(namespace = "eqemu_proof")]
 mod ffi {
@@ -31,6 +33,8 @@ mod ffi {
         TargetKilled,
         TargetLost,
         ActorDefeated,
+        StartPublicHunt,
+        ReleasePublicHunt,
     }
     #[repr(u8)]
     enum Status {
@@ -183,10 +187,12 @@ mod ffi {
         swings: u64,
         hits: u64,
         damage: u64,
+        public_hunt: bool,
     }
     extern "Rust" {
         type Runtime;
         fn construct(epoch: u64) -> Box<Runtime>;
+        fn construct_population(epoch: u64) -> Box<Runtime>;
         fn advance(self: &mut Runtime, sequence: u64, tick: u64, inputs: Vec<Input>) -> Report;
         fn inspect(self: &Runtime) -> Snapshot;
         fn combat(self: &mut Runtime, sequence: u64, tick: u64, fact: CombatFact) -> Report;
@@ -212,6 +218,9 @@ fn boundary<T>(f: impl FnOnce() -> T) -> T {
 
 fn construct(epoch: u64) -> Box<Runtime> {
     boundary(|| Box::new(Runtime(actor_core::Runtime::new(epoch))))
+}
+fn construct_population(epoch: u64) -> Box<Runtime> {
+    boundary(|| Box::new(Runtime(actor_core::Runtime::for_population(epoch))))
 }
 
 fn map_status(value: actor_core::Status) -> ffi::Status {
@@ -346,6 +355,8 @@ impl Runtime {
                     ffi::Kind::StartApproach => actor_core::Kind::StartApproach,
                     ffi::Kind::CreateMeleeBody => actor_core::Kind::CreateMeleeBody,
                     ffi::Kind::StartMelee => actor_core::Kind::StartMelee,
+                    ffi::Kind::StartPublicHunt => actor_core::Kind::StartPublicHunt,
+                    ffi::Kind::ReleasePublicHunt => actor_core::Kind::ReleasePublicHunt,
                     _ => {
                         let s = self.0.inspect();
                         return ffi::Report {
@@ -487,6 +498,7 @@ impl Runtime {
                 swings: s.swings,
                 hits: s.hits,
                 damage: s.damage,
+                public_hunt: s.public_hunt,
                 patrol: match s.patrol {
                     actor_core::Patrol::Disabled => ffi::Patrol::Disabled,
                     actor_core::Patrol::Running => ffi::Patrol::Running,

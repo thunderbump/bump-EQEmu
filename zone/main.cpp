@@ -70,6 +70,7 @@
 
 #include "actor-bridge/src/lib.rs.h"
 #include "zone/actor_body.h"
+#include "zone/actor_demo.h"
 
 // Retained qualification symbol, in addition to the real runtime below.
 extern "C" std::uint32_t eqemu_rust_bridge_v1();
@@ -679,6 +680,7 @@ int main(int argc, char **argv)
                 InserverTests::BeforeActorFacts();
 #endif
 				ActorBody::Process();
+				ActorDemo::Process();
 #endif
 			}
 		}

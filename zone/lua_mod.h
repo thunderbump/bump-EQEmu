@@ -22,7 +22,10 @@
 #include <string>
 
 struct lua_State;
+struct DamageHitInfo;
+struct ExtraAttackOptions;
 
+class Mob;
 class LuaParser;
 class LuaMod
 {

@@ -19,6 +19,7 @@
 
 #ifdef LUA_EQEMU
 
+#include "common/types.h"
 #include "zone/lua_ptr.h"
 
 class Group;

@@ -17,13 +17,23 @@
 */
 #pragma once
 
+#include "common/eqemu_logsys.h"
+#include "common/rulesys.h"
+#include "common/strings.h"
 #include "common/types.h"
 #include "zone/event_codes.h"
 
 #include <any>
+#include <list>
+#include <string>
+#include <vector>
 
+class Bot;
 class Client;
+class Merc;
+class Mob;
 class NPC;
+class Zone;
 
 namespace EQ {
 	class ItemInstance;
