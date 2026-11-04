@@ -842,7 +842,7 @@ No host Cargo/native candidate execution or shared game deployment is implied.
 ### Bounded integration observations
 
 The test-only observer uses the exact controller and artifact schemas in
-[`bridge/protocol/integration-v1.3.json`](bridge/protocol/integration-v1.3.json),
+[`bridge/protocol/integration-v1.4.json`](bridge/protocol/integration-v1.4.json),
 which clarifies the retained v2 event contract without changing actor authority.
 It requires both native test and Rust bridge builds, the existing population
 opt-in, and the explicit observer environment in that protocol. Ordinary actor
@@ -852,8 +852,8 @@ through stopped offline records and the normal native restoration path.
 
 Native callbacks copy fixed scalar records into a bounded zone-thread buffer.
 Rust drains it outside callbacks, assigns immutable contexts and process-local
-sequences, and records successful per-actor durable publications with native
-OpenSSL SHA-256. Failed writes emit no committed publication or credit.
+sequences, and records successful per-actor durable publications with the pinned
+software SHA-256 implementation used by the Rust tests. Failed writes emit no committed publication or credit.
 A later failure writing a different actor does not erase an earlier committed
 actor's credit observation. These are per-actor commits, not a transaction over
 all three actors.

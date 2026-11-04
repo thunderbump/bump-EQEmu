@@ -4,6 +4,7 @@ use crate::checkpoint;
 use actor_core::{inventory::Item, population::Saved};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::{cell::RefCell, fs, io::Read, path::{Path, PathBuf}};
 use std::os::unix::fs::{PermissionsExt};
 
@@ -90,17 +91,8 @@ pub mod ffi {
     }
 }
 
-// Reuse the native OpenSSL implementation already required by common. No new
-// Cargo dependency or private hash implementation is introduced.
-#[link(name = "crypto")]
+// CLOCK_MONOTONIC is the same guest clock used by the native capture buffer.
 unsafe extern "C" {
-    fn EVP_MD_CTX_new() -> *mut std::ffi::c_void;
-    fn EVP_MD_CTX_free(ctx: *mut std::ffi::c_void);
-    fn EVP_sha256() -> *const std::ffi::c_void;
-    fn EVP_DigestInit_ex(ctx: *mut std::ffi::c_void, md: *const std::ffi::c_void,
-        engine: *mut std::ffi::c_void) -> i32;
-    fn EVP_DigestUpdate(ctx: *mut std::ffi::c_void, data: *const std::ffi::c_void, size: usize) -> i32;
-    fn EVP_DigestFinal_ex(ctx: *mut std::ffi::c_void, out: *mut u8, size: *mut u32) -> i32;
     fn clock_gettime(clock: i32, value: *mut Timespec) -> i32;
 }
 #[repr(C)]
@@ -112,29 +104,15 @@ fn now_us() -> u64 {
     u64::try_from(value.seconds).unwrap_or(0).saturating_mul(1_000_000)
         .saturating_add(u64::try_from(value.nanos).unwrap_or(0) / 1000)
 }
-struct Digest(*mut std::ffi::c_void);
-impl Drop for Digest {
-    fn drop(&mut self) { unsafe { EVP_MD_CTX_free(self.0) }; }
-}
 fn hash_reader(mut reader: impl Read) -> Result<String, String> {
-    let ctx = Digest(unsafe { EVP_MD_CTX_new() });
-    if ctx.0.is_null() || unsafe { EVP_DigestInit_ex(ctx.0, EVP_sha256(), std::ptr::null_mut()) } != 1 {
-        return Err("observer_digest".into());
-    }
-    let mut chunk = [0u8; 8192];
+    let mut digest=Sha256::new();
+    let mut chunk=[0u8;8192];
     loop {
-        let count = reader.read(&mut chunk).map_err(|_| "observer_digest_read")?;
-        if count == 0 { break; }
-        if unsafe { EVP_DigestUpdate(ctx.0, chunk.as_ptr().cast(), count) } != 1 {
-            return Err("observer_digest".into());
-        }
+        let count=reader.read(&mut chunk).map_err(|_|"observer_digest_read")?;
+        if count==0 {break;}
+        digest.update(&chunk[..count]);
     }
-    let mut out = [0u8; 32];
-    let mut size = 0;
-    if unsafe { EVP_DigestFinal_ex(ctx.0, out.as_mut_ptr(), &mut size) } != 1 || size != 32 {
-        return Err("observer_digest".into());
-    }
-    Ok(out.iter().map(|b| format!("{b:02x}")).collect())
+    Ok(format!("{:x}",digest.finalize()))
 }
 pub fn sha256(bytes: &[u8]) -> Result<String, String> { hash_reader(bytes) }
 fn encoded(value: &impl Serialize) -> Result<Vec<u8>, String> {
@@ -697,9 +675,11 @@ mod tests {
             phase:1,reference:1,a:100,b:500,c:500,d:1000,..ffi::NativeEvent::default()}],false);
     }
     #[test]
-    fn native_sha_matches_known_vectors_and_streaming_bytes() {
+    fn sha256_matches_known_vectors_and_streaming_bytes() {
         assert_eq!(sha256(b"").unwrap(),"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
         assert_eq!(sha256(b"abc").unwrap(),"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        let million=vec![b'a';1_000_000];
+        assert_eq!(sha256(&million).unwrap(),"cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0");
         let bytes=vec![0x5a;32769];
         assert_eq!(hash_reader(std::io::Cursor::new(&bytes)).unwrap(),sha256(&bytes).unwrap());
     }
@@ -849,9 +829,9 @@ mod tests {
     }
     #[test]
     fn fixed_interface_widths_and_hashes_match_selected_source_contract() {
-        let selected:Value=serde_json::from_str(include_str!("../protocol/integration-v1.3.json")).unwrap();
+        let selected:Value=serde_json::from_str(include_str!("../protocol/integration-v1.4.json")).unwrap();
         assert_eq!(selected["event_contract_sha256"],CONTRACT);
-        assert_eq!(sha256(include_bytes!("../protocol/integration-v1.3.json")).unwrap(),"1b523bbea868a59ad798cd13a1a5f50c4aa7e5f40bca7c49829d0c558bfd4615");
+        assert_eq!(sha256(include_bytes!("../protocol/integration-v1.4.json")).unwrap(),"c604e154baf96908e2d6707714875924a198793438ec219565f05dc4e6cf6eb0");
         assert_eq!(sha256(include_bytes!("../protocol/event-contract-v2.json")).unwrap(),CONTRACT);
         let mut r=request(u64::MAX,1,u16::MAX);r.process_index=23;r.session="s".repeat(48);
         assert!(encoded(&r).unwrap().len()+1<=256);
