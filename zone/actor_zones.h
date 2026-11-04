@@ -7,10 +7,10 @@ class NPC;
 namespace ActorZones {
 struct HuntBounds { uint8_t minimum = 1, maximum = 1; };
 struct Connection {
-  uint32_t id = 0, zone = 0;
-  ActorDemo::HuntPosition exit{}, arrival{};
-  // Native geometric fact only; Rust composes the route selection cost.
-  double hint_distance = 0;
+	uint32_t id = 0, zone = 0;
+	ActorDemo::HuntPosition exit{}, arrival{};
+	// Native geometric fact only; Rust composes the route selection cost.
+	double hint_distance = 0;
 };
 bool MayEnter(NPC &actor, uint32_t destination);
 bool Resolve(NPC &actor, uint32_t id, uint32_t destination, Connection &connection);

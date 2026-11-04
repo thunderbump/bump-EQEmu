@@ -184,6 +184,7 @@ eqemu_proof::Report Adapter::StartTransferMove(int32_t x, int32_t y, int32_t z)
 bool Adapter::RestorePopulationBody(unsigned hunter, double x, double y, double z, int64_t hp, uint8_t level)
 {
     if (!population_ || hunter >= 3 || Inspect().alive || Body() || hp < 1 || level < 1 || level > 127 || !zone ||
+        !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z) ||
         (level == 1 && zone->GetZoneID() != 2) || zone->GetInstanceID() || zone->GetInstanceVersion() ||
         !zone->zonemap || !zone->pathing || !zone->watermap ||
         (level == 1 && !ActorDemo::InsideHuntArea({x,y,z}, {ActorDemo::HuntHomeX,ActorDemo::HuntHomeY,3.75}, ActorDemo::HuntLeash))) { return false; }
@@ -191,6 +192,9 @@ bool Adapter::RestorePopulationBody(unsigned hunter, double x, double y, double 
     const auto floor = zone->zonemap->FindBestZ(probe,nullptr);
     if (floor == BEST_Z_INVALID || !std::isfinite(floor) || (level == 1 && std::abs(z-floor-3.75) > 2) || zone->watermap->InLiquid(point)) { return false; }
     if (level > 1) { z = floor + 3.75; }
+    // Floor correction is a new placement. The supplied arrival can be dry
+    // above submerged terrain, so validate the actual feet/body before spawn.
+    if (zone->watermap->SegmentInLiquid({x,y,floor}, {x,y,z})) { return false; }
     transfer_move_ = false;
     hunter_ = hunter + 1; restore_x_ = x; restore_y_ = y; restore_z_ = z; restore_hp_ = hp; restore_level_ = level;
     return CreateVisibleMeleeBody(std::lround(x),std::lround(y),std::lround(z)).event == eqemu_proof::Event::BodyRequested;
