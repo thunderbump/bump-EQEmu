@@ -1109,6 +1109,15 @@ mod tests {
     fn rejected_local_prey_does_not_starve_a_reachable_connection() {
         let (mut p, mut b) = setup();
         p.actors[0].saved.level = 2;
+        p.actors[0].saved.experience = 1000;
+        for body in &mut b {
+            body.level = 1;
+            body.max_hp = 100;
+            body.sitting = false; // Acknowledge setup's Stand actions.
+        }
+        b[0].level = 2;
+        b[0].level_cap = 127;
+        b[0].next_level_at = 8000;
         let mut target = rat(20);
         target.hostile_mask = 1;
         b[0].routes = vec![Route {
@@ -1124,12 +1133,34 @@ mod tests {
         b[0].probe_ready = true;
         b[0].probe_ok = false;
         p.tick(11_001, &b, &[], false);
-        let actions = p.tick(11_202, &b, &[target], false);
+        assert_eq!(p.actors[0].phase, Phase::Searching);
+        assert!(p.actors[0].rejected.contains(&target.key));
+        assert!(!p.claims.contains_key(&target.key));
+
+        // Another starter hunter can probe this rat after actor 0 releases it.
+        // That consumes the shared stagger, not actor 0's rejection history.
+        let staggered = p.tick(11_202, &b, &[target.clone()], false);
+        assert!(
+            staggered
+                .iter()
+                .any(|a| a.actor != 0 && a.kind == ActionKind::Probe && a.target == target.key)
+        );
+        assert_eq!(p.actors[0].phase, Phase::Searching);
+        assert!(p.actors[0].rejected.contains(&target.key));
+        assert_eq!(p.probe_at, 11_402);
+        let waiting = p.tick(11_401, &b, &[target.clone()], false);
+        assert!(!waiting.iter().any(|a| a.actor == 0));
+        assert_eq!(p.actors[0].phase, Phase::Searching);
+
+        let actions = p.tick(11_402, &b, &[target], false);
         assert!(
             actions
                 .iter()
                 .any(|a| a.actor == 0 && a.kind == ActionKind::Travel)
         );
+        assert_eq!(p.actors[0].phase, Phase::Travelling);
+        assert_eq!(p.actors[0].eligible, 1);
+        assert_eq!(p.actors[0].saved.transfer.unwrap().id, 4);
     }
 
     #[test]
