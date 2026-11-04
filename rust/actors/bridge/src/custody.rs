@@ -306,6 +306,7 @@ impl Store {
 mod tests {
     use super::*;
     use actor_core::inventory::Item;
+    use actor_core::population::Desired;
     use std::sync::{Arc, Barrier};
     fn directory() -> PathBuf {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -353,6 +354,9 @@ mod tests {
         let mut source = Store::open(directory.to_str().unwrap(), 2).unwrap();
         let mut saved = source.load().unwrap().saved;
         progressed(&mut saved[0]);
+        // Production transfers start from an enabled hunt. Progress alone does
+        // not enable an actor, and paused destinations must not boot on retry.
+        saved[0].desired = Desired::Enabled;
         source.write(&saved, 10, false, [false; COUNT]).unwrap();
         let epoch = saved[0].owner_epoch;
         let mut destination = Store::open(directory.to_str().unwrap(), 3).unwrap();
@@ -368,6 +372,13 @@ mod tests {
             .unwrap();
         assert_eq!(source.mask(), 6);
         assert_eq!(source.pending_boots().unwrap().len(), 1);
+        let retry = source.pending_boots().unwrap();
+        assert_eq!(retry.len(), 1);
+        assert_eq!(retry[0].0, 0);
+        assert_eq!(retry[0].1.desired, Desired::Enabled);
+        assert_eq!(retry[0].1.zone, 3);
+        assert_eq!(retry[0].1.owner_epoch, epoch);
+        assert_eq!(retry[0].1.inventory, saved[0].inventory);
         let adopted = destination.refresh().unwrap();
         assert_eq!(adopted.len(), 1);
         assert_eq!(adopted[0].0, 0);
@@ -388,6 +399,7 @@ mod tests {
             .unwrap();
         source.write(&saved, 14, false, [true; COUNT]).unwrap();
         assert_eq!(read(&source.records, 0).unwrap().saved.experience, 12445);
+        assert!(source.pending_boots().unwrap().is_empty());
         // Dirty destination death refuses replay and retains the entire record.
         let evidence = fs::read(destination.actor_path(0)).unwrap();
         drop(destination);
@@ -395,6 +407,39 @@ mod tests {
         assert!(restarted.load().is_err());
         assert_eq!(fs::read(restarted.actor_path(0)).unwrap(), evidence);
         drop(restarted);
+        drop(source);
+        fs::remove_dir_all(directory).unwrap();
+    }
+    #[test]
+    fn clean_paused_destination_suppresses_enabled_transfer_boot_retries() {
+        let directory = directory();
+        let mut source = Store::open(directory.to_str().unwrap(), 2).unwrap();
+        let mut saved = source.load().unwrap().saved;
+        progressed(&mut saved[0]);
+        saved[0].desired = Desired::Enabled;
+        saved[0].previous_zone = 2;
+        saved[0].zone = 3;
+        source.write(&saved, 10, false, [true; COUNT]).unwrap();
+        assert_eq!(source.pending_boots().unwrap().len(), 1);
+
+        let mut destination = Store::open(directory.to_str().unwrap(), 3).unwrap();
+        let mut at_destination = destination.load().unwrap().saved;
+        assert_eq!(at_destination[0].desired, Desired::Enabled);
+        at_destination[0].desired = Desired::Paused;
+        destination
+            .write(&at_destination, 11, true, [true; COUNT])
+            .unwrap();
+        assert!(read(&source.records, 0).unwrap().clean);
+        assert!(source.pending_boots().unwrap().is_empty());
+        drop(destination);
+
+        let mut restored = Store::open(directory.to_str().unwrap(), 3).unwrap();
+        let paused = restored.load().unwrap().saved;
+        assert_eq!(paused[0].desired, Desired::Paused);
+        assert_eq!(paused[0].experience, saved[0].experience);
+        assert_eq!(paused[0].inventory, saved[0].inventory);
+        assert!(source.pending_boots().unwrap().is_empty());
+        drop(restored);
         drop(source);
         fs::remove_dir_all(directory).unwrap();
     }
