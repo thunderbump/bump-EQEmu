@@ -10,6 +10,8 @@
 #include "common/player_zone_access.h"
 #include "common/rulesys.h"
 #include "common/repositories/criteria/content_filter_criteria.h"
+#include "common/repositories/spawn2_disabled_repository.h"
+#include <set>
 #include "common/strings.h"
 #include "common/zone_store.h"
 #include <cmath>
@@ -18,6 +20,7 @@
 
 extern Zone *zone;
 extern ZoneDatabase content_db;
+extern ZoneDatabase database;
 namespace ActorZones {
 namespace {
 bool Access(NPC &actor, uint32_t destination) {
@@ -62,6 +65,40 @@ bool Resolve(NPC &actor, uint32_t id, uint32_t destination, Connection &connecti
 	}
 	return false;
 }
+std::optional<std::vector<SpawnHint>> ReadSpawnHints(Database &content, Database &runtime,
+	const std::string &name, HuntBounds bounds) {
+	auto rows = content.QueryDatabase(fmt::format(
+			"SELECT s.id,s.x,s.y,n.level,f.primaryfaction FROM spawn2 s "
+			"JOIN spawnentry e ON e.spawngroupID=s.spawngroupID JOIN npc_types n ON n.id=e.npcID "
+			"JOIN npc_faction f ON f.id=n.npc_faction_id WHERE s.zone='{}' AND (s.version=0 OR s.version=-1) "
+			"AND n.level BETWEEN {} AND {} AND n.merchant_id=0 {} {} ORDER BY s.id,n.id LIMIT 4097",
+			Strings::Escape(name), bounds.minimum, bounds.maximum, ContentFilterCriteria::apply("s"), ContentFilterCriteria::apply("e")));
+	if (!rows.Success() || rows.RowCount() > 4096) { return std::nullopt; }
+	std::vector<SpawnHint> hints;
+	std::set<uint32_t> ids;
+	for (auto row = rows.begin(); row != rows.end(); ++row) {
+		if (!row[0] || !row[1] || !row[2] || !row[3] || !row[4]) { return std::nullopt; }
+		const auto id = Strings::ToUnsignedInt(row[0]);
+		hints.push_back({id, Strings::ToFloat(row[1]), Strings::ToFloat(row[2]),
+			uint8_t(Strings::ToUnsignedInt(row[3])), Strings::ToInt(row[4])});
+		ids.insert(id);
+	}
+	if (ids.empty()) { return hints; }
+	// Match the current Spawn2 loader: instance-zero actors use runtime default
+	// overrides; absent/zero means enabled. GetWhere hides query failure as an
+	// empty vector, so use its table contract with an explicitly checked result.
+	auto overrides = runtime.QueryDatabase(fmt::format(
+			"SELECT spawn2_id,disabled FROM {} WHERE instance_id=0 AND spawn2_id IN ({}) LIMIT 4097",
+			Spawn2DisabledRepository::TableName(), Strings::Join(std::vector<uint32_t>(ids.begin(), ids.end()), ",")));
+	if (!overrides.Success() || overrides.RowCount() > 4096) { return std::nullopt; }
+	std::set<uint32_t> disabled;
+	for (auto row = overrides.begin(); row != overrides.end(); ++row) {
+		if (!row[0] || !row[1]) { return std::nullopt; }
+		if (Strings::ToInt(row[1]) != 0) { disabled.insert(Strings::ToUnsignedInt(row[0])); }
+	}
+	std::erase_if(hints, [&](const auto &hint) { return disabled.contains(hint.spawn_id); });
+	return hints;
+}
 std::vector<Connection> Nearby(NPC &actor, const std::map<int32_t, int32_t> &reputation, HuntBounds bounds) {
 	std::vector<Connection> connections;
 	if (actor.GetLevel() <= 1 || actor.IsMoving() || actor.IsEngaged()) { return connections; }
@@ -73,21 +110,16 @@ std::vector<Connection> Nearby(NPC &actor, const std::map<int32_t, int32_t> &rep
 		if (!name) { continue; }
 		// These are travel hints, never combat identities or permission. Once in
 		// the destination, only live incarnation-checked native NPCs can be hunted.
-		auto rows = content_db.QueryDatabase(fmt::format(
-				"SELECT s.id,s.x,s.y,n.level,f.primaryfaction FROM spawn2 s "
-				"JOIN spawnentry e ON e.spawngroupID=s.spawngroupID JOIN npc_types n ON n.id=e.npcID "
-				"JOIN npc_faction f ON f.id=n.npc_faction_id WHERE s.zone='{}' AND (s.version=0 OR s.version=-1) AND s.enabled=1 "
-				"AND n.level BETWEEN {} AND {} AND n.merchant_id=0 {} {} ORDER BY s.id,n.id LIMIT 4097",
-				Strings::Escape(name), bounds.minimum, bounds.maximum, ContentFilterCriteria::apply("s"), ContentFilterCriteria::apply("e")));
-		if (!rows.Success() || rows.RowCount() > 4096) { continue; }
+		auto hints = ReadSpawnHints(content_db, database, name, bounds);
+		if (!hints) { continue; }
 		auto distance = std::numeric_limits<double>::infinity();
-		for (auto row = rows.begin(); row != rows.end(); ++row) {
-			const auto faction = Strings::ToInt(row[4]);
+		for (const auto &hint : *hints) {
+			const auto faction = hint.faction;
 			const auto found = reputation.find(faction);
 			const auto reaction = actor.GetPlayerFactionLevel(nullptr, faction, actor.GetFactionRace(), actor.GetClass(),
 					actor.GetDeity(), 0, found == reputation.end() ? 0 : found->second);
 			if (reaction != FACTION_THREATENINGLY && reaction != FACTION_SCOWLS) { continue; }
-			const auto x = Strings::ToFloat(row[1]), y = Strings::ToFloat(row[2]);
+			const auto x = hint.x, y = hint.y;
 			if (!std::isfinite(x) || !std::isfinite(y)) { continue; }
 			const auto candidate = std::hypot(x-connection.arrival.x, y-connection.arrival.y);
 			distance = std::min(distance, candidate);

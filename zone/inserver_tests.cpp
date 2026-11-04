@@ -6,9 +6,11 @@
 #include "common/json/json.hpp"
 #include "common/timer.h"
 #include "common/rulesys.h"
+#include "common/content/world_content_service.h"
 #include "zone/beacon.h"
 #include "zone/actor_body.h"
 #include "zone/actor_inventory.h"
+#include "zone/actor_zones.h"
 #include "common/item_instance.h"
 #include <memory>
 #include "zone/npc.h"
@@ -1270,6 +1272,7 @@ Result ActorApproach()
 #include "actor_melee_tests.h"
 #include "actor_melee_facing_tests.h"
 #include "actor_inventory_tests.h"
+#include "actor_zone_tests.h"
 #endif
 
 struct Scenario {
@@ -1288,6 +1291,7 @@ constexpr std::array scenarios = {
 	, Scenario{"native_water_segment_geometry", WaterSegmentGeometry}
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
     , Scenario{"rust_native_actor_equipment", ActorEquipment, CleanupMelee, 30000}
+    , Scenario{"rust_native_actor_spawn_hints", ActorSpawnHints}
     // Exercises real shutdown, then boots a replacement in the same zone host.
     , Scenario{"rust_native_actor_body_lifetime", ActorBodyLifetime, CleanupActorBody}
     , Scenario{"rust_native_actor_patrol", ActorTravel<TravelCase::Patrol>, CleanupActorBody}
