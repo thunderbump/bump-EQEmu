@@ -779,31 +779,33 @@ mod tests {
 
     #[test]
     fn travel_cost_includes_reaching_the_exit_before_destination_prey() {
-        let mut native = ffi::Body::default();
-        native.routes = vec![
-            ffi::Route {
-                id: 1,
-                zone: 3,
-                x: 100.0,
-                y: 0.0,
-                z: 0.0,
-                arrival_x: 0.0,
-                arrival_y: 0.0,
-                arrival_z: 0.0,
-                hint_distance: 1.0,
-            },
-            ffi::Route {
-                id: 2,
-                zone: 4,
-                x: 2.0,
-                y: 0.0,
-                z: 0.0,
-                arrival_x: 0.0,
-                arrival_y: 0.0,
-                arrival_z: 0.0,
-                hint_distance: 20.0,
-            },
-        ];
+        let mut native = ffi::Body {
+            routes: vec![
+                ffi::Route {
+                    id: 1,
+                    zone: 3,
+                    x: 100.0,
+                    y: 0.0,
+                    z: 0.0,
+                    arrival_x: 0.0,
+                    arrival_y: 0.0,
+                    arrival_z: 0.0,
+                    hint_distance: 1.0,
+                },
+                ffi::Route {
+                    id: 2,
+                    zone: 4,
+                    x: 2.0,
+                    y: 0.0,
+                    z: 0.0,
+                    arrival_x: 0.0,
+                    arrival_y: 0.0,
+                    arrival_z: 0.0,
+                    hint_distance: 20.0,
+                },
+            ],
+            ..ffi::Body::default()
+        };
         let projected = body(&native);
         assert!(projected.routes[1].distance < projected.routes[0].distance);
         native.x = 100.0;
