@@ -73,7 +73,7 @@ std::vector<Connection> Nearby(NPC &actor, const std::map<int32_t, int32_t> &rep
 		if (!name) { continue; }
 		// These are travel hints, never combat identities or permission. Once in
 		// the destination, only live incarnation-checked native NPCs can be hunted.
-		const auto rows = content_db.QueryDatabase(fmt::format(
+		auto rows = content_db.QueryDatabase(fmt::format(
 				"SELECT s.id,s.x,s.y,n.level,f.primaryfaction FROM spawn2 s "
 				"JOIN spawnentry e ON e.spawngroupID=s.spawngroupID JOIN npc_types n ON n.id=e.npcID "
 				"JOIN npc_faction f ON f.id=n.npc_faction_id WHERE s.zone='{}' AND (s.version=0 OR s.version=-1) AND s.enabled=1 "
