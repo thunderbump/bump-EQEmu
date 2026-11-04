@@ -1202,6 +1202,12 @@ public:
 	void AI_Event_Engaged(Mob* attacker, bool yell_for_help = true);
 	void AI_Event_NoLongerEngaged();
 
+	// Default player XP rule calculations, without Client quest/AA/leadership state.
+	uint64 ScaleNormalExperience(uint64 add_exp, uint8 conlevel);
+	uint64 FinishNormalExperience(uint64 add_exp, uint64 current_exp,
+		uint32 experience_for_level, float character_modifier);
+	uint32 GetBaseExperienceForLevel(uint16 check_level);
+	uint64 GetBaseExperienceForKill(Mob* against);
 	FACTION_VALUE GetSpecialFactionCon(Mob* iOther);
 	// What observer thinks of a player identity. Standing is supplied by its owner;
 	// actor reputation can live in Rust without using the NPC ally table.
