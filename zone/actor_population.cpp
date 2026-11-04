@@ -557,8 +557,12 @@ public:
     for (const auto &p : observations) {
       projection.push_back(p);
     }
+    auto facts=Facts();
+    // Facts can observe native drain. Publish those observations before Rust
+    // can commit destination custody or release a lease from the same frame.
+    ActorIntegration::Drain();
     auto actions =
-        policy->step(now, Facts(), std::move(projection), scan, overflow);
+        policy->step(now, std::move(facts), std::move(projection), scan, overflow);
     if (policy->failed()) {
       if (!failure_reported) {
         LogError("Actor population failed closed; inspect private "

@@ -71,6 +71,11 @@ bool Relevant(NPC *npc) {
 	return spawn==10863 || spawn==10865 || spawn==4347 ||
 		(npc->GetNPCTypeID()==2014 || npc->GetNPCTypeID()==2021);
 }
+ReactionState *FindReaction(const Context &actor,const Context &other) {
+	for(auto &r:reactions){if(r.used && r.actor.native_id==actor.native_id && r.actor.incarnation==actor.incarnation &&
+		r.other.native_id==other.native_id && r.other.incarnation==other.incarnation){return &r;}}
+	return nullptr;
+}
 uint32_t LoadedFlags() { return zone ? (zone->zonemap?1u:0u)|(zone->watermap?2u:0u)|(zone->pathing?4u:0u):0; }
 }
 bool CaptureBufferControl() {
@@ -136,13 +141,10 @@ void Reaction(Mob *actor, Mob *observer, int32_t faction, int32_t standing,
 	e.b=observer->CastToNPC()->GetHateListCount();
 	// Reaction transitions are recorded once. Authorization attempts are never
 	// deduplicated; every actual gate below carries its resolved con.
-	for (auto &r:reactions) {
-		if (r.used && r.actor.native_id==e.actor.native_id && r.actor.incarnation==e.actor.incarnation &&
-			r.other.native_id==e.other.native_id && r.other.incarnation==e.other.incarnation) {
-			const auto &old=r.event;
-			if (old.e==e.e && old.f==e.f && old.g==e.g && old.h==e.h && old.a==e.a && old.b==e.b && old.flags==e.flags) { return; }
-			r.event=e;Capture(e);return;
-		}
+	if(auto *r=FindReaction(e.actor,e.other)) {
+		const auto &old=r->event;
+		if(old.e==e.e && old.f==e.f && old.g==e.g && old.h==e.h && old.a==e.a && old.b==e.b && old.flags==e.flags){return;}
+		r->event=e;Capture(e);return;
 	}
 	for (auto &r:reactions) { if (!r.used) { r={e.actor,e.other,e,true};Capture(e);return; } }
 	buffer.overflow=true;
@@ -154,8 +156,7 @@ void Gate(Mob *attacker,Mob *victim,bool allowed) {
 	auto e=Make(6,actor,other);e.phase=outgoing?0:1;e.a=allowed?1:0;e.c=allowed?0:1;
 	auto *recipient=outgoing?other:actor;
 	e.e=recipient?recipient->GetHP():0;e.f=e.e;
-	for (const auto &r:reactions) {if(r.used && r.actor.native_id==e.actor.native_id && r.actor.incarnation==e.actor.incarnation &&
-		r.other.native_id==e.other.native_id && r.other.incarnation==e.other.incarnation) {e.b=r.event.a;}}
+	if(const auto *r=FindReaction(e.actor,e.other)){e.b=r->event.a;}
 	Capture(e);
 }
 Attack::Attack(Mob *attacker,Mob *victim,bool allowed) {
@@ -167,8 +168,7 @@ Attack::Attack(Mob *attacker,Mob *victim,bool allowed) {
 	auto *recipient=victim && victim->IsNPC()?victim->CastToNPC():nullptr;
 	if (!recipient) { buffer.overflow=true;return; }
 	id_=recipient->GetID();incarnation_=recipient->NativeIncarnation();event_.e=recipient->GetHP();
-	for(const auto&r:reactions){if(r.used && r.actor.native_id==event_.actor.native_id && r.actor.incarnation==event_.actor.incarnation &&
-		r.other.native_id==event_.other.native_id && r.other.incarnation==event_.other.incarnation){event_.b=r.event.a;}}
+	if(const auto *r=FindReaction(event_.actor,event_.other)){event_.b=r->event.a;}
 	active_=true;
 }
 Attack::~Attack() {
