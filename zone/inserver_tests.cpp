@@ -6,6 +6,7 @@
 #include "common/json/json.hpp"
 #include "common/timer.h"
 #include "common/rulesys.h"
+#include "common/eqemu_config.h"
 #include "common/content/world_content_service.h"
 #include "zone/beacon.h"
 #include "zone/actor_body.h"
