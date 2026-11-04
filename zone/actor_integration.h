@@ -4,7 +4,8 @@ class Mob;
 class NPC;
 namespace ActorIntegration {
 // Always inert outside the explicit test fixture. Callbacks only copy POD data
-// into a fixed zone-thread buffer. Drain/Poll are the only Rust entry points.
+// into a fixed zone-thread buffer. Open/Drain/Poll/Finish/Route/Geometry may
+// enter Rust only at native startup or zone safe points, never in callbacks.
 bool Enabled();
 void Open(const char *directory);
 void Drain();
