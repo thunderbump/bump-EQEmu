@@ -2,6 +2,10 @@ cmake_minimum_required(VERSION 3.20.0)
 
 add_subdirectory(cppunit)
 
+# Opt-in controller/protocol seam checks. No server, DB, client or Rust fixtures.
+add_executable(tests_actor_demo_controls EXCLUDE_FROM_ALL actor_demo_controls.cpp)
+add_executable(tests_actor_hunt_controls EXCLUDE_FROM_ALL actor_hunt_controls.cpp)
+
 set(tests_sources
 	main.cpp
 )
@@ -36,6 +40,12 @@ target_link_libraries(tests PRIVATE common cppunit)
 target_include_directories(tests PRIVATE ..)
 include("${CMAKE_SOURCE_DIR}/cmake/ActorBridge.cmake")
 eqemu_link_actor_bridge(tests)
+if(TARGET actor_bridge)
+    add_executable(tests_actor_hunt_bridge_controls EXCLUDE_FROM_ALL actor_hunt_bridge_controls.cpp)
+    eqemu_link_actor_bridge(tests_actor_hunt_bridge_controls)
+    add_executable(tests_actor_population_bridge_controls EXCLUDE_FROM_ALL actor_population_bridge_controls.cpp)
+    eqemu_link_actor_bridge(tests_actor_population_bridge_controls)
+endif()
 
 install(TARGETS tests RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
 

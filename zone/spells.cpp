@@ -66,6 +66,7 @@
 */
 
 #include "mob.h"
+#include "actor_demo.h"
 
 #include "common/bodytypes.h"
 #include "common/classes.h"
@@ -3895,6 +3896,9 @@ bool Mob::SpellOnTarget(
 	int duration_override,
 	bool disable_buff_overwrite
 ) {
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+    if (!ActorDemo::AllowCombat(this, spelltar)) { return false; }
+#endif
 	auto spellOwner = GetOwnerOrSelf();
 
 	// well we can't cast a spell on target without a target
