@@ -416,9 +416,9 @@ public:
     // Retiring is safe even after native disappearance: the adapter checks
     // its own tags and never borrows authority from the requested key.
     if (a.kind == Kind::Retire) {
-      ActorIntegration::Body(adapter.Body(),5);
       Detach(i);
       if (s.alive) {
+        ActorIntegration::Body(adapter.Body(),5);
         adapter.Send(
             {eqemu_proof::Kind::Retire, s.epoch, s.generation, 0, 0, 0, 0});
       }
