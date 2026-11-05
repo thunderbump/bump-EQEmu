@@ -679,7 +679,10 @@ impl Population {
         if !self.failed() {
             for action in &actions {
                 if action.kind == core::ActionKind::LevelUp {
-                    crate::integration::level_request(action.actor, &self.core.actors[action.actor].saved);
+                    crate::integration::level_request(
+                        action.actor,
+                        &self.core.actors[action.actor].saved,
+                    );
                 }
             }
         }
@@ -794,16 +797,19 @@ mod tests {
     #[test]
     fn rejected_native_frame_never_indexes_observer_past_actor_count() {
         for length in [2, 4] {
-            let directory=dir();
-            let mut population=population_open(directory.to_str().unwrap(),"invalid-frame").unwrap();
-            let frames=(0..length).map(|index|ffi::Body {
-                actor:index as u8,
-                ..ffi::Body::default()
-            }).collect();
-            let actions=population.step_inner(1,frames,Vec::new(),false,false);
-            assert_eq!(population.fault,"invalid_native_frame");
+            let directory = dir();
+            let mut population =
+                population_open(directory.to_str().unwrap(), "invalid-frame").unwrap();
+            let frames = (0..length)
+                .map(|index| ffi::Body {
+                    actor: index as u8,
+                    ..ffi::Body::default()
+                })
+                .collect();
+            let actions = population.step_inner(1, frames, Vec::new(), false, false);
+            assert_eq!(population.fault, "invalid_native_frame");
             assert!(actions.is_empty());
-            assert!(population.latest.iter().all(|body|body.drained));
+            assert!(population.latest.iter().all(|body| body.drained));
             drop(population);
             fs::remove_dir_all(directory).unwrap();
         }

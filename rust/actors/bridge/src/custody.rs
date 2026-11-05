@@ -27,7 +27,12 @@ struct Owned {
 impl Drop for Owned {
     fn drop(&mut self) {
         if self.file.unlock().is_ok() {
-            crate::integration::lease(self.record.id, &self.record.saved, self.record.revision, false);
+            crate::integration::lease(
+                self.record.id,
+                &self.record.saved,
+                self.record.revision,
+                false,
+            );
         } else {
             crate::integration::storage_failure(self.record.id);
         }
@@ -71,7 +76,14 @@ fn publish(directory: &Path, index: usize, record: &Record, cause: u8) -> Result
         return Err("actor_record_too_large".into());
     }
     checkpoint::atomic(directory, &record_name(index), &bytes)?;
-    crate::integration::publication(index, &record.saved, record.revision, record.clean, cause, &bytes);
+    crate::integration::publication(
+        index,
+        &record.saved,
+        record.revision,
+        record.clean,
+        cause,
+        &bytes,
+    );
     Ok(())
 }
 fn migrate(directory: &str) -> Result<PathBuf, String> {
@@ -300,13 +312,25 @@ impl Store {
                 saved: saved[i].clone(),
             };
             let old = &owned.record;
-            let cause = if departing { 7 } else if clean { 8 }
-                else if record.saved.completed != old.saved.completed { 4 }
-                else if record.saved.level != old.saved.level { 9 }
-                else if record.saved.inventory != old.saved.inventory { 5 }
-                else if record.saved.transfer.is_some() && record.saved.transfer != old.saved.transfer { 6 }
-                else if old.clean { 2 } else { 3 };
-            if let Err(error)=publish(&self.records, i, &record, cause) {
+            let cause = if departing {
+                7
+            } else if clean {
+                8
+            } else if record.saved.completed != old.saved.completed {
+                4
+            } else if record.saved.level != old.saved.level {
+                9
+            } else if record.saved.inventory != old.saved.inventory {
+                5
+            } else if record.saved.transfer.is_some() && record.saved.transfer != old.saved.transfer
+            {
+                6
+            } else if old.clean {
+                2
+            } else {
+                3
+            };
+            if let Err(error) = publish(&self.records, i, &record, cause) {
                 crate::integration::storage_failure(i);
                 return Err(error);
             }
