@@ -61,9 +61,12 @@ Result ActorSpawnHints()
 	} content{content_connection, *config, "content", {}, {}},
 		runtime{runtime_connection, *config, "runtime", {}, {}};
 	auto fail = [](const char *why) { return Result{Outcome::Failed, why}; };
-	// Clone the actual retained spawn2 schema: it must have no enabled column.
-	if (!content.Create("spawn2", " LIKE spawn2") ||
-		!content.Create("spawnentry", " LIKE spawnentry") ||
+	// Distinct TEMPORARY intermediates avoid same-name CREATE ... LIKE binding.
+	// Both copies retain native columns/indexes/options without touching physical tables.
+	if (!content.Create("cdau_spawn2_schema", " LIKE spawn2") ||
+		!content.Create("spawn2", " LIKE cdau_spawn2_schema") ||
+		!content.Create("cdau_spawnentry_schema", " LIKE spawnentry") ||
+		!content.Create("spawnentry", " LIKE cdau_spawnentry_schema") ||
 		!content.Create("npc_types", " (id INT PRIMARY KEY,level INT,npc_faction_id INT,merchant_id INT)") ||
 		!content.Create("npc_faction", " (id INT PRIMARY KEY,primaryfaction INT)") ||
 		!content.Create("spawn2_disabled", " (spawn2_id INT,instance_id INT,disabled INT)") ||
