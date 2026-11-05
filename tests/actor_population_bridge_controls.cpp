@@ -279,7 +279,7 @@ void ThreeActorsClaimsCallbacksAndRestore() {
             "one-stop retired wrong bodies");
     Command(d, "drain one 3\n");
     auto draining = pop->step(17000, Frame(m), Prey(), false, false);
-    Require(Read(d.path / "checkpoint.json").find("\"clean\":false") !=
+    Require(Read(d.path / "actors-v3/actor-1.json").find("\"clean\":false") !=
                 std::string::npos,
             "checkpoint clean before native drain");
     Apply(m, draining);

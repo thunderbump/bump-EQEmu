@@ -15,6 +15,8 @@
 	You should have received a copy of the GNU General Public License
 	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
+#include "actor_integration.h"
+#include "actor_population.h"
 #include "zone/actor_body.h"
 #ifdef EQEMU_BUILD_TESTS
 #include "zone/inserver_tests.h"
@@ -63,6 +65,7 @@
 
 #include <cfloat>
 #include <cstdlib>
+#include <exception>
 #include <cstring>
 #include <ctime>
 #include <iostream>
@@ -1178,6 +1181,17 @@ bool Zone::Init(bool is_static) {
 	zonemap  = Map::LoadMapFile(map_name);
 	watermap = WaterMap::LoadWaterMapfile(map_name);
 	pathing  = IPathfinder::Load(map_name);
+#if defined(EQEMU_RUST_BOOTSTRAP_BRIDGE) && defined(EQEMU_BUILD_TESTS)
+	// Open observations before real fixture NPC registration, without opening
+	// actor custody or issuing actor commands during native zone loading.
+	const auto *actor_dir=std::getenv("EQEMU_STAGING_ACTOR_POPULATION_DIR");
+	const auto *actor_demo=std::getenv("EQEMU_STAGING_ACTOR_DEMO");
+	if(ActorPopulation::Selected() && actor_demo && std::string(actor_demo)=="1" && actor_dir &&
+		!GetInstanceID() && !GetInstanceVersion()) {
+		try {ActorIntegration::Open(actor_dir);}
+		catch(const std::exception &error){LogError("Fixture observation startup refused [{}]",error.what());return false;}
+	}
+#endif
 
 	LogInfo("Loading timezone data");
 	zone_time.setEQTimeZone(content_db.GetZoneTimezone(zoneid, GetInstanceVersion()));

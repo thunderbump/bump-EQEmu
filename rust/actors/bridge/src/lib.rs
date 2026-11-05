@@ -1,5 +1,7 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 mod checkpoint;
+mod custody;
+mod integration;
 mod population;
 
 #[cxx::bridge(namespace = "eqemu_proof")]
@@ -146,6 +148,8 @@ mod ffi {
         type_id: u32,
         level: u8,
         service: bool,
+        actor_level: u8,
+        hostile: bool,
     }
     struct CombatFact {
         epoch: u64,
@@ -175,6 +179,7 @@ mod ffi {
         operation: u64,
         last_terminal: Event,
         last_operation: u64,
+        next_operation: u64,
         sequence: u64,
         tick: u64,
         patrol: Patrol,
@@ -418,6 +423,8 @@ impl Runtime {
                         type_id: c.type_id,
                         level: c.level,
                         service: c.service,
+                        actor_level: c.actor_level,
+                        hostile: c.hostile,
                     });
                 }
             } else {
@@ -476,6 +483,7 @@ impl Runtime {
                 operation: s.operation,
                 last_terminal: map_event(s.last_terminal),
                 last_operation: s.last_operation,
+                next_operation: self.0.next_operation().unwrap_or(0),
                 sequence: s.sequence,
                 tick: s.tick,
                 approach: match s.approach {

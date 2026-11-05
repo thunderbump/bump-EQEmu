@@ -16,6 +16,7 @@
 	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 #include "mob.h"
+#include "actor_integration.h"
 
 #include "common/data_bucket.h"
 #include "common/data_verification.h"
@@ -5424,6 +5425,7 @@ uint16 Mob::GetInstanceVersion() const {
 
 int Mob::GetHaste()
 {
+	if (UsesActorInventory()) { return CalculatePlayerHaste(); }
 	// See notes in Client::CalcHaste
 	// Need to check if the effect of inhibit melee differs for NPCs
 	if (spellbonuses.haste < 0) {
@@ -7328,6 +7330,100 @@ void Mob::ClearItemFactionBonuses() {
 	item_faction_bonuses.clear();
 }
 
+// Native random Heroic CHA adjustment and repair/clamp rules shared with Client.
+// Persistence is the caller's responsibility.
+bool Mob::ApplyPersonalFaction(int32 &current_value, int32 npc_value,
+	int32 this_faction_min, int32 this_faction_max, bool gm)
+{
+	bool repair = false;
+	bool change = false;
+
+	if (itembonuses.HeroicCHA)
+	{
+		int faction_mod = itembonuses.HeroicCHA / 5;
+		// If our result isn't truncated, then just do that
+		if (npc_value * faction_mod / 100 != 0)
+			npc_value += npc_value * faction_mod / 100;
+		// If our result is truncated, then double a mob's value every once and a while to equal what they would have got
+		else
+		{
+			if (zone->random.Int(0, 100) < faction_mod)
+				npc_value *= 2;
+		}
+	}
+
+	// Set flag when to update db
+	// Repair needed, as db changes could modify a base value for a faction
+	// and we need to auto correct when that happens.
+	if (current_value > this_faction_max)
+	{
+		current_value = this_faction_max;
+		repair = true;
+	}
+	else if (current_value < this_faction_min)
+	{
+		current_value = this_faction_min;
+		repair = true;
+	}
+	else if ((!gm) && (npc_value != 0) &&
+		((npc_value > 0 && current_value != this_faction_max) ||
+		((npc_value < 0 && current_value != this_faction_min))))
+		change = true;
+
+	if (change || repair)
+	{
+		current_value += npc_value;
+
+		if (current_value > this_faction_max)
+			current_value = this_faction_max;
+		else if (current_value < this_faction_min)
+			current_value = this_faction_min;
+
+	}
+
+	return change || repair;
+}
+
+FACTION_VALUE Mob::GetPlayerFactionLevel(Mob* observer, int32 faction, uint32 race,
+	uint32 class_id, uint32 deity_id, uint32 character_id, int32 standing)
+{
+	const auto personal_standing=standing;
+	int32 item_bonus=0,spell_bonus=0;
+	auto observed=[&](FACTION_VALUE result) {
+		ActorIntegration::Reaction(this,observer,faction,personal_standing,item_bonus,spell_bonus,result);
+		return result;
+	};
+	if (faction < 0) {
+		return observed(CalculatePlayerSpecialFaction(faction));
+	}
+	if (GetFeigned() || !zone->CanDoCombat() ||
+		(invisible_undead && observer && !observer->SeeInvisibleUndead()) ||
+		IsInvisible(observer)) {
+		return observed(FACTION_INDIFFERENTLY);
+	}
+	if (observer && observer->GetOwnerID()) {
+		auto *owner = observer->GetOwner();
+		return observed(owner && owner->IsClient() && character_id &&
+			character_id == owner->CastToClient()->CharacterID()
+			? FACTION_AMIABLY : FACTION_INDIFFERENTLY);
+	}
+	if (faction <= 0) {
+		return observed(FACTION_INDIFFERENTLY);
+	}
+	FactionMods modifiers;
+	auto reaction = FACTION_INDIFFERENTLY;
+	if (content_db.GetFactionData(&modifiers, class_id, race, deity_id, faction)) {
+		spell_bonus=GetFactionBonus(faction);
+		item_bonus=GetItemFactionBonus(faction);
+		standing += spell_bonus;
+		standing += item_bonus;
+		reaction = CalculateFaction(&modifiers, standing);
+	}
+	return observed(AdjustPlayerFaction(reaction,
+		observer && observer->IsNPC() && observer->CastToNPC()->MerchantType,
+		observer && observer->IsNPC() && observer->CastToNPC()->CheckAggro(this)));
+}
+
 FACTION_VALUE Mob::GetSpecialFactionCon(Mob* iOther) {
 	if (!iOther)
 		return FACTION_INDIFFERENTLY;
@@ -7339,6 +7435,10 @@ FACTION_VALUE Mob::GetSpecialFactionCon(Mob* iOther) {
 	bool iOtherAIControlled = iOther->IsAIControlled();
 	int selfPrimaryFaction = self->GetPrimaryFaction();
 	int iOtherPrimaryFaction = iOther->GetPrimaryFaction();
+
+	if (!selfAIcontrolled) {
+		return CalculatePlayerSpecialFaction(iOtherPrimaryFaction);
+	}
 
 	if (selfPrimaryFaction >= 0 && selfAIcontrolled)
 		return FACTION_INDIFFERENTLY;

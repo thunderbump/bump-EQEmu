@@ -43,6 +43,7 @@ public:
 	virtual bool InVWater(const glm::vec3& location) const;
 	virtual bool InLava(const glm::vec3& location) const;
 	virtual bool InLiquid(const glm::vec3& location) const;
+	bool SegmentInLiquid(const glm::vec3 &from, const glm::vec3 &to) const override;
 	virtual bool InPvP(const glm::vec3& location) const;
 	virtual bool InZoneLine(const glm::vec3& location) const;
 	
@@ -52,6 +53,8 @@ protected:
 private:
 	WaterRegionType BSPReturnRegionType(int32 node_number, const glm::vec3& location) const;
 	ZBSP_Node* BSP_Root;
+	uint32 node_count_ = 0;
+	bool SegmentInLiquid(int32 node, const glm::vec3 &from, const glm::vec3 &to, uint32 &budget, unsigned depth) const;
 
 	friend class WaterMap;
 };

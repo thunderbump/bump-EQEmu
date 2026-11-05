@@ -34,6 +34,7 @@ public:
 	virtual bool InVWater(const glm::vec3& location) const;
 	virtual bool InLava(const glm::vec3& location) const;
 	virtual bool InLiquid(const glm::vec3& location) const;
+	bool SegmentInLiquid(const glm::vec3 &from, const glm::vec3 &to) const override;
 	virtual bool InPvP(const glm::vec3& location) const;
 	virtual bool InZoneLine(const glm::vec3& location) const;
 

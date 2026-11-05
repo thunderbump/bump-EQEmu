@@ -2,6 +2,7 @@
 
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
 #include "actor-bridge/src/lib.rs.h"
+#include "actor_population.h"
 #include <cstdint>
 #include <cstddef>
 #include <array>
@@ -29,7 +30,8 @@ public:
     bool ReleasePublicHunt();
     // Demo-only appearance/broadcast. Ordinary creation and test profiles stay unchanged.
     eqemu_proof::Report CreateVisibleMeleeBody(int32_t x, int32_t y, int32_t z);
-    bool RestorePopulationBody(unsigned hunter, double x, double y, double z, int64_t hp);
+    eqemu_proof::Report StartTransferMove(int32_t x, int32_t y, int32_t z);
+    bool RestorePopulationBody(unsigned hunter, double x, double y, double z, int64_t hp, uint8_t level);
     // Native Death completion hook: latch values only, never reenter Rust.
     void ObserveDeath(NPC *victim, Mob *killer);
     void Process();
@@ -44,6 +46,8 @@ public:
     // Native Death can be latched by this tick's swing before Rust consumes it
     // on the next tick. This is evidence to wait, never a reported victory.
     bool HasPendingTargetKill(uint64_t target_incarnation) const;
+    const std::vector<ActorPopulation::FactionChange> &FactionChanges() const { return combat_.factions; }
+    uint64_t KillExperience() const { return combat_.killed ? combat_.experience : 0; }
     bool HasAdmittedPublicCombat(NPC *body, NPC *prey) const;
 private:
     eqemu_proof::Report Advance(eqemu_proof::Input input, bool empty = false);
@@ -56,6 +60,8 @@ private:
     struct Combat {
         uint64_t epoch = 0, generation = 0, goal = 0, operation = 0, target = 0;
         uint64_t actor_incarnation = 0;
+        uint64_t experience = 0;
+        std::vector<ActorPopulation::FactionChange> factions;
         uint16_t id = 0;
         bool killed = false, defeated = false;
     } combat_;
@@ -69,15 +75,17 @@ private:
     bool closing_ = false;
     bool visible_creation_ = false;
     bool population_ = false;
+    bool transfer_move_ = false;
     unsigned hunter_ = 0;
     double restore_x_ = 0, restore_y_ = 0, restore_z_ = 0;
     int64_t restore_hp_ = 100;
+    uint8_t restore_level_ = 1;
     int32_t target_x_ = 0, target_y_ = 0, target_z_ = 0;
 };
 Adapter &Get();
 Adapter &PopulationAdapter(std::size_t hunter);
 bool LegacyAlive();
-bool IsPublicHuntPrey(NPC *npc, bool population = false);
+bool IsPublicHuntPrey(NPC *npc, bool population = false, NPC *actor = nullptr);
 void Process();
 void ObserveDeath(NPC *victim, Mob *killer);
 void BeginTeardown();
