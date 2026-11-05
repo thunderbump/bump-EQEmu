@@ -316,7 +316,7 @@ impl Trace {
             || context.kind > 3
             || context.zone != self.zone
             || self.contexts.len() >= 128
-            || !encoded(&self.context_value(&context)).is_ok_and(|b| b.len() + 1 <= 256)
+            || !encoded(&self.context_value(&context)).is_ok_and(|b| b.len() < 256)
         {
             self.invalid();
             return 0;
@@ -360,7 +360,7 @@ impl Trace {
         if self.counts[index] >= CAPS[index]
             || self.events.len() >= 4096
             || context >= self.contexts.len()
-            || !encoded(&event).is_ok_and(|b| b.len() + 1 <= WIDTHS[index])
+            || !encoded(&event).is_ok_and(|b| b.len() < WIDTHS[index])
         {
             self.invalid();
             return;
@@ -560,7 +560,7 @@ impl Trace {
         }
         let snapshot = json!({"process_index":self.process,"sequence":sequence,
             "raw_record_sha256_by_actor":hashes,"raw_json_by_actor":first});
-        if !encoded(&snapshot).is_ok_and(|b| b.len() + 1 <= 11264) {
+        if !encoded(&snapshot).is_ok_and(|b| b.len() < 11264) {
             return Err(9);
         }
         Ok(snapshot)
@@ -1707,7 +1707,7 @@ mod tests {
         let mut r = request(u64::MAX, 1, u16::MAX);
         r.process_index = 23;
         r.session = "s".repeat(48);
-        assert!(encoded(&r).unwrap().len() + 1 <= 256);
+        assert!(encoded(&r).unwrap().len() < 256);
         let witness: Value =
             serde_json::from_str(include_str!("../protocol/interface-width-witness.json")).unwrap();
         assert!(encoded(&witness["manifest_max_witness"]).unwrap().len() <= 16384);
