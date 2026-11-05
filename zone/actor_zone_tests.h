@@ -19,12 +19,38 @@ Result ActorSpawnHints()
 	}
 	struct Tables {
 		Database &db;
+		const EQEmuConfig &config;
+		const char *role;
 		std::vector<std::string> names;
+		std::string error;
 		~Tables() {
 			for (const auto &name : names) { db.QueryDatabase("DROP TEMPORARY TABLE IF EXISTS " + name); }
 		}
 		bool Create(const std::string &name, const std::string &definition) {
-			if (!db.QueryDatabase("CREATE TEMPORARY TABLE " + name + definition).Success()) { return false; }
+			auto result = db.QueryDatabase("CREATE TEMPORARY TABLE " + name + definition);
+			if (!result.Success()) {
+				auto message = result.ErrorMessage();
+				// Report SQL evidence, never the configured connection credentials.
+				std::vector<std::string> connection_values{config.DatabaseHost, config.DatabaseUsername,
+					config.DatabasePassword, config.DatabaseDB, config.ContentDbHost,
+					config.ContentDbUsername, config.ContentDbPassword, config.ContentDbName};
+				std::sort(connection_values.begin(), connection_values.end(),
+					[](const auto &a, const auto &b) { return a.size() > b.size(); });
+				for (const auto &value : connection_values) {
+					if (value.empty()) { continue; }
+					size_t offset = 0;
+					while ((offset = message.find(value, offset)) != std::string::npos) {
+						message.replace(offset, value.size(), "[redacted]");
+						offset += 10;
+					}
+				}
+				if (message.size() > 144) { message = message.substr(0, 141) + "..."; }
+				for (auto &c : message) { if (c < 32 || c > 126) { c = '?'; } }
+				// Identity and errno precede text so abbreviated suite reports retain them.
+				error = fmt::format("spawn hint {}/{} CREATE errno={}: {}", role, name,
+					result.ErrorNumber(), message);
+				return false;
+			}
 			names.push_back(name);
 			return true;
 		}
@@ -32,7 +58,8 @@ Result ActorSpawnHints()
 			return db.QueryDatabase("DROP TEMPORARY TABLE " + name).Success() &&
 				db.QueryDatabase("CREATE TEMPORARY TABLE " + name + definition).Success();
 		}
-	} content{content_connection, {}}, runtime{runtime_connection, {}};
+	} content{content_connection, *config, "content", {}, {}},
+		runtime{runtime_connection, *config, "runtime", {}, {}};
 	auto fail = [](const char *why) { return Result{Outcome::Failed, why}; };
 	// Clone the actual retained spawn2 schema: it must have no enabled column.
 	if (!content.Create("spawn2", " LIKE spawn2") ||
@@ -41,7 +68,7 @@ Result ActorSpawnHints()
 		!content.Create("npc_faction", " (id INT PRIMARY KEY,primaryfaction INT)") ||
 		!content.Create("spawn2_disabled", " (spawn2_id INT,instance_id INT,disabled INT)") ||
 		!runtime.Create("spawn2_disabled", " (spawn2_id INT,instance_id INT,disabled INT)")) {
-		return fail("spawn hint temporary schema creation");
+		return {Outcome::Failed, content.error.empty() ? runtime.error : content.error};
 	}
 	auto columns = content_connection.QueryDatabase("SHOW COLUMNS FROM spawn2 LIKE 'enabled'");
 	if (!columns.Success() || columns.RowCount() != 0) { return fail("retained spawn2 schema unexpectedly contains enabled"); }
