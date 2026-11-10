@@ -1,7 +1,13 @@
 // Deliberate negative control: qualify UBSan's packed-scalar diagnostic.
 #include <cstdint>
-int main() {
+
+__attribute__((noinline)) static uint32_t Load(const uint32_t *value) {
+ return *value;
+}
+
+int main(int argc, char **) {
  alignas(uint32_t) char bytes[8] = {};
- volatile uint32_t *unaligned = reinterpret_cast<volatile uint32_t *>(bytes + 1);
- return *unaligned;
+ // argc is one in the worker invocation. Keep the access non-volatile:
+ // Clang intentionally omits alignment diagnostics on volatile pointers.
+ return Load(reinterpret_cast<const uint32_t *>(bytes + argc));
 }
