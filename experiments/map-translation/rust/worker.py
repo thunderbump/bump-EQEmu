@@ -41,7 +41,7 @@ cd rust
 python3 qualify.py /rust-build/release/map-poc /inputs /references /results/rust
 sha256sum /rust-build/release/map-poc > /results/binary.sha256
 ldd /rust-build/release/map-poc > /results/ldd.txt
-ldd /rust-build/release/map-poc | awk '{for(i=1;i<=NF;i++) if ($i ~ /^\//) print $i}' | xargs sha256sum > /results/shared-libraries.sha256
+ldd /rust-build/release/map-poc | awk '{for(i=1;i<=NF;i++) if (index($i,"/") == 1) print $i}' | xargs sha256sum > /results/shared-libraries.sha256
 printf '%s\n' "RUSTFLAGS=${RUSTFLAGS-}" "CARGO_ENCODED_RUSTFLAGS=${CARGO_ENCODED_RUSTFLAGS-}" 'Rust release default target CPU; no fast-math, no mul_add, default process FP environment' > /results/fp.txt
 cp Cargo.lock /results/
 '''

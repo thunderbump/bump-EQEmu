@@ -55,7 +55,7 @@ qualification, which is network-disabled and uses `--frozen --offline`:
 ```sh
 python3 experiments/map-translation/rust/worker.py \
   --socket unix:///run/user/1000/eqemu-rust-map-poc.sock \
-  --image sha256:f307adb59b1733d18a0671c0e5bb225bbeb7343e8948deb8e63a8b191f48e9bd \
+  --image sha256:0aeb54f14590bf1631a27f60b3e7b7eed6dde549f08ba1f5738282e59d4cea1d \
   --glm /candidate/build/vcpkg_installed/x64-linux/include \
   --inputs /home/bump/.local/state/eqemu-map-translation/two-maps-v1/inputs \
   --references /home/bump/.local/state/eqemu-map-translation/capture-tests-20261110/handoff-ordinary/results/capture \
