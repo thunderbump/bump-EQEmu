@@ -42,6 +42,9 @@ impl<'a> Cursor<'a> {
             .iter()
             .position(|&b| b == 0)
             .ok_or(MapError("unterminated name"))?;
+        if n > 4096 {
+            return Err(MapError("name limit"));
+        }
         Ok(self.take(n + 1)?[..n].to_vec())
     }
     fn skip_records(&mut self, count: usize, size: usize) -> Result<()> {
@@ -93,6 +96,9 @@ fn expand(data: &[u8]) -> Result<Mesh> {
     let nni = c.word()? as usize;
     let nm = c.word()?;
     let np = c.word()?;
+    if nm > 65_536 || np > 1_000_000 {
+        return Err(MapError("record limit"));
+    }
     let groups = c.word()?;
     let tiles = c.word()?;
     let _quads = c.word()?;

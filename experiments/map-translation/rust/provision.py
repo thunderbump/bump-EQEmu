@@ -6,7 +6,7 @@ p.add_argument('--socket', required=True); p.add_argument('--image', required=Tr
 a=p.parse_args(); a.output.mkdir(parents=True, exist_ok=False)
 d=['docker','--host',a.socket]
 assert 'name=rootless' in json.loads(subprocess.check_output(d+['info','--format','{{json .SecurityOptions}}']))
-cid=subprocess.check_output(d+['create','--memory','2g','--cpus','2','--entrypoint','/bin/bash',a.image,'-lc','mkdir -p /results; cd /crate; cargo generate-lockfile; cargo fetch --locked; cp Cargo.lock /results/; rustc -Vv > /results/rustc.txt'],text=True).strip()
+cid=subprocess.check_output(d+['create','--memory','2g','--cpus','2','--entrypoint','/bin/bash',a.image,'-lc','set -eu; mkdir -p /results; cd /crate; if [ ! -f Cargo.lock ]; then cargo generate-lockfile; fi; cargo fetch --locked; cp Cargo.lock /results/; rustc -Vv > /results/rustc.txt'],text=True).strip()
 try:
  subprocess.run(d+['cp',str(Path(__file__).resolve().parent)+'/.',cid+':/crate'],check=True)
  with (a.output/'provision.log').open('w') as f: subprocess.run(d+['start','-a',cid],stdout=f,stderr=subprocess.STDOUT,check=True)

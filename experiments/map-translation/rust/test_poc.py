@@ -8,10 +8,11 @@ import subprocess
 import sys
 import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from test_capture import CaptureTests, floats, words
+import test_capture
+from test_capture import floats, words
 from mesh import read
 
-class RustTests(CaptureTests):
+class RustTests(test_capture.CaptureTests):
     def fixture_rotation(self, r):
         base = floats(1, 2, 3, 4, 6, 8, 9, 12, 15)
         header = words(0, 0, 0, 0, 1, 1, 0, 0, 0) + floats(1)
@@ -70,5 +71,20 @@ class RustTests(CaptureTests):
             source=self.root/'bad.map'; source.write_bytes(data)
             result=subprocess.run([self.binary,str(source),str(self.root/'bad.mesh'),hashlib.sha256(data).hexdigest()],capture_output=True)
             self.assertEqual(result.returncode,1)
+
+    def test_numeric_diagnostics(self):
+        from diagnose import diagnose
+        import json
+        def mesh(path, bits):
+            path.write_bytes(struct.pack('<8sIII64s', b'EQMESH01',1,len(bits)//3,0,b'0'*64)+words(*bits))
+        a=self.root/'a.mesh'; b=self.root/'b.mesh'
+        mesh(a,[]); mesh(b,[])
+        self.assertTrue(diagnose(a,b)['exact'])
+        mesh(a,[0,0x3f800000,0x7f800000]); mesh(b,[0x80000000,0x3f800001,0x7fc00000])
+        result=diagnose(a,b)
+        self.assertEqual(result['signed_zero_changes'],1)
+        self.assertEqual(result['max_ulp'],1)
+        self.assertEqual(len(result['nonfinite']),1)
+        json.dumps(result,allow_nan=False)
 
 if __name__ == '__main__': unittest.main(verbosity=2)

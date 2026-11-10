@@ -29,11 +29,12 @@ def diagnose(reference,candidate):
         return values[min(len(values)-1,int(q*(len(values)-1)))] if values else 0
     bounds=[]
     for mesh in (a,b):
-        bounds.append([[min(f(w) for w in mesh[1][axis::3]),max(f(w) for w in mesh[1][axis::3])] for axis in range(3)])
+        axes=[[f(w) for w in mesh[1][axis::3] if math.isfinite(f(w))] for axis in range(3)]
+        bounds.append([[min(values),max(values)] if values else None for values in axes])
     return {'exact':exact,'vertices':len(a[1])//3,'indices':len(a[2]),'ordered_indices_equal':True,
-            'differing_coordinates':len(diffs),'coordinate_fraction':len(diffs)/len(a[1]),
+            'differing_coordinates':len(diffs),'coordinate_fraction':len(diffs)/len(a[1]) if a[1] else 0,
             'differing_vertices':len(set(d['vertex'] for d in diffs)),
-            'vertex_fraction':len(set(d['vertex'] for d in diffs))/(len(a[1])//3),
+            'vertex_fraction':len(set(d['vertex'] for d in diffs))/(len(a[1])//3) if a[1] else 0,
             'max_absolute':quantile('absolute',1),'median_absolute':quantile('absolute',.5),'p99_absolute':quantile('absolute',.99),
             'max_relative_above_1e_minus_6':quantile('relative',1),'max_ulp':quantile('ulp',1),
             'signed_zero_changes':zeros,'nonfinite':nonfinite,'bounds':bounds,'bounds_equal':bounds[0]==bounds[1],

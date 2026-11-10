@@ -2,7 +2,7 @@
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, OpenOptions},
-    io::{BufWriter, Write},
+    io::{BufWriter, Read, Write},
     time::Instant,
 };
 fn main() {
@@ -17,7 +17,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("usage: map-poc input.map output.mesh input-sha256".into());
     }
     let start = Instant::now();
-    let input = fs::read(&a[1])?;
+    let mut input = Vec::new();
+    fs::File::open(&a[1])?
+        .take(128 * 1024 * 1024 + 13)
+        .read_to_end(&mut input)?;
+    if input.len() > 128 * 1024 * 1024 + 12 {
+        return Err("input size limit".into());
+    }
     let hash = format!("{:x}", Sha256::digest(&input));
     if a[3].to_str() != Some(&hash) {
         return Err("input SHA256 mismatch".into());

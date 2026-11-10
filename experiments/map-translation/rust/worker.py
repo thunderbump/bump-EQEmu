@@ -30,7 +30,7 @@ export CARGO_TARGET_DIR=/rust-build
 rustc -Vv > /results/rustc.txt
 cargo tree --locked --offline > /results/dependencies.txt
 cargo fmt --check
-cargo build --release --frozen --offline
+cargo build --release --frozen --offline -vv
 cargo test --release --frozen --offline
 MAP_CAPTURE_BINARY=/rust-build/release/map-poc python3 test_poc.py
 cmake -S /work/experiments/map-translation -B /build -DGLM_INCLUDE_DIR="$GLM_INCLUDE" -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
@@ -41,6 +41,8 @@ cd rust
 python3 qualify.py /rust-build/release/map-poc /inputs /references /results/rust
 sha256sum /rust-build/release/map-poc > /results/binary.sha256
 ldd /rust-build/release/map-poc > /results/ldd.txt
+ldd /rust-build/release/map-poc | awk '{for(i=1;i<=NF;i++) if ($i ~ /^\//) print $i}' | xargs sha256sum > /results/shared-libraries.sha256
+printf '%s\n' "RUSTFLAGS=${RUSTFLAGS-}" "CARGO_ENCODED_RUSTFLAGS=${CARGO_ENCODED_RUSTFLAGS-}" 'Rust release default target CPU; no fast-math, no mul_add, default process FP environment' > /results/fp.txt
 cp Cargo.lock /results/
 '''
 with tempfile.TemporaryDirectory() as tmp:
