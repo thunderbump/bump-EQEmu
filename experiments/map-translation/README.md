@@ -1,65 +1,82 @@
-# Map translation evaluations
+# Map translation reference tests
 
-Translation-project-only experiment. This directory is not registered with CMake,
-CTest, Cargo, the normal utility suite or CI. No runnable evaluation exists yet.
+Opt-in two-map experiment, central-qfiz. No Rust, CI or game deployment changes.
+Inputs are pinned by `corpus.json`; keep inputs and all generated results outside
+Git. The old manifest reference commit was runtime-unqualified, not a golden.
+The scalar memcpy prerequisite originated in local commit `78c07284908931297ea72e25da358965b60ee913`.
 
-Branch: `experiment/map-translation-evals`.
-Baseline: `78c07284908931297ea72e25da358965b60ee913`, including the reviewed but
-runtime-unqualified packed-map scalar alignment fix.
-Task: `central-qfiz`.
+`zone/map_geometry.cpp` is the real production V1/V2 loader and expansion code,
+extracted from `Map`. Both production `Map::LoadV1/LoadV2` and the offline tool
+call it. Production still owns `createRaycastMesh` and every public query. The
+capture tool serializes the returned owned arrays at that boundary, without MMF,
+zone globals, database, world startup or a second transformation implementation.
+Extraction changes file location, not transformation arithmetic/order.
 
-## Inputs and status
+## Reproduce
 
-`corpus.json` pins the two initial map files. Input bytes and copied bytes were
-both checked against its sizes and SHA256 values during setup. These are samples
-for proving the evaluation mechanism, not the complete existing-map collection.
+Use an authorized disposable rootless daemon and an immutable image with CMake,
+Clang/GCC, Python3, zlib development files and GLM. Commit reviewed source first.
+Run from the Server checkout on the host, substituting the existing daemon socket
+and immutable image ID. This command only transports source and artifacts on the
+host; all build and test execution happens inside the disposable worker:
 
-Local data root:
-`/home/bump/.local/state/eqemu-map-translation/two-maps-v1/`
+```sh
+python3 experiments/map-translation/worker.py \
+  --socket unix:///run/user/1000/eqemu-map-capture.sock \
+  --image sha256:ecfffeb317764c9ab48b08f06b0e7fbd07403a8e320349024647efe6342869f2 \
+  --glm /candidate/build/vcpkg_installed/x64-linux/include \
+  --inputs /home/bump/.local/state/eqemu-map-translation/two-maps-v1/inputs \
+  --output /home/bump/.local/state/eqemu-map-translation/CHOOSE-A-FRESH-DIRECTORY
+```
 
-- `inputs/`: verified copies of `qeynos2.map` and `poknowledge.map`.
-- `reference/`: reserved for captured C++ reference outputs; not generated.
-- `candidate/`: reserved for translation output; not generated.
-- `results/`: reserved for comparisons; not generated.
+Use the actual retained image ID from `container.json`, not an assumed image
+installation. Add `--sanitizers` and a different output directory for ASan/UBSan.
+The diagnostic target uses non-PIE to avoid observed intermittent Clang14 ASan
+startup SIGSEGVs with PIE in this worker. This is a separate diagnostic profile,
+not evidence about the normal full server sanitizer build. Failures are retained;
+there is no retry-to-pass behavior. Containers are removed even on failure.
+The worker prints no success unless analytic tests, rejection controls, input
+hash checks, two captures per asset, bounds and predicted counts all pass.
 
-Keep all large inputs and generated output outside Git. Manifest and evaluation
-code belong on this branch. No reference outputs, parser census, triangle counts,
-repeatability measurements, performance measurements or passing evaluations have
-been produced.
+`source.json` pins the Git commit/tree, source archive hash and prerequisite
+origin. `provenance.json` records actual compiler, exact compile commands,
+architecture, FP flags, binary hash, linked-library paths/hashes including
+zlib/libm, and GLM header hashes. Container inspection pins the image. Each
+`.time` records wait status, peak RSS KiB and CPU time via Linux wait4. Elapsed
+wall time and output hashes/sizes are in `results.json`. Provenance is separate
+from geometry. No existing artifact or reference is overwritten by the workflow.
 
-## First evaluation acceptance criteria
+## Schema 1 and future Rust comparison
 
-1. Use the production `Map::Load` path, with MMF bypassed, and capture ordered
-   float32 vertices and uint32 triangle indices immediately before
-   `createRaycastMesh`. Do not copy transformation logic into the test driver.
-2. Use a small offline driver; no world, zone, database or live deployment needed.
-   Extraction/link dependencies remain unproven.
-3. Record source commit, patch/source hashes, compiler/options, architecture,
-   floating-point settings, dependencies, input hashes and output schema version.
-   Serialize fields explicitly, not padded native structs.
-4. Capture each map twice and require exact repeatability. Check counts, index
-   bounds, ordering and raw float bits. Do not sort, weld, round or normalize.
-5. Demonstrate that the comparator rejects an altered vertex, changed index,
-   reordered triangle and truncated output. Identify the map and first differing
-   element; report numeric deltas without treating them as automatic tolerances.
-6. Add a small independently calculated geometry case to avoid relying solely on
-   the existing implementation. Decoded-record capture can localize mismatches;
-   final ordered-mesh parity is the acceptance boundary.
-7. Measure elapsed time, peak memory, expanded geometry and output size. Use these
-   results to estimate the cost of the complete existing-map corpus.
+Every field is explicit little endian, no padded structs:
 
-Unchanged raycaster inputs provide bounded geometry parity, not proof of bridge
-ownership, shutdown behavior or arbitrary future inputs. Future maps are outside
-this project's stated compatibility target.
+- Bytes 0..7: ASCII `EQMESH01`.
+- Bytes 8..19: uint32 schema=1, vertex count, index count.
+- Bytes 20..83: 64 lowercase ASCII input SHA256 characters.
+- Then vertex count * 3 uint32 IEEE754 float32 coordinate bits in x,y,z order.
+- Then index count uint32 indices, triangle order and winding unchanged.
+- Exact file length is 84 + vertex count*12 + index count*4. No trailing bytes.
 
-## Execution boundary
+The capture binary takes `input.map output.mesh input-sha256`; the workflow
+verifies the hash first. Direct binary callers are responsible for truthful input
+identity. Future Rust emits this schema for the same input. Inside the disposable
+worker run `python3 experiments/map-translation/mesh.py reviewed.mesh rust.mesh`.
+Nonzero exit means rejection. First difference reports file/map, vertex and axis
+or triangle/corner, expected/actual hex bits, and optional numeric delta. There
+is no epsilon, normalization, welding, sorting or automatic golden promotion.
+Compare geometry payload hashes separately from provenance. Review and retain
+references explicitly; a fresh capture never blesses a candidate.
 
-A previous delegated parser-test/build task was automatically rejected for
-possible cybersecurity risk. This bootstrap only copies and hashes data and
-records the contract; it does not retry that task or resolve the rejection.
-Production parser capture and runtime qualification remain outstanding. Candidate
-execution must follow the authorized disposable-worker path, never execute on the
-host. Keep runtime failures distinct from ordinary file inventory checks.
+## Coverage
 
-The authoritative options and worklog are in Operations, under project
-`bump-akk-stack`, plan `2026-11-09-rootless-validation-and-map-options`.
+Three automated test methods cover a hand-computed asymmetric base/model fixture,
+identity and nonuniform scale/translation placements, output order/winding/x-y
+swap, hidden polygons and skipped noncollidable data; seven comparator rejection
+controls including changed vertex/index, reordered triangles, truncation, schema,
+input identity and bounds; plus basic driver errors. Fixture placement rotations
+are zero. Real starter assets exercise many nonzero rotations, but have no groups
+or terrain. No independent nonzero-rotation, group, terrain or V1 runtime fixture
+is claimed. The production parser retains unchecked packed-buffer reads on
+malformed payloads; this extraction is not parser hardening or fuzz qualification.
+Capture tests do not exercise the raycaster, MMF, public queries, future CXX
+ownership or startup/shutdown. No full Server build is implied by this target.

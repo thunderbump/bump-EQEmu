@@ -2,8 +2,8 @@
   "schema_version": 1,
   "corpus_id": "two-maps-v1",
   "scope": "Initial two-map sample, not the complete existing-map collection",
-  "reference_source_commit": "78c07284908931297ea72e25da358965b60ee913",
-  "reference_status": "not_generated",
+  "reference_source_commit": null,
+  "reference_status": "capture identity is recorded per run, not inferred from this manifest",
   "input_origin": "Existing runtime-qeynos2-inputs-20261025 public fixture; per-map release provenance not fully established",
   "maps": [
     {
@@ -16,5 +16,6 @@
       "bytes": 940304,
       "sha256": "794b618d86852b47bd593424129aaf34eee326e5e3fec7290aeeb0e32bc41d20"
     }
-  ]
+  ],
+  "historical_unqualified_alignment_commit": "78c07284908931297ea72e25da358965b60ee913"
 }
