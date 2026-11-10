@@ -1,0 +1,51 @@
+{
+  "exact": true,
+  "vertices": 32276,
+  "indices": 72855,
+  "ordered_indices_equal": true,
+  "differing_coordinates": 0,
+  "coordinate_fraction": 0.0,
+  "differing_vertices": 0,
+  "vertex_fraction": 0.0,
+  "max_absolute": 0,
+  "median_absolute": 0,
+  "p99_absolute": 0,
+  "max_relative_above_1e_minus_6": 0,
+  "max_ulp": 0,
+  "signed_zero_changes": 0,
+  "nonfinite": [],
+  "bounds": [
+    [
+      [
+        -1099.5625,
+        1099.5625
+      ],
+      [
+        -258.90625,
+        1999.1875
+      ],
+      [
+        -390.84375,
+        79.96875
+      ]
+    ],
+    [
+      [
+        -1099.5625,
+        1099.5625
+      ],
+      [
+        -258.90625,
+        1999.1875
+      ],
+      [
+        -390.84375,
+        79.96875
+      ]
+    ]
+  ],
+  "bounds_equal": true,
+  "coordinate_range": null,
+  "worst_examples": [],
+  "topology": "same ordered index words, counts and vertex correspondence; geometric degeneracy/collision behavior not assessed"
+}
