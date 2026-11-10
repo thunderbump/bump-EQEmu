@@ -51,7 +51,8 @@ with tempfile.TemporaryDirectory() as tmp:
                        '--entrypoint', '/bin/bash', '-e', f'GLM_INCLUDE={a.glm}', '-e', f'DIAGNOSTICS={"ON" if a.sanitizers else "OFF"}',
                        '-e', 'ASAN_OPTIONS=halt_on_error=1:detect_leaks=1', '-e', 'UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1', a.image, '-lc', script]
     cid = subprocess.check_output(create, text=True).strip()
-    retain = False
+    (a.output / 'container-id.txt').write_text(cid + '\n')
+    retain = True
     try:
         with (a.output / 'container.json').open('w') as out: subprocess.run(docker + ['inspect', cid], stdout=out, check=True)
         subprocess.run(docker + ['cp', str(source) + '/.', cid + ':/work'], check=True)
@@ -66,6 +67,7 @@ with tempfile.TemporaryDirectory() as tmp:
         (a.output / 'exit.json').write_text(json.dumps({'transport_exit': status, 'worker_exit': exitcode}))
     finally:
         if retain:
+            subprocess.run(docker + ['stop', '--time', '10', cid], check=False)
             (a.output / 'cleanup.json').write_text(json.dumps({'container_retained_for_recovery': cid}))
         else:
             subprocess.run(docker + ['rm', '-f', cid], check=True)
