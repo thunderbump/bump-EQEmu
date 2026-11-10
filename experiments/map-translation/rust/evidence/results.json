@@ -1,0 +1,78 @@
+[
+  {
+    "map": "qeynos2",
+    "run": 0,
+    "elapsed_seconds": 0.0048333508893847466,
+    "peak_rss_kib": 3788,
+    "user_seconds": 0.0,
+    "system_seconds": 0.0,
+    "bytes": 678816,
+    "sha256": "d9860bb39b0b4588534e8294ea3de92ba979dd63f5eadafdd08503feb8541cfa"
+  },
+  {
+    "map": "qeynos2",
+    "run": 1,
+    "elapsed_seconds": 0.006174637004733086,
+    "peak_rss_kib": 3744,
+    "user_seconds": 0.0,
+    "system_seconds": 0.0,
+    "bytes": 678816,
+    "sha256": "d9860bb39b0b4588534e8294ea3de92ba979dd63f5eadafdd08503feb8541cfa"
+  },
+  {
+    "map": "qeynos2",
+    "implementation": "cpp",
+    "run": 0,
+    "elapsed_seconds": 0.008478042669594288,
+    "peak_rss_kib": 4508,
+    "user_seconds": 0.0,
+    "system_seconds": 0.0
+  },
+  {
+    "map": "qeynos2",
+    "implementation": "cpp",
+    "run": 1,
+    "elapsed_seconds": 0.006575742270797491,
+    "peak_rss_kib": 4808,
+    "user_seconds": 0.0,
+    "system_seconds": 0.0
+  },
+  {
+    "map": "poknowledge",
+    "run": 0,
+    "elapsed_seconds": 0.02342343609780073,
+    "peak_rss_kib": 20096,
+    "user_seconds": 0.01,
+    "system_seconds": 0.0,
+    "bytes": 12722472,
+    "sha256": "ecdbcf4223234c47f1f7125a493421b689fcb6fb9eda507e4ac8137b8ed1ce31"
+  },
+  {
+    "map": "poknowledge",
+    "run": 1,
+    "elapsed_seconds": 0.032758332788944244,
+    "peak_rss_kib": 19640,
+    "user_seconds": 0.02,
+    "system_seconds": 0.01,
+    "bytes": 12722472,
+    "sha256": "ecdbcf4223234c47f1f7125a493421b689fcb6fb9eda507e4ac8137b8ed1ce31"
+  },
+  {
+    "map": "poknowledge",
+    "implementation": "cpp",
+    "run": 0,
+    "elapsed_seconds": 0.0728219011798501,
+    "peak_rss_kib": 23696,
+    "user_seconds": 0.05,
+    "system_seconds": 0.01
+  },
+  {
+    "map": "poknowledge",
+    "implementation": "cpp",
+    "run": 1,
+    "elapsed_seconds": 0.0699688303284347,
+    "peak_rss_kib": 24340,
+    "user_seconds": 0.05,
+    "system_seconds": 0.0
+  }
+]

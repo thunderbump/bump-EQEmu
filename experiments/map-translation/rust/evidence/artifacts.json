@@ -1,0 +1,186 @@
+{
+  "root": "/home/bump/.local/state/eqemu-map-translation/rust-poc-20261110/qualified",
+  "image": "sha256:0aeb54f14590bf1631a27f60b3e7b7eed6dde549f08ba1f5738282e59d4cea1d",
+  "files": {
+    "worker.log": {
+      "bytes": 48744,
+      "sha256": "cdfc2cb9ebecc618c54f2999f68bc891e6f7f9e59d8de4011fc015df59d452ae"
+    },
+    "container-id.txt": {
+      "bytes": 65,
+      "sha256": "0891307c437aace9657d19b06523f06de348072c7e67129cf19fdba0e407550d"
+    },
+    "container.json": {
+      "bytes": 9122,
+      "sha256": "94f83b4653eca945a5faa462229fa576e2263d992b8af3e530a1c7cc4605bbad"
+    },
+    "cleanup.json": {
+      "bytes": 89,
+      "sha256": "47d675db07b2ead0e63c2e5d862679be9c0aef6f35cc483001a6e44a7446c663"
+    },
+    "source.json": {
+      "bytes": 272,
+      "sha256": "698504dcff7aeaf12ad5da3104c907040533d40d69a68af3716459e5c57838e6"
+    },
+    "exit.json": {
+      "bytes": 39,
+      "sha256": "8eee6154fee17aa27ac12408d37c0e4fc4cfbca9248a3843ac5bfbeb4053ab20"
+    },
+    "results/fp.txt": {
+      "bytes": 126,
+      "sha256": "956455e49b3050ee41c5489b8f391cf4df2fc426eebf51320d68aaf085db466b"
+    },
+    "results/binary.sha256": {
+      "bytes": 94,
+      "sha256": "d5fe994950e68da0548cbf2659091a0c1e5c3ae5cee038293cb02846800423dc"
+    },
+    "results/rustc.txt": {
+      "bytes": 196,
+      "sha256": "b569b0c98ea3133c7252b4b8ea6b39b7b353813df0dd5f5c412c355691424112"
+    },
+    "results/dependencies.txt": {
+      "bytes": 715,
+      "sha256": "f004b3e9b99d2a7bdf6339e83a37fdd6c6fe890ffe4aa77ce18121baca191acb"
+    },
+    "results/Cargo.lock": {
+      "bytes": 3492,
+      "sha256": "dfaa3fb2f28aa85fa8e83f71760a54cd4d91a9a978474dcc1530de82e24965cc"
+    },
+    "results/shared-libraries.sha256": {
+      "bytes": 392,
+      "sha256": "6ade1de12dbd54df5f2e479ddd53aa0b4414ff945eed25b7c6f6f02b87906724"
+    },
+    "results/ldd.txt": {
+      "bytes": 297,
+      "sha256": "428cd200bdb26513f3cef303cc145dcf5ace8ee1d1a9cd7744d62ea0d130481c"
+    },
+    "results/time-package.txt": {
+      "bytes": 13,
+      "sha256": "00de793e536a18ea0e301ed3e767f2d7cb663cc20e56729c1029859939e2c5ed"
+    },
+    "results/rust/qeynos2.0.time": {
+      "bytes": 64,
+      "sha256": "0fba1bf8103332182e3705617d81b9186a6575795138deb2bacd1cc99e0630a4"
+    },
+    "results/rust/qeynos2.0.mesh": {
+      "bytes": 678816,
+      "sha256": "d9860bb39b0b4588534e8294ea3de92ba979dd63f5eadafdd08503feb8541cfa"
+    },
+    "results/rust/poknowledge.1.stages.json": {
+      "bytes": 136,
+      "sha256": "b0401a350eb357d40e67a4d766cbbe3ab0db922768a873eaa685903001e40074"
+    },
+    "results/rust/qeynos2.1.mesh": {
+      "bytes": 678816,
+      "sha256": "d9860bb39b0b4588534e8294ea3de92ba979dd63f5eadafdd08503feb8541cfa"
+    },
+    "results/rust/qeynos2.strict.json": {
+      "bytes": 134,
+      "sha256": "a0c48a8eeb11347e28630e2b49381f1a15c20e52c83a659a70b534d4df4b8d3f"
+    },
+    "results/rust/qeynos2.cpp.1.time": {
+      "bytes": 64,
+      "sha256": "0c94449ab791dae3815f949515aa380c93f2a6e9782d9e33eff896215803c7e9"
+    },
+    "results/rust/poknowledge.strict.json": {
+      "bytes": 134,
+      "sha256": "b35fd331638f1165b6edb06dff665ffdee1568b3ca4436cfacb248578cc91094"
+    },
+    "results/rust/poknowledge.cpp.0.time": {
+      "bytes": 65,
+      "sha256": "6388cd6ca2269fbe5b7a8138e07c8ea7a458d79676274881be090067712cecab"
+    },
+    "results/rust/poknowledge.1.time": {
+      "bytes": 65,
+      "sha256": "5d095f2edf38a35ad402d740a3f189d5da44f811314b6697bc7bedc7d0d68591"
+    },
+    "results/rust/poknowledge.numeric.json": {
+      "bytes": 929,
+      "sha256": "759e3dee28194d9c712188bb04a39f50e2bd39594b089b09f333e7aa9df6a8c7"
+    },
+    "results/rust/qeynos2.1.stages.json": {
+      "bytes": 135,
+      "sha256": "43772a4b16127a2d469ac3297d23676f4022cf8732a1c45ae6d4a6bd9298f246"
+    },
+    "results/rust/poknowledge.0.stages.json": {
+      "bytes": 137,
+      "sha256": "7b1d83fbb09a5b93871018a6273d733f35bfd786460dbb33aac7673e07e82817"
+    },
+    "results/rust/qeynos2.cpp.0.time": {
+      "bytes": 64,
+      "sha256": "430419a9bd699b064f8e5a6de067015f950b2a8411fcee009a048ebc403d38f0"
+    },
+    "results/rust/qeynos2.numeric.json": {
+      "bytes": 949,
+      "sha256": "dedf9194369428a824611767ef34d0f83b4f378ac61ddb0acc60138c686cb200"
+    },
+    "results/rust/poknowledge.0.mesh": {
+      "bytes": 12722472,
+      "sha256": "ecdbcf4223234c47f1f7125a493421b689fcb6fb9eda507e4ac8137b8ed1ce31"
+    },
+    "results/rust/results.json": {
+      "bytes": 1892,
+      "sha256": "60b17167362fa9100e8f752539ce4faa3c612c2c74a0ee1bc8a6b1272e201b55"
+    },
+    "results/rust/poknowledge.1.mesh": {
+      "bytes": 12722472,
+      "sha256": "ecdbcf4223234c47f1f7125a493421b689fcb6fb9eda507e4ac8137b8ed1ce31"
+    },
+    "results/rust/poknowledge.cpp.1.time": {
+      "bytes": 65,
+      "sha256": "f9afa8a0f0b983fa8bcd7e7e6e402d50e26e06a909f25853fd7c727101f30682"
+    },
+    "results/rust/qeynos2.1.time": {
+      "bytes": 64,
+      "sha256": "634b8e3239ec963b31b2a6bf362c34ead0895c33f1b266128e1190265656cd8f"
+    },
+    "results/rust/qeynos2.0.stages.json": {
+      "bytes": 135,
+      "sha256": "cbcd182f863b465779b2a7c4331352f40297f498641156383d2a408cc8260b9c"
+    },
+    "results/rust/poknowledge.0.time": {
+      "bytes": 65,
+      "sha256": "d185a944a65b7e93b3f9076c833530d6258b06142d09978b865690744630a304"
+    },
+    "results/cpp-timing/qeynos2.0.time": {
+      "bytes": 95,
+      "sha256": "7e722e8f0169fae14a83ce62161cad0a72a681ade965aeae1fca65741d3436b5"
+    },
+    "results/cpp-timing/qeynos2.0.mesh": {
+      "bytes": 678816,
+      "sha256": "d9860bb39b0b4588534e8294ea3de92ba979dd63f5eadafdd08503feb8541cfa"
+    },
+    "results/cpp-timing/qeynos2.1.mesh": {
+      "bytes": 678816,
+      "sha256": "d9860bb39b0b4588534e8294ea3de92ba979dd63f5eadafdd08503feb8541cfa"
+    },
+    "results/cpp-timing/poknowledge.1.time": {
+      "bytes": 95,
+      "sha256": "a45165be7b0b9bb473078ab6189cee8aba0d9a6f2ac7390445d7143eaf86670a"
+    },
+    "results/cpp-timing/provenance.json": {
+      "bytes": 45609,
+      "sha256": "1c83bd6765e0e13fd4700562ba9f0ca4e1f46dda11dedef9be0ff970ea384367"
+    },
+    "results/cpp-timing/poknowledge.0.mesh": {
+      "bytes": 12722472,
+      "sha256": "ecdbcf4223234c47f1f7125a493421b689fcb6fb9eda507e4ac8137b8ed1ce31"
+    },
+    "results/cpp-timing/results.json": {
+      "bytes": 978,
+      "sha256": "8ed3e473b36aa6b392b6daa1a52bdac141a4c09102ed7385620f40de1cb336f2"
+    },
+    "results/cpp-timing/poknowledge.1.mesh": {
+      "bytes": 12722472,
+      "sha256": "ecdbcf4223234c47f1f7125a493421b689fcb6fb9eda507e4ac8137b8ed1ce31"
+    },
+    "results/cpp-timing/qeynos2.1.time": {
+      "bytes": 95,
+      "sha256": "72576c5545ff86264a47b31438728f4995d97b0bdfd22a13d9367b1898e2dffd"
+    },
+    "results/cpp-timing/poknowledge.0.time": {
+      "bytes": 95,
+      "sha256": "77e4c1e74950f33f5c6320642366476403e0b14b1c2d47b2a0c78f3fae0cf563"
+    }
+  }
+}
