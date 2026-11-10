@@ -628,4 +628,3 @@ void MapGeometry::TranslateVertex(glm::vec3 &v, float tx, float ty, float tz) {
 	v.y = v.y + ty;
 	v.z = v.z + tz;
 }
-
