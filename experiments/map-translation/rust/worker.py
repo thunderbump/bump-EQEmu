@@ -23,7 +23,7 @@ if 'name=rootless' not in json.loads(security):
     p.error('rootless Docker required')
 a.output.mkdir(parents=True, exist_ok=False)
 commit = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
-script = '''''''set -eu
+script = '''set -eu
 mkdir -p /results
 cd /work/experiments/map-translation/rust
 export CARGO_TARGET_DIR=/rust-build
@@ -42,7 +42,7 @@ python3 qualify.py /rust-build/release/map-poc /inputs /references /results/rust
 sha256sum /rust-build/release/map-poc > /results/binary.sha256
 ldd /rust-build/release/map-poc > /results/ldd.txt
 cp Cargo.lock /results/
-'''''''
+'''
 with tempfile.TemporaryDirectory() as tmp:
     tmp = Path(tmp)
     archive = subprocess.check_output(['git', '-C', str(root), 'archive', commit])
