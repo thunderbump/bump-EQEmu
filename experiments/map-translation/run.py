@@ -43,7 +43,7 @@ for line in provenance['dependencies'].splitlines():
         if token.startswith('/') and Path(token).is_file():
             provenance['dependency_sha256'][token] = sha(token)
 glm = Path(os.environ.get('GLM_ROOT', '/usr/include/glm'))
-provenance['glm_headers'] = {str(f.relative_to(glm)): sha(f) for f in sorted(glm.rglob('*.hpp'))}
+provenance['glm_headers'] = {str(f.relative_to(glm)): sha(f) for f in sorted(f for f in glm.rglob('*') if f.is_file())}
 if not provenance['glm_headers']:
     raise RuntimeError('set GLM_ROOT to actual compiler GLM directory')
 (a.output / 'provenance.json').write_text(json.dumps(provenance, indent=2))

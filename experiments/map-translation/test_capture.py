@@ -85,6 +85,19 @@ class CaptureTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 1, result.stderr)
                 print(label, result.stderr.decode().strip())
 
+    def test_preserve_existing_files(self):
+        ref = self.capture(self.fixture())
+        source = self.root / 'analytic.map'
+        original = source.read_bytes()
+        symlink = self.root / 'symlink.map'; symlink.symlink_to(source)
+        hardlink = self.root / 'hardlink.map'; hardlink.hardlink_to(source)
+        for destination in (source, ref, symlink, hardlink):
+            before = destination.read_bytes()
+            result = subprocess.run([self.binary, str(source), str(destination), hashlib.sha256(original).hexdigest()])
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(destination.read_bytes(), before)
+        self.assertEqual(source.read_bytes(), original)
+
     def test_basic_driver_errors(self):
         for data in (b'', words(123), words(0x02000000)):
             source = self.root / 'bad.map'; source.write_bytes(data)

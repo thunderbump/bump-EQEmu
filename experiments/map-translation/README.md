@@ -34,14 +34,15 @@ installation. Add `--sanitizers` and a different output directory for ASan/UBSan
 The diagnostic target uses non-PIE to avoid observed intermittent Clang14 ASan
 startup SIGSEGVs with PIE in this worker. This is a separate diagnostic profile,
 not evidence about the normal full server sanitizer build. Failures are retained;
-there is no retry-to-pass behavior. Containers are removed even on failure.
+there is no retry-to-pass behavior. Containers are removed after results are retrieved. Failed retrieval exits nonzero
+and retains the stopped container ID in `cleanup.json` for manual recovery.
 The worker prints no success unless analytic tests, rejection controls, input
 hash checks, two captures per asset, bounds and predicted counts all pass.
 
 `source.json` pins the Git commit/tree, source archive hash and prerequisite
 origin. `provenance.json` records actual compiler, exact compile commands,
 architecture, FP flags, binary hash, linked-library paths/hashes including
-zlib/libm, and GLM header hashes. Container inspection pins the image. Each
+zlib/libm, and complete GLM include-tree hashes. Container inspection pins the image. Each
 `.time` records wait status, peak RSS KiB and CPU time via Linux wait4. Elapsed
 wall time and output hashes/sizes are in `results.json`. Provenance is separate
 from geometry. No existing artifact or reference is overwritten by the workflow.
@@ -69,14 +70,33 @@ references explicitly; a fresh capture never blesses a candidate.
 
 ## Coverage
 
-Three automated test methods cover a hand-computed asymmetric base/model fixture,
+Four automated test methods cover a hand-computed asymmetric base/model fixture,
 identity and nonuniform scale/translation placements, output order/winding/x-y
 swap, hidden polygons and skipped noncollidable data; seven comparator rejection
 controls including changed vertex/index, reordered triangles, truncation, schema,
-input identity and bounds; plus basic driver errors. Fixture placement rotations
+input identity and bounds; plus basic driver errors and exclusive output creation, including symlink/hardlink
+protection. Diagnostic execution also requires a deliberate unaligned load to
+fail with the expected UBSan diagnostic. Fixture placement rotations
 are zero. Real starter assets exercise many nonzero rotations, but have no groups
 or terrain. No independent nonzero-rotation, group, terrain or V1 runtime fixture
 is claimed. The production parser retains unchecked packed-buffer reads on
 malformed payloads; this extraction is not parser hardening or fuzz qualification.
 Capture tests do not exercise the raycaster, MMF, public queries, future CXX
 ownership or startup/shutdown. No full Server build is implied by this target.
+
+## Storage and cleanup
+
+The two original inputs total 1,072,288 bytes. Preserve them. Their hashes pin
+identity, but the manifest does not supply a known obtainable upstream download;
+Git alone cannot regenerate these original assets. Do not treat them as cache.
+
+One derived reference pair occupies 13,401,288 bytes including schema headers.
+Two repeatability copies occupy 26,802,576 bytes per profile; ordinary plus
+sanitizer copies occupy 53,605,152 bytes, excluding small logs and provenance.
+Derived meshes, binaries and comparison reports can be removed from an owned run
+directory after review and regenerated with the command above, provided the
+original inputs, Git commit and matching worker image/dependencies are retained.
+Retain the small source/image identity and command alongside any handoff. Cleanup
+means deleting only an explicitly selected owned output directory, never the
+shared `two-maps-v1/inputs` or another run. No storage framework or whole-corpus
+retention policy is introduced here.

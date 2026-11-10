@@ -7,13 +7,19 @@
 #include <xmmintrin.h>
 #endif
 #include <cstring>
-#include <fstream>
+#include <memory>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
 
-static void Word(std::ostream &out, uint32_t value) {
- for (unsigned i = 0; i < 4; ++i) out.put(static_cast<char>(value >> (8 * i)));
+static void Write(FILE *out, const char *data, size_t count) {
+ if (fwrite(data, 1, count, out) != count) throw std::runtime_error("output write failed");
+}
+
+static void Word(FILE *out, uint32_t value) {
+ char bytes[4];
+ for (unsigned i = 0; i < 4; ++i) bytes[i] = static_cast<char>(value >> (8 * i));
+ Write(out, bytes, 4);
 }
 
 int main(int argc, char **argv) {
@@ -49,16 +55,18 @@ int main(int argc, char **argv) {
   if (vertices.size() > UINT32_MAX || indices.size() > UINT32_MAX || indices.size() % 3)
    throw std::runtime_error("invalid output counts");
   for (auto index : indices) if (index >= vertices.size()) throw std::runtime_error("index out of bounds");
-  std::ofstream out(argv[2], std::ios::binary | std::ios::trunc);
-  out.exceptions(std::ios::badbit | std::ios::failbit);
-  out.write("EQMESH01", 8);
+  // Exclusive creation also rejects symlinks/hardlinks to retained inputs.
+  std::unique_ptr<FILE, decltype(&fclose)> output(fopen(argv[2], "wbx"), &fclose);
+  if (!output) throw std::runtime_error("cannot exclusively create output; choose a fresh path");
+  FILE *out = output.get();
+  Write(out, "EQMESH01", 8);
   Word(out, 1); Word(out, vertices.size()); Word(out, indices.size());
-  out.write(hash.data(), 64);
+  Write(out, hash.data(), 64);
   for (const auto &v : vertices) for (unsigned axis = 0; axis < 3; ++axis) {
    uint32_t bits; float value = v[axis]; std::memcpy(&bits, &value, 4); Word(out, bits);
   }
   for (auto index : indices) Word(out, index);
-  out.close();
+  if (fclose(output.release()) != 0) throw std::runtime_error("output close failed");
   std::cout << vertices.size() << " vertices " << indices.size() << " indices\n";
   return 0;
  } catch (const std::exception &e) { std::cerr << e.what() << '\n'; return 1; }
