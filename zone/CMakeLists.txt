@@ -55,6 +55,7 @@ set(zone_sources
     loot.cpp
     main.cpp
     map.cpp
+    map_geometry.cpp
     merc.cpp
     mob.cpp
     mob_ai.cpp
