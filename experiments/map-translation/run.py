@@ -26,6 +26,7 @@ def command(*args):
     return subprocess.check_output(args, text=True, stderr=subprocess.STDOUT)
 
 provenance = {
+    'runtime_fp_and_versions': json.loads(command(str(a.binary), '--runtime-info')),
     'schema': 1, 'architecture': platform.machine(), 'platform': platform.platform(),
     'source_identity': json.loads((root / 'capture-source.json').read_text()),
     'binary_sha256': sha(a.binary),

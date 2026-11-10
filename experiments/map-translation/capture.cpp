@@ -1,5 +1,11 @@
 #include "zone/map_geometry.h"
 #include <cstdint>
+#include <cfenv>
+#include <glm/detail/setup.hpp>
+#include <zlib.h>
+#ifdef __SSE__
+#include <xmmintrin.h>
+#endif
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -13,6 +19,16 @@ static void Word(std::ostream &out, uint32_t value) {
 int main(int argc, char **argv) {
  try {
   static_assert(sizeof(float) == 4 && std::numeric_limits<float>::is_iec559, "IEEE float32 required");
+  if (argc == 2 && std::string(argv[1]) == "--runtime-info") {
+   std::cout << "{\"rounding_mode\":" << std::fegetround()
+             << ",\"glm_version\":" << GLM_VERSION
+             << ",\"zlib_runtime\":\"" << zlibVersion() << "\"";
+#ifdef __SSE__
+   std::cout << ",\"mxcsr\":" << _mm_getcsr();
+#endif
+   std::cout << "}\n";
+   return 0;
+  }
   if (argc != 4) throw std::runtime_error("usage: map-capture input.map output.mesh input-sha256");
   std::string hash = argv[3];
   if (hash.size() != 64 || hash.find_first_not_of("0123456789abcdef") != std::string::npos)

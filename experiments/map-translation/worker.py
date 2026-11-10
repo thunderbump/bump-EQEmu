@@ -26,6 +26,13 @@ commit = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], 
 script = '''set -eu
 cmake -S /work/experiments/map-translation -B /build -DGLM_INCLUDE_DIR="$GLM_INCLUDE" -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DMAP_CAPTURE_SANITIZERS="$DIAGNOSTICS"
 cmake --build /build -j2
+if [ "$DIAGNOSTICS" = ON ]; then
+ mkdir -p /results
+ if /build/map-alignment-control > /results/alignment-control.log 2>&1; then
+  echo 'alignment negative control unexpectedly passed' >&2; exit 1
+ fi
+ grep -q 'runtime error: load of misaligned address' /results/alignment-control.log
+fi
 cd /work/experiments/map-translation
 MAP_CAPTURE_BINARY=/build/map-capture python3 test_capture.py
 GLM_ROOT="$GLM_INCLUDE/glm" python3 run.py /build/map-capture /inputs /results/capture
