@@ -17,26 +17,30 @@ IDENTITIES = {'qeynos2': '040343c54e3b02bfd1637ce8fca8839dd676e17c41fb24c042ccfa
 def sha(p):
     return hashlib.sha256(p.read_bytes()).hexdigest()
 
-def run(name, args, expected=0, diagnostic=None):
+def run(name, args, expected=0, diagnostic=None, collect=False):
     start = time.monotonic()
     p = subprocess.run(['/usr/bin/time', '-v', '-o', str(OUT / (name+'.time'))] + args, capture_output=True, text=True)
     (OUT / (name+'.stdout')).write_text(p.stdout)
     (OUT / (name+'.stderr')).write_text(p.stderr)
-    record = {'name': name, 'command': args, 'exit': p.returncode, 'seconds': time.monotonic()-start}
+    record = {'name': name, 'command': args, 'exit': p.returncode, 'seconds': time.monotonic()-start, 'expected_exit': expected}
     results.append(record)
     (OUT/'runs.json').write_text(json.dumps(results, indent=2))
     if p.returncode != expected or (diagnostic and diagnostic not in p.stderr):
-        raise RuntimeError(f'{name}: unexpected result {p.returncode}, expected {expected}: {p.stderr}')
+        if collect:
+            failures.append(name)
+        else:
+            raise RuntimeError(f'{name}: unexpected result {p.returncode}, expected {expected}: {p.stderr}')
     return p.stdout
 
 results = []
+failures = []
 if os.environ.get('DIAGNOSTICS') == 'ON':
     run('sanitizer-pass', ['/build/collision-sanitizer-controls', 'pass'])
     for mode, message in [('use-after-free','heap-use-after-free'), ('out-of-bounds','heap-buffer-overflow'), ('undefined','signed integer overflow'), ('leak','detected memory leaks')]:
         run('sanitizer-'+mode, ['/build/collision-sanitizer-controls', mode], 1, message)
         text=(OUT/('sanitizer-'+mode+'.stderr')).read_text()
         assert 'sanitizer_controls.cpp:' in text, 'missing symbolized control file/line'
-run('analytic' , [BINARY, '--controls'])
+run('analytic', [BINARY, '--controls'], collect=True)
 manifest = []
 for name, identity in IDENTITIES.items():
     original = Path('/inputs')/(name+'.map')
@@ -47,7 +51,7 @@ for name, identity in IDENTITIES.items():
         manifest.append({'path':str(p),'bytes':p.stat().st_size,'sha256':sha(p),
                          'payload_sha256':hashlib.sha256(p.read_bytes()[84:]).hexdigest() if p.suffix=='.mesh' else None})
     os.environ['COLLISION_TRACE']=str(OUT/(name+'.trace'))
-    report=json.loads(run(name,[BINARY,str(a),str(b),identity]))
+    report=json.loads(run(name,[BINARY,str(a),str(b),identity], collect=True))
     del os.environ['COLLISION_TRACE']
     (OUT/(name+'.json')).write_text(json.dumps(report,indent=2))
     # Exercise the native reader and structural comparator, not just a Python parser.
@@ -71,3 +75,7 @@ for name, identity in IDENTITIES.items():
     path.write_bytes(changed)
     run(name+'-reject-order',[BINARY,str(a),str(path),identity],2,'strict structure/index/order'); path.unlink()
 (OUT/'artifacts.json').write_text(json.dumps(manifest,indent=2))
+
+(OUT/'summary.json').write_text(json.dumps({'passed':not failures, 'failed_processes':failures},indent=2))
+if failures:
+    raise SystemExit('failed processes: '+', '.join(failures))

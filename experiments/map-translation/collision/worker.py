@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import subprocess
 import tempfile
+import sys
 
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--socket', required=True)
@@ -23,6 +24,15 @@ security = subprocess.check_output(docker + ['info', '--format', '{{json .Securi
 if 'name=rootless' not in json.loads(security):
     p.error('rootless Docker required')
 a.output.mkdir(parents=True, exist_ok=False)
+(a.output / 'command.json').write_text(json.dumps(sys.argv, indent=2))
+reused = {}
+for label, directory in [('cpp', a.references), ('rust', a.rust_meshes)]:
+    base = directory.resolve().parent.parent
+    reused[label] = {}
+    for name in ['source.json', 'container.json']:
+        data = (base / name).read_bytes()
+        reused[label][name] = {'path':str(base / name), 'sha256':hashlib.sha256(data).hexdigest(), 'content':json.loads(data)}
+(a.output / 'reused-provenance.json').write_text(json.dumps(reused, indent=2))
 commit = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
 script = '''set -eu
 mkdir -p /results
