@@ -6,7 +6,7 @@ from compare import compare, controls, row
 O=Path('/results'); CG=Path('/sys/fs/cgroup')
 def sha(p):
  with Path(p).open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
-def mem():return {n:(CG/n).read_text() for n in ['memory.max','memory.swap.max','memory.peak','memory.events']}
+def mem():return {n:(CG/n).read_text() for n in ['memory.current','memory.max','memory.swap.max','memory.peak','memory.events']}
 runs=[]
 def run(name,args,expected=0):
  before=mem();start=time.monotonic()
@@ -15,7 +15,7 @@ def run(name,args,expected=0):
   try:code=p.wait(timeout=300)
   except subprocess.TimeoutExpired:os.killpg(p.pid,signal.SIGKILL);p.wait();code='timeout'
  runs.append(dict(name=name,args=args,exit=code,seconds=time.monotonic()-start,before=before,after=mem()))
- (O/'runs.json').write_text(json.dumps(runs,indent=2));assert code==expected,(name,code)
+ (O/(sys.argv[1]+'.runs.json')).write_text(json.dumps(runs,indent=2));assert code==expected,(name,code)
 assert mem()['memory.max'].strip()=='2147483648' and mem()['memory.swap.max'].strip()=='0'
 if sys.argv[1]=='build':
  os.environ['CARGO_TARGET_DIR']='/results/target'
@@ -40,9 +40,12 @@ else:
  assert sha('/geometry.mesh')==c['geometry']['sha256'] and sha('/original.map')==id
  controls(O)
  from controls import check
- check(c,run,O)
+ if sys.argv[1]=='controls':
+  check(c,run,O);sys.exit(0)
  opts=['--known-asset',c['input']['path'],'/original.map']
- run('reference',['/build/reference','--record','/geometry.mesh',id,'unused','/results/reference.trace',*opts])
+ if sys.argv[1]=='reference':
+  run('reference',['/build/reference','--record','/geometry.mesh',id,'unused','/results/reference.trace',*opts])
+  sys.exit(0)
  lines=(O/'reference.trace').read_text().splitlines();assert len(lines)==5504
  q=bytearray(b'EQRAYS01'+id.encode()+struct.pack('<I',len(lines)))
  for n,line in enumerate(lines):ident,_=row(line);q+=struct.pack('<I',n)+b''.join(ident[1])

@@ -19,6 +19,20 @@ fn phase(s: &str, t: Instant) {
             .collect::<Vec<_>>()
             .join(" ")
     );
+    for name in [
+        "memory.current",
+        "memory.peak",
+        "memory.max",
+        "memory.swap.max",
+        "memory.events",
+    ] {
+        eprintln!(
+            "CGROUP {s} {name}={}",
+            fs::read_to_string(format!("/sys/fs/cgroup/{name}"))
+                .unwrap_or_default()
+                .replace('\n', ";")
+        );
+    }
 }
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let a: Vec<_> = std::env::args().collect();
@@ -42,6 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         None
     };
+    let build_start = std::cell::Cell::new(t);
     let mut engine = rust_raycaster_poc::admission::load(&a[1], &a[2], policy, || {
         phase("read", t);
         build_start.set(Instant::now());
