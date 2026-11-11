@@ -1,0 +1,50 @@
+[
+  {
+    "input": "breedinggrounds",
+    "raw_sha256": "d688d5e6e25d460c2ca0c64a6b6a282383bacb5ee9c4fac40fd20658be657a57",
+    "vertex_offset": 5792314,
+    "vertex_hex": "0000c0ff0000c0ff0000c0ff",
+    "polygon_offset": 5837703,
+    "polygon": [
+      1661,
+      1660,
+      1613,
+      1
+    ],
+    "placement_offset": 6619240,
+    "placement_name": "OBJ_maus_InnerWalls.MOD",
+    "transform_hex": "91bfb344db8e2b43777e56c20000000000000000dc0fc9bf0000803f0000803f0000803f"
+  },
+  {
+    "input": "chapterhouse",
+    "raw_sha256": "8066c2ec6effc7d292ab31c4a3a684c2b6bf6e5302c167de506ef0ad3e784da0",
+    "vertex_offset": 253650,
+    "vertex_hex": "0000c0ff0000c0ff0000c0ff",
+    "polygon_offset": 263642,
+    "polygon": [
+      294,
+      324,
+      323,
+      1
+    ],
+    "placement_offset": 8970529,
+    "placement_name": "OBJ_BFS_HallwallH.MOD",
+    "transform_hex": "362e8342f4e20e41818724c00000000000000000dc0fc9bf0000803f0000803f0000803f"
+  },
+  {
+    "input": "chapterhouse",
+    "raw_sha256": "8066c2ec6effc7d292ab31c4a3a684c2b6bf6e5302c167de506ef0ad3e784da0",
+    "vertex_offset": 253686,
+    "vertex_hex": "0000c0ff0000c0ff0000c0ff",
+    "polygon_offset": 263655,
+    "polygon": [
+      326,
+      573,
+      574,
+      1
+    ],
+    "placement_offset": 8970529,
+    "placement_name": "OBJ_BFS_HallwallH.MOD",
+    "transform_hex": "362e8342f4e20e41818724c00000000000000000dc0fc9bf0000803f0000803f0000803f"
+  }
+]

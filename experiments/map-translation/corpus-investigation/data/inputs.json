@@ -1,0 +1,32 @@
+[
+  {
+    "path": "base/breedinggrounds.map",
+    "bytes": 2901773,
+    "sha256": "d688d5e6e25d460c2ca0c64a6b6a282383bacb5ee9c4fac40fd20658be657a57"
+  },
+  {
+    "path": "base/chapterhouse.map",
+    "bytes": 3457111,
+    "sha256": "8066c2ec6effc7d292ab31c4a3a684c2b6bf6e5302c167de506ef0ad3e784da0"
+  },
+  {
+    "path": "base/firiona_lit.map",
+    "bytes": 39,
+    "sha256": "fd36a52d9a4e6f7a8e580f349381fb185a5edfcca5a775c67e6322abf052e05f"
+  },
+  {
+    "path": "base/warslikswood_lit.map",
+    "bytes": 39,
+    "sha256": "fd36a52d9a4e6f7a8e580f349381fb185a5edfcca5a775c67e6322abf052e05f"
+  },
+  {
+    "path": "base/firiona.map",
+    "bytes": 828455,
+    "sha256": "1e292e3144e5e44145bf3e835b864836700f5d380cdc0bf6f4f0d71a9cd8c019"
+  },
+  {
+    "path": "base/warslikswood.map",
+    "bytes": 2025205,
+    "sha256": "33768cd991dac020a9bb6ad21a601cabb786f9d4508f188ca6663124cae1ae15"
+  }
+]

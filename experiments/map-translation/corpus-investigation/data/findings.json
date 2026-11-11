@@ -1,0 +1,361 @@
+{
+  "breedinggrounds": {
+    "input_sha256": "d688d5e6e25d460c2ca0c64a6b6a282383bacb5ee9c4fac40fd20658be657a57",
+    "bytes": 2901773,
+    "mesh_sha256": "fefc4b03ea54eaf9b892bf87fa2f2634069cecb9c0c49485d30279e9b4c91cc3",
+    "mesh_bytes": 31583052,
+    "vertices": 1961990,
+    "indices": 2009772,
+    "nonfinite": [
+      {
+        "record": 239353,
+        "axis": "x",
+        "offset": 2872320,
+        "bits": "ffc00000",
+        "kind": "nan",
+        "section": "export"
+      },
+      {
+        "record": 239353,
+        "axis": "y",
+        "offset": 2872324,
+        "bits": "ffc00000",
+        "kind": "nan",
+        "section": "export"
+      },
+      {
+        "record": 239353,
+        "axis": "z",
+        "offset": 2872328,
+        "bits": "ffc00000",
+        "kind": "nan",
+        "section": "export"
+      }
+    ],
+    "references": {
+      "239353": [
+        95711
+      ]
+    },
+    "raw_v2": {
+      "header": [
+        10232,
+        58014,
+        123,
+        507,
+        301,
+        1788,
+        0,
+        0,
+        0,
+        0.0
+      ],
+      "decompressed_bytes": 6706612,
+      "decompressed_sha256": "1d15025c3e22f6a7c1de8fcd62c4a79880c7f1078334b7818a127a202b99c92d",
+      "after_placements": 6706612,
+      "source_nonfinite": [
+        {
+          "record": 1613,
+          "axis": "x",
+          "offset": 5792314,
+          "bits": "ffc00000",
+          "kind": "nan",
+          "section": "model:OBJ_maus_InnerWalls.MOD"
+        },
+        {
+          "record": 1613,
+          "axis": "y",
+          "offset": 5792318,
+          "bits": "ffc00000",
+          "kind": "nan",
+          "section": "model:OBJ_maus_InnerWalls.MOD"
+        },
+        {
+          "record": 1613,
+          "axis": "z",
+          "offset": 5792322,
+          "bits": "ffc00000",
+          "kind": "nan",
+          "section": "model:OBJ_maus_InnerWalls.MOD"
+        }
+      ]
+    },
+    "provenance": [
+      {
+        "model_ordinal": 260,
+        "model": "OBJ_maus_InnerWalls.MOD",
+        "model_vertex": 1613,
+        "raw_vertex_offset": 5792314,
+        "raw_vertex_hex": "0000c0ff0000c0ff0000c0ff",
+        "polygon": 2177,
+        "polygon_offset": 5837703,
+        "polygon_hex": "7d0600007c0600004d06000001",
+        "corner": 2,
+        "placement": 234,
+        "placement_offset": 6619240,
+        "placement_hex": "4f424a5f6d6175735f496e6e657257616c6c732e4d4f440091bfb344db8e2b43777e56c20000000000000000dc0fc9bf0000803f0000803f0000803f",
+        "output_vertex": 239353,
+        "output_triangle": 95711
+      }
+    ],
+    "affected_placements": [
+      {
+        "ordinal": 234,
+        "name": "OBJ_maus_InnerWalls.MOD",
+        "offset": 6619240,
+        "scalar_offset": 6619264,
+        "values": [
+          1437.9864501953125,
+          171.5580291748047,
+          -53.62350082397461,
+          0.0,
+          0.0,
+          -1.5707964897155762,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "hex": "91bfb344db8e2b43777e56c20000000000000000dc0fc9bf0000803f0000803f0000803f"
+      }
+    ]
+  },
+  "chapterhouse": {
+    "input_sha256": "8066c2ec6effc7d292ab31c4a3a684c2b6bf6e5302c167de506ef0ad3e784da0",
+    "bytes": 3457111,
+    "mesh_sha256": "ea1759428279ca0c12b1b288a74d9ffdcf9b4b3e8286d1cd6b37ffc1963143df",
+    "mesh_bytes": 36437088,
+    "vertices": 2277011,
+    "indices": 2278218,
+    "nonfinite": [
+      {
+        "record": 1450240,
+        "axis": "x",
+        "offset": 17402964,
+        "bits": "ffc00000",
+        "kind": "nan",
+        "section": "export"
+      },
+      {
+        "record": 1450240,
+        "axis": "y",
+        "offset": 17402968,
+        "bits": "ffc00000",
+        "kind": "nan",
+        "section": "export"
+      },
+      {
+        "record": 1450240,
+        "axis": "z",
+        "offset": 17402972,
+        "bits": "ffc00000",
+        "kind": "nan",
+        "section": "export"
+      },
+      {
+        "record": 1450241,
+        "axis": "x",
+        "offset": 17402976,
+        "bits": "ffc00000",
+        "kind": "nan",
+        "section": "export"
+      },
+      {
+        "record": 1450241,
+        "axis": "y",
+        "offset": 17402980,
+        "bits": "ffc00000",
+        "kind": "nan",
+        "section": "export"
+      },
+      {
+        "record": 1450241,
+        "axis": "z",
+        "offset": 17402984,
+        "bits": "ffc00000",
+        "kind": "nan",
+        "section": "export"
+      }
+    ],
+    "references": {
+      "1450240": [
+        483815
+      ],
+      "1450241": [
+        483816
+      ]
+    },
+    "raw_v2": {
+      "header": [
+        257,
+        1464,
+        592,
+        2808,
+        354,
+        1681,
+        0,
+        0,
+        0,
+        0.0
+      ],
+      "decompressed_bytes": 9036188,
+      "decompressed_sha256": "3d1987b0c2623446075097fad67cc42cd68dbbe216ee0e4c9477af20209f76f1",
+      "after_placements": 9036188,
+      "source_nonfinite": [
+        {
+          "record": 323,
+          "axis": "x",
+          "offset": 253650,
+          "bits": "ffc00000",
+          "kind": "nan",
+          "section": "model:OBJ_BFS_HallwallH.MOD"
+        },
+        {
+          "record": 323,
+          "axis": "y",
+          "offset": 253654,
+          "bits": "ffc00000",
+          "kind": "nan",
+          "section": "model:OBJ_BFS_HallwallH.MOD"
+        },
+        {
+          "record": 323,
+          "axis": "z",
+          "offset": 253658,
+          "bits": "ffc00000",
+          "kind": "nan",
+          "section": "model:OBJ_BFS_HallwallH.MOD"
+        },
+        {
+          "record": 326,
+          "axis": "x",
+          "offset": 253686,
+          "bits": "ffc00000",
+          "kind": "nan",
+          "section": "model:OBJ_BFS_HallwallH.MOD"
+        },
+        {
+          "record": 326,
+          "axis": "y",
+          "offset": 253690,
+          "bits": "ffc00000",
+          "kind": "nan",
+          "section": "model:OBJ_BFS_HallwallH.MOD"
+        },
+        {
+          "record": 326,
+          "axis": "z",
+          "offset": 253694,
+          "bits": "ffc00000",
+          "kind": "nan",
+          "section": "model:OBJ_BFS_HallwallH.MOD"
+        }
+      ]
+    },
+    "provenance": [
+      {
+        "model_ordinal": 14,
+        "model": "OBJ_BFS_HallwallH.MOD",
+        "model_vertex": 323,
+        "raw_vertex_offset": 253650,
+        "raw_vertex_hex": "0000c0ff0000c0ff0000c0ff",
+        "polygon": 536,
+        "polygon_offset": 263642,
+        "polygon_hex": "26010000440100004301000001",
+        "corner": 2,
+        "placement": 556,
+        "placement_offset": 8970529,
+        "placement_hex": "4f424a5f4246535f48616c6c77616c6c482e4d4f4400362e8342f4e20e41818724c00000000000000000dc0fc9bf0000803f0000803f0000803f",
+        "output_vertex": 1450240,
+        "output_triangle": 483815
+      },
+      {
+        "model_ordinal": 14,
+        "model": "OBJ_BFS_HallwallH.MOD",
+        "model_vertex": 326,
+        "raw_vertex_offset": 253686,
+        "raw_vertex_hex": "0000c0ff0000c0ff0000c0ff",
+        "polygon": 537,
+        "polygon_offset": 263655,
+        "polygon_hex": "460100003d0200003e02000001",
+        "corner": 0,
+        "placement": 556,
+        "placement_offset": 8970529,
+        "placement_hex": "4f424a5f4246535f48616c6c77616c6c482e4d4f4400362e8342f4e20e41818724c00000000000000000dc0fc9bf0000803f0000803f0000803f",
+        "output_vertex": 1450241,
+        "output_triangle": 483816
+      }
+    ],
+    "affected_placements": [
+      {
+        "ordinal": 556,
+        "name": "OBJ_BFS_HallwallH.MOD",
+        "offset": 8970529,
+        "scalar_offset": 8970551,
+        "values": [
+          65.59025573730469,
+          8.930408477783203,
+          -2.570770502090454,
+          0.0,
+          0.0,
+          -1.5707964897155762,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "hex": "362e8342f4e20e41818724c00000000000000000dc0fc9bf0000803f0000803f0000803f"
+      }
+    ]
+  },
+  "firiona_lit": {
+    "input_sha256": "fd36a52d9a4e6f7a8e580f349381fb185a5edfcca5a775c67e6322abf052e05f",
+    "bytes": 39,
+    "mesh_sha256": "e07f97a667b1c2b93dcbc4baf8a8d6de9b3ce8e94c475962e2080fe271f64e9f",
+    "mesh_bytes": 84,
+    "vertices": 0,
+    "indices": 0,
+    "nonfinite": [],
+    "references": {},
+    "v1": {
+      "hex": "0000000100000000010000000000a5d46853a5d46853a5d468d3a5d468d3010000000000000000",
+      "face_count": 0,
+      "node_count": 1,
+      "facelist_count": 0,
+      "body_hex": "a5d46853a5d46853a5d468d3a5d468d3010000000000000000",
+      "node_scalars": [
+        999999995904.0,
+        999999995904.0,
+        -999999995904.0,
+        -999999995904.0,
+        1,
+        0,
+        0
+      ]
+    }
+  },
+  "warslikswood_lit": {
+    "input_sha256": "fd36a52d9a4e6f7a8e580f349381fb185a5edfcca5a775c67e6322abf052e05f",
+    "bytes": 39,
+    "mesh_sha256": "e07f97a667b1c2b93dcbc4baf8a8d6de9b3ce8e94c475962e2080fe271f64e9f",
+    "mesh_bytes": 84,
+    "vertices": 0,
+    "indices": 0,
+    "nonfinite": [],
+    "references": {},
+    "v1": {
+      "hex": "0000000100000000010000000000a5d46853a5d46853a5d468d3a5d468d3010000000000000000",
+      "face_count": 0,
+      "node_count": 1,
+      "facelist_count": 0,
+      "body_hex": "a5d46853a5d46853a5d468d3a5d468d3010000000000000000",
+      "node_scalars": [
+        999999995904.0,
+        999999995904.0,
+        -999999995904.0,
+        -999999995904.0,
+        1,
+        0,
+        0
+      ]
+    }
+  }
+}

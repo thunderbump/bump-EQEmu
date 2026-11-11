@@ -1,0 +1,30 @@
+{
+  "native_source": "2d6cc88a5ea891f79b72fc0e9530b35d7b2caec8",
+  "image": "sha256:0aeb54f14590bf1631a27f60b3e7b7eed6dde549f08ba1f5738282e59d4cea1d",
+  "state": {
+    "Status": "exited",
+    "Running": false,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 0,
+    "ExitCode": 0,
+    "Error": "",
+    "StartedAt": "2026-11-11T03:10:47.120577148Z",
+    "FinishedAt": "2026-11-11T03:10:52.192188091Z"
+  },
+  "host_config": {
+    "Memory": 2147483648,
+    "MemorySwap": 2147483648,
+    "NanoCpus": 2000000000,
+    "PidsLimit": 128,
+    "NetworkMode": "none"
+  },
+  "memory_peak": 309940224,
+  "source_binary": "e7fae440d22a42b2a92049a1fd0ff86d4e2978d513020a2c33356b22baa8b3ef  /capture/map-capture\n919ebafc057f474b1df59d83a0aff627045697aeea230f587df08df593f727e9  /work/zone/map_geometry.cpp\n",
+  "analysis_sources": "a3dfa99fa84de2d9ea2eed2ef40ce02529a2705a44a5a108b19e7313b1110cb1  /analysis/analyze.py\nbe273db61ce93fc4b1215109abf421c0c1b49077800a4eb42fa2971624e09fb1  /analysis/check_excerpts.py\na5360d924f5235c061675008d585b3a664d0e7ce413acc3c4fc75be249ad2212  /analysis/transport.py\n",
+  "official_export_cmp": "all four exact",
+  "instrumented_native_source": false,
+  "artifact_root": "/home/bump/.local/state/eqemu-map-translation/corpus-data-gaps-20261110/reviewed"
+}
