@@ -74,9 +74,13 @@ The worker output retains source/archive identity, image/container configuration
 verbose build logs, toolchain, libraries, binary hashes, tests, exact/numeric
 reports, phase timings/RSS, GNU time peak RSS, cgroup counters, process exits and
 container cleanup even when execution fails. Each map runs serially in its own
-process. Binary output differs from the C++ text IO workload; do not declare a
-speedup from end-to-end times. Reused ordinary C++ baseline timing provenance
-remains at raycaster-memory-20261110/ordinary-01.
+process. The reference-only C++ adapter builds the unchanged production engine and
+replays the same binary endpoint input with the same binary field output size.
+Its triangle ordinal is a sentinel because the public engine does not expose IDs.
+Both adapters time read, build, query and serialization. Rust consumes the owned
+arrays; the public C++ constructor copies and then releases its input arrays.
+These short single runs are indicative, not a stable speedup benchmark. Original
+text-output baseline timing provenance remains at raycaster-memory-20261110/ordinary-01.
 
 Host command, with absolute fresh output path:
 

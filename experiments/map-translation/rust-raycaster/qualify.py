@@ -45,18 +45,18 @@ for name,identity in IDS.items():
  for p in [mesh,reference,qp]:manifest.append({'path':str(p),'bytes':p.stat().st_size,'sha256':sha(p)})
  binary=OUT/(name+'.bin');run(name,[BIN,str(mesh),identity,str(qp),str(binary)])
  ref_binary=OUT/(name+'.reference.bin');run(name+'-reference',['/reference-build/raycaster-reference',str(mesh),identity,str(qp),str(ref_binary)])
- data=binary.read_bytes();ref_data=ref_binary.read_bytes();cursor=0;out=[];ordinals=[]
- for line in lines:
-  fields=line.split()[:7];hit=data[cursor];assert hit==ref_data[cursor];cursor+=1;assert hit in (0,1);fields.append(str(hit))
-  if hit:
-   assert data[cursor:cursor+28]==ref_data[cursor:cursor+28], 'fresh C++ field parity'
-   values=struct.unpack_from('<7fI',data,cursor);cursor+=32;assert all(math.isfinite(x) for x in values[:7]);fields.extend(float(x).hex() for x in values[:7]);ordinals.append(values[7])
-  out.append(' '.join(fields)+'\n')
- assert cursor==len(data)
- candidate=OUT/(name+'.trace');candidate.write_text(''.join(out));(OUT/(name+'.ordinals.json')).write_text(json.dumps(ordinals))
- try:strict=compare(reference,candidate)
- except AssertionError as e:strict={'failure':str(e)};failures.append(name+' strict')
- (OUT/(name+'.strict.json')).write_text(json.dumps(strict,indent=2));(OUT/(name+'.numeric.json')).write_text(json.dumps(report(reference,candidate),indent=2))
+ for label,path in [('candidate',binary),('reference',ref_binary)]:
+  data=path.read_bytes();cursor=0;out=[];ordinals=[]
+  for line in lines:
+   fields=line.split()[:7];hit=data[cursor];cursor+=1;assert hit in (0,1);fields.append(str(hit))
+   if hit:
+    values=struct.unpack_from('<7fI',data,cursor);cursor+=32;assert all(math.isfinite(x) for x in values[:7]);fields.extend(float(x).hex() for x in values[:7]);ordinals.append(values[7])
+   out.append(' '.join(fields)+'\n')
+  assert cursor==len(data)
+  candidate=OUT/(name+'.'+label+'.trace');candidate.write_text(''.join(out));(OUT/(name+'.'+label+'.ordinals.json')).write_text(json.dumps(ordinals))
+  try:strict=compare(reference,candidate)
+  except AssertionError as e:strict={'failure':str(e)};failures.append(name+' '+label+' strict')
+  (OUT/(name+'.'+label+'.strict.json')).write_text(json.dumps(strict,indent=2));(OUT/(name+'.'+label+'.numeric.json')).write_text(json.dumps(report(reference,candidate),indent=2))
  # Reader/replay controls exercise the candidate, preserving the reference files.
  raw=mesh.read_bytes();nv=struct.unpack_from('<I',raw,12)[0]
  for label,offset,value,message in [('schema',8,struct.pack('<I',2),'schema'),('identity',20,b'f'*64,'identity'),('index',84+nv*12,struct.pack('<I',nv),'index'),('count',12,struct.pack('<I',4_000_001),'counts'),('nonfinite',84,struct.pack('<I',0x7fc00000),'vertex')]:
