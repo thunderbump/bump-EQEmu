@@ -18,7 +18,7 @@ Normal arrays are allocated by the production constructor at raycast_mesh.cpp:80
 then its pointer is overwritten by NULL at :819. This is a concrete production
 lifecycle defect, outside this change's file ownership. No suppression or repair
 was applied. Qeynos2's diagnostic peak includes leak checking and was 2,070,048
-KiB. Ordinary peaks were 20,324 / 100,808 KiB, roughly 0.05 / 0.30 seconds.
+KiB. Ordinary peaks were 19,624 / 100,224 KiB, roughly 0.07 / 0.31 seconds.
 Consult retained .time files for exact current-run measurements.
 
 All attempts, including failed build/expectation/symbolizer setup and diagnostic

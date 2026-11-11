@@ -5,6 +5,7 @@
   "source": "read-only retained containerd content blobs from eqemu-rootless-proof/docker",
   "daemon_cleanup": "ActiveState=inactive\nSubState=dead\nResult=success\n",
   "owned_transfer_archive_removed": true,
-  "owned_image_store_removed": false,
-  "containers_remaining_before_prune": 0
+  "owned_image_store_removed": true,
+  "containers_remaining_before_prune": 0,
+  "cleanup_note": "rootlesskit helper failed UID mapping; after Docker prune, ordinary owner removal of residual 680 KiB metadata succeeded"
 }
