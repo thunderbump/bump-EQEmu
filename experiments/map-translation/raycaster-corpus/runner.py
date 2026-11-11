@@ -26,7 +26,7 @@ def cleanup(directory):
     return removed
 BUILD='''set -eu
 mkdir -p /results
-cmake -S /work/experiments/map-translation -B /capture -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+cmake -S /work/experiments/map-translation -B /capture -DGLM_INCLUDE_DIR=/candidate/build/vcpkg_installed/x64-linux/include -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 cmake --build /capture -j2
 cmake -S /work/experiments/map-translation/collision -B /collision -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 cmake --build /collision -j2
