@@ -25,7 +25,7 @@ def cleanup(directory):
         if p.exists(): removed.append({'name':name,'bytes':p.stat().st_size,'sha256':sha(p)}); p.unlink()
     return removed
 BUILD='''set -eu
-mkdir /results
+mkdir -p /results
 cmake -S /work/experiments/map-translation -B /capture -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 cmake --build /capture -j2
 cmake -S /work/experiments/map-translation/collision -B /collision -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
