@@ -1,0 +1,45 @@
+
+=================================================================
+==118==ERROR: LeakSanitizer: detected memory leaks
+
+Direct leak of 384 byte(s) in 32 object(s) allocated from:
+    #0 0x4a6067 in posix_memalign ??:?
+    #1 0x5023ed in KSM::AllocatePageAligned(unsigned long) /work/common/memory/ksm.cpp:124
+    #2 0x4f8633 in RAYCAST_MESH::MyRaycastMesh::MyRaycastMesh(unsigned int, float const*, unsigned int, unsigned int const*, unsigned int, unsigned int, float) /work/zone/raycast_mesh.cpp:806
+    #3 0x4f647b in createRaycastMesh(unsigned int, float const*, unsigned int, unsigned int const*, unsigned int, unsigned int, float) /work/zone/raycast_mesh.cpp:993
+    #4 0x4e3709 in build(Mesh const&) /work/experiments/map-translation/collision/driver.cpp:40
+    #5 0x4ea92c in controls() /work/experiments/map-translation/collision/driver.cpp:94
+    #6 0x4ec757 in main /work/experiments/map-translation/collision/driver.cpp:110
+    #7 0x790ec584e249 in __libc_start_call_main csu/../sysdeps/x86/libc-start.c:58
+
+Direct leak of 384 byte(s) in 32 object(s) allocated from:
+    #0 0x4a6067 in posix_memalign ??:?
+    #1 0x5023ed in KSM::AllocatePageAligned(unsigned long) /work/common/memory/ksm.cpp:124
+    #2 0x4f8633 in RAYCAST_MESH::MyRaycastMesh::MyRaycastMesh(unsigned int, float const*, unsigned int, unsigned int const*, unsigned int, unsigned int, float) /work/zone/raycast_mesh.cpp:806
+    #3 0x4f647b in createRaycastMesh(unsigned int, float const*, unsigned int, unsigned int const*, unsigned int, unsigned int, float) /work/zone/raycast_mesh.cpp:993
+    #4 0x4e3709 in build(Mesh const&) /work/experiments/map-translation/collision/driver.cpp:40
+    #5 0x4e9d97 in controls() /work/experiments/map-translation/collision/driver.cpp:84
+    #6 0x4ec757 in main /work/experiments/map-translation/collision/driver.cpp:110
+    #7 0x790ec584e249 in __libc_start_call_main csu/../sysdeps/x86/libc-start.c:58
+
+Direct leak of 24 byte(s) in 1 object(s) allocated from:
+    #0 0x4a6067 in posix_memalign ??:?
+    #1 0x5023ed in KSM::AllocatePageAligned(unsigned long) /work/common/memory/ksm.cpp:124
+    #2 0x4f8633 in RAYCAST_MESH::MyRaycastMesh::MyRaycastMesh(unsigned int, float const*, unsigned int, unsigned int const*, unsigned int, unsigned int, float) /work/zone/raycast_mesh.cpp:806
+    #3 0x4f647b in createRaycastMesh(unsigned int, float const*, unsigned int, unsigned int const*, unsigned int, unsigned int, float) /work/zone/raycast_mesh.cpp:993
+    #4 0x4e3709 in build(Mesh const&) /work/experiments/map-translation/collision/driver.cpp:40
+    #5 0x4eb4a6 in controls() /work/experiments/map-translation/collision/driver.cpp:104
+    #6 0x4ec757 in main /work/experiments/map-translation/collision/driver.cpp:110
+    #7 0x790ec584e249 in __libc_start_call_main csu/../sysdeps/x86/libc-start.c:58
+
+Direct leak of 24 byte(s) in 1 object(s) allocated from:
+    #0 0x4a6067 in posix_memalign ??:?
+    #1 0x5023ed in KSM::AllocatePageAligned(unsigned long) /work/common/memory/ksm.cpp:124
+    #2 0x4f8633 in RAYCAST_MESH::MyRaycastMesh::MyRaycastMesh(unsigned int, float const*, unsigned int, unsigned int const*, unsigned int, unsigned int, float) /work/zone/raycast_mesh.cpp:806
+    #3 0x4f647b in createRaycastMesh(unsigned int, float const*, unsigned int, unsigned int const*, unsigned int, unsigned int, float) /work/zone/raycast_mesh.cpp:993
+    #4 0x4e3709 in build(Mesh const&) /work/experiments/map-translation/collision/driver.cpp:40
+    #5 0x4eae4b in controls() /work/experiments/map-translation/collision/driver.cpp:97
+    #6 0x4ec757 in main /work/experiments/map-translation/collision/driver.cpp:110
+    #7 0x790ec584e249 in __libc_start_call_main csu/../sysdeps/x86/libc-start.c:58
+
+SUMMARY: AddressSanitizer: 816 byte(s) leaked in 66 allocation(s).

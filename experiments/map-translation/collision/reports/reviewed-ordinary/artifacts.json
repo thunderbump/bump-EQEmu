@@ -1,0 +1,38 @@
+[
+  {
+    "path": "/inputs/qeynos2.map",
+    "bytes": 131984,
+    "sha256": "040343c54e3b02bfd1637ce8fca8839dd676e17c41fb24c042ccfa0bd649435c",
+    "payload_sha256": null
+  },
+  {
+    "path": "/references/qeynos2.0.mesh",
+    "bytes": 678816,
+    "sha256": "d9860bb39b0b4588534e8294ea3de92ba979dd63f5eadafdd08503feb8541cfa",
+    "payload_sha256": "73c437e6cd6c217547cfbd014050949cd683eeeef2def2b0ede914029b26c92f"
+  },
+  {
+    "path": "/rust-meshes/qeynos2.0.mesh",
+    "bytes": 678816,
+    "sha256": "d9860bb39b0b4588534e8294ea3de92ba979dd63f5eadafdd08503feb8541cfa",
+    "payload_sha256": "73c437e6cd6c217547cfbd014050949cd683eeeef2def2b0ede914029b26c92f"
+  },
+  {
+    "path": "/inputs/poknowledge.map",
+    "bytes": 940304,
+    "sha256": "794b618d86852b47bd593424129aaf34eee326e5e3fec7290aeeb0e32bc41d20",
+    "payload_sha256": null
+  },
+  {
+    "path": "/references/poknowledge.0.mesh",
+    "bytes": 12722472,
+    "sha256": "ecdbcf4223234c47f1f7125a493421b689fcb6fb9eda507e4ac8137b8ed1ce31",
+    "payload_sha256": "cdbd535bff2be2c6455d4a47828213537df6a22da20f288345d3e8ffe066a98f"
+  },
+  {
+    "path": "/rust-meshes/poknowledge.0.mesh",
+    "bytes": 12722472,
+    "sha256": "ecdbcf4223234c47f1f7125a493421b689fcb6fb9eda507e4ac8137b8ed1ce31",
+    "payload_sha256": "cdbd535bff2be2c6455d4a47828213537df6a22da20f288345d3e8ffe066a98f"
+  }
+]

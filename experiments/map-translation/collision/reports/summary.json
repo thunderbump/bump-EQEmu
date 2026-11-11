@@ -1,0 +1,109 @@
+{
+  "execution_commit": "89c7fee74e2286002e4b9fe0082964d01488ab6e",
+  "output_root": "/home/bump/.local/state/eqemu-map-translation/collision-eval-20261110",
+  "profiles": {
+    "reviewed-ordinary": {
+      "passed": true,
+      "failed_processes": [],
+      "worker_exit": {
+        "transport_exit": 0,
+        "worker_exit": 0
+      },
+      "trace_bytes": {
+        "qeynos2.trace": 1004253,
+        "poknowledge.trace": 1101062
+      },
+      "retained_run_bytes": 2175769
+    },
+    "reviewed-sanitizers": {
+      "passed": false,
+      "failed_processes": [
+        "analytic",
+        "qeynos2",
+        "poknowledge"
+      ],
+      "worker_exit": {
+        "transport_exit": 1,
+        "worker_exit": 1
+      },
+      "trace_bytes": {
+        "qeynos2.trace": 1004253
+      },
+      "retained_run_bytes": 1090426
+    }
+  },
+  "historical_attempts": {
+    "ordinary-2": {
+      "exit": {
+        "transport_exit": 1,
+        "worker_exit": 1
+      },
+      "cleanup": {
+        "container_removed": "b495b22a06460fef775352fc758ff0ef903b15fa4f7a04daf58f45439c5f7280"
+      }
+    },
+    "sanitizers-3": {
+      "exit": {
+        "transport_exit": 1,
+        "worker_exit": 1
+      },
+      "cleanup": {
+        "container_removed": "b7f8160190edb1711106f9125bd752aaae5694cfedf4ba9c4f6d490fab6442cb"
+      }
+    },
+    "sanitizers-1": {
+      "exit": {
+        "transport_exit": 1,
+        "worker_exit": 1
+      },
+      "cleanup": {
+        "container_removed": "c83e387ddf2943bd3fcb387f1035e9ccf45cd6eccc54e00b5a5a5dc16440c6d5"
+      }
+    },
+    "final-sanitizers": {
+      "exit": {
+        "transport_exit": 1,
+        "worker_exit": 1
+      },
+      "cleanup": {
+        "container_removed": "85db7a96edbc40d7cdb1d9f5e0b1722f369b038ed7fbaf694796118f876d28ed"
+      }
+    },
+    "sanitizers-2": {
+      "exit": {
+        "transport_exit": 1,
+        "worker_exit": 1
+      },
+      "cleanup": {
+        "container_removed": "398aabf19be6da5acaf1b77a8ca014ffc2ffed26593d47c4f6aa9575a15d3ccf"
+      }
+    },
+    "ordinary-1": {
+      "exit": {
+        "transport_exit": 2,
+        "worker_exit": 2
+      },
+      "cleanup": {
+        "container_removed": "1b9f83dbdb93e4e2a65908a622c33d4084c560c5d483f4df939b2a7032d89df9"
+      }
+    },
+    "ordinary-3": {
+      "exit": {
+        "transport_exit": 0,
+        "worker_exit": 0
+      },
+      "cleanup": {
+        "container_removed": "0568eeddfb375e0dbb3ac1d7d006c997a73f88c17525decc6966b2f5cf07ac7a"
+      }
+    },
+    "final-ordinary": {
+      "exit": {
+        "transport_exit": 0,
+        "worker_exit": 0
+      },
+      "cleanup": {
+        "container_removed": "4cc7fa9b9f0243ebf809901ac683ed069b746e502e7c2f149a73d367e6764f5b"
+      }
+    }
+  }
+}

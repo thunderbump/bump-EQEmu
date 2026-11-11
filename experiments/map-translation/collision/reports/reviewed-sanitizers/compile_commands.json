@@ -1,0 +1,22 @@
+[
+{
+  "directory": "/build",
+  "command": "/usr/bin/clang++  -I/work/experiments/map-translation/collision/shim -I/work -I/work/zone -O3 -DNDEBUG -fsanitize=address,undefined -fno-sanitize-recover=all -O1 -g -fno-omit-frame-pointer -fno-pie -std=gnu++17 -o CMakeFiles/collision-eval.dir/driver.cpp.o -c /work/experiments/map-translation/collision/driver.cpp",
+  "file": "/work/experiments/map-translation/collision/driver.cpp"
+},
+{
+  "directory": "/build",
+  "command": "/usr/bin/clang++  -I/work/experiments/map-translation/collision/shim -I/work -I/work/zone -O3 -DNDEBUG -fsanitize=address,undefined -fno-sanitize-recover=all -O1 -g -fno-omit-frame-pointer -fno-pie -std=gnu++17 -o CMakeFiles/collision-eval.dir/work/zone/raycast_mesh.cpp.o -c /work/zone/raycast_mesh.cpp",
+  "file": "/work/zone/raycast_mesh.cpp"
+},
+{
+  "directory": "/build",
+  "command": "/usr/bin/clang++  -I/work/experiments/map-translation/collision/shim -I/work -I/work/zone -O3 -DNDEBUG -fsanitize=address,undefined -fno-sanitize-recover=all -O1 -g -fno-omit-frame-pointer -fno-pie -std=gnu++17 -o CMakeFiles/collision-eval.dir/work/common/memory/ksm.cpp.o -c /work/common/memory/ksm.cpp",
+  "file": "/work/common/memory/ksm.cpp"
+},
+{
+  "directory": "/build",
+  "command": "/usr/bin/clang++   -O3 -DNDEBUG -fsanitize=address,undefined -fno-sanitize-recover=all -O1 -g -fno-omit-frame-pointer -fno-pie -std=gnu++17 -o CMakeFiles/collision-sanitizer-controls.dir/work/tests/sanitizer_controls.cpp.o -c /work/tests/sanitizer_controls.cpp",
+  "file": "/work/tests/sanitizer_controls.cpp"
+}
+]

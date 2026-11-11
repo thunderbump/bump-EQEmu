@@ -1,0 +1,449 @@
+{
+  "cpp": {
+    "source.json": {
+      "path": "/home/bump/.local/state/eqemu-map-translation/capture-tests-20261110/handoff-ordinary/source.json",
+      "sha256": "e9f2778515d4e62c4c727ebf5764f8ce7f4234e84103236b86eb6672a3c51b57",
+      "content": {
+        "commit": "f3826005ce96820291c2cdba48e5fe06b6426cf0",
+        "tree": "6b0478aa83c2e05e7d482878179125520a52284d",
+        "archive_sha256": "a03b9a226eddd87d86603b5154c397ddb2e7f1055dc648cb5ba0355c2968ac6d",
+        "alignment_patch_origin": "78c07284908931297ea72e25da358965b60ee913"
+      }
+    },
+    "container.json": {
+      "path": "/home/bump/.local/state/eqemu-map-translation/capture-tests-20261110/handoff-ordinary/container.json",
+      "sha256": "4bc3787bdc7c6764e12b92ff6af39dd0a6278c9db03eede5a645c6866238face",
+      "content": [
+        {
+          "Id": "2022e50dd31ac695f1e80cab851d0dd95d8a5a1003a30a3b57734fcdfcfcc623",
+          "Created": "2026-11-10T23:10:58.947462256Z",
+          "Path": "/bin/bash",
+          "Args": [
+            "-lc",
+            "set -eu\ncmake -S /work/experiments/map-translation -B /build -DGLM_INCLUDE_DIR=\"$GLM_INCLUDE\" -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DMAP_CAPTURE_SANITIZERS=\"$DIAGNOSTICS\"\ncmake --build /build -j2\nif [ \"$DIAGNOSTICS\" = ON ]; then\n mkdir -p /results\n if /build/map-alignment-control > /results/alignment-control.log 2>&1; then\n  echo 'alignment negative control unexpectedly passed' >&2; exit 1\n fi\n grep -q 'runtime error: load of misaligned address' /results/alignment-control.log\nfi\ncd /work/experiments/map-translation\nMAP_CAPTURE_BINARY=/build/map-capture python3 test_capture.py\nGLM_ROOT=\"$GLM_INCLUDE/glm\" python3 run.py /build/map-capture /inputs /results/capture\n"
+          ],
+          "State": {
+            "Status": "created",
+            "Running": false,
+            "Paused": false,
+            "Restarting": false,
+            "OOMKilled": false,
+            "Dead": false,
+            "Pid": 0,
+            "ExitCode": 0,
+            "Error": "",
+            "StartedAt": "0001-01-01T00:00:00Z",
+            "FinishedAt": "0001-01-01T00:00:00Z"
+          },
+          "Image": "sha256:ecfffeb317764c9ab48b08f06b0e7fbd07403a8e320349024647efe6342869f2",
+          "ResolvConfPath": "",
+          "HostnamePath": "",
+          "HostsPath": "",
+          "LogPath": "",
+          "Name": "/stupefied_lalande",
+          "RestartCount": 0,
+          "Driver": "overlayfs",
+          "Platform": "linux",
+          "MountLabel": "",
+          "ProcessLabel": "",
+          "AppArmorProfile": "",
+          "ExecIDs": null,
+          "HostConfig": {
+            "Binds": null,
+            "ContainerIDFile": "",
+            "LogConfig": {
+              "Type": "json-file",
+              "Config": {}
+            },
+            "NetworkMode": "none",
+            "PortBindings": {},
+            "RestartPolicy": {
+              "Name": "no",
+              "MaximumRetryCount": 0
+            },
+            "AutoRemove": false,
+            "VolumeDriver": "",
+            "VolumesFrom": null,
+            "ConsoleSize": [
+              0,
+              0
+            ],
+            "CapAdd": null,
+            "CapDrop": null,
+            "CgroupnsMode": "private",
+            "Dns": null,
+            "DnsOptions": [],
+            "DnsSearch": [],
+            "ExtraHosts": null,
+            "GroupAdd": null,
+            "IpcMode": "private",
+            "Cgroup": "",
+            "Links": null,
+            "OomScoreAdj": 0,
+            "PidMode": "",
+            "Privileged": false,
+            "PublishAllPorts": false,
+            "ReadonlyRootfs": false,
+            "SecurityOpt": null,
+            "UTSMode": "",
+            "UsernsMode": "",
+            "ShmSize": 67108864,
+            "Runtime": "runc",
+            "Isolation": "",
+            "CpuShares": 0,
+            "Memory": 2147483648,
+            "NanoCpus": 2000000000,
+            "CgroupParent": "",
+            "BlkioWeight": 0,
+            "BlkioWeightDevice": [],
+            "BlkioDeviceReadBps": [],
+            "BlkioDeviceWriteBps": [],
+            "BlkioDeviceReadIOps": [],
+            "BlkioDeviceWriteIOps": [],
+            "CpuPeriod": 0,
+            "CpuQuota": 0,
+            "CpuRealtimePeriod": 0,
+            "CpuRealtimeRuntime": 0,
+            "CpusetCpus": "",
+            "CpusetMems": "",
+            "Devices": [],
+            "DeviceCgroupRules": null,
+            "DeviceRequests": null,
+            "MemoryReservation": 0,
+            "MemorySwap": 2147483648,
+            "MemorySwappiness": null,
+            "OomKillDisable": false,
+            "PidsLimit": 128,
+            "Ulimits": null,
+            "CpuCount": 0,
+            "CpuPercent": 0,
+            "IOMaximumIOps": 0,
+            "IOMaximumBandwidth": 0,
+            "MaskedPaths": [
+              "/proc/acpi",
+              "/proc/asound",
+              "/proc/interrupts",
+              "/proc/kcore",
+              "/proc/keys",
+              "/proc/latency_stats",
+              "/proc/sched_debug",
+              "/proc/scsi",
+              "/proc/timer_list",
+              "/proc/timer_stats",
+              "/sys/devices/virtual/powercap",
+              "/sys/firmware"
+            ],
+            "ReadonlyPaths": [
+              "/proc/bus",
+              "/proc/fs",
+              "/proc/irq",
+              "/proc/sys",
+              "/proc/sysrq-trigger"
+            ]
+          },
+          "Storage": {
+            "RootFS": {
+              "Snapshot": {
+                "Name": "overlayfs"
+              }
+            }
+          },
+          "Mounts": [],
+          "Config": {
+            "Hostname": "2022e50dd31a",
+            "Domainname": "",
+            "User": "0",
+            "AttachStdin": false,
+            "AttachStdout": true,
+            "AttachStderr": true,
+            "Tty": false,
+            "OpenStdin": false,
+            "StdinOnce": false,
+            "Env": [
+              "GLM_INCLUDE=/candidate/build/vcpkg_installed/x64-linux/include",
+              "DIAGNOSTICS=OFF",
+              "ASAN_OPTIONS=halt_on_error=1:detect_leaks=1",
+              "UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1",
+              "PATH=/opt/eqemu-perl/bin:/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+              "DEBIAN_FRONTEND=noninteractive",
+              "PUID=1000",
+              "PGID=1000",
+              "TZ=US/Central",
+              "CC=/usr/bin/clang",
+              "CXX=/usr/bin/clang++"
+            ],
+            "Cmd": [
+              "-lc",
+              "set -eu\ncmake -S /work/experiments/map-translation -B /build -DGLM_INCLUDE_DIR=\"$GLM_INCLUDE\" -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DMAP_CAPTURE_SANITIZERS=\"$DIAGNOSTICS\"\ncmake --build /build -j2\nif [ \"$DIAGNOSTICS\" = ON ]; then\n mkdir -p /results\n if /build/map-alignment-control > /results/alignment-control.log 2>&1; then\n  echo 'alignment negative control unexpectedly passed' >&2; exit 1\n fi\n grep -q 'runtime error: load of misaligned address' /results/alignment-control.log\nfi\ncd /work/experiments/map-translation\nMAP_CAPTURE_BINARY=/build/map-capture python3 test_capture.py\nGLM_ROOT=\"$GLM_INCLUDE/glm\" python3 run.py /build/map-capture /inputs /results/capture\n"
+            ],
+            "Image": "sha256:ecfffeb317764c9ab48b08f06b0e7fbd07403a8e320349024647efe6342869f2",
+            "Volumes": null,
+            "WorkingDir": "/home/eqemu",
+            "Entrypoint": [
+              "/bin/bash"
+            ],
+            "Labels": {
+              "maintainer": "Akkadius <akkadius1@gmail.com>"
+            }
+          },
+          "NetworkSettings": {
+            "SandboxID": "",
+            "SandboxKey": "",
+            "Ports": {},
+            "Networks": {
+              "none": {
+                "IPAMConfig": null,
+                "Links": null,
+                "Aliases": null,
+                "DriverOpts": null,
+                "GwPriority": 0,
+                "NetworkID": "",
+                "EndpointID": "",
+                "Gateway": "",
+                "IPAddress": "",
+                "MacAddress": "",
+                "IPPrefixLen": 0,
+                "IPv6Gateway": "",
+                "GlobalIPv6Address": "",
+                "GlobalIPv6PrefixLen": 0,
+                "DNSNames": null
+              }
+            }
+          },
+          "ImageManifestDescriptor": {
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "digest": "sha256:ecfffeb317764c9ab48b08f06b0e7fbd07403a8e320349024647efe6342869f2",
+            "size": 4431,
+            "platform": {
+              "architecture": "amd64",
+              "os": "linux"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "rust": {
+    "source.json": {
+      "path": "/home/bump/.local/state/eqemu-map-translation/rust-poc-20261110/qualified/source.json",
+      "sha256": "698504dcff7aeaf12ad5da3104c907040533d40d69a68af3716459e5c57838e6",
+      "content": {
+        "commit": "1fa4f48d1198188662e4239c94fc71754dad5895",
+        "tree": "42388b806f988249a0e27d758f29c2da6c63f451",
+        "archive_sha256": "9ba8a4ef85d4fc5e1ccfd332b9b46cad96b8512ee5443c72cabbb2f9a2b912c3",
+        "alignment_patch_origin": "78c07284908931297ea72e25da358965b60ee913"
+      }
+    },
+    "container.json": {
+      "path": "/home/bump/.local/state/eqemu-map-translation/rust-poc-20261110/qualified/container.json",
+      "sha256": "94f83b4653eca945a5faa462229fa576e2263d992b8af3e530a1c7cc4605bbad",
+      "content": [
+        {
+          "Id": "c622c15ce2b91d7017843b55943c2b6c16fac441f2b8ee008acebaebf8081b9f",
+          "Created": "2026-11-10T23:40:17.320582173Z",
+          "Path": "/bin/bash",
+          "Args": [
+            "-lc",
+            "set -eu\nmkdir -p /results\ncd /work/experiments/map-translation/rust\nexport CARGO_TARGET_DIR=/rust-build\nrustc -Vv > /results/rustc.txt\ncargo tree --locked --offline > /results/dependencies.txt\ncargo fmt --check\ncargo build --release --frozen --offline -vv\ncargo test --release --frozen --offline\nMAP_CAPTURE_BINARY=/rust-build/release/map-poc python3 test_poc.py\ncmake -S /work/experiments/map-translation -B /build -DGLM_INCLUDE_DIR=\"$GLM_INCLUDE\" -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON\ncmake --build /build -j2\ncd /work/experiments/map-translation\nGLM_ROOT=\"$GLM_INCLUDE/glm\" python3 run.py /build/map-capture /inputs /results/cpp-timing\ncd rust\npython3 qualify.py /rust-build/release/map-poc /inputs /references /results/rust\nsha256sum /rust-build/release/map-poc > /results/binary.sha256\nldd /rust-build/release/map-poc > /results/ldd.txt\nldd /rust-build/release/map-poc | awk '{for(i=1;i<=NF;i++) if (index($i,\"/\") == 1) print $i}' | xargs sha256sum > /results/shared-libraries.sha256\nprintf '%s\n' \"RUSTFLAGS=${RUSTFLAGS-}\" \"CARGO_ENCODED_RUSTFLAGS=${CARGO_ENCODED_RUSTFLAGS-}\" 'Rust release default target CPU; no fast-math, no mul_add, default process FP environment' > /results/fp.txt\ncp Cargo.lock /results/\n"
+          ],
+          "State": {
+            "Status": "created",
+            "Running": false,
+            "Paused": false,
+            "Restarting": false,
+            "OOMKilled": false,
+            "Dead": false,
+            "Pid": 0,
+            "ExitCode": 0,
+            "Error": "",
+            "StartedAt": "0001-01-01T00:00:00Z",
+            "FinishedAt": "0001-01-01T00:00:00Z"
+          },
+          "Image": "sha256:0aeb54f14590bf1631a27f60b3e7b7eed6dde549f08ba1f5738282e59d4cea1d",
+          "ResolvConfPath": "",
+          "HostnamePath": "",
+          "HostsPath": "",
+          "LogPath": "",
+          "Name": "/nice_shannon",
+          "RestartCount": 0,
+          "Driver": "overlayfs",
+          "Platform": "linux",
+          "MountLabel": "",
+          "ProcessLabel": "",
+          "AppArmorProfile": "",
+          "ExecIDs": null,
+          "HostConfig": {
+            "Binds": null,
+            "ContainerIDFile": "",
+            "LogConfig": {
+              "Type": "json-file",
+              "Config": {}
+            },
+            "NetworkMode": "none",
+            "PortBindings": {},
+            "RestartPolicy": {
+              "Name": "no",
+              "MaximumRetryCount": 0
+            },
+            "AutoRemove": false,
+            "VolumeDriver": "",
+            "VolumesFrom": null,
+            "ConsoleSize": [
+              0,
+              0
+            ],
+            "CapAdd": null,
+            "CapDrop": null,
+            "CgroupnsMode": "private",
+            "Dns": null,
+            "DnsOptions": [],
+            "DnsSearch": [],
+            "ExtraHosts": null,
+            "GroupAdd": null,
+            "IpcMode": "private",
+            "Cgroup": "",
+            "Links": null,
+            "OomScoreAdj": 0,
+            "PidMode": "",
+            "Privileged": false,
+            "PublishAllPorts": false,
+            "ReadonlyRootfs": false,
+            "SecurityOpt": null,
+            "UTSMode": "",
+            "UsernsMode": "",
+            "ShmSize": 67108864,
+            "Runtime": "runc",
+            "Isolation": "",
+            "CpuShares": 0,
+            "Memory": 2147483648,
+            "NanoCpus": 2000000000,
+            "CgroupParent": "",
+            "BlkioWeight": 0,
+            "BlkioWeightDevice": [],
+            "BlkioDeviceReadBps": [],
+            "BlkioDeviceWriteBps": [],
+            "BlkioDeviceReadIOps": [],
+            "BlkioDeviceWriteIOps": [],
+            "CpuPeriod": 0,
+            "CpuQuota": 0,
+            "CpuRealtimePeriod": 0,
+            "CpuRealtimeRuntime": 0,
+            "CpusetCpus": "",
+            "CpusetMems": "",
+            "Devices": [],
+            "DeviceCgroupRules": null,
+            "DeviceRequests": null,
+            "MemoryReservation": 0,
+            "MemorySwap": 2147483648,
+            "MemorySwappiness": null,
+            "OomKillDisable": false,
+            "PidsLimit": 128,
+            "Ulimits": null,
+            "CpuCount": 0,
+            "CpuPercent": 0,
+            "IOMaximumIOps": 0,
+            "IOMaximumBandwidth": 0,
+            "MaskedPaths": [
+              "/proc/acpi",
+              "/proc/asound",
+              "/proc/interrupts",
+              "/proc/kcore",
+              "/proc/keys",
+              "/proc/latency_stats",
+              "/proc/sched_debug",
+              "/proc/scsi",
+              "/proc/timer_list",
+              "/proc/timer_stats",
+              "/sys/devices/virtual/powercap",
+              "/sys/firmware"
+            ],
+            "ReadonlyPaths": [
+              "/proc/bus",
+              "/proc/fs",
+              "/proc/irq",
+              "/proc/sys",
+              "/proc/sysrq-trigger"
+            ]
+          },
+          "Storage": {
+            "RootFS": {
+              "Snapshot": {
+                "Name": "overlayfs"
+              }
+            }
+          },
+          "Mounts": [],
+          "Config": {
+            "Hostname": "c622c15ce2b9",
+            "Domainname": "",
+            "User": "0",
+            "AttachStdin": false,
+            "AttachStdout": true,
+            "AttachStderr": true,
+            "Tty": false,
+            "OpenStdin": false,
+            "StdinOnce": false,
+            "Env": [
+              "UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1",
+              "GLM_INCLUDE=/candidate/build/vcpkg_installed/x64-linux/include",
+              "ASAN_OPTIONS=halt_on_error=1:detect_leaks=1",
+              "PATH=/opt/eqemu-perl/bin:/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+              "DEBIAN_FRONTEND=noninteractive",
+              "PUID=1000",
+              "PGID=1000",
+              "TZ=US/Central",
+              "CC=/usr/bin/clang",
+              "CXX=/usr/bin/clang++"
+            ],
+            "Cmd": [
+              "-lc",
+              "set -eu\nmkdir -p /results\ncd /work/experiments/map-translation/rust\nexport CARGO_TARGET_DIR=/rust-build\nrustc -Vv > /results/rustc.txt\ncargo tree --locked --offline > /results/dependencies.txt\ncargo fmt --check\ncargo build --release --frozen --offline -vv\ncargo test --release --frozen --offline\nMAP_CAPTURE_BINARY=/rust-build/release/map-poc python3 test_poc.py\ncmake -S /work/experiments/map-translation -B /build -DGLM_INCLUDE_DIR=\"$GLM_INCLUDE\" -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON\ncmake --build /build -j2\ncd /work/experiments/map-translation\nGLM_ROOT=\"$GLM_INCLUDE/glm\" python3 run.py /build/map-capture /inputs /results/cpp-timing\ncd rust\npython3 qualify.py /rust-build/release/map-poc /inputs /references /results/rust\nsha256sum /rust-build/release/map-poc > /results/binary.sha256\nldd /rust-build/release/map-poc > /results/ldd.txt\nldd /rust-build/release/map-poc | awk '{for(i=1;i<=NF;i++) if (index($i,\"/\") == 1) print $i}' | xargs sha256sum > /results/shared-libraries.sha256\nprintf '%s\n' \"RUSTFLAGS=${RUSTFLAGS-}\" \"CARGO_ENCODED_RUSTFLAGS=${CARGO_ENCODED_RUSTFLAGS-}\" 'Rust release default target CPU; no fast-math, no mul_add, default process FP environment' > /results/fp.txt\ncp Cargo.lock /results/\n"
+            ],
+            "Image": "sha256:0aeb54f14590bf1631a27f60b3e7b7eed6dde549f08ba1f5738282e59d4cea1d",
+            "Volumes": null,
+            "WorkingDir": "/home/eqemu",
+            "Entrypoint": [
+              "/bin/bash"
+            ],
+            "Labels": {
+              "maintainer": "Akkadius <akkadius1@gmail.com>"
+            }
+          },
+          "NetworkSettings": {
+            "SandboxID": "",
+            "SandboxKey": "",
+            "Ports": {},
+            "Networks": {
+              "none": {
+                "IPAMConfig": null,
+                "Links": null,
+                "Aliases": null,
+                "DriverOpts": null,
+                "GwPriority": 0,
+                "NetworkID": "",
+                "EndpointID": "",
+                "Gateway": "",
+                "IPAddress": "",
+                "MacAddress": "",
+                "IPPrefixLen": 0,
+                "IPv6Gateway": "",
+                "GlobalIPv6Address": "",
+                "GlobalIPv6PrefixLen": 0,
+                "DNSNames": null
+              }
+            }
+          },
+          "ImageManifestDescriptor": {
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "digest": "sha256:0aeb54f14590bf1631a27f60b3e7b7eed6dde549f08ba1f5738282e59d4cea1d",
+            "size": 4868,
+            "platform": {
+              "architecture": "amd64",
+              "os": "linux"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
