@@ -14,6 +14,8 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <sstream>
+#include <sys/resource.h>
 using V = std::array<float,3>;
 struct Mesh { std::vector<float> v; std::vector<unsigned> i; };
 void require(bool b, const char* s) { if (!b) throw std::runtime_error(s); }
@@ -30,7 +32,7 @@ Mesh read(const char* path, const std::string& id) {
  require(b.size()==84+uint64_t(nv)*12+uint64_t(ni)*4,"length");
  require(id.size()==64 && id.find_first_not_of("0123456789abcdef")==std::string::npos,"identity syntax");
  require(std::memcmp(b.data()+20,id.data(),64)==0,"identity mismatch");
- Mesh m;
+ Mesh m; m.v.reserve(size_t(nv)*3); m.i.reserve(ni);
  for(size_t p=84;p<84+size_t(nv)*12;p+=4) { auto u=word(b,p); float x; std::memcpy(&x,&u,4); require(std::isfinite(x),"nonfinite vertex"); m.v.push_back(x); }
  for(size_t p=84+size_t(nv)*12;p<b.size();p+=4) { auto i=word(b,p); require(i<nv,"index bounds"); m.i.push_back(i); }
  return m;
@@ -91,6 +93,8 @@ void controls() {
   auto bad=h; for(int k=0;k<7;k++) { bad=h; bad.fields[k]=std::nextafter(bad.fields[k],INFINITY); require(!equal(h,bad),"field comparator control"); }
   bad=h; bad.hit=false; require(!equal(h,bad),"hit comparator control");
   Mesh moved=m; for(size_t i=2;i<moved.v.size();i+=3) moved.v[i]+=10;
+  Mesh reversed=m; std::swap(reversed.i[1],reversed.i[2]); auto rev=build(reversed);
+  auto rh=cast(*rev,r); require(rh.hit && rh.fields[5]==-1,"reversed winding normal");
   auto other=build(moved); require(!equal(h,cast(*other,r)),"perturbed geometry sensitivity");
  }
  Mesh square{{0,0,0, 4,0,0, 4,4,0, 0,4,0}, {0,1,2,0,2,3}};
@@ -105,7 +109,55 @@ void controls() {
  require(!cast(*deg,{{11,0,2},{11,0,-2},"degenerate"}).hit,"collinear triangle miss");
  std::cout<<"{\"controls\":32,\"perturbed_geometry_disagreements\":32}\n";
 }
+
+// Flush each phase immediately so a killed build still leaves its last boundary.
+void phase(const char* name) {
+ std::ifstream f("/proc/self/status"); std::string line;
+ std::cerr<<"PHASE "<<name;
+ while(std::getline(f,line)) if(line.rfind("VmRSS:",0)==0 || line.rfind("VmHWM:",0)==0) std::cerr<<" "<<line;
+ for(const char* name:{"memory.current","memory.peak","memory.events"}) {
+  std::ifstream c(std::string("/sys/fs/cgroup/")+name); std::string value((std::istreambuf_iterator<char>(c)),{});
+  std::replace(value.begin(),value.end(),'\n',';'); std::cerr<<" "<<name<<"="<<value;
+ }
+ std::cerr<<std::endl;
+}
+float token(std::istream& in) {
+ std::string s; require(bool(in>>s),"trace endpoint missing"); char* end=nullptr;
+ float x=std::strtof(s.c_str(),&end);
+ require(end==s.c_str()+s.size() && std::isfinite(x),"trace endpoint invalid"); return x;
+}
+// Each invocation owns one mesh/tree. Replay reads reference endpoints, never candidate geometry.
+void single(int argc,char** argv) {
+ require(argc==6,"usage: --record/--replay mesh identity reference-trace output-trace");
+ bool record=std::string(argv[1])=="--record";
+ phase("start"); auto m=read(argv[2],argv[3]); phase("read");
+ std::vector<Ray> q; if(record) q=queries(m);
+ auto e=build(m); phase("build");
+ m=Mesh{}; phase("arrays_released");
+ std::ifstream input; if(!record) { input.open(argv[4]); require(bool(input),"trace input open"); }
+ std::ofstream out(argv[5]); require(bool(out),"trace output open"); out<<std::hexfloat;
+ auto emit=[&](const Ray& r) {
+  auto h=cast(*e,r); out<<r.category;
+  for(auto x:r.a) out<<' '<<x; for(auto x:r.b) out<<' '<<x;
+  out<<' '<<h.hit; if(h.hit) for(auto x:h.fields) { require(std::isfinite(x),"nonfinite hit"); out<<' '<<x; }
+  out<<'\n';
+ };
+ if(record) for(const auto& r:q) emit(r);
+ else {
+  std::string line;
+  while(std::getline(input,line)) {
+   std::istringstream row(line); Ray r; require(bool(row>>r.category),"trace category missing");
+   for(auto& x:r.a) x=token(row); for(auto& x:r.b) x=token(row);
+   // The independent comparator validates outcomes and row count.
+   emit(r);
+  }
+  require(input.eof(),"trace read");
+ }
+ out.close(); require(bool(out),"trace write"); phase("query");
+ e.reset(); q.clear(); q.shrink_to_fit(); phase("release");
+}
 int main(int argc,char** argv) { try {
+ if(argc>1 && (std::string(argv[1])=="--record" || std::string(argv[1])=="--replay")) { single(argc,argv); return 0; }
  static_assert(sizeof(float)==4 && sizeof(unsigned)==4,"production layout");
  if(argc==2 && std::string(argv[1])=="--controls") { controls(); return 0; }
  require(argc==4,"usage: collision-eval cpp.mesh rust.mesh input-sha256 | --controls");

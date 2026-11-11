@@ -15,7 +15,11 @@ p.add_argument('--output', type=Path, required=True)
 p.add_argument('--references', type=Path, required=True)
 p.add_argument('--rust-meshes', type=Path, required=True)
 p.add_argument('--sanitizers', action='store_true')
+p.add_argument('--memory-gib', type=int, choices=[2,4], default=2)
+p.add_argument('--baseline-traces', type=Path, required=True)
 a = p.parse_args()
+if a.memory_gib == 4 and not a.sanitizers:
+    p.error('4 GiB is an opt-in diagnostic limit only')
 root = Path(__file__).resolve().parents[3]
 if subprocess.check_output(['git', '-C', str(root), 'status', '--porcelain']).strip():
     p.error('commit the reviewed source first; snapshot must be clean')
@@ -35,7 +39,7 @@ for label, directory in [('cpp', a.references), ('rust', a.rust_meshes)]:
 (a.output / 'reused-provenance.json').write_text(json.dumps(reused, indent=2))
 commit = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
 script = '''set -eu
-mkdir -p /results
+mkdir -p /results /baseline
 cmake -S /work/experiments/map-translation/collision -B /build -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCOLLISION_SANITIZERS="$DIAGNOSTICS"
 cmake --build /build -j2
 cp /build/compile_commands.json /results/
@@ -53,10 +57,10 @@ with tempfile.TemporaryDirectory() as tmp:
     source = tmp / 'source'; source.mkdir()
     subprocess.run(['tar', '-xf', str(tmp / 'source.tar'), '-C', str(source)], check=True)
     identity = {'commit': commit, 'tree': subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD^{tree}'], text=True).strip(),
-                'archive_sha256': hashlib.sha256(archive).hexdigest(), 'purpose': 'unchanged production raycaster query evaluation'}
+                'archive_sha256': hashlib.sha256(archive).hexdigest(), 'purpose': 'raycaster memory baseline; one engine per process'}
     (source / 'capture-source.json').write_text(json.dumps(identity, indent=2))
     (a.output / 'source.json').write_text(json.dumps(identity, indent=2))
-    create = docker + ['create', '--network', 'none', '--memory', '2g', '--memory-swap', '2g', '--cpus', '2', '--pids-limit', '128',
+    create = docker + ['create', '--network', 'none', '--memory', f'{a.memory_gib}g', '--memory-swap', f'{a.memory_gib}g', '--cpus', '2', '--pids-limit', '128',
                        '--entrypoint', '/bin/bash', '-e', f'DIAGNOSTICS={"ON" if a.sanitizers else "OFF"}',
                        '-e', 'ASAN_OPTIONS=halt_on_error=1:abort_on_error=0:detect_leaks=1:symbolize=1:allow_addr2line=1:exitcode=1', '-e', 'ASAN_SYMBOLIZER_PATH=/usr/bin/addr2line', '-e', 'UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1:exitcode=1', a.image, '-lc', script]
     cid = subprocess.check_output(create, text=True).strip()
@@ -68,6 +72,11 @@ with tempfile.TemporaryDirectory() as tmp:
         subprocess.run(docker + ['cp', str(a.inputs.resolve()), cid + ':/inputs'], check=True)
         subprocess.run(docker + ['cp', str(a.references.resolve()), cid + ':/references'], check=True)
         subprocess.run(docker + ['cp', str(a.rust_meshes.resolve()), cid + ':/rust-meshes'], check=True)
+        baseline = tmp / 'baseline'; baseline.mkdir()
+        import shutil
+        for name in ('qeynos2','poknowledge'):
+            shutil.copyfile(a.baseline_traces/(name+'.trace'),baseline/(name+'.trace'))
+        subprocess.run(docker + ['cp', str(baseline), cid + ':/baseline'], check=True)
         with (a.output / 'worker.log').open('w') as out:
             status = subprocess.run(docker + ['start', '-a', cid], stdout=out, stderr=subprocess.STDOUT).returncode
         copied = subprocess.run(docker + ['cp', cid + ':/results', str(a.output)], capture_output=True)

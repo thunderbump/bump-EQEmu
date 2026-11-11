@@ -6,6 +6,8 @@ from pathlib import Path
 import struct
 import subprocess
 import time
+import threading
+from compare import compare, controls
 
 ROOT = Path('/work')
 HERE = ROOT / 'experiments/map-translation/collision'
@@ -18,11 +20,24 @@ def sha(p):
     return hashlib.sha256(p.read_bytes()).hexdigest()
 
 def run(name, args, expected=0, diagnostic=None, collect=False):
+    def memory():
+        return {n: (Path('/sys/fs/cgroup')/n).read_text().strip() for n in
+                ['memory.current','memory.peak','memory.events','memory.max','memory.swap.max']}
+    before = memory()
     start = time.monotonic()
+    samples = []
+    done = threading.Event()
+    def sample():
+        while not done.wait(.05):
+            samples.append({'seconds':time.monotonic()-start, **memory()})
+    monitor = threading.Thread(target=sample)
+    monitor.start()
     p = subprocess.run(['/usr/bin/time', '-v', '-o', str(OUT / (name+'.time'))] + args, capture_output=True, text=True)
+    done.set(); monitor.join()
+    (OUT / (name+'.memory.json')).write_text(json.dumps(samples))
     (OUT / (name+'.stdout')).write_text(p.stdout)
     (OUT / (name+'.stderr')).write_text(p.stderr)
-    record = {'name': name, 'command': args, 'exit': p.returncode, 'seconds': time.monotonic()-start, 'expected_exit': expected}
+    record = {'name': name, 'command': args, 'exit': p.returncode, 'seconds': time.monotonic()-start, 'expected_exit': expected, 'cgroup_before':before, 'cgroup_after':memory()}
     results.append(record)
     (OUT/'runs.json').write_text(json.dumps(results, indent=2))
     if p.returncode != expected or (diagnostic and diagnostic not in p.stderr):
@@ -41,6 +56,7 @@ if os.environ.get('DIAGNOSTICS') == 'ON':
         text=(OUT/('sanitizer-'+mode+'.stderr')).read_text()
         assert 'sanitizer_controls.cpp:' in text, 'missing symbolized control file/line'
 run('analytic', [BINARY, '--controls'], collect=True)
+controls(OUT)
 manifest = []
 for name, identity in IDENTITIES.items():
     original = Path('/inputs')/(name+'.map')
@@ -50,10 +66,18 @@ for name, identity in IDENTITIES.items():
     for p in (original,a,b):
         manifest.append({'path':str(p),'bytes':p.stat().st_size,'sha256':sha(p),
                          'payload_sha256':hashlib.sha256(p.read_bytes()[84:]).hexdigest() if p.suffix=='.mesh' else None})
-    os.environ['COLLISION_TRACE']=str(OUT/(name+'.trace'))
-    stdout=run(name,[BINARY,str(a),str(b),identity], collect=True)
-    report=json.loads(stdout) if stdout.strip() else {'outcomes_unavailable':True, 'see':name+'.stderr'}
-    del os.environ['COLLISION_TRACE']
+    manifest.append({'path':'/baseline/'+name+'.trace','sha256':sha(Path('/baseline')/(name+'.trace'))})
+    reference=OUT/(name+'.reference.trace')
+    candidate=OUT/(name+'.candidate.trace')
+    run(name+'-reference',[BINARY,'--record',str(a),identity,'unused',str(reference)],collect=True)
+    run(name+'-candidate',[BINARY,'--replay',str(b),identity,str(reference),str(candidate)],collect=True)
+    try:
+        report=compare(reference,candidate)
+        baseline=compare(Path('/baseline')/(name+'.trace'),reference,legacy=True)
+        assert baseline == report
+    except (AssertionError, OSError, ValueError, IndexError) as error:
+        failures.append(name+'-comparison')
+        report={'failure':str(error)}
     (OUT/(name+'.json')).write_text(json.dumps(report,indent=2))
     # Exercise the native reader and structural comparator, not just a Python parser.
     raw=a.read_bytes()
