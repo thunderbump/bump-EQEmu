@@ -1,0 +1,6 @@
+{
+  "commit": "89c7fee74e2286002e4b9fe0082964d01488ab6e",
+  "tree": "865c54625228176bf2da51985e6f4fc864de222d",
+  "archive_sha256": "73bd0da199a2b9740708d54af3cf99a2f858bc539417ebb4cb58a1ae7a6a23f4",
+  "purpose": "unchanged production raycaster query evaluation"
+}

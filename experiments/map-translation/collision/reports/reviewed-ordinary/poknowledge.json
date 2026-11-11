@@ -1,0 +1,82 @@
+{
+  "seed": 2236555302,
+  "queries": 5504,
+  "hits": 3354,
+  "misses": 2150,
+  "differences": 0,
+  "max_absolute_field_delta": 0,
+  "categories": {
+    "edge": {
+      "queries": 256,
+      "hits": 253,
+      "misses": 3,
+      "differences": 0
+    },
+    "edge_adjacent": {
+      "queries": 256,
+      "hits": 245,
+      "misses": 11,
+      "differences": 0
+    },
+    "interior": {
+      "queries": 256,
+      "hits": 256,
+      "misses": 0,
+      "differences": 0
+    },
+    "interior_adjacent": {
+      "queries": 256,
+      "hits": 256,
+      "misses": 0,
+      "differences": 0
+    },
+    "near_parallel": {
+      "queries": 256,
+      "hits": 200,
+      "misses": 56,
+      "differences": 0
+    },
+    "outside": {
+      "queries": 200,
+      "hits": 0,
+      "misses": 200,
+      "differences": 0
+    },
+    "short": {
+      "queries": 256,
+      "hits": 256,
+      "misses": 0,
+      "differences": 0
+    },
+    "spatial": {
+      "queries": 2000,
+      "hits": 612,
+      "misses": 1388,
+      "differences": 0
+    },
+    "vertex": {
+      "queries": 256,
+      "hits": 254,
+      "misses": 2,
+      "differences": 0
+    },
+    "vertex_adjacent": {
+      "queries": 256,
+      "hits": 242,
+      "misses": 14,
+      "differences": 0
+    },
+    "vertical": {
+      "queries": 1000,
+      "hits": 780,
+      "misses": 220,
+      "differences": 0
+    },
+    "zero_length": {
+      "queries": 256,
+      "hits": 0,
+      "misses": 256,
+      "differences": 0
+    }
+  }
+}

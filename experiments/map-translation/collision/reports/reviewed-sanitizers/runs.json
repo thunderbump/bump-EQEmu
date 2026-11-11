@@ -1,0 +1,254 @@
+[
+  {
+    "name": "sanitizer-pass",
+    "command": [
+      "/build/collision-sanitizer-controls",
+      "pass"
+    ],
+    "exit": 0,
+    "seconds": 0.005120872985571623,
+    "expected_exit": 0
+  },
+  {
+    "name": "sanitizer-use-after-free",
+    "command": [
+      "/build/collision-sanitizer-controls",
+      "use-after-free"
+    ],
+    "exit": 1,
+    "seconds": 0.04954781895503402,
+    "expected_exit": 1
+  },
+  {
+    "name": "sanitizer-out-of-bounds",
+    "command": [
+      "/build/collision-sanitizer-controls",
+      "out-of-bounds"
+    ],
+    "exit": 1,
+    "seconds": 0.06106414599344134,
+    "expected_exit": 1
+  },
+  {
+    "name": "sanitizer-undefined",
+    "command": [
+      "/build/collision-sanitizer-controls",
+      "undefined"
+    ],
+    "exit": 1,
+    "seconds": 0.058243073988705873,
+    "expected_exit": 1
+  },
+  {
+    "name": "sanitizer-leak",
+    "command": [
+      "/build/collision-sanitizer-controls",
+      "leak"
+    ],
+    "exit": 1,
+    "seconds": 0.06471396889537573,
+    "expected_exit": 1
+  },
+  {
+    "name": "analytic",
+    "command": [
+      "/build/collision-eval",
+      "--controls"
+    ],
+    "exit": 1,
+    "seconds": 0.17334723798558116,
+    "expected_exit": 0
+  },
+  {
+    "name": "qeynos2",
+    "command": [
+      "/build/collision-eval",
+      "/references/qeynos2.0.mesh",
+      "/rust-meshes/qeynos2.0.mesh",
+      "040343c54e3b02bfd1637ce8fca8839dd676e17c41fb24c042ccfa0bd649435c"
+    ],
+    "exit": 1,
+    "seconds": 1.2280178191140294,
+    "expected_exit": 0
+  },
+  {
+    "name": "qeynos2-reject-schema",
+    "command": [
+      "/build/collision-eval",
+      "/references/qeynos2.0.mesh",
+      "/results/control.mesh",
+      "040343c54e3b02bfd1637ce8fca8839dd676e17c41fb24c042ccfa0bd649435c"
+    ],
+    "exit": 2,
+    "seconds": 0.02374986605718732,
+    "expected_exit": 2
+  },
+  {
+    "name": "qeynos2-reject-identity",
+    "command": [
+      "/build/collision-eval",
+      "/references/qeynos2.0.mesh",
+      "/results/control.mesh",
+      "040343c54e3b02bfd1637ce8fca8839dd676e17c41fb24c042ccfa0bd649435c"
+    ],
+    "exit": 2,
+    "seconds": 0.021683785133063793,
+    "expected_exit": 2
+  },
+  {
+    "name": "qeynos2-reject-index",
+    "command": [
+      "/build/collision-eval",
+      "/references/qeynos2.0.mesh",
+      "/results/control.mesh",
+      "040343c54e3b02bfd1637ce8fca8839dd676e17c41fb24c042ccfa0bd649435c"
+    ],
+    "exit": 2,
+    "seconds": 0.023829947225749493,
+    "expected_exit": 2
+  },
+  {
+    "name": "qeynos2-reject-count",
+    "command": [
+      "/build/collision-eval",
+      "/references/qeynos2.0.mesh",
+      "/results/control.mesh",
+      "040343c54e3b02bfd1637ce8fca8839dd676e17c41fb24c042ccfa0bd649435c"
+    ],
+    "exit": 2,
+    "seconds": 0.028543934226036072,
+    "expected_exit": 2
+  },
+  {
+    "name": "qeynos2-reject-nonfinite",
+    "command": [
+      "/build/collision-eval",
+      "/references/qeynos2.0.mesh",
+      "/results/control.mesh",
+      "040343c54e3b02bfd1637ce8fca8839dd676e17c41fb24c042ccfa0bd649435c"
+    ],
+    "exit": 2,
+    "seconds": 0.024597241077572107,
+    "expected_exit": 2
+  },
+  {
+    "name": "qeynos2-reject-truncated",
+    "command": [
+      "/build/collision-eval",
+      "/references/qeynos2.0.mesh",
+      "/results/control.mesh",
+      "040343c54e3b02bfd1637ce8fca8839dd676e17c41fb24c042ccfa0bd649435c"
+    ],
+    "exit": 2,
+    "seconds": 0.02176094986498356,
+    "expected_exit": 2
+  },
+  {
+    "name": "qeynos2-reject-order",
+    "command": [
+      "/build/collision-eval",
+      "/references/qeynos2.0.mesh",
+      "/results/control.mesh",
+      "040343c54e3b02bfd1637ce8fca8839dd676e17c41fb24c042ccfa0bd649435c"
+    ],
+    "exit": 2,
+    "seconds": 0.023415917064994574,
+    "expected_exit": 2
+  },
+  {
+    "name": "poknowledge",
+    "command": [
+      "/build/collision-eval",
+      "/references/poknowledge.0.mesh",
+      "/rust-meshes/poknowledge.0.mesh",
+      "794b618d86852b47bd593424129aaf34eee326e5e3fec7290aeeb0e32bc41d20"
+    ],
+    "exit": 137,
+    "seconds": 1.4381741057150066,
+    "expected_exit": 0
+  },
+  {
+    "name": "poknowledge-reject-schema",
+    "command": [
+      "/build/collision-eval",
+      "/references/poknowledge.0.mesh",
+      "/results/control.mesh",
+      "794b618d86852b47bd593424129aaf34eee326e5e3fec7290aeeb0e32bc41d20"
+    ],
+    "exit": 2,
+    "seconds": 0.29675131384283304,
+    "expected_exit": 2
+  },
+  {
+    "name": "poknowledge-reject-identity",
+    "command": [
+      "/build/collision-eval",
+      "/references/poknowledge.0.mesh",
+      "/results/control.mesh",
+      "794b618d86852b47bd593424129aaf34eee326e5e3fec7290aeeb0e32bc41d20"
+    ],
+    "exit": 2,
+    "seconds": 0.2863376531749964,
+    "expected_exit": 2
+  },
+  {
+    "name": "poknowledge-reject-index",
+    "command": [
+      "/build/collision-eval",
+      "/references/poknowledge.0.mesh",
+      "/results/control.mesh",
+      "794b618d86852b47bd593424129aaf34eee326e5e3fec7290aeeb0e32bc41d20"
+    ],
+    "exit": 2,
+    "seconds": 0.3089817459695041,
+    "expected_exit": 2
+  },
+  {
+    "name": "poknowledge-reject-count",
+    "command": [
+      "/build/collision-eval",
+      "/references/poknowledge.0.mesh",
+      "/results/control.mesh",
+      "794b618d86852b47bd593424129aaf34eee326e5e3fec7290aeeb0e32bc41d20"
+    ],
+    "exit": 2,
+    "seconds": 0.2923482721671462,
+    "expected_exit": 2
+  },
+  {
+    "name": "poknowledge-reject-nonfinite",
+    "command": [
+      "/build/collision-eval",
+      "/references/poknowledge.0.mesh",
+      "/results/control.mesh",
+      "794b618d86852b47bd593424129aaf34eee326e5e3fec7290aeeb0e32bc41d20"
+    ],
+    "exit": 2,
+    "seconds": 0.3121329308487475,
+    "expected_exit": 2
+  },
+  {
+    "name": "poknowledge-reject-truncated",
+    "command": [
+      "/build/collision-eval",
+      "/references/poknowledge.0.mesh",
+      "/results/control.mesh",
+      "794b618d86852b47bd593424129aaf34eee326e5e3fec7290aeeb0e32bc41d20"
+    ],
+    "exit": 2,
+    "seconds": 0.2957272548228502,
+    "expected_exit": 2
+  },
+  {
+    "name": "poknowledge-reject-order",
+    "command": [
+      "/build/collision-eval",
+      "/references/poknowledge.0.mesh",
+      "/results/control.mesh",
+      "794b618d86852b47bd593424129aaf34eee326e5e3fec7290aeeb0e32bc41d20"
+    ],
+    "exit": 2,
+    "seconds": 0.3029686021618545,
+    "expected_exit": 2
+  }
+]

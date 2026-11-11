@@ -1,0 +1,10 @@
+{
+  "archive_sha256": "6419b67a5b3f8b216b31a6a2d27d603af522fe034c9ecdacd1c3aeaa16224d9d",
+  "archive_bytes": 2710456320,
+  "image_manifest": "sha256:0aeb54f14590bf1631a27f60b3e7b7eed6dde549f08ba1f5738282e59d4cea1d",
+  "source": "read-only retained containerd content blobs from eqemu-rootless-proof/docker",
+  "daemon_cleanup": "ActiveState=inactive\nSubState=dead\nResult=success\n",
+  "owned_transfer_archive_removed": true,
+  "owned_image_store_removed": false,
+  "containers_remaining_before_prune": 0
+}

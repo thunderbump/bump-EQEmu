@@ -1,0 +1,8 @@
+/work/tests/sanitizer_controls.cpp:25:15: runtime error: signed integer overflow: 2147483647 + 1 cannot be represented in type 'int'
+    #0 0x4e085a in SanitizerUndefined() /work/tests/sanitizer_controls.cpp:25
+    #1 0x4e09b8 in main /work/tests/sanitizer_controls.cpp:52
+    #2 0x78ae1a58e249 in __libc_start_call_main csu/../sysdeps/x86/libc-start.c:58
+    #3 0x78ae1a58e304 in __libc_start_main_impl csu/../csu/libc-start.c:360
+    #4 0x420300 in _start ??:?
+
+SUMMARY: UndefinedBehaviorSanitizer: undefined-behavior /work/tests/sanitizer_controls.cpp:25:15 in 
