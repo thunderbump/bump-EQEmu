@@ -1,0 +1,12 @@
+{
+  "queries": 5504,
+  "hits": 3354,
+  "misses": 2150,
+  "classification_changes": 0,
+  "field_bit_changes": 0,
+  "max_abs": 0.0,
+  "max_relative_reference_ge_1e-6": 0.0,
+  "max_ulp": 0,
+  "signed_zero_changes": 0,
+  "examples": []
+}

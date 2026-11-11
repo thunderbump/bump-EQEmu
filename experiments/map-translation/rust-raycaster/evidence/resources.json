@@ -1,0 +1,41 @@
+{
+  "qeynos2": {
+    "rust": {
+      "query_seconds": 0.003385759999999988,
+      "serialize_seconds": 0.00021786200000001587,
+      "queries": 5504,
+      "peak_rss_kib": 6324,
+      "phase_log": "qeynos2.stderr"
+    },
+    "cpp": {
+      "query_seconds": 0.00338197,
+      "serialize_seconds": 0.000214749,
+      "queries": 5504,
+      "peak_rss_kib": 12096,
+      "phase_log": "qeynos2-reference.stderr"
+    }
+  },
+  "poknowledge": {
+    "rust": {
+      "query_seconds": 0.01293231899999995,
+      "serialize_seconds": 0.0002292950000000177,
+      "queries": 5504,
+      "peak_rss_kib": 40336,
+      "phase_log": "poknowledge.stderr"
+    },
+    "cpp": {
+      "query_seconds": 0.0124838,
+      "serialize_seconds": 0.000256276,
+      "queries": 5504,
+      "peak_rss_kib": 47576,
+      "phase_log": "poknowledge-reference.stderr"
+    }
+  },
+  "cgroup_final": {
+    "memory.current": "59650048\n",
+    "memory.peak": "99688448\n",
+    "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+    "memory.max": "2147483648\n",
+    "memory.swap.max": "0\n"
+  }
+}

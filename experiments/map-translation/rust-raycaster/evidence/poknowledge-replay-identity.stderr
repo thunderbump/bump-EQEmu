@@ -1,0 +1,4 @@
+PHASE start seconds=0.000000311 VmHWM:	    1984 kB VmRSS:	    1984 kB
+PHASE read seconds=0.006805541 VmHWM:	   26496 kB VmRSS:	   14416 kB
+PHASE build seconds=0.126618514 VmHWM:	   40780 kB VmRSS:	   40780 kB
+Error: Error("replay identity/schema")

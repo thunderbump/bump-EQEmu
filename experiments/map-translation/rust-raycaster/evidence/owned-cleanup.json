@@ -1,0 +1,13 @@
+{
+  "container_receipts": [
+    "development-01/cleanup.json",
+    "development-02/cleanup.json",
+    "qualified-01/cleanup.json",
+    "qualified-02/cleanup.json"
+  ],
+  "daemon_stopped": true,
+  "owned_store_removed": true,
+  "owned_transfer_archive_removed": true,
+  "original_sources_and_retained_OCI_blobs": "preserved",
+  "retained_bytes": 181980246
+}

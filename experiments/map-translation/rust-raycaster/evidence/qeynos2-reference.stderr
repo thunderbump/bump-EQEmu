@@ -1,0 +1,8 @@
+SECONDS read=0.00125336
+PHASE read VmHWM:	    4652 kB VmRSS:	    4416 kB memory.current=23937024; memory.peak=87162880; memory.events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;sock_throttled 0;
+SECONDS build=0.0204747
+PHASE build VmHWM:	   12504 kB VmRSS:	   12504 kB memory.current=32067584; memory.peak=87162880; memory.events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;sock_throttled 0;
+SECONDS query_and_serialize=0.00393286
+PHASE query_and_serialize VmHWM:	   12504 kB VmRSS:	   12504 kB memory.current=32198656; memory.peak=87162880; memory.events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;sock_throttled 0;
+{"query_seconds":0.00338197,"serialize_seconds":0.000214749,"queries":5504}
+PHASE release VmHWM:	   12096 kB VmRSS:	    7124 kB memory.current=26689536; memory.peak=87162880; memory.events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;sock_throttled 0;

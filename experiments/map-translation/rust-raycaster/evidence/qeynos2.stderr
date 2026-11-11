@@ -1,0 +1,6 @@
+PHASE start seconds=0.00000025 VmHWM:	    2008 kB VmRSS:	    2008 kB
+PHASE read seconds=0.000373483 VmHWM:	    2968 kB VmRSS:	    2680 kB
+PHASE build seconds=0.015047156 VmHWM:	    6708 kB VmRSS:	    6708 kB
+PHASE query_and_serialize seconds=0.004846159 VmHWM:	    6708 kB VmRSS:	    6708 kB
+{"query_seconds":0.003385759999999988,"serialize_seconds":0.00021786200000001587,"queries":5504}
+PHASE release seconds=0.004946278 VmHWM:	    6324 kB VmRSS:	    4116 kB
