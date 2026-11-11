@@ -34,6 +34,7 @@ cd /work/experiments/map-translation/rust-raycaster
 export CARGO_TARGET_DIR=/rust-build
 cargo build --release --frozen --offline
 cargo test --release --frozen --offline > /results/tests.txt
+python3 /work/experiments/map-translation/raycaster-corpus/controls.py
 /collision/collision-eval --controls > /results/cpp-controls.txt
 MAP_CAPTURE_BINARY=/capture/map-capture python3 ../test_capture.py > /results/capture-tests.txt 2>&1
 /capture/map-capture --runtime-info > /results/fp.json
@@ -84,7 +85,7 @@ def main():
             subprocess.run(d+['cp',cid+':/results/.',str(dest)],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,timeout=180)
             return cid,final[0]['State']['ExitCode']
         except BaseException:
-            subprocess.run(d+['rm','-f',cid],stdout=subprocess.DEVNULL); raise
+            subprocess.run(d+['rm','-f',cid],stdout=subprocess.DEVNULL,timeout=180); raise
     build=out/'build'
     if not (build/'complete.json').exists():
         build.mkdir(exist_ok=True)

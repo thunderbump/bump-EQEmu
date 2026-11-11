@@ -53,3 +53,9 @@ All-hit/all-miss maps are coverage-limited even if exact. Failed comparisons rem
 failures regardless of numerical delta. A reference decoder failure prevents
 raycaster coverage and warrants a separate owned Mesh boundary investigation,
 not rewriting the reference in this phase.
+
+Build gating includes synthetic candidate reader/replay rejection controls for
+schema, identity, index, nonfinite, count, truncation, order and query identity.
+The comparator's classification, endpoint, category, count and seven-field
+mutation controls run independently. `summarize.py RUN OUTPUT` emits a compact
+per-path report only after completeness and uniqueness checks succeed.

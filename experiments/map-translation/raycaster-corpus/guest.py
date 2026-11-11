@@ -31,9 +31,12 @@ try:
     # Census only. Header declarations are not branch execution coverage.
     source=Path('/input.map').read_bytes()
     if source[:4]==bytes.fromhex('00000002'):
-        decoded=zlib.decompress(source[12:]); header=struct.unpack_from('<9If',decoded)
-        report['header_declarations']={'models':header[4],'placements':header[5],'groups':header[6],'tiles':header[7],'proof_of_branch_execution':False}
-        del decoded
+        try:
+            decoded=zlib.decompressobj().decompress(source[12:],40)
+            header=struct.unpack('<9If',decoded)
+            report['header_declarations']={'models':header[4],'placements':header[5],'groups':header[6],'tiles':header[7],'proof_of_branch_execution':False}
+        except Exception as error:
+            report['header_census_error']=str(error)
     del source
     assert sha(Path('/input.map')) == identity, 'input integrity'
     run('cpp-decode', ['/capture/map-capture','/input.map',str(O/'geometry.mesh'),identity],120)
@@ -41,10 +44,10 @@ try:
     mesh=O/'geometry.mesh'; raw=mesh.read_bytes()
     assert raw[:8]==b'EQMESH01' and struct.unpack_from('<I',raw,8)[0]==1 and raw[20:84]==identity.encode(), 'schema/identity'
     nv,ni=struct.unpack_from('<II',raw,12)
+    report['geometry']={'vertices':nv,'indices':ni,'bytes':len(raw),'sha256':sha(mesh)}
     assert len(raw)==84+12*nv+4*ni and ni%3==0, 'counts/length'
     assert all(math.isfinite(x[0]) for x in struct.iter_unpack('<f',raw[84:84+12*nv])), 'nonfinite geometry'
     assert all(x[0]<nv for x in struct.iter_unpack('<I',raw[84+12*nv:])), 'index bounds'
-    report['geometry']={'vertices':nv,'indices':ni,'bytes':len(raw),'sha256':sha(mesh)}
     del raw
     if not nv or not ni: raise RuntimeError('empty geometry')
     run('cpp-query',['/collision/collision-eval','--record',str(mesh),identity,'unused',str(O/'reference.trace')],120)
