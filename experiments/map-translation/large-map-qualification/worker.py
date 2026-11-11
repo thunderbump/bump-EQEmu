@@ -1,7 +1,7 @@
 """Host transport only. Each stage gets a fresh 2 GiB/no-swap offline rootless container."""
 import argparse,subprocess,json,hashlib,tarfile,time
 from pathlib import Path
-p=argparse.ArgumentParser();p.add_argument('--socket',required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--stage',choices=['build','maps'],required=True);p.add_argument('--build',type=Path);a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--socket',required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--stage',choices=['build','maps','regressions'],required=True);p.add_argument('--build',type=Path);a=p.parse_args()
 ROOT=Path(__file__).resolve().parents[3];HERE=Path(__file__).resolve().parent
 assert not subprocess.check_output(['git','status','--porcelain'],cwd=ROOT).strip()
 D=['docker','--host',a.socket];IMAGE='sha256:0aeb54f14590bf1631a27f60b3e7b7eed6dde549f08ba1f5738282e59d4cea1d'
@@ -22,6 +22,8 @@ for c in cases:
   original=Path('/home/bump/Projects/bump-eqemu/bump-akk-stack/server/maps')/c['input']['path']
   (dest/'case.json').write_text(json.dumps(c))
   for src,target in [(mesh,'/geometry.mesh'),(original,'/original.map'),(dest/'case.json','/case.json'),(a.build.resolve(),'/build')]:args+=['--mount',f'type=bind,src={src},dst={target},readonly']
+ if a.stage=='regressions':
+  for src,target in [(a.build.resolve(),'/build'),(Path.home()/'.local/state/eqemu-map-translation/raycaster-memory-20261110/ordinary-01/results','/baseline'),(Path.home()/'.local/state/eqemu-map-translation/rust-poc-20261110/qualified/results/rust','/rust-meshes'),(Path.home()/'.local/state/eqemu-map-translation/capture-tests-20261110/handoff-ordinary/results/capture','/references')]:args+=['--mount',f'type=bind,src={src},dst={target},readonly']
  args+=['--entrypoint','python3',IMAGE,'/work/experiments/map-translation/large-map-qualification/guest.py',a.stage]
  commands.append(D+args);(a.output/'commands.json').write_text(json.dumps(commands,indent=2))
  cid=subprocess.check_output(D+args,text=True).strip()

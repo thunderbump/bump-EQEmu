@@ -42,9 +42,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         None
     };
-    let mut engine =
-        rust_raycaster_poc::admission::load(&a[1], &a[2], policy, || phase("read", t))?;
-    phase("build", t);
+    let mut engine = rust_raycaster_poc::admission::load(&a[1], &a[2], policy, || {
+        phase("read", t);
+        build_start.set(Instant::now());
+    })?;
+    phase("build", build_start.get());
     let mut input = fs::File::open(&a[3])?;
     let mut header = [0u8; 76];
     input.read_exact(&mut header)?;

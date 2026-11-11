@@ -24,14 +24,23 @@ if sys.argv[1]=='build':
  run('build',['cargo','build','--release','--frozen','--offline','-vv'])
  run('tests',['cargo','test','--release','--frozen','--offline'])
  run('cpp-build',['c++','-O3','-DNDEBUG','-std=c++17','-I/work/experiments/map-translation/collision/shim','-I/work','-I/work/zone','/work/experiments/map-translation/collision/driver.cpp','/work/zone/raycast_mesh.cpp','/work/common/memory/ksm.cpp','-o','/results/reference'])
+ run('old-configure',['cmake','-S','/work/experiments/map-translation/rust-raycaster','-B','/results/old-reference','-DCMAKE_BUILD_TYPE=Release','-DCMAKE_EXPORT_COMPILE_COMMANDS=ON'])
+ run('old-build',['cmake','--build','/results/old-reference','-j2'])
  run('cpp-controls',['/results/reference','--controls'])
  (O/'toolchain.txt').write_text(subprocess.check_output(['rustc','-Vv'],text=True)+subprocess.check_output(['c++','--version'],text=True))
  for name,cmd in [('rust','/results/target/release/rust-raycaster-poc'),('cpp','/results/reference')]:
   (O/(name+'.identity.json')).write_text(json.dumps({'sha256':sha(cmd),'ldd':subprocess.check_output(['ldd',cmd],text=True),'FP':'O3/default CPU, no fast math, default process FP environment'},indent=2))
+elif sys.argv[1]=='regressions':
+ import runpy
+ os.symlink('/build/target','/rust-build');os.symlink('/build/old-reference','/reference-build')
+ os.chdir('/work/experiments/map-translation/rust-raycaster')
+ runpy.run_path('qualify.py',run_name='__main__')
 else:
  c=json.loads(Path('/case.json').read_text());id=c['input']['sha256'];name=Path(c['input']['path']).stem
  assert sha('/geometry.mesh')==c['geometry']['sha256'] and sha('/original.map')==id
  controls(O)
+ from controls import check
+ check(c,run,O)
  opts=['--known-asset',c['input']['path'],'/original.map']
  run('reference',['/build/reference','--record','/geometry.mesh',id,'unused','/results/reference.trace',*opts])
  lines=(O/'reference.trace').read_text().splitlines();assert len(lines)==5504
