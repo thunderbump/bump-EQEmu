@@ -4,3 +4,8 @@ systemd-run --user --unit=eqemu-additional-pipeline-20261111 --setenv=DOCKERD_RO
 # Importer from exact verified module archive, or read-only baseline identical file.
 python3 /home/bump/.t3/worktrees/bump-EQEmu/t3-dd2bfc5a-28c830438bc3bc8b/experiments/map-translation/large-map-qualification/import_image.py --socket unix:///run/user/1000/eqemu-additional-pipeline-20261111.sock --output /home/bump/.local/state/eqemu-map-translation/additional-pipeline-20261111/image-import.json
 python3 experiments/map-translation/additional-pipeline/worker.py
+# After successful retrieval: prune only this dedicated daemon, then stop its service.
+docker --host unix:///run/user/1000/eqemu-additional-pipeline-20261111.sock system prune -af --volumes
+systemctl --user stop eqemu-additional-pipeline-20261111
+# Remove owned store and exec-root using the same rootless uid mapping.
+systemd-run --user --unit=eqemu-additional-pipeline-20261111-cleanup --wait --pipe /usr/bin/rootlesskit --state-dir=/run/user/1000/eqemu-additional-pipeline-20261111-cleanup-kit python3 -c 'import shutil; shutil.rmtree("/home/bump/.local/state/eqemu-map-translation/additional-pipeline-20261111/docker"); shutil.rmtree("/run/user/1000/eqemu-additional-pipeline-20261111-exec",ignore_errors=True)'
