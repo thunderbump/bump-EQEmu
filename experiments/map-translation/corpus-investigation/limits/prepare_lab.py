@@ -26,7 +26,7 @@ new = '''auto e=build(m); phase("build");
  size_t leafCount=0, maxLeaf=0;
  for(size_t n=0;n<lab->mNodeCount;n++) {
   auto offset=lab->mNodes[n].mLeafTriangleIndex;
-  if(offset!=RAYCAST_MESH::TRI_EOF) { leafCount++; maxLeaf=std::max(maxLeaf,size_t(lab->mLeafTriangles[offset])); }
+  if(offset!=TRI_EOF) { leafCount++; maxLeaf=std::max(maxLeaf,size_t(lab->mLeafTriangles[offset])); }
  }
  std::cerr<<"LAB_STATS {\\"nodes\\":"<<lab->mNodeCount<<",\\"node_size\\":"<<sizeof(RAYCAST_MESH::NodeAABB)
  <<",\\"allocated_nodes\\":"<<lab->mMaxNodeCount<<",\\"leaf_nodes\\":"<<leafCount
