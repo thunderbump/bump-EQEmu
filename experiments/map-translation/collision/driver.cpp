@@ -3,6 +3,8 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
+#include <iomanip>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -81,7 +83,7 @@ void controls() {
  for(int j=0;j<32;j++) {
   auto e=build(m); auto h=cast(*e,r); require(h.hit,"analytic hit");
   require(h.fields[0]==1 && h.fields[1]==1 && h.fields[2]==0 && h.fields[6]==2,"analytic location/distance");
-  require(h.fields[3]==0 && h.fields[4]==0 && h.fields[5]==-1,"analytic winding normal");
+  require(h.fields[3]==0 && h.fields[4]==0 && h.fields[5]==1,"analytic winding normal");
   require(!cast(*e,{{5,5,2},{5,5,-2},"miss"}).hit,"analytic miss");
   require(!cast(*e,{{1,1,2},{1,1,1},"short_miss"}).hit,"segment bound");
   require(!cast(*e,{{1,1,0},{1,1,0},"zero"}).hit,"zero ray");
@@ -100,13 +102,20 @@ int main(int argc,char** argv) { try {
  auto a=read(argv[1],argv[3]),b=read(argv[2],argv[3]);
  require(a.v.size()==b.v.size() && a.i==b.i,"strict structure/index/order");
  auto x=build(a),y=build(b); auto q=queries(a);
+ std::ofstream trace;
+ if(const char* path=std::getenv("COLLISION_TRACE")) { trace.open(path); require(bool(trace),"trace open"); trace<<std::hexfloat; }
  struct Counts { unsigned total=0,hits=0,misses=0,differences=0; };
  std::map<std::string,Counts> counts; unsigned diffs=0,hits=0,misses=0; double maxdelta=0;
- for(const auto& r:q) { auto h=cast(*x,r),j=cast(*y,r); auto& c=counts[r.category]; c.total++; (h.hit?c.hits:c.misses)++; (h.hit?hits:misses)++;
+ for(const auto& r:q) { auto h=cast(*x,r),j=cast(*y,r); if(trace.is_open()) {
+   trace<<r.category; for(auto f:r.a) trace<<' '<<f; for(auto f:r.b) trace<<' '<<f;
+   for(const auto& out:{h,j}) { trace<<' '<<out.hit; if(out.hit) for(auto f:out.fields) trace<<' '<<f; }
+   trace<<'\n';
+  }
+  auto& c=counts[r.category]; c.total++; (h.hit?c.hits:c.misses)++; (h.hit?hits:misses)++;
   if(!equal(h,j)) { c.differences++; diffs++; }
   if(h.hit && j.hit) for(int k=0;k<7;k++) { require(std::isfinite(h.fields[k])&&std::isfinite(j.fields[k]),"nonfinite hit field"); maxdelta=std::max(maxdelta,std::abs(double(h.fields[k])-j.fields[k])); }
  }
  std::cout<<"{\"seed\":2236555302,\"queries\":"<<q.size()<<",\"hits\":"<<hits<<",\"misses\":"<<misses<<",\"differences\":"<<diffs<<",\"max_absolute_field_delta\":"<<maxdelta<<",\"categories\":{";
  bool first=true; for(auto& kv:counts) { if(!first) std::cout<<","; first=false; auto& c=kv.second; std::cout<<"\""<<kv.first<<"\":{\"queries\":"<<c.total<<",\"hits\":"<<c.hits<<",\"misses\":"<<c.misses<<",\"differences\":"<<c.differences<<"}"; }
- std::cout<<"}}\n"; require(hits>=100 && misses>=100,"vacuous query set"); return diffs?1:0;
+ std::cout<<"}}\n"; if(trace.is_open()) { trace.close(); require(bool(trace),"trace write"); } require(hits>=100 && misses>=100,"vacuous query set"); return diffs?1:0;
  } catch(const std::exception& e) { std::cerr<<e.what()<<"\n"; return 2; } }

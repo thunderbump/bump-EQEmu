@@ -46,7 +46,9 @@ for name, identity in IDENTITIES.items():
     for p in (original,a,b):
         manifest.append({'path':str(p),'bytes':p.stat().st_size,'sha256':sha(p),
                          'payload_sha256':hashlib.sha256(p.read_bytes()[84:]).hexdigest() if p.suffix=='.mesh' else None})
+    os.environ['COLLISION_TRACE']=str(OUT/(name+'.trace'))
     report=json.loads(run(name,[BINARY,str(a),str(b),identity]))
+    del os.environ['COLLISION_TRACE']
     (OUT/(name+'.json')).write_text(json.dumps(report,indent=2))
     # Exercise the native reader and structural comparator, not just a Python parser.
     raw=a.read_bytes()
