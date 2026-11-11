@@ -1,0 +1,88 @@
+{
+  "asset_contracts": [
+    {
+      "path": "base/breedinggrounds.map",
+      "result": "expected LOAD ERROR: nonfinite or out-of-bound vertex",
+      "cli_rejections": 2,
+      "engine_constructed": false,
+      "collision_queries": 0,
+      "diagnostic_vertices": [
+        {
+          "vertex": 239353,
+          "axis": 0,
+          "bits": "ffc00000"
+        },
+        {
+          "vertex": 239353,
+          "axis": 1,
+          "bits": "ffc00000"
+        },
+        {
+          "vertex": 239353,
+          "axis": 2,
+          "bits": "ffc00000"
+        }
+      ]
+    },
+    {
+      "path": "base/chapterhouse.map",
+      "result": "expected LOAD ERROR: nonfinite or out-of-bound vertex",
+      "cli_rejections": 2,
+      "engine_constructed": false,
+      "collision_queries": 0,
+      "diagnostic_vertices": [
+        {
+          "vertex": 1450240,
+          "axis": 0,
+          "bits": "ffc00000"
+        },
+        {
+          "vertex": 1450240,
+          "axis": 1,
+          "bits": "ffc00000"
+        },
+        {
+          "vertex": 1450240,
+          "axis": 2,
+          "bits": "ffc00000"
+        },
+        {
+          "vertex": 1450241,
+          "axis": 0,
+          "bits": "ffc00000"
+        },
+        {
+          "vertex": 1450241,
+          "axis": 1,
+          "bits": "ffc00000"
+        },
+        {
+          "vertex": 1450241,
+          "axis": 2,
+          "bits": "ffc00000"
+        }
+      ]
+    },
+    {
+      "path": "base/firiona_lit.map",
+      "result": "valid empty",
+      "load_drop_cycles": 64,
+      "finite_nohits": 14336,
+      "invalid_endpoint_errors": 384,
+      "cli_nohits": 1
+    },
+    {
+      "path": "base/warslikswood_lit.map",
+      "result": "valid empty",
+      "load_drop_cycles": 64,
+      "finite_nohits": 14336,
+      "invalid_endpoint_errors": 384,
+      "cli_nohits": 1
+    }
+  ],
+  "handwritten_nonfinite_cli_rejections": 24,
+  "parser_cli_rejections": 6,
+  "core_unit_tests": 10,
+  "contract_unit_tests": 2,
+  "collision_comparisons": 0
+}

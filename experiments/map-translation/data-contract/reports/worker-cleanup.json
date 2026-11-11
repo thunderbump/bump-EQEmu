@@ -1,0 +1,20 @@
+{
+  "service_state": "ActiveState=inactive\nSubState=dead\nResult=success\n",
+  "containers_remaining": 0,
+  "image_prune_reclaimed": "11.75GB",
+  "store_removed": true,
+  "exec_root_removed": true,
+  "socket_removed": true,
+  "removed_derived": [
+    {
+      "path": "/home/bump/.local/state/eqemu-map-translation/map-safe-data-contract-20261111/qualified/source.tar",
+      "bytes": 84203520,
+      "sha256": "a644b3e3340ebff088e22fd2e341ad6652818a2addda05b20ce66d9c8d8e211d"
+    },
+    {
+      "path": "/home/bump/.local/state/eqemu-map-translation/map-safe-data-contract-20261111/qualified/source",
+      "bytes": 81796700
+    }
+  ],
+  "retained": "original exports untouched; qualified/results including binaries, queries, fixtures, run logs and failure diagnostics retained"
+}

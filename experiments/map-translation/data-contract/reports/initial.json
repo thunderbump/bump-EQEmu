@@ -1,0 +1,178 @@
+{
+  "Id": "09792537a51ead1853e07c9f79022b1b6cd0d10c375c44ee351af9c167a85c82",
+  "State": {
+    "Status": "created",
+    "Running": false,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 0,
+    "ExitCode": 0,
+    "Error": "",
+    "StartedAt": "0001-01-01T00:00:00Z",
+    "FinishedAt": "0001-01-01T00:00:00Z"
+  },
+  "HostConfig": {
+    "Binds": null,
+    "ContainerIDFile": "",
+    "LogConfig": {
+      "Type": "json-file",
+      "Config": {}
+    },
+    "NetworkMode": "none",
+    "PortBindings": {},
+    "RestartPolicy": {
+      "Name": "no",
+      "MaximumRetryCount": 0
+    },
+    "AutoRemove": false,
+    "VolumeDriver": "",
+    "VolumesFrom": null,
+    "ConsoleSize": [
+      0,
+      0
+    ],
+    "CapAdd": null,
+    "CapDrop": null,
+    "CgroupnsMode": "private",
+    "Dns": null,
+    "DnsOptions": [],
+    "DnsSearch": [],
+    "ExtraHosts": null,
+    "GroupAdd": null,
+    "IpcMode": "private",
+    "Cgroup": "",
+    "Links": null,
+    "OomScoreAdj": 0,
+    "PidMode": "",
+    "Privileged": false,
+    "PublishAllPorts": false,
+    "ReadonlyRootfs": false,
+    "SecurityOpt": null,
+    "UTSMode": "",
+    "UsernsMode": "",
+    "ShmSize": 67108864,
+    "Runtime": "runc",
+    "Isolation": "",
+    "CpuShares": 0,
+    "Memory": 2147483648,
+    "NanoCpus": 2000000000,
+    "CgroupParent": "",
+    "BlkioWeight": 0,
+    "BlkioWeightDevice": [],
+    "BlkioDeviceReadBps": [],
+    "BlkioDeviceWriteBps": [],
+    "BlkioDeviceReadIOps": [],
+    "BlkioDeviceWriteIOps": [],
+    "CpuPeriod": 0,
+    "CpuQuota": 0,
+    "CpuRealtimePeriod": 0,
+    "CpuRealtimeRuntime": 0,
+    "CpusetCpus": "",
+    "CpusetMems": "",
+    "Devices": [],
+    "DeviceCgroupRules": null,
+    "DeviceRequests": null,
+    "MemoryReservation": 0,
+    "MemorySwap": 2147483648,
+    "MemorySwappiness": null,
+    "OomKillDisable": false,
+    "PidsLimit": 128,
+    "Ulimits": null,
+    "CpuCount": 0,
+    "CpuPercent": 0,
+    "IOMaximumIOps": 0,
+    "IOMaximumBandwidth": 0,
+    "Mounts": [
+      {
+        "Type": "bind",
+        "Source": "/home/bump/.local/state/eqemu-map-translation/map-safe-data-contract-20261111/qualified/source",
+        "Target": "/work",
+        "ReadOnly": true
+      },
+      {
+        "Type": "bind",
+        "Source": "/home/bump/.local/state/eqemu-map-translation/map-safe-data-contract-20261111/qualified/results",
+        "Target": "/results"
+      },
+      {
+        "Type": "bind",
+        "Source": "/home/bump/.local/state/eqemu-map-translation/raycaster-corpus-20261110/final/assets/base/breedinggrounds",
+        "Target": "/assets/breedinggrounds",
+        "ReadOnly": true
+      },
+      {
+        "Type": "bind",
+        "Source": "/home/bump/.local/state/eqemu-map-translation/raycaster-corpus-20261110/final/assets/base/chapterhouse",
+        "Target": "/assets/chapterhouse",
+        "ReadOnly": true
+      },
+      {
+        "Type": "bind",
+        "Source": "/home/bump/.local/state/eqemu-map-translation/raycaster-corpus-20261110/final/assets/base/firiona_lit",
+        "Target": "/assets/firiona_lit",
+        "ReadOnly": true
+      },
+      {
+        "Type": "bind",
+        "Source": "/home/bump/.local/state/eqemu-map-translation/raycaster-corpus-20261110/final/assets/base/warslikswood_lit",
+        "Target": "/assets/warslikswood_lit",
+        "ReadOnly": true
+      }
+    ],
+    "MaskedPaths": [
+      "/proc/acpi",
+      "/proc/asound",
+      "/proc/interrupts",
+      "/proc/kcore",
+      "/proc/keys",
+      "/proc/latency_stats",
+      "/proc/sched_debug",
+      "/proc/scsi",
+      "/proc/timer_list",
+      "/proc/timer_stats",
+      "/sys/devices/virtual/powercap",
+      "/sys/firmware"
+    ],
+    "ReadonlyPaths": [
+      "/proc/bus",
+      "/proc/fs",
+      "/proc/irq",
+      "/proc/sys",
+      "/proc/sysrq-trigger"
+    ]
+  },
+  "Config": {
+    "Hostname": "09792537a51e",
+    "Domainname": "",
+    "User": "0",
+    "AttachStdin": false,
+    "AttachStdout": true,
+    "AttachStderr": true,
+    "Tty": false,
+    "OpenStdin": false,
+    "StdinOnce": false,
+    "Env": [
+      "PATH=/opt/eqemu-perl/bin:/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      "DEBIAN_FRONTEND=noninteractive",
+      "PUID=1000",
+      "PGID=1000",
+      "TZ=US/Central",
+      "CC=/usr/bin/clang",
+      "CXX=/usr/bin/clang++"
+    ],
+    "Cmd": [
+      "/work/experiments/map-translation/data-contract/guest.py"
+    ],
+    "Image": "sha256:0aeb54f14590bf1631a27f60b3e7b7eed6dde549f08ba1f5738282e59d4cea1d",
+    "Volumes": null,
+    "WorkingDir": "/home/eqemu",
+    "Entrypoint": [
+      "python3"
+    ],
+    "Labels": {
+      "maintainer": "Akkadius <akkadius1@gmail.com>"
+    }
+  }
+}
