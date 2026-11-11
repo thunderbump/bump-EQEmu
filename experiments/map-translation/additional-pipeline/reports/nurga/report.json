@@ -1,0 +1,276 @@
+{
+  "stage": "complete",
+  "outcome": "pass",
+  "stages": [
+    {
+      "stage": "cpp-decode",
+      "exit": 0,
+      "seconds": 0.007524601183831692,
+      "before": {
+        "memory.current": "10252288\n",
+        "memory.peak": "11980800\n",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+        "memory.max": "2147483648\n",
+        "memory.swap.max": "0\n"
+      },
+      "after": {
+        "memory.current": "11677696\n",
+        "memory.peak": "12451840\n",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+        "memory.max": "2147483648\n",
+        "memory.swap.max": "0\n"
+      }
+    },
+    {
+      "stage": "rust-decode",
+      "exit": 0,
+      "seconds": 0.007532486226409674,
+      "before": {
+        "memory.current": "11915264\n",
+        "memory.peak": "12451840\n",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+        "memory.max": "2147483648\n",
+        "memory.swap.max": "0\n"
+      },
+      "after": {
+        "memory.current": "13107200\n",
+        "memory.peak": "14184448\n",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+        "memory.max": "2147483648\n",
+        "memory.swap.max": "0\n"
+      }
+    },
+    {
+      "stage": "cpp-repeat",
+      "exit": 0,
+      "seconds": 0.00806742301210761,
+      "before": {
+        "memory.current": "18812928\n",
+        "memory.peak": "34062336\n",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+        "memory.max": "2147483648\n",
+        "memory.swap.max": "0\n"
+      },
+      "after": {
+        "memory.current": "19972096\n",
+        "memory.peak": "34062336\n",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+        "memory.max": "2147483648\n",
+        "memory.swap.max": "0\n"
+      }
+    },
+    {
+      "stage": "rust-repeat",
+      "exit": 0,
+      "seconds": 0.008025674149394035,
+      "before": {
+        "memory.current": "19296256\n",
+        "memory.peak": "34062336\n",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+        "memory.max": "2147483648\n",
+        "memory.swap.max": "0\n"
+      },
+      "after": {
+        "memory.current": "19898368\n",
+        "memory.peak": "34062336\n",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+        "memory.max": "2147483648\n",
+        "memory.swap.max": "0\n"
+      }
+    },
+    {
+      "stage": "cpp-query",
+      "exit": 0,
+      "seconds": 0.06414897926151752,
+      "before": {
+        "memory.current": "19263488\n",
+        "memory.peak": "34062336\n",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+        "memory.max": "2147483648\n",
+        "memory.swap.max": "0\n"
+      },
+      "after": {
+        "memory.current": "19845120\n",
+        "memory.peak": "34062336\n",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+        "memory.max": "2147483648\n",
+        "memory.swap.max": "0\n"
+      }
+    },
+    {
+      "stage": "rust-query",
+      "exit": 0,
+      "seconds": 0.06398385902866721,
+      "before": {
+        "memory.current": "21491712\n",
+        "memory.peak": "34062336\n",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+        "memory.max": "2147483648\n",
+        "memory.swap.max": "0\n"
+      },
+      "after": {
+        "memory.current": "22007808\n",
+        "memory.peak": "34062336\n",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+        "memory.max": "2147483648\n",
+        "memory.swap.max": "0\n"
+      }
+    }
+  ],
+  "header_declarations": {
+    "models": 19,
+    "placements": 126,
+    "groups": 0,
+    "tiles": 0,
+    "proof_of_branch_execution": false
+  },
+  "geometry": {
+    "vertices": 24494,
+    "indices": 55029,
+    "bytes": 514128,
+    "sha256": "d258df8a72f1002c75377634a2227c80f46b8041d277d75883798b0c066cb372"
+  },
+  "rust_geometry": {
+    "sha256": "d258df8a72f1002c75377634a2227c80f46b8041d277d75883798b0c066cb372",
+    "bytes": 514128
+  },
+  "decoder_exact": true,
+  "decoder_numeric": {
+    "exact": true,
+    "vertices": 24494,
+    "indices": 55029,
+    "ordered_indices_equal": true,
+    "differing_coordinates": 0,
+    "coordinate_fraction": 0.0,
+    "differing_vertices": 0,
+    "vertex_fraction": 0.0,
+    "max_absolute": 0,
+    "median_absolute": 0,
+    "p99_absolute": 0,
+    "max_relative_above_1e_minus_6": 0,
+    "max_ulp": 0,
+    "signed_zero_changes": 0,
+    "nonfinite": [],
+    "bounds": [
+      [
+        [
+          -1967.21875,
+          1663.34375
+        ],
+        [
+          -2383.0625,
+          16.0
+        ],
+        [
+          -361.0,
+          111.96875
+        ]
+      ],
+      [
+        [
+          -1967.21875,
+          1663.34375
+        ],
+        [
+          -2383.0625,
+          16.0
+        ],
+        [
+          -361.0,
+          111.96875
+        ]
+      ]
+    ],
+    "bounds_equal": true,
+    "coordinate_range": null,
+    "worst_examples": [],
+    "topology": "same ordered index words, counts and vertex correspondence; geometric degeneracy/collision behavior not assessed"
+  },
+  "cpp_repeat_sha256": "d258df8a72f1002c75377634a2227c80f46b8041d277d75883798b0c066cb372",
+  "rust_repeat_sha256": "d258df8a72f1002c75377634a2227c80f46b8041d277d75883798b0c066cb372",
+  "queries": {
+    "count": 5504,
+    "sha256": "be13a3a748598509df29cd12e4a456593c805951ed115fc2fe03f7c1dbe79388",
+    "trace_sha256": "ec6a0251a4e080850e12a1ad9aa60e6dd04aac0a678d17b67c7324513e9f47cf",
+    "categories": {
+      "spatial": {
+        "queries": 2000,
+        "misses": 1646,
+        "hits": 354
+      },
+      "vertical": {
+        "queries": 1000,
+        "misses": 907,
+        "hits": 93
+      },
+      "outside": {
+        "queries": 200,
+        "misses": 200
+      },
+      "interior": {
+        "queries": 256,
+        "hits": 256
+      },
+      "interior_adjacent": {
+        "queries": 256,
+        "hits": 256
+      },
+      "edge": {
+        "queries": 256,
+        "hits": 253,
+        "misses": 3
+      },
+      "edge_adjacent": {
+        "queries": 256,
+        "hits": 240,
+        "misses": 16
+      },
+      "vertex": {
+        "queries": 256,
+        "hits": 256
+      },
+      "vertex_adjacent": {
+        "queries": 256,
+        "hits": 219,
+        "misses": 37
+      },
+      "short": {
+        "queries": 256,
+        "hits": 256
+      },
+      "near_parallel": {
+        "queries": 256,
+        "misses": 95,
+        "hits": 161
+      },
+      "zero_length": {
+        "queries": 256,
+        "misses": 256
+      }
+    },
+    "seed": 2236555302,
+    "recipe": "unchanged collision/driver.cpp queries",
+    "geometry_source": "d258df8a72f1002c75377634a2227c80f46b8041d277d75883798b0c066cb372",
+    "candidate_geometry_source": "d258df8a72f1002c75377634a2227c80f46b8041d277d75883798b0c066cb372"
+  },
+  "comparison": {
+    "queries": 5504,
+    "hits": 2344,
+    "misses": 3160,
+    "differences": 0
+  },
+  "numeric": {
+    "queries": 5504,
+    "hits": 2344,
+    "misses": 3160,
+    "classification_changes": 0,
+    "field_bit_changes": 0,
+    "max_abs": 0.0,
+    "max_relative": 0.0,
+    "max_ulp": 0,
+    "signed_zero": 0,
+    "nonfinite": 0,
+    "examples": []
+  },
+  "coverage": "useful hit and miss"
+}

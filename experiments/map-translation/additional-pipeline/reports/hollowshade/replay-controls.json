@@ -1,0 +1,55 @@
+{
+  "reader_replay": [
+    {
+      "control": "analytic",
+      "exit": 0,
+      "diagnostic": ""
+    },
+    {
+      "control": "schema",
+      "exit": 1,
+      "diagnostic": "schema"
+    },
+    {
+      "control": "identity",
+      "exit": 1,
+      "diagnostic": "identity"
+    },
+    {
+      "control": "index",
+      "exit": 1,
+      "diagnostic": "index"
+    },
+    {
+      "control": "nonfinite",
+      "exit": 1,
+      "diagnostic": "vertex"
+    },
+    {
+      "control": "count",
+      "exit": 1,
+      "diagnostic": "counts"
+    },
+    {
+      "control": "truncated",
+      "exit": 1,
+      "diagnostic": "length"
+    },
+    {
+      "control": "order",
+      "exit": 1,
+      "diagnostic": "order"
+    },
+    {
+      "control": "replay_identity",
+      "exit": 1,
+      "diagnostic": "identity"
+    },
+    {
+      "control": "replay_count",
+      "exit": 1,
+      "diagnostic": "count"
+    }
+  ],
+  "independent_exact_comparator_mutations": "passed"
+}

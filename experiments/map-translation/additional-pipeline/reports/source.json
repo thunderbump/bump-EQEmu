@@ -1,0 +1,18 @@
+[
+  {
+    "name": "module",
+    "commit": "60346d90b79b9c2b1a86590125b955219ecd1a41",
+    "tree": "9a95bea539aa03a4d9dbdd580664695cabaf376e",
+    "subtree": null,
+    "archive_sha256": "4d7e9ffd9dfadc643fc43db798e54f59fcc82144401edaca5e0ea5b8ac938183",
+    "archive_bytes": 84285440
+  },
+  {
+    "name": "harness",
+    "commit": "b3ad0bf5e39eefe798771db21e772ce52fe1dc1a",
+    "tree": "2d8a52c1d53df4ffa1f5ca050ad13750934e24a4",
+    "subtree": "dca5c4c63036cf6adff6f9f7dd8391b072ad9198",
+    "archive_sha256": "1b2c017c73f44e7a62f78715d34bc5734e3165ecb0a88bc4b765b4829927e813",
+    "archive_bytes": 235520
+  }
+]

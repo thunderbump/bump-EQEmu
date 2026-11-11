@@ -1,0 +1,11 @@
+{
+  "service": "ActiveState=inactive\nSubState=dead\nResult=success\n",
+  "cleanup_service": "Result=success\nExecMainStatus=0\n",
+  "paths": {
+    "/home/bump/.local/state/eqemu-map-translation/additional-pipeline-20261111/docker": false,
+    "/run/user/1000/eqemu-additional-pipeline-20261111.sock": false,
+    "/run/user/1000/eqemu-additional-pipeline-20261111-exec": false
+  },
+  "artifact_bytes_after_cleanup": 1465332,
+  "prune_receipt": "Deleted Images:\nuntagged: additional-pipeline-build:b3ad0bf5e39e\ndeleted: sha256:967c82ae1c294440d2c2f7bdf4722a6490e5ff1c615b4a6ecb43fb8c95d7eb54\nuntagged: limits-offline\ndeleted: sha256:0aeb54f14590bf1631a27f60b3e7b7eed6dde549f08ba1f5738282e59d4cea1d\n\nTotal reclaimed space: 11.89GB\n"
+}

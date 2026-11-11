@@ -1,0 +1,69 @@
+{
+  "successful_derived_removed": [
+    {
+      "path": "execution/hollowshade/geometry.mesh",
+      "bytes": 15073128,
+      "sha256": "6e3882bfd11f9ac943fc69688289f42b9589ed8e259d4f100d5c5eeac769aba4"
+    },
+    {
+      "path": "execution/hollowshade/rust.mesh",
+      "bytes": 15073128,
+      "sha256": "6e3882bfd11f9ac943fc69688289f42b9589ed8e259d4f100d5c5eeac769aba4"
+    },
+    {
+      "path": "execution/hollowshade/queries.bin",
+      "bytes": 154188,
+      "sha256": "87b3e4042027e9b1a2b12f5ce43ca99bfeecfab82e891a9caf88ccd83d63797e"
+    },
+    {
+      "path": "execution/hollowshade/reference.trace",
+      "bytes": 915242,
+      "sha256": "5ba8254624d7da32a63510fed526150d61f7af67761b2060e511d496b67cb697"
+    },
+    {
+      "path": "execution/hollowshade/candidate.bin",
+      "bytes": 125184,
+      "sha256": "1686da403c57e8d5c956a3e5650e24ee3d29b51e3e3e114b10bcafee87d51896"
+    },
+    {
+      "path": "execution/hollowshade/candidate.trace",
+      "bytes": 1103711,
+      "sha256": "f6162fe55ad764f1a279f15970320b19904f413ae9625d47ae816b1f909978df"
+    },
+    {
+      "path": "execution/nurga/geometry.mesh",
+      "bytes": 514128,
+      "sha256": "d258df8a72f1002c75377634a2227c80f46b8041d277d75883798b0c066cb372"
+    },
+    {
+      "path": "execution/nurga/rust.mesh",
+      "bytes": 514128,
+      "sha256": "d258df8a72f1002c75377634a2227c80f46b8041d277d75883798b0c066cb372"
+    },
+    {
+      "path": "execution/nurga/queries.bin",
+      "bytes": 154188,
+      "sha256": "be13a3a748598509df29cd12e4a456593c805951ed115fc2fe03f7c1dbe79388"
+    },
+    {
+      "path": "execution/nurga/reference.trace",
+      "bytes": 739215,
+      "sha256": "ec6a0251a4e080850e12a1ad9aa60e6dd04aac0a678d17b67c7324513e9f47cf"
+    },
+    {
+      "path": "execution/nurga/candidate.bin",
+      "bytes": 80512,
+      "sha256": "6c0b37608f1ae2b9a4eab1227ed6147cb21f9acae7a4a08c07b18fac2c47a318"
+    },
+    {
+      "path": "execution/nurga/candidate.trace",
+      "bytes": 859869,
+      "sha256": "90910632b612bcf21a32c8fe4d4069a42783814e7f691c8f11d31e8045869958"
+    }
+  ],
+  "bytes_removed": 35306621,
+  "archives_and_extractions_removed": "verified archives regenerable from recorded commits; both build attempts preserved as small logs/identity/exit receipts",
+  "input_bytes_preserved": 1307825,
+  "storage_before_derived_cleanup_execution_bytes": 202049558,
+  "source_importer_sha256": "1e837132788050b4e9baf261342587a86801b12a534634d9c668e795edf60f30"
+}
