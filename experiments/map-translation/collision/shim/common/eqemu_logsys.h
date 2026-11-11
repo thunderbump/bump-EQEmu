@@ -1,6 +1,7 @@
 #pragma once
 // Standalone logging adapter only. The production allocator and raycaster compile unchanged.
 #include <cstddef>
+#include <cstdio>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
