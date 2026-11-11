@@ -1,0 +1,29 @@
+{
+  "seed": "brian-extra-map-20261110-v1",
+  "algorithm": "big-endian SHA256(UTF-8 seed) integer modulo eligible count; zero-based index into lexicographically sorted paths",
+  "filter": "base/*.map; V2; groups=0; tiles=0; exclude qeynos2.map and poknowledge.map. Header-supported pool, resource bounds not prequalified.",
+  "eligible_count": 449,
+  "candidate_list_sha256": "84b05834dd4351e89111a9a575ce4dca082c121ef1a799d60bbe7f0c2b0b31ea",
+  "candidate_list_encoding": "UTF-8 paths sorted ascending, each followed by LF",
+  "selected_index": 138,
+  "collection_root": "/home/bump/Projects/bump-eqemu/bump-akk-stack/server/maps",
+  "map": {
+    "path": "base/griegsend.map",
+    "bytes": 636006,
+    "sha256": "2d12a9614a1db9a5cb1abcceca09b3007f0fdfc6ac497a61fe71c0a7724e9c58",
+    "version": "0x2000000",
+    "header": {
+      "vertices": 37260,
+      "indices": 166389,
+      "nc_vertices": 1173,
+      "nc_indices": 7116,
+      "models": 114,
+      "placements": 649,
+      "groups": 0,
+      "tiles": 0,
+      "quads_per_tile": 0,
+      "units_per_vertex": 0.0
+    }
+  },
+  "census_sha256": "4c6d8827ee1b0e679996c6a313862a5e77a2882fe557bf3f98c7fb48391e39b8"
+}
