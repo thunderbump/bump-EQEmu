@@ -14,6 +14,8 @@ p.add_argument('--baseline', type=Path, required=True)
 p.add_argument('--rust-meshes', type=Path, required=True)
 p.add_argument('--references', type=Path, required=True)
 a = p.parse_args()
+if not a.image.startswith("sha256:") or len(a.image)!=71:
+    p.error("immutable sha256 image ID required")
 root = Path(__file__).resolve().parents[3]
 if subprocess.check_output(['git', '-C', str(root), 'status', '--porcelain']).strip():
     p.error('commit the reviewed source first; snapshot must be clean')
@@ -42,21 +44,23 @@ cmake -S . -B /reference-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE
 cp /reference-build/compile_commands.json /results/
 c++ --version > /results/compiler.txt
 sha256sum /reference-build/raycaster-reference > /results/reference-binary.sha256
+ldd /reference-build/raycaster-reference > /results/reference-ldd.txt
+ldd /reference-build/raycaster-reference | awk '{for(i=1;i<=NF;i++) if (index($i,"/") == 1) print $i}' | xargs sha256sum > /results/reference-libraries.sha256
 python3 qualify.py
 '''
 with tempfile.TemporaryDirectory() as tmp:
     tmp = Path(tmp)
     archive = subprocess.check_output(['git', '-C', str(root), 'archive', commit])
     (tmp / 'source.tar').write_bytes(archive)
+    (a.output / 'source.tar').write_bytes(archive)
     source = tmp / 'source'; source.mkdir()
     subprocess.run(['tar', '-xf', str(tmp / 'source.tar'), '-C', str(source)], check=True)
     identity = {'commit': commit, 'tree': subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD^{tree}'], text=True).strip(),
                 'archive_sha256': hashlib.sha256(archive).hexdigest(), 'baseline': 'f2cd85d4161bf5d75bab54e2ab5a0e6c7bc303f2'}
     (source / 'capture-source.json').write_text(json.dumps(identity, indent=2))
     (a.output / 'source.json').write_text(json.dumps(identity, indent=2))
-    create = docker + ['create', '--network', 'none', '--memory', '2g', '--memory-swap', '2g', '--cpus', '2', '--pids-limit', '128',
-                       '--entrypoint', '/bin/bash',  
-                       '-e', 'ASAN_OPTIONS=halt_on_error=1:detect_leaks=1', '-e', 'UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1', a.image, '-lc', script]
+    create = docker + ['create', '--pull', 'never', '--network', 'none', '--memory', '2g', '--memory-swap', '2g', '--cpus', '2', '--pids-limit', '128',
+                       '--entrypoint', '/bin/bash', a.image, '-lc', script]
     cid = subprocess.check_output(create, text=True).strip()
     (a.output / 'container-id.txt').write_text(cid + '\n')
     retain = True

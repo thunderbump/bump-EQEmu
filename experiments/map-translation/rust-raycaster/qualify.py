@@ -5,8 +5,18 @@ sys.path.insert(0,'/work/experiments/map-translation/collision')
 from compare import compare,controls,row
 OUT=Path('/results'); BIN='/rust-build/release/rust-raycaster-poc'
 IDS={'qeynos2':'040343c54e3b02bfd1637ce8fca8839dd676e17c41fb24c042ccfa0bd649435c','poknowledge':'794b618d86852b47bd593424129aaf34eee326e5e3fec7290aeeb0e32bc41d20'}
+# Frozen ordinary PR106 outputs, authenticated before candidate execution.
+TRACES={'qeynos2':'891a5edfb2761a2c70be91e261355e3326e9674b26b57f5a8dbb552084193b3f','poknowledge':'24350316805971e439651cc7349724348c3307d27b2644df185434663af4e0b1'}
+MESHES={'qeynos2':'d9860bb39b0b4588534e8294ea3de92ba979dd63f5eadafdd08503feb8541cfa','poknowledge':'ecdbcf4223234c47f1f7125a493421b689fcb6fb9eda507e4ac8137b8ed1ce31'}
+def authenticate(data,digest):
+ assert hashlib.sha256(data).hexdigest()==digest,'frozen trace digest mismatch'
+ lines=data.decode().splitlines();assert len(lines)==5504,'frozen trace count mismatch'
+ for line in lines:row(line)
+ return lines
 def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 def mem():return {n:(Path('/sys/fs/cgroup')/n).read_text() for n in ['memory.current','memory.peak','memory.events','memory.max','memory.swap.max']}
+admission=mem();assert int(admission["memory.max"])==2*1024**3 and int(admission["memory.swap.max"])==0
+(OUT/"admission.json").write_text(json.dumps(admission,indent=2))
 runs=[]
 def run(name,args,expected=0,message=None):
  before=mem();t=time.monotonic()
@@ -16,13 +26,15 @@ def run(name,args,expected=0,message=None):
  assert p.returncode==expected,(name,p.stderr)
  assert message is None or message in p.stderr,(name,message,p.stderr)
 def ordered(b):
- u=struct.unpack('<I',b)[0];return (0x80000000-u) if u&0x80000000 else (0x80000000+u)
+ u=struct.unpack('<I',b)[0];return (0x80000000-(u&0x7fffffff)) if u&0x80000000 else (0x80000000+u)
 def report(ref,candidate):
  results={'queries':0,'hits':0,'misses':0,'classification_changes':0,'field_bit_changes':0,'max_abs':0.,'max_relative_reference_ge_1e-6':0.,'max_ulp':0,'signed_zero_changes':0,'examples':[]}
  for x,y in zip(ref.read_text().splitlines(),candidate.read_text().splitlines(),strict=True):
   xi,xh=row(x);yi,yh=row(y);assert xi==yi
   results['queries']+=1; results['hits' if yh[0][0] else 'misses']+=1
-  if xh[0][0]!=yh[0][0]:results['classification_changes']+=1
+  if xh[0][0]!=yh[0][0]:
+   results['classification_changes']+=1
+   if len(results['examples'])<10:results['examples'].append({'row':results['queries']-1,'reference_hit':xh[0][0],'candidate_hit':yh[0][0]})
   if xh[0][0] and yh[0][0]:
    for k,(a,b) in enumerate(zip(xh[0][1],yh[0][1])):
     if a==b:continue
@@ -33,12 +45,24 @@ def report(ref,candidate):
     if len(results['examples'])<10:results['examples'].append({'row':results['queries']-1,'field':k,'reference':av,'candidate':bv})
  return results
 controls(OUT)
+assert ordered(struct.pack("<f",-0.))==ordered(struct.pack("<f",0.))
+assert ordered(struct.pack("<I",0x80000001))+1==ordered(struct.pack("<f",0.))
+assert ordered(struct.pack("<f",0.))+1==ordered(struct.pack("<I",1))
+assert ordered(struct.pack("<f",-1.))<ordered(struct.pack("<f",0.))<ordered(struct.pack("<f",1.))
 manifest=[]; failures=[]
 for name,identity in IDS.items():
  mesh=Path('/rust-meshes')/(name+'.0.mesh');reference=Path('/baseline')/(name+'.reference.trace')
  # Both original owned arrays are retained; reject accidental geometry drift before replay.
  assert mesh.read_bytes()==(Path('/references')/(name+'.0.mesh')).read_bytes()
- lines=reference.read_text().splitlines();queries=bytearray(b'EQRAYS01'+identity.encode()+struct.pack('<I',len(lines)))
+ assert sha(mesh)==MESHES[name],'frozen mesh digest mismatch'
+ raw_trace=reference.read_bytes();lines=authenticate(raw_trace,TRACES[name])
+ # Authentication sensitivity: truncate, reorder, and perturb one endpoint byte.
+ changed=bytearray(raw_trace);offset=raw_trace.index(b' ')+1;changed[offset]=ord('1') if changed[offset]!=ord('1') else ord('2')
+ for mutation in [lines[0].encode()+b'\n',('\n'.join([lines[1],lines[0],*lines[2:]])+'\n').encode(),bytes(changed)]:
+  try:authenticate(mutation,TRACES[name])
+  except AssertionError:pass
+  else:raise AssertionError('trace authentication accepted mutation')
+ queries=bytearray(b'EQRAYS01'+identity.encode()+struct.pack('<I',len(lines)))
  for n,line in enumerate(lines):
   ident,_=row(line);queries+=struct.pack('<I',n)+b''.join(ident[1])
  qp=OUT/(name+'.queries');qp.write_bytes(queries)
@@ -64,5 +88,6 @@ for name,identity in IDS.items():
  path=OUT/'bad.mesh';path.write_bytes(raw[:-1]);run(name+'-reject-truncated',[BIN,str(path),identity,str(qp),str(OUT/(name+'-bad-truncated.bin'))],1,'length');path.unlink()
  for label,offset,value,message in [('order',76,struct.pack('<I',1),'order'),('identity',8,b'f'*64,'identity'),('count',72,struct.pack('<I',0),'count')]:
   path=OUT/'bad.queries';path.write_bytes(queries[:offset]+value+queries[offset+len(value):]);run(name+'-replay-'+label,[BIN,str(mesh),identity,str(path),str(OUT/(name+'-replay-'+label+'.bin'))],1,message);path.unlink()
+(OUT/'adapter-controls.json').write_text(json.dumps({'trace_authentication_mutations_rejected':6,'ulp_order_cases':4,'streaming_comparator_mutations':'existing compare.controls passed'}))
 (OUT/'artifacts.json').write_text(json.dumps(manifest,indent=2));(OUT/'summary.json').write_text(json.dumps({'failures':failures},indent=2))
 if failures:raise SystemExit(1)
