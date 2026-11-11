@@ -1,0 +1,45 @@
+{
+  "daemon_service": "eqemu-corpus-data-investigation",
+  "stopped": true,
+  "containers_removed": true,
+  "images_pruned": true,
+  "derived_removed": [
+    {
+      "path": "image.tar",
+      "bytes": 2710456320
+    },
+    {
+      "path": "source.tar",
+      "bytes": 83947520
+    },
+    {
+      "path": "source",
+      "bytes": 81592936
+    },
+    {
+      "path": "final/source.tar",
+      "bytes": 83947520
+    },
+    {
+      "path": "final/source",
+      "bytes": 81592936
+    },
+    {
+      "path": "verified/source.tar",
+      "bytes": 83947520
+    },
+    {
+      "path": "verified/source",
+      "bytes": 81592936
+    },
+    {
+      "path": "reviewed/source.tar",
+      "bytes": 83947520
+    },
+    {
+      "path": "reviewed/source",
+      "bytes": 81592936
+    }
+  ],
+  "original_evidence_untouched": true
+}
