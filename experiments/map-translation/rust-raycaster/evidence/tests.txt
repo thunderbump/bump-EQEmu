@@ -1,0 +1,29 @@
+   Compiling rust-raycaster-poc v0.1.0 (/work/experiments/map-translation/rust-raycaster)
+    Finished `release` profile [optimized] target(s) in 0.27s
+     Running unittests src/lib.rs (/rust-build/release/deps/rust_raycaster_poc-eb3a2fc84360b3ff)
+
+running 9 tests
+test tests::invalid_and_empty ... ok
+test tests::analytic_and_lifecycle ... ok
+test tests::overlap_tie_and_wrap ... ok
+test tests::primitive_boundary_and_precision ... ok
+test tests::seam_edges_and_winding ... ok
+test tests::seeded_independent_f64_reference ... ok
+test tests::split_duplication_and_axis_ties ... ok
+test tests::thresholds_and_box_bits ... ok
+test tests::oblique_seeded_f64 ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running unittests src/main.rs (/rust-build/release/deps/rust_raycaster_poc-911669bcd847d679)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests rust_raycaster_poc
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

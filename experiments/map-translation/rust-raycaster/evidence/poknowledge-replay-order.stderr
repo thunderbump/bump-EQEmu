@@ -1,0 +1,4 @@
+PHASE start seconds=0.00000018 VmHWM:	    1984 kB VmRSS:	    1984 kB
+PHASE read seconds=0.008597826 VmHWM:	   26472 kB VmRSS:	   14416 kB
+PHASE build seconds=0.131892459 VmHWM:	   40780 kB VmRSS:	   40780 kB
+Error: Error("replay order")

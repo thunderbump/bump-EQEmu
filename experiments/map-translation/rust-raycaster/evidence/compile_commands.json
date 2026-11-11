@@ -1,0 +1,17 @@
+[
+{
+  "directory": "/reference-build",
+  "command": "/usr/bin/clang++  -I/work/experiments/map-translation/rust-raycaster/../collision/shim -I/work -I/work/zone -O3 -DNDEBUG -std=gnu++17 -o CMakeFiles/raycaster-reference.dir/reference.cpp.o -c /work/experiments/map-translation/rust-raycaster/reference.cpp",
+  "file": "/work/experiments/map-translation/rust-raycaster/reference.cpp"
+},
+{
+  "directory": "/reference-build",
+  "command": "/usr/bin/clang++  -I/work/experiments/map-translation/rust-raycaster/../collision/shim -I/work -I/work/zone -O3 -DNDEBUG -std=gnu++17 -o CMakeFiles/raycaster-reference.dir/work/zone/raycast_mesh.cpp.o -c /work/zone/raycast_mesh.cpp",
+  "file": "/work/zone/raycast_mesh.cpp"
+},
+{
+  "directory": "/reference-build",
+  "command": "/usr/bin/clang++  -I/work/experiments/map-translation/rust-raycaster/../collision/shim -I/work -I/work/zone -O3 -DNDEBUG -std=gnu++17 -o CMakeFiles/raycaster-reference.dir/work/common/memory/ksm.cpp.o -c /work/common/memory/ksm.cpp",
+  "file": "/work/common/memory/ksm.cpp"
+}
+]

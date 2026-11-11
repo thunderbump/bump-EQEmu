@@ -1,0 +1,3 @@
+PHASE start seconds=0.000000111 VmHWM:	    2020 kB VmRSS:	    2020 kB
+PHASE read seconds=0.000333789 VmHWM:	    2980 kB VmRSS:	    2692 kB
+Error: Error("index out of bounds")

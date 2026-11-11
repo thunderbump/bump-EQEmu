@@ -1,0 +1,1 @@
+rust-raycaster-poc v0.1.0 (/work/experiments/map-translation/rust-raycaster)

@@ -1,0 +1,3 @@
+PHASE start seconds=0.00000016 VmHWM:	    1992 kB VmRSS:	    1992 kB
+PHASE read seconds=0.00028137 VmHWM:	    2924 kB VmRSS:	    2664 kB
+Error: Error("nonfinite or out-of-bound vertex")

@@ -1,0 +1,15 @@
+[
+  "experiments/map-translation/rust-raycaster/worker.py",
+  "--socket",
+  "unix:///run/user/1000/eqemu-rust-raycaster-poc.sock",
+  "--image",
+  "sha256:0aeb54f14590bf1631a27f60b3e7b7eed6dde549f08ba1f5738282e59d4cea1d",
+  "--references",
+  "/home/bump/.local/state/eqemu-map-translation/capture-tests-20261110/handoff-ordinary/results/capture",
+  "--rust-meshes",
+  "/home/bump/.local/state/eqemu-map-translation/rust-poc-20261110/qualified/results/rust",
+  "--baseline",
+  "/home/bump/.local/state/eqemu-map-translation/raycaster-memory-20261110/ordinary-01/results",
+  "--output",
+  "/home/bump/.local/state/eqemu-map-translation/rust-raycaster-poc-20261110/qualified-02"
+]
