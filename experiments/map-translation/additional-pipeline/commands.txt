@@ -1,0 +1,6 @@
+# cwd is prepared harness checkout, no checkout/worktree mutations.
+# Seed and selection already frozen in seed.txt + manifest.json.
+systemd-run --user --unit=eqemu-additional-pipeline-20261111 --setenv=DOCKERD_ROOTLESS_ROOTLESSKIT_STATE_DIR=/run/user/1000/eqemu-additional-pipeline-20261111-kit /usr/bin/dockerd-rootless.sh --host=unix:///run/user/1000/eqemu-additional-pipeline-20261111.sock --data-root=/home/bump/.local/state/eqemu-map-translation/additional-pipeline-20261111/docker --exec-root=/run/user/1000/eqemu-additional-pipeline-20261111-exec --pidfile=/run/user/1000/eqemu-additional-pipeline-20261111.pid
+# Importer from exact verified module archive, or read-only baseline identical file.
+python3 /home/bump/.t3/worktrees/bump-EQEmu/t3-dd2bfc5a-28c830438bc3bc8b/experiments/map-translation/large-map-qualification/import_image.py --socket unix:///run/user/1000/eqemu-additional-pipeline-20261111.sock --output /home/bump/.local/state/eqemu-map-translation/additional-pipeline-20261111/image-import.json
+python3 experiments/map-translation/additional-pipeline/worker.py
