@@ -1,5 +1,5 @@
 #![forbid(unsafe_code)]
-use rust_raycaster_poc::{Error, Raycaster, V};
+use rust_raycaster_poc::Error;
 use std::{
     fs::{self, OpenOptions},
     io::{BufWriter, Read, Write},
@@ -20,44 +20,10 @@ fn phase(s: &str, t: Instant) {
             .join(" ")
     );
 }
-fn load(path: &str, identity: &[u8]) -> Result<(Vec<V>, Vec<u32>), Box<dyn std::error::Error>> {
-    let mut f = fs::File::open(path)?;
-    if f.metadata()?.len() > 100_000_000 {
-        return Err(Error("mesh byte limit").into());
-    }
-    let mut b = Vec::new();
-    b.try_reserve_exact(f.metadata()?.len() as usize)?;
-    f.read_to_end(&mut b)?;
-    if b.len() < 84 || &b[..8] != b"EQMESH01" || word(&b, 8) != 1 {
-        return Err(Error("mesh schema").into());
-    }
-    let (nv, ni) = (word(&b, 12) as usize, word(&b, 16) as usize);
-    if nv > 4_000_000 || ni > 12_000_000 || ni % 3 != 0 || b.len() != 84 + nv * 12 + ni * 4 {
-        return Err(Error("mesh counts/length").into());
-    }
-    if &b[20..84] != identity {
-        return Err(Error("mesh identity").into());
-    }
-    let mut v = Vec::new();
-    v.try_reserve_exact(nv)?;
-    for p in (84..84 + nv * 12).step_by(12) {
-        v.push([
-            f32::from_bits(word(&b, p)),
-            f32::from_bits(word(&b, p + 4)),
-            f32::from_bits(word(&b, p + 8)),
-        ]);
-    }
-    let mut i = Vec::new();
-    i.try_reserve_exact(ni)?;
-    for p in (84 + nv * 12..b.len()).step_by(4) {
-        i.push(word(&b, p));
-    }
-    Ok((v, i))
-}
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let a: Vec<_> = std::env::args().collect();
-    if a.len() != 5 {
-        return Err(Error("usage: mesh identity queries.bin output.bin").into());
+    if a.len() != 5 && a.len() != 8 {
+        return Err(Error("usage: mesh identity queries.bin output.bin [--known-asset base/name.map original.map]").into());
     }
     if a[2].len() != 64
         || !a[2]
@@ -68,10 +34,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let t = Instant::now();
     phase("start", t);
-    let (v, i) = load(&a[1], a[2].as_bytes())?;
-    phase("read", t);
-    let t = Instant::now();
-    let mut engine = Raycaster::build(v, i)?;
+    let policy = if a.len() == 8 {
+        if a[5] != "--known-asset" {
+            return Err(Error("policy syntax").into());
+        }
+        Some((a[6].as_str(), a[7].as_str()))
+    } else {
+        None
+    };
+    let mut engine =
+        rust_raycaster_poc::admission::load(&a[1], &a[2], policy, || phase("read", t))?;
     phase("build", t);
     let mut input = fs::File::open(&a[3])?;
     let mut header = [0u8; 76];
@@ -117,6 +89,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             out.write_all(&(h.triangle as u32).to_le_bytes())?;
         }
         serialize_seconds += q.elapsed().as_secs_f64();
+    }
+    if input.read(&mut [0u8; 1])? != 0 {
+        return Err(Error("replay EOF").into());
     }
     out.flush()?;
     phase("query_and_serialize", t);

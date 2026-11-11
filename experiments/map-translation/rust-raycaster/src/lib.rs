@@ -1,5 +1,7 @@
 //! Standalone port of zone/raycast_mesh.cpp. See README for legacy boundary semantics.
 #![forbid(unsafe_code)]
+#[path = "../../large-map-qualification/admission.rs"]
+pub mod admission;
 pub type V = [f32; 3];
 #[derive(Debug, Clone, PartialEq)]
 pub struct Error(pub &'static str);
@@ -182,7 +184,11 @@ pub struct Raycaster {
 impl Raycaster {
     /// Empty arrays build an empty engine. Coordinates and queries are bounded to +/-1e8.
     pub fn build(vertices: Vec<V>, indices: Vec<u32>) -> Result<Self> {
-        if vertices.len() > 4_000_000 || indices.len() > 12_000_000 || indices.len() % 3 != 0 {
+        Self::build_admitted(vertices, indices, 4_000_000, 12_000_000)
+    }
+    // Only the authenticated loader can select a larger count envelope.
+    fn build_admitted(vertices: Vec<V>, indices: Vec<u32>, nv: usize, ni: usize) -> Result<Self> {
+        if vertices.len() > nv || indices.len() > ni || indices.len() % 3 != 0 {
             return Err(Error("invalid geometry counts"));
         }
         if vertices.iter().any(|&v| !finite(v)) {
