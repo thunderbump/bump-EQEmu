@@ -1,0 +1,28 @@
+test_analytic_base_placement_filtering (__main__.CaptureTests.test_analytic_base_placement_filtering) ... 9 vertices 9 indices
+ok
+test_basic_driver_errors (__main__.CaptureTests.test_basic_driver_errors) ... production loader rejected map
+production loader rejected map
+production loader rejected map
+usage: map-capture input.map output.mesh input-sha256
+cannot open input
+ok
+test_comparator_controls (__main__.CaptureTests.test_comparator_controls) ... 9 vertices 9 indices
+ok
+test_preserve_existing_files (__main__.CaptureTests.test_preserve_existing_files) ... 9 vertices 9 indices
+cannot exclusively create output; choose a fresh path
+cannot exclusively create output; choose a fresh path
+cannot exclusively create output; choose a fresh path
+cannot exclusively create output; choose a fresh path
+ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.150s
+
+OK
+vertex /tmp/tmpcgis5ue1/mutated.mesh: first vertex 0.x: 0x3f800000 != 0x3f800001 values 1.0 != 1.0000001192092896, delta 1.1920928955078125e-07
+index /tmp/tmpcgis5ue1/mutated.mesh: first index 0.0: 0x00000002 != 0x00000003
+triangle order /tmp/tmpcgis5ue1/mutated.mesh: first index 0.0: 0x00000002 != 0x00000003
+truncated /tmp/tmpcgis5ue1/mutated.mesh: counts/length mismatch or truncated payload
+schema /tmp/tmpcgis5ue1/mutated.mesh: unsupported schema/magic
+input identity /tmp/tmpcgis5ue1/mutated.mesh: input identity mismatch
+bounds /tmp/tmpcgis5ue1/mutated.mesh: index out of bounds

@@ -1,0 +1,35 @@
+test_analytic_base_placement_filtering (__main__.RustTests.test_analytic_base_placement_filtering) ... {"load_hash_seconds":0.000021431,"decode_expand_seconds":0.000051567,"serialize_seconds":0.000054833,"vertices":9,"indices":9}
+ok
+test_basic_driver_errors (__main__.RustTests.test_basic_driver_errors) ... map-poc: input SHA256 mismatch
+map-poc: input SHA256 mismatch
+map-poc: input SHA256 mismatch
+map-poc: usage: map-poc input.map output.mesh input-sha256
+map-poc: No such file or directory (os error 2)
+ok
+test_comparator_controls (__main__.RustTests.test_comparator_controls) ... {"load_hash_seconds":0.000008285,"decode_expand_seconds":0.000029756,"serialize_seconds":0.000032131,"vertices":9,"indices":9}
+ok
+test_duplicate_missing_and_raw_names (__main__.RustTests.test_duplicate_missing_and_raw_names) ... {"load_hash_seconds":0.000029276,"decode_expand_seconds":0.000048701,"serialize_seconds":0.00009037,"vertices":0,"indices":0}
+ok
+test_numeric_diagnostics (__main__.RustTests.test_numeric_diagnostics) ... ok
+test_parser_errors (__main__.RustTests.test_parser_errors) ... ok
+test_preserve_existing_files (__main__.RustTests.test_preserve_existing_files) ... {"load_hash_seconds":0.000011632,"decode_expand_seconds":0.000031339,"serialize_seconds":0.000035086,"vertices":9,"indices":9}
+map-poc: File exists (os error 17)
+map-poc: File exists (os error 17)
+map-poc: File exists (os error 17)
+map-poc: File exists (os error 17)
+ok
+test_rotations (__main__.RustTests.test_rotations) ... {"load_hash_seconds":0.00001059,"decode_expand_seconds":0.00002661,"serialize_seconds":0.000033443,"vertices":3,"indices":3}
+{"load_hash_seconds":0.000007374,"decode_expand_seconds":0.000020909,"serialize_seconds":0.00002643,"vertices":3,"indices":3}
+ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.180s
+
+OK
+vertex /tmp/tmpaoaxw4tp/mutated.mesh: first vertex 0.x: 0x3f800000 != 0x3f800001 values 1.0 != 1.0000001192092896, delta 1.1920928955078125e-07
+index /tmp/tmpaoaxw4tp/mutated.mesh: first index 0.0: 0x00000002 != 0x00000003
+triangle order /tmp/tmpaoaxw4tp/mutated.mesh: first index 0.0: 0x00000002 != 0x00000003
+truncated /tmp/tmpaoaxw4tp/mutated.mesh: counts/length mismatch or truncated payload
+schema /tmp/tmpaoaxw4tp/mutated.mesh: unsupported schema/magic
+input identity /tmp/tmpaoaxw4tp/mutated.mesh: input identity mismatch
+bounds /tmp/tmpaoaxw4tp/mutated.mesh: index out of bounds
