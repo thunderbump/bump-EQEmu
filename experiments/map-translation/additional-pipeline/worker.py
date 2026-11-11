@@ -39,7 +39,7 @@ def main():
             return cid,code
         except BaseException:call(['rm','-f',cid]);raise
     build='''set -eu
-mkdir /results
+mkdir -p /results
 cmake -S /work/experiments/map-translation -B /capture -DGLM_INCLUDE_DIR=/candidate/build/vcpkg_installed/x64-linux/include -DCMAKE_BUILD_TYPE=Release
 cmake --build /capture -j2
 cmake -S /work/experiments/map-translation/collision -B /collision -DCMAKE_BUILD_TYPE=Release
@@ -68,7 +68,7 @@ cat /sys/fs/cgroup/memory.{peak,events,max,swap.max} > /results/build-memory.txt
     for r in json.loads((HERE/'manifest.json').read_text())['selected']:
         inp=STATE/'inputs'/Path(r['path']).name;assert sha(inp)==r['sha256']
         dest=out/Path(r['path']).stem
-        cid,code=container('mkdir /results; python3 /work/experiments/map-translation/additional-pipeline/guest.py '+r['sha256'],dest,tag,lambda c:call(['cp',str(inp),c+':/input.map']),600)
+        cid,code=container('mkdir -p /results; python3 /work/experiments/map-translation/additional-pipeline/guest.py '+r['sha256'],dest,tag,lambda c:call(['cp',str(inp),c+':/input.map']),600)
         try:
             report=json.loads((dest/'report.json').read_text());report['container_transport']=code;report['input']=r;outcomes.append(report)
         finally:call(['rm','-f',cid]);save(dest/'cleanup.json',{'removed':cid})
