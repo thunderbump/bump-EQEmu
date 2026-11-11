@@ -1,0 +1,61 @@
+{
+  "reviewed_source": "2d6cc88a5ea891f79b72fc0e9530b35d7b2caec8",
+  "prior_executed_source": "c319cb077cbf5c2bfbf82544f3eab125e5e3277e",
+  "summary_sha256": "faae2d011667020be4c737f0a8898d3f53ecd91314d1a604fa5c482d26928af4",
+  "cases": [
+    {
+      "input": {
+        "path": "base/chelsithreborn.map",
+        "bytes": 1724957,
+        "sha256": "c1ebe5fe799241693cdc46f9ca9450fe07c818a9d152b11f0ea0f74b4ceca87a",
+        "version": "00000002"
+      },
+      "geometry": {
+        "vertices": 5810335,
+        "indices": 5985597,
+        "bytes": 93666492,
+        "sha256": "4b0e68eed94f79f6bc1d00cad9e23f79f9c4384aabaf961b260c067b35e848fd"
+      }
+    },
+    {
+      "input": {
+        "path": "base/cityofbronze.map",
+        "bytes": 2446659,
+        "sha256": "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+        "version": "00000002"
+      },
+      "geometry": {
+        "vertices": 6161009,
+        "indices": 6684999,
+        "bytes": 100672188,
+        "sha256": "5734892a6bd482c236370a23f66e60480dffb675ac6600fc3736298fc42cf622"
+      }
+    },
+    {
+      "input": {
+        "path": "base/riftseekers.map",
+        "bytes": 1589760,
+        "sha256": "94370b8d34bfc0a6be39749cae2f21821f46ede4fc869975cf1dca9c45041e78",
+        "version": "00000002"
+      },
+      "geometry": {
+        "vertices": 5001642,
+        "indices": 5497866,
+        "bytes": 82011252,
+        "sha256": "9d2674519f580782745327e6557548f925c511c25b3ea0f4fba8f188822106a8"
+      }
+    }
+  ],
+  "sources": {
+    "zone/raycast_mesh.cpp": "de0b71fa404839d899793e9e9814d410dc0505b6ba8b2bd0c068625c7ef131f4",
+    "zone/raycast_mesh.h": "6236b02f26774682cb7a4e2d94acedf725fcda0af93ed798dd6db39cca263c71",
+    "zone/map_geometry.cpp": "919ebafc057f474b1df59d83a0aff627045697aeea230f587df08df593f727e9",
+    "common/memory/ksm.cpp": "6423f05a9432b61dd6721d4b67d816da94872e68f26c5ce38f0fd4ab8665c139",
+    "experiments/map-translation/collision/driver.cpp": "fd35dffc92ec0cc4c430440cb24926c4a2da854835f7930a92e2cd356fd973a7",
+    "experiments/map-translation/rust-raycaster/reference.cpp": "b4b315b52d85a0ce3e8189ea3a140a088ce059a62a605002f34a02f139b258a1",
+    "experiments/map-translation/rust-raycaster/src/main.rs": "c551ad71d259b095deca9c50566ee2f952bcbf5d0f707ade2870f8971f896228",
+    "experiments/map-translation/rust-raycaster/src/lib.rs": "a48f49fa8805972f163b6b10919d30fec98bbbba81899718b74d33b1e3c2be9b",
+    "experiments/map-translation/raycaster-corpus/guest.py": "f6d218806916cff6625df36520d41415690e6bb148809aeb38910be092a8358f",
+    "experiments/map-translation/capture.cpp": "118028be5ab7f472fe26cfc761c14f727af89c24421d6313d160fbfaf4fff99f"
+  }
+}

@@ -1,0 +1,17 @@
+# Worktree /home/bump/.t3/worktrees/bump-EQEmu/t3-875762ad, branch t3/large-map-rust-qualification.
+# Verified clean cd66dd0; fast-forwarded branch to 2d6cc88.
+git merge --ff-only 2d6cc88a5ea891f79b72fc0e9530b35d7b2caec8
+systemd-run --user --unit=eqemu-rust-large-three-20261110 --setenv=DOCKERD_ROOTLESS_ROOTLESSKIT_STATE_DIR=/run/user/1000/eqemu-rust-large-three-20261110-kit /usr/bin/dockerd-rootless.sh --host=unix:///run/user/1000/eqemu-rust-large-three-20261110.sock --data-root=/home/bump/.local/state/eqemu-map-translation/rust-large-three-20261110/docker --exec-root=/run/user/1000/eqemu-rust-large-three-20261110-exec --pidfile=/run/user/1000/eqemu-rust-large-three-20261110.pid
+python3 experiments/map-translation/large-map-qualification/import_image.py --socket unix:///run/user/1000/eqemu-rust-large-three-20261110.sock --output /home/bump/.local/state/eqemu-map-translation/rust-large-three-20261110/image-import.json
+# Qualifying source committed/pushed 2d72772d6519037acebc26b657a9eb8671b3900e.
+python3 experiments/map-translation/large-map-qualification/worker.py --socket unix:///run/user/1000/eqemu-rust-large-three-20261110.sock --output /home/bump/.local/state/eqemu-map-translation/rust-large-three-20261110/build-final --stage build
+python3 experiments/map-translation/large-map-qualification/worker.py --socket unix:///run/user/1000/eqemu-rust-large-three-20261110.sock --output /home/bump/.local/state/eqemu-map-translation/rust-large-three-20261110/maps-final --stage maps --build /home/bump/.local/state/eqemu-map-translation/rust-large-three-20261110/build-final/build
+python3 experiments/map-translation/large-map-qualification/worker.py --socket unix:///run/user/1000/eqemu-rust-large-three-20261110.sock --output /home/bump/.local/state/eqemu-map-translation/rust-large-three-20261110/regressions-final --stage regressions --build /home/bump/.local/state/eqemu-map-translation/rust-large-three-20261110/build-final/build
+# Use fresh exclusive output paths and an independently owned daemon for reproduction.
+# Earlier build attempts and formatting transport are recorded in retained build directories.
+docker --host unix:///run/user/1000/eqemu-rust-large-three-20261110.sock ps -aq
+docker --host unix:///run/user/1000/eqemu-rust-large-three-20261110.sock system prune -af --volumes
+systemctl --user stop eqemu-rust-large-three-20261110
+systemd-run --user --unit=eqemu-rust-large-three-20261110-cleanup --wait --pipe /usr/bin/rootlesskit --state-dir=/run/user/1000/eqemu-rust-large-three-20261110-cleanup-kit rm -rf /home/bump/.local/state/eqemu-map-translation/rust-large-three-20261110/docker /run/user/1000/eqemu-rust-large-three-20261110-exec
+systemctl --user show eqemu-rust-large-three-20261110 -p ActiveState -p SubState -p Result
+# Host Python removed only listed own source.tar/source extraction copies, sizes/hashes in reports/cleanup.json.

@@ -1,0 +1,32 @@
+[
+  {
+    "name": "reference",
+    "args": [
+      "/build/reference",
+      "--record",
+      "/geometry.mesh",
+      "c1ebe5fe799241693cdc46f9ca9450fe07c818a9d152b11f0ea0f74b4ceca87a",
+      "unused",
+      "/results/reference.trace",
+      "--known-asset",
+      "base/chelsithreborn.map",
+      "/original.map"
+    ],
+    "exit": 0,
+    "seconds": 0.7156258197501302,
+    "before": {
+      "memory.current": "11853824\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "11853824\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "13860864\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "277188608\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  }
+]

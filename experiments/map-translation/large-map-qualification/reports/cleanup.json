@@ -1,0 +1,90 @@
+{
+  "unit": "ActiveState=inactive\nSubState=dead\nResult=success\n",
+  "store_absent": true,
+  "exec_root_absent": true,
+  "socket_absent": true,
+  "archive_cleanup": [
+    {
+      "path": "/home/bump/.local/state/eqemu-map-translation/rust-large-three-20261110/maps-final/source.tar",
+      "bytes": 83978240,
+      "sha256": "52b99198f659bfd62a40277355daaf2da21fff24e9b5c484beb94f37f325fce8"
+    },
+    {
+      "path": "/home/bump/.local/state/eqemu-map-translation/rust-large-three-20261110/maps-final/source",
+      "bytes": 81619118,
+      "sha256": null
+    },
+    {
+      "path": "/home/bump/.local/state/eqemu-map-translation/rust-large-three-20261110/regressions-final/source.tar",
+      "bytes": 83978240,
+      "sha256": "52b99198f659bfd62a40277355daaf2da21fff24e9b5c484beb94f37f325fce8"
+    },
+    {
+      "path": "/home/bump/.local/state/eqemu-map-translation/rust-large-three-20261110/regressions-final/source",
+      "bytes": 81619118,
+      "sha256": null
+    },
+    {
+      "path": "/home/bump/.local/state/eqemu-map-translation/rust-large-three-20261110/build-03/source.tar",
+      "bytes": 83978240,
+      "sha256": "02cc7b3d9be18fe0d6a738cca642dab37147f47c5ab74f6416bfd6f347f2a02f"
+    },
+    {
+      "path": "/home/bump/.local/state/eqemu-map-translation/rust-large-three-20261110/build-03/source",
+      "bytes": 81618375,
+      "sha256": null
+    },
+    {
+      "path": "/home/bump/.local/state/eqemu-map-translation/rust-large-three-20261110/maps-01/source.tar",
+      "bytes": 83978240,
+      "sha256": "02cc7b3d9be18fe0d6a738cca642dab37147f47c5ab74f6416bfd6f347f2a02f"
+    },
+    {
+      "path": "/home/bump/.local/state/eqemu-map-translation/rust-large-three-20261110/maps-01/source",
+      "bytes": 81618375,
+      "sha256": null
+    },
+    {
+      "path": "/home/bump/.local/state/eqemu-map-translation/rust-large-three-20261110/build-01/source.tar",
+      "bytes": 83968000,
+      "sha256": "457c674ced5c34f1184254f839e451c3d52ea0f027eea4f318b3ee936e1e6628"
+    },
+    {
+      "path": "/home/bump/.local/state/eqemu-map-translation/rust-large-three-20261110/build-01/source",
+      "bytes": 81613546,
+      "sha256": null
+    },
+    {
+      "path": "/home/bump/.local/state/eqemu-map-translation/rust-large-three-20261110/regressions-01/source.tar",
+      "bytes": 83978240,
+      "sha256": "02cc7b3d9be18fe0d6a738cca642dab37147f47c5ab74f6416bfd6f347f2a02f"
+    },
+    {
+      "path": "/home/bump/.local/state/eqemu-map-translation/rust-large-three-20261110/regressions-01/source",
+      "bytes": 81618375,
+      "sha256": null
+    },
+    {
+      "path": "/home/bump/.local/state/eqemu-map-translation/rust-large-three-20261110/build-final/source.tar",
+      "bytes": 83978240,
+      "sha256": "52b99198f659bfd62a40277355daaf2da21fff24e9b5c484beb94f37f325fce8"
+    },
+    {
+      "path": "/home/bump/.local/state/eqemu-map-translation/rust-large-three-20261110/build-final/source",
+      "bytes": 81619118,
+      "sha256": null
+    },
+    {
+      "path": "/home/bump/.local/state/eqemu-map-translation/rust-large-three-20261110/build-02/source.tar",
+      "bytes": 83978240,
+      "sha256": "261c2354362fc786cc694d4f1f50ab868a252cd609a974ade5fe2c150850de5f"
+    },
+    {
+      "path": "/home/bump/.local/state/eqemu-map-translation/rust-large-three-20261110/build-02/source",
+      "bytes": 81617060,
+      "sha256": null
+    }
+  ],
+  "retained_bytes": 37319029,
+  "retained": "build binaries, traces, first failed build, all logs/identities/receipts; original/prior evidence untouched"
+}

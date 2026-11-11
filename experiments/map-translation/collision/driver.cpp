@@ -22,16 +22,18 @@ void require(bool b, const char* s) { if (!b) throw std::runtime_error(s); }
 uint32_t word(const std::vector<unsigned char>& b, size_t p) {
  return uint32_t(b[p]) | uint32_t(b[p+1])<<8 | uint32_t(b[p+2])<<16 | uint32_t(b[p+3])<<24;
 }
-Mesh read(const char* path, const std::string& id) {
- std::ifstream f(path,std::ios::binary); require(bool(f),"open mesh");
- std::vector<unsigned char> b{std::istreambuf_iterator<char>(f),{}};
+#include "../large-map-qualification/admission.h"
+Mesh read(const char* path, const std::string& id, Envelope policy={}) {
+ auto b=bounded(path,policy.bytes);
  require(b.size()>=84,"short header");
  require(std::memcmp(b.data(),"EQMESH01",8)==0 && word(b,8)==1,"schema");
  auto nv=word(b,12), ni=word(b,16);
- require(nv>0 && nv<=4000000 && ni>0 && ni<=12000000 && ni%3==0,"counts");
+ require(nv>0 && nv<=policy.nv && ni>0 && ni<=policy.ni && ni%3==0,"counts");
  require(b.size()==84+uint64_t(nv)*12+uint64_t(ni)*4,"length");
  require(id.size()==64 && id.find_first_not_of("0123456789abcdef")==std::string::npos,"identity syntax");
  require(std::memcmp(b.data()+20,id.data(),64)==0,"identity mismatch");
+ if(!policy.mesh.empty()) require(nv==policy.nv && ni==policy.ni && b.size()==policy.bytes && digest(b)==policy.mesh,"policy mesh hash/counts/length");
+ require(uint64_t(nv)*3<=std::numeric_limits<size_t>::max(),"vertex size overflow");
  Mesh m; m.v.reserve(size_t(nv)*3); m.i.reserve(ni);
  for(size_t p=84;p<84+size_t(nv)*12;p+=4) { auto u=word(b,p); float x; std::memcpy(&x,&u,4); require(std::isfinite(x),"nonfinite vertex"); m.v.push_back(x); }
  for(size_t p=84+size_t(nv)*12;p<b.size();p+=4) { auto i=word(b,p); require(i<nv,"index bounds"); m.i.push_back(i); }
@@ -128,9 +130,9 @@ float token(std::istream& in) {
 }
 // Each invocation owns one mesh/tree. Replay reads reference endpoints, never candidate geometry.
 void single(int argc,char** argv) {
- require(argc==6,"usage: --record/--replay mesh identity reference-trace output-trace");
+ require(argc==6 || (argc==9 && std::string(argv[6])=="--known-asset"),"usage: --record/--replay mesh identity reference-trace output-trace");
  bool record=std::string(argv[1])=="--record";
- phase("start"); auto m=read(argv[2],argv[3]); phase("read");
+ phase("start"); auto policy=argc==9?envelope(argv[7],argv[8],argv[3]):Envelope{}; auto m=read(argv[2],argv[3],policy); phase("read");
  std::vector<Ray> q; if(record) q=queries(m);
  auto e=build(m); phase("build");
  m=Mesh{}; phase("arrays_released");

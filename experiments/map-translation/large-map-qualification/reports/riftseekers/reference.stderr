@@ -1,0 +1,6 @@
+PHASE start VmHWM:	    3384 kB VmRSS:	    3384 kB memory.current=12234752; memory.peak=13328384; memory.events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;sock_throttled 0;
+PHASE read VmHWM:	  163352 kB VmRSS:	   83680 kB memory.current=94982144; memory.peak=179511296; memory.events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;sock_throttled 0;
+PHASE build VmHWM:	  224492 kB VmRSS:	  206632 kB memory.current=221061120; memory.peak=240222208; memory.events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;sock_throttled 0;
+PHASE arrays_released VmHWM:	  224492 kB VmRSS:	  126536 kB memory.current=139042816; memory.peak=240222208; memory.events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;sock_throttled 0;
+PHASE query VmHWM:	  224492 kB VmRSS:	  141016 kB memory.current=154501120; memory.peak=240222208; memory.events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;sock_throttled 0;
+PHASE release VmHWM:	  224492 kB VmRSS:	   36496 kB memory.current=47472640; memory.peak=240222208; memory.events=low 0;high 0;max 0;oom 0;oom_kill 0;oom_group_kill 0;sock_throttled 0;
