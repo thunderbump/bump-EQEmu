@@ -1,0 +1,90 @@
+[
+  {
+    "implementation": "cpp",
+    "run": 0,
+    "command": [
+      "/usr/bin/time",
+      "-o",
+      "/results/capture/cpp.0.time",
+      "-f",
+      "%M %U %S",
+      "/build/map-capture",
+      "/inputs/griegsend.map",
+      "/results/capture/griegsend.cpp.0.mesh",
+      "2d12a9614a1db9a5cb1abcceca09b3007f0fdfc6ac497a61fe71c0a7724e9c58"
+    ],
+    "exit": 0,
+    "elapsed_seconds": 0.04450739128515124,
+    "time_raw": "15776 0.03 0.00\n",
+    "bytes": 8048520,
+    "sha256": "e3f634921cc58ebb6e56fa8e1d7610d623a055aec2dda76f1ebddeee54539025",
+    "vertices": 470745,
+    "indices": 599874
+  },
+  {
+    "implementation": "cpp",
+    "run": 1,
+    "command": [
+      "/usr/bin/time",
+      "-o",
+      "/results/capture/cpp.1.time",
+      "-f",
+      "%M %U %S",
+      "/build/map-capture",
+      "/inputs/griegsend.map",
+      "/results/capture/griegsend.cpp.1.mesh",
+      "2d12a9614a1db9a5cb1abcceca09b3007f0fdfc6ac497a61fe71c0a7724e9c58"
+    ],
+    "exit": 0,
+    "elapsed_seconds": 0.048829371109604836,
+    "time_raw": "15296 0.04 0.00\n",
+    "bytes": 8048520,
+    "sha256": "e3f634921cc58ebb6e56fa8e1d7610d623a055aec2dda76f1ebddeee54539025",
+    "vertices": 470745,
+    "indices": 599874
+  },
+  {
+    "implementation": "rust",
+    "run": 0,
+    "command": [
+      "/usr/bin/time",
+      "-o",
+      "/results/capture/rust.0.time",
+      "-f",
+      "%M %U %S",
+      "/rust-build/release/map-poc",
+      "/inputs/griegsend.map",
+      "/results/capture/griegsend.rust.0.mesh",
+      "2d12a9614a1db9a5cb1abcceca09b3007f0fdfc6ac497a61fe71c0a7724e9c58"
+    ],
+    "exit": 0,
+    "elapsed_seconds": 0.019164639059454203,
+    "time_raw": "13680 0.00 0.00\n",
+    "bytes": 8048520,
+    "sha256": "e3f634921cc58ebb6e56fa8e1d7610d623a055aec2dda76f1ebddeee54539025",
+    "vertices": 470745,
+    "indices": 599874
+  },
+  {
+    "implementation": "rust",
+    "run": 1,
+    "command": [
+      "/usr/bin/time",
+      "-o",
+      "/results/capture/rust.1.time",
+      "-f",
+      "%M %U %S",
+      "/rust-build/release/map-poc",
+      "/inputs/griegsend.map",
+      "/results/capture/griegsend.rust.1.mesh",
+      "2d12a9614a1db9a5cb1abcceca09b3007f0fdfc6ac497a61fe71c0a7724e9c58"
+    ],
+    "exit": 0,
+    "elapsed_seconds": 0.01608213409781456,
+    "time_raw": "13980 0.00 0.00\n",
+    "bytes": 8048520,
+    "sha256": "e3f634921cc58ebb6e56fa8e1d7610d623a055aec2dda76f1ebddeee54539025",
+    "vertices": 470745,
+    "indices": 599874
+  }
+]

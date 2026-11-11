@@ -1,0 +1,22 @@
+[
+  {
+    "path": "/home/bump/.local/state/eqemu-map-translation/additional-map-20261110/run-01/results/capture/griegsend.cpp.0.mesh",
+    "bytes": 8048520,
+    "host_rehashed_sha256": "e3f634921cc58ebb6e56fa8e1d7610d623a055aec2dda76f1ebddeee54539025"
+  },
+  {
+    "path": "/home/bump/.local/state/eqemu-map-translation/additional-map-20261110/run-01/results/capture/griegsend.cpp.1.mesh",
+    "bytes": 8048520,
+    "host_rehashed_sha256": "e3f634921cc58ebb6e56fa8e1d7610d623a055aec2dda76f1ebddeee54539025"
+  },
+  {
+    "path": "/home/bump/.local/state/eqemu-map-translation/additional-map-20261110/run-01/results/capture/griegsend.rust.0.mesh",
+    "bytes": 8048520,
+    "host_rehashed_sha256": "e3f634921cc58ebb6e56fa8e1d7610d623a055aec2dda76f1ebddeee54539025"
+  },
+  {
+    "path": "/home/bump/.local/state/eqemu-map-translation/additional-map-20261110/run-01/results/capture/griegsend.rust.1.mesh",
+    "bytes": 8048520,
+    "host_rehashed_sha256": "e3f634921cc58ebb6e56fa8e1d7610d623a055aec2dda76f1ebddeee54539025"
+  }
+]
