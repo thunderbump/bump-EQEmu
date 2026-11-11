@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.20)
+project(raycaster_poc_reference LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+get_filename_component(SERVER "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
+add_executable(raycaster-reference reference.cpp ${SERVER}/zone/raycast_mesh.cpp ${SERVER}/common/memory/ksm.cpp)
+target_include_directories(raycaster-reference PRIVATE ../collision/shim ${SERVER} ${SERVER}/zone)

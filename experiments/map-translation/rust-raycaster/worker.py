@@ -37,6 +37,11 @@ ldd /rust-build/release/rust-raycaster-poc > /results/ldd.txt
 ldd /rust-build/release/rust-raycaster-poc | awk '{for(i=1;i<=NF;i++) if (index($i,"/") == 1) print $i}' | xargs sha256sum > /results/libraries.sha256
 printf '%s\n' "RUSTFLAGS=${RUSTFLAGS-}" "CARGO_ENCODED_RUSTFLAGS=${CARGO_ENCODED_RUSTFLAGS-}" 'release opt-level=3 default CPU; no fast-math or mul_add; default process FP environment' > /results/fp.txt
 cp Cargo.lock /results/
+cmake -S . -B /reference-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+/usr/bin/time -v -o /results/reference-build.time cmake --build /reference-build -j2
+cp /reference-build/compile_commands.json /results/
+c++ --version > /results/compiler.txt
+sha256sum /reference-build/raycaster-reference > /results/reference-binary.sha256
 python3 qualify.py
 '''
 with tempfile.TemporaryDirectory() as tmp:
