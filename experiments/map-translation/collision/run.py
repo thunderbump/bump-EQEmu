@@ -1,6 +1,7 @@
 """Guest-only bounded collision checks and provenance collection."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import struct
 import subprocess
@@ -29,7 +30,13 @@ def run(name, args, expected=0, diagnostic=None):
     return p.stdout
 
 results = []
-run('analytic', [BINARY, '--controls'])
+if os.environ.get('DIAGNOSTICS') == 'ON':
+    run('sanitizer-pass', ['/build/collision-sanitizer-controls', 'pass'])
+    for mode, message in [('use-after-free','heap-use-after-free'), ('out-of-bounds','heap-buffer-overflow'), ('undefined','signed integer overflow'), ('leak','detected memory leaks')]:
+        run('sanitizer-'+mode, ['/build/collision-sanitizer-controls', mode], 1, message)
+        text=(OUT/('sanitizer-'+mode+'.stderr')).read_text()
+        assert 'sanitizer_controls.cpp:' in text, 'missing symbolized control file/line'
+run('analytic' , [BINARY, '--controls'])
 manifest = []
 for name, identity in IDENTITIES.items():
     original = Path('/inputs')/(name+'.map')

@@ -48,7 +48,7 @@ with tempfile.TemporaryDirectory() as tmp:
     (a.output / 'source.json').write_text(json.dumps(identity, indent=2))
     create = docker + ['create', '--network', 'none', '--memory', '2g', '--memory-swap', '2g', '--cpus', '2', '--pids-limit', '128',
                        '--entrypoint', '/bin/bash', '-e', f'DIAGNOSTICS={"ON" if a.sanitizers else "OFF"}',
-                       '-e', 'ASAN_OPTIONS=halt_on_error=1:detect_leaks=1', '-e', 'UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1', a.image, '-lc', script]
+                       '-e', 'ASAN_OPTIONS=halt_on_error=1:abort_on_error=0:detect_leaks=1:symbolize=1:exitcode=1', '-e', 'ASAN_SYMBOLIZER_PATH=/usr/bin/llvm-symbolizer', '-e', 'UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1:exitcode=1', a.image, '-lc', script]
     cid = subprocess.check_output(create, text=True).strip()
     (a.output / 'container-id.txt').write_text(cid + '\n')
     retain = True
@@ -65,6 +65,7 @@ with tempfile.TemporaryDirectory() as tmp:
         if retain: (a.output / 'copy-error.txt').write_bytes(copied.stderr)
         # docker start exit is supplemented with the container's actual process status.
         exitcode = int(subprocess.check_output(docker + ['inspect', '--format', '{{.State.ExitCode}}', cid]))
+        with (a.output / 'container-final.json').open('w') as out: subprocess.run(docker + ['inspect', cid], stdout=out, check=True)
         (a.output / 'exit.json').write_text(json.dumps({'transport_exit': status, 'worker_exit': exitcode}))
     finally:
         if retain:
