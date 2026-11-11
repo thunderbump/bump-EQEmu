@@ -6,7 +6,7 @@ Server's default build, tests and CI. No CXX bridge or server startup is involve
 `driver.cpp` reads schema-1 EQMESH01 arrays, checks input identity, lengths,
 nonempty bounded counts, finite coordinates and index bounds. Pair comparison
 requires identical counts, indices and triangle order. It passes contiguous
-float triples and unsigned indices to the unchanged production
+float triples and unsigned indices to the production
 `zone/raycast_mesh.cpp`, using the same default createRaycastMesh configuration
 as `Map`. The unchanged production allocator is linked too. The only adapter
 is `shim/common/eqemu_logsys.h`, which disables logging and supplies standard
@@ -76,14 +76,13 @@ use-after-free, out-of-bounds, overflow and leak diagnostics, each exiting 1.
 Installed addr2line is enabled explicitly. Failures remain failures. Analytic or
 map failures are collected so later checks can run; worker exit stays nonzero.
 
-## Findings and retention
+## Prior checkpoint findings and retention
 
-See reports/summary.json and the retained raw diagnostic. Ordinary queries match
+The following describes the pre-repair checkpoint. See reports/summary.json and the retained raw diagnostic. Ordinary queries match
 exactly on both maps. Sanitizers expose a production lifecycle leak, and the
 larger map exceeds the diagnostic memory budget. No sanitizer pass is claimed.
-Production source remains unchanged. Repair the leaked constructor allocation in
-a separately approved change, then rerun lifecycle and bounded diagnostics with
-an explicit resource decision. Broader maps and other toolchains remain later
+That checkpoint left production source unchanged. The approved repair and bounded
+diagnostic results are described below. Broader maps and other toolchains remain later
 checkpoints; this does not establish whole-corpus or production suitability.
 
 Original inputs total 1,072,288 bytes. Preserve them and all earlier evidence;

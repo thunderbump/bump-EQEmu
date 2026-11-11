@@ -1,0 +1,502 @@
+[
+  {
+    "name": "analytic",
+    "command": [
+      "/build/collision-eval",
+      "--controls"
+    ],
+    "exit": 0,
+    "seconds": 0.053015618585050106,
+    "expected_exit": 0,
+    "cgroup_before": {
+      "memory.current": "32415744",
+      "memory.peak": "98852864",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    },
+    "cgroup_after": {
+      "memory.current": "31645696",
+      "memory.peak": "104099840",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    }
+  },
+  {
+    "name": "qeynos2-reference",
+    "command": [
+      "/build/collision-eval",
+      "--record",
+      "/references/qeynos2.0.mesh",
+      "040343c54e3b02bfd1637ce8fca8839dd676e17c41fb24c042ccfa0bd649435c",
+      "unused",
+      "/results/qeynos2.reference.trace"
+    ],
+    "exit": 0,
+    "seconds": 0.046994199976325035,
+    "expected_exit": 0,
+    "cgroup_before": {
+      "memory.current": "32030720",
+      "memory.peak": "104099840",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    },
+    "cgroup_after": {
+      "memory.current": "33435648",
+      "memory.peak": "104099840",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    }
+  },
+  {
+    "name": "qeynos2-candidate",
+    "command": [
+      "/build/collision-eval",
+      "--replay",
+      "/rust-meshes/qeynos2.0.mesh",
+      "040343c54e3b02bfd1637ce8fca8839dd676e17c41fb24c042ccfa0bd649435c",
+      "/results/qeynos2.reference.trace",
+      "/results/qeynos2.candidate.trace"
+    ],
+    "exit": 0,
+    "seconds": 0.03909404156729579,
+    "expected_exit": 0,
+    "cgroup_before": {
+      "memory.current": "33431552",
+      "memory.peak": "104099840",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    },
+    "cgroup_after": {
+      "memory.current": "34152448",
+      "memory.peak": "104099840",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    }
+  },
+  {
+    "name": "qeynos2-reject-schema",
+    "command": [
+      "/build/collision-eval",
+      "/references/qeynos2.0.mesh",
+      "/results/control.mesh",
+      "040343c54e3b02bfd1637ce8fca8839dd676e17c41fb24c042ccfa0bd649435c"
+    ],
+    "exit": 2,
+    "seconds": 0.006267252843827009,
+    "expected_exit": 2,
+    "cgroup_before": {
+      "memory.current": "36737024",
+      "memory.peak": "104099840",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    },
+    "cgroup_after": {
+      "memory.current": "37384192",
+      "memory.peak": "104099840",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    }
+  },
+  {
+    "name": "qeynos2-reject-identity",
+    "command": [
+      "/build/collision-eval",
+      "/references/qeynos2.0.mesh",
+      "/results/control.mesh",
+      "040343c54e3b02bfd1637ce8fca8839dd676e17c41fb24c042ccfa0bd649435c"
+    ],
+    "exit": 2,
+    "seconds": 0.0059243072755634785,
+    "expected_exit": 2,
+    "cgroup_before": {
+      "memory.current": "38006784",
+      "memory.peak": "104099840",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    },
+    "cgroup_after": {
+      "memory.current": "38162432",
+      "memory.peak": "104099840",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    }
+  },
+  {
+    "name": "qeynos2-reject-index",
+    "command": [
+      "/build/collision-eval",
+      "/references/qeynos2.0.mesh",
+      "/results/control.mesh",
+      "040343c54e3b02bfd1637ce8fca8839dd676e17c41fb24c042ccfa0bd649435c"
+    ],
+    "exit": 2,
+    "seconds": 0.005411721300333738,
+    "expected_exit": 2,
+    "cgroup_before": {
+      "memory.current": "38715392",
+      "memory.peak": "104099840",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    },
+    "cgroup_after": {
+      "memory.current": "38866944",
+      "memory.peak": "104099840",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    }
+  },
+  {
+    "name": "qeynos2-reject-count",
+    "command": [
+      "/build/collision-eval",
+      "/references/qeynos2.0.mesh",
+      "/results/control.mesh",
+      "040343c54e3b02bfd1637ce8fca8839dd676e17c41fb24c042ccfa0bd649435c"
+    ],
+    "exit": 2,
+    "seconds": 0.00430915504693985,
+    "expected_exit": 2,
+    "cgroup_before": {
+      "memory.current": "38891520",
+      "memory.peak": "104099840",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    },
+    "cgroup_after": {
+      "memory.current": "39329792",
+      "memory.peak": "104099840",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    }
+  },
+  {
+    "name": "qeynos2-reject-nonfinite",
+    "command": [
+      "/build/collision-eval",
+      "/references/qeynos2.0.mesh",
+      "/results/control.mesh",
+      "040343c54e3b02bfd1637ce8fca8839dd676e17c41fb24c042ccfa0bd649435c"
+    ],
+    "exit": 2,
+    "seconds": 0.00372884189710021,
+    "expected_exit": 2,
+    "cgroup_before": {
+      "memory.current": "39362560",
+      "memory.peak": "104099840",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    },
+    "cgroup_after": {
+      "memory.current": "38629376",
+      "memory.peak": "104099840",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    }
+  },
+  {
+    "name": "qeynos2-reject-truncated",
+    "command": [
+      "/build/collision-eval",
+      "/references/qeynos2.0.mesh",
+      "/results/control.mesh",
+      "040343c54e3b02bfd1637ce8fca8839dd676e17c41fb24c042ccfa0bd649435c"
+    ],
+    "exit": 2,
+    "seconds": 0.003388612065464258,
+    "expected_exit": 2,
+    "cgroup_before": {
+      "memory.current": "38727680",
+      "memory.peak": "104099840",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    },
+    "cgroup_after": {
+      "memory.current": "39149568",
+      "memory.peak": "104099840",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    }
+  },
+  {
+    "name": "qeynos2-reject-order",
+    "command": [
+      "/build/collision-eval",
+      "/references/qeynos2.0.mesh",
+      "/results/control.mesh",
+      "040343c54e3b02bfd1637ce8fca8839dd676e17c41fb24c042ccfa0bd649435c"
+    ],
+    "exit": 2,
+    "seconds": 0.0033801752142608166,
+    "expected_exit": 2,
+    "cgroup_before": {
+      "memory.current": "39227392",
+      "memory.peak": "104099840",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    },
+    "cgroup_after": {
+      "memory.current": "39108608",
+      "memory.peak": "104099840",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    }
+  },
+  {
+    "name": "poknowledge-reference",
+    "command": [
+      "/build/collision-eval",
+      "--record",
+      "/references/poknowledge.0.mesh",
+      "794b618d86852b47bd593424129aaf34eee326e5e3fec7290aeeb0e32bc41d20",
+      "unused",
+      "/results/poknowledge.reference.trace"
+    ],
+    "exit": 0,
+    "seconds": 0.15421417681500316,
+    "expected_exit": 0,
+    "cgroup_before": {
+      "memory.current": "38166528",
+      "memory.peak": "104099840",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    },
+    "cgroup_after": {
+      "memory.current": "39055360",
+      "memory.peak": "104099840",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    }
+  },
+  {
+    "name": "poknowledge-candidate",
+    "command": [
+      "/build/collision-eval",
+      "--replay",
+      "/rust-meshes/poknowledge.0.mesh",
+      "794b618d86852b47bd593424129aaf34eee326e5e3fec7290aeeb0e32bc41d20",
+      "/results/poknowledge.reference.trace",
+      "/results/poknowledge.candidate.trace"
+    ],
+    "exit": 0,
+    "seconds": 0.15994544979184866,
+    "expected_exit": 0,
+    "cgroup_before": {
+      "memory.current": "39043072",
+      "memory.peak": "104099840",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    },
+    "cgroup_after": {
+      "memory.current": "39313408",
+      "memory.peak": "104099840",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    }
+  },
+  {
+    "name": "poknowledge-reject-schema",
+    "command": [
+      "/build/collision-eval",
+      "/references/poknowledge.0.mesh",
+      "/results/control.mesh",
+      "794b618d86852b47bd593424129aaf34eee326e5e3fec7290aeeb0e32bc41d20"
+    ],
+    "exit": 2,
+    "seconds": 0.05799154983833432,
+    "expected_exit": 2,
+    "cgroup_before": {
+      "memory.current": "88797184",
+      "memory.peak": "104099840",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    },
+    "cgroup_after": {
+      "memory.current": "89722880",
+      "memory.peak": "132116480",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    }
+  },
+  {
+    "name": "poknowledge-reject-identity",
+    "command": [
+      "/build/collision-eval",
+      "/references/poknowledge.0.mesh",
+      "/results/control.mesh",
+      "794b618d86852b47bd593424129aaf34eee326e5e3fec7290aeeb0e32bc41d20"
+    ],
+    "exit": 2,
+    "seconds": 0.05490547884255648,
+    "expected_exit": 2,
+    "cgroup_before": {
+      "memory.current": "102670336",
+      "memory.peak": "132116480",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    },
+    "cgroup_after": {
+      "memory.current": "103460864",
+      "memory.peak": "145862656",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    }
+  },
+  {
+    "name": "poknowledge-reject-index",
+    "command": [
+      "/build/collision-eval",
+      "/references/poknowledge.0.mesh",
+      "/results/control.mesh",
+      "794b618d86852b47bd593424129aaf34eee326e5e3fec7290aeeb0e32bc41d20"
+    ],
+    "exit": 2,
+    "seconds": 0.0639046560972929,
+    "expected_exit": 2,
+    "cgroup_before": {
+      "memory.current": "115916800",
+      "memory.peak": "145862656",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    },
+    "cgroup_after": {
+      "memory.current": "115208192",
+      "memory.peak": "157732864",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    }
+  },
+  {
+    "name": "poknowledge-reject-count",
+    "command": [
+      "/build/collision-eval",
+      "/references/poknowledge.0.mesh",
+      "/results/control.mesh",
+      "794b618d86852b47bd593424129aaf34eee326e5e3fec7290aeeb0e32bc41d20"
+    ],
+    "exit": 2,
+    "seconds": 0.04588339803740382,
+    "expected_exit": 2,
+    "cgroup_before": {
+      "memory.current": "89714688",
+      "memory.peak": "157732864",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    },
+    "cgroup_after": {
+      "memory.current": "89944064",
+      "memory.peak": "157732864",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    }
+  },
+  {
+    "name": "poknowledge-reject-nonfinite",
+    "command": [
+      "/build/collision-eval",
+      "/references/poknowledge.0.mesh",
+      "/results/control.mesh",
+      "794b618d86852b47bd593424129aaf34eee326e5e3fec7290aeeb0e32bc41d20"
+    ],
+    "exit": 2,
+    "seconds": 0.0474448692984879,
+    "expected_exit": 2,
+    "cgroup_before": {
+      "memory.current": "102359040",
+      "memory.peak": "157732864",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    },
+    "cgroup_after": {
+      "memory.current": "102543360",
+      "memory.peak": "157732864",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    }
+  },
+  {
+    "name": "poknowledge-reject-truncated",
+    "command": [
+      "/build/collision-eval",
+      "/references/poknowledge.0.mesh",
+      "/results/control.mesh",
+      "794b618d86852b47bd593424129aaf34eee326e5e3fec7290aeeb0e32bc41d20"
+    ],
+    "exit": 2,
+    "seconds": 0.04696458438411355,
+    "expected_exit": 2,
+    "cgroup_before": {
+      "memory.current": "102612992",
+      "memory.peak": "157732864",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    },
+    "cgroup_after": {
+      "memory.current": "102592512",
+      "memory.peak": "157732864",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    }
+  },
+  {
+    "name": "poknowledge-reject-order",
+    "command": [
+      "/build/collision-eval",
+      "/references/poknowledge.0.mesh",
+      "/results/control.mesh",
+      "794b618d86852b47bd593424129aaf34eee326e5e3fec7290aeeb0e32bc41d20"
+    ],
+    "exit": 2,
+    "seconds": 0.05489917704835534,
+    "expected_exit": 2,
+    "cgroup_before": {
+      "memory.current": "102424576",
+      "memory.peak": "157732864",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    },
+    "cgroup_after": {
+      "memory.current": "102129664",
+      "memory.peak": "157732864",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+      "memory.max": "2147483648",
+      "memory.swap.max": "0"
+    }
+  }
+]

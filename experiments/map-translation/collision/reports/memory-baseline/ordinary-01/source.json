@@ -1,0 +1,6 @@
+{
+  "commit": "30d7a13e7e2be870913eeaa0cae35ed67dd42abd",
+  "tree": "61176055a123d84497c895f2ac1ac23a377a5cfe",
+  "archive_sha256": "cc543b655638b9f56dc86d1962f84b3c1b03f9af1cd822880265b1c401a4b7a7",
+  "purpose": "raycaster memory baseline; one engine per process"
+}

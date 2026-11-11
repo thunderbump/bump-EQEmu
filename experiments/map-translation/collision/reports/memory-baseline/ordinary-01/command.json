@@ -1,0 +1,17 @@
+[
+  "experiments/map-translation/collision/worker.py",
+  "--socket",
+  "unix:///run/user/1000/eqemu-raycaster-memory.sock",
+  "--image",
+  "sha256:0aeb54f14590bf1631a27f60b3e7b7eed6dde549f08ba1f5738282e59d4cea1d",
+  "--inputs",
+  "/home/bump/.local/state/eqemu-map-translation/two-maps-v1/inputs",
+  "--references",
+  "/home/bump/.local/state/eqemu-map-translation/capture-tests-20261110/handoff-ordinary/results/capture",
+  "--rust-meshes",
+  "/home/bump/.local/state/eqemu-map-translation/rust-poc-20261110/qualified/results/rust",
+  "--baseline-traces",
+  "/home/bump/.local/state/eqemu-map-translation/collision-eval-20261110/reviewed-ordinary/results",
+  "--output",
+  "/home/bump/.local/state/eqemu-map-translation/raycaster-memory-20261110/ordinary-01"
+]

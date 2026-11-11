@@ -1,0 +1,11 @@
+
+=================================================================
+==118==ERROR: LeakSanitizer: detected memory leaks
+
+Direct leak of 4 byte(s) in 1 object(s) allocated from:
+    #0 0x4ddf1d in operator new(unsigned long) ??:?
+    #1 0x4e0875 in SanitizerLeak() /work/tests/sanitizer_controls.cpp:30
+    #2 0x4e09a3 in main /work/tests/sanitizer_controls.cpp:56
+    #3 0x7c2fb9fcd249 in __libc_start_call_main csu/../sysdeps/x86/libc-start.c:58
+
+SUMMARY: AddressSanitizer: 4 byte(s) leaked in 1 allocation(s).
