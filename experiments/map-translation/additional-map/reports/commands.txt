@@ -1,0 +1,16 @@
+# Working directory: /home/bump/.t3/worktrees/bump-EQEmu/t3-5f1c155b
+# Initial clean cd66dd0, assigned branch identity preserved:
+git merge --ff-only ed0dc7f414cc503cbaa0e0b2d32de80e71f5adb0
+# One initial choice, never rerolled:
+python3 experiments/map-translation/additional-map/select.py --pin --census /home/bump/.local/state/eqemu-map-translation/investigation-2026-11-10/asset-census.json --inputs /home/bump/.local/state/eqemu-map-translation/additional-map-20261110/inputs
+# Direct rootlesskit copy failed UID mapping. Successful owned service invocation:
+systemd-run --user --unit=eqemu-map-additional-copy --wait --pipe /usr/bin/rootlesskit --state-dir=/run/user/1000/eqemu-map-additional-copy2 cp -a --reflink=auto /home/bump/.local/state/eqemu-rootless-proof/docker /home/bump/.local/state/eqemu-map-translation/additional-map-20261110/docker
+systemd-run --user --unit=eqemu-map-additional --setenv=DOCKERD_ROOTLESS_ROOTLESSKIT_STATE_DIR=/run/user/1000/eqemu-map-additional-rootlesskit /usr/bin/dockerd-rootless.sh --host=unix:///run/user/1000/eqemu-map-additional.sock --data-root=/home/bump/.local/state/eqemu-map-translation/additional-map-20261110/docker --exec-root=/run/user/1000/eqemu-map-additional-exec --pidfile=/run/user/1000/eqemu-map-additional.pid
+# At clean committed 6cee8f2f0:
+python3 experiments/map-translation/additional-map/worker.py --socket unix:///run/user/1000/eqemu-map-additional.sock --image sha256:0aeb54f14590bf1631a27f60b3e7b7eed6dde549f08ba1f5738282e59d4cea1d --glm /candidate/build/vcpkg_installed/x64-linux/include --inputs /home/bump/.local/state/eqemu-map-translation/additional-map-20261110/inputs --output /home/bump/.local/state/eqemu-map-translation/additional-map-20261110/run-01
+# Worker build/execution commands are tracked in worker.py and actual container JSON.
+systemctl --user stop eqemu-map-additional
+systemctl --user show eqemu-map-additional -p ActiveState -p SubState -p Result
+systemd-run --user --unit=eqemu-map-additional-cleanup --wait --pipe /usr/bin/rootlesskit --state-dir=/run/user/1000/eqemu-map-additional-cleanup rm -rf /home/bump/.local/state/eqemu-map-translation/additional-map-20261110/docker
+# Regeneration: use a stopped source image store, fresh owned store/service paths;
+# omit --pin for selection recheck and choose fresh worker output. Never reroll.

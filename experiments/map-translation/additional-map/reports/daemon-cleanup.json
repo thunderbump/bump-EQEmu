@@ -1,0 +1,14 @@
+{
+  "service": "eqemu-map-additional",
+  "stop_exit": 0,
+  "ActiveState": "inactive",
+  "SubState": "dead",
+  "Result": "success",
+  "copied_image_store_removed": "/home/bump/.local/state/eqemu-map-translation/additional-map-20261110/docker",
+  "cleanup_service": "eqemu-map-additional-cleanup",
+  "cleanup_exit": 0,
+  "cleanup_result": "success",
+  "owned_daemon_socket_absent": "/run/user/1000/eqemu-map-additional.sock",
+  "image_store_absent_rechecked": true,
+  "original_image_store_preserved": "/home/bump/.local/state/eqemu-rootless-proof/docker"
+}

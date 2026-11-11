@@ -1,0 +1,19 @@
+map-poc v0.1.0 (/work/experiments/map-translation/rust)
+├── flate2 v1.1.5
+│   ├── crc32fast v1.5.5
+│   │   └── cfg-if v1.0.5
+│   └── miniz_oxide v0.8.9
+│       ├── adler2 v2.0.1
+│       └── simd-adler32 v0.3.10
+└── sha2 v0.10.9
+    ├── cfg-if v1.0.5
+    ├── cpufeatures v0.2.17
+    └── digest v0.10.7
+        ├── block-buffer v0.10.4
+        │   └── generic-array v0.14.7
+        │       └── typenum v1.20.1
+        │       [build-dependencies]
+        │       └── version_check v0.9.5
+        └── crypto-common v0.1.7
+            ├── generic-array v0.14.7 (*)
+            └── typenum v1.20.1

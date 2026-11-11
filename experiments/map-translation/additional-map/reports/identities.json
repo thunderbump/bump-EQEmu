@@ -1,0 +1,68 @@
+{
+  "image": "sha256:0aeb54f14590bf1631a27f60b3e7b7eed6dde549f08ba1f5738282e59d4cea1d",
+  "fp": {
+    "RUSTFLAGS": null,
+    "CARGO_ENCODED_RUSTFLAGS": null,
+    "cpp": "-fno-fast-math -ffp-contract=off",
+    "rust": "release default target CPU, no mul_add; default process FP environment"
+  },
+  "binaries": {
+    "cpp": {
+      "sha256": "e7fae440d22a42b2a92049a1fd0ff86d4e2978d513020a2c33356b22baa8b3ef",
+      "ldd": "\tlinux-vdso.so.1 (0x000075cdc564a000)\n\tlibz.so.1 => /lib/x86_64-linux-gnu/libz.so.1 (0x000075cdc5609000)\n\tlibstdc++.so.6 => /lib/x86_64-linux-gnu/libstdc++.so.6 (0x000075cdc53ef000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x000075cdc5310000)\n\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x000075cdc52f0000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x000075cdc510f000)\n\t/lib64/ld-linux-x86-64.so.2 (0x000075cdc564c000)\n",
+      "libraries": {
+        "/lib/x86_64-linux-gnu/libz.so.1": "7e2a72b4c4b38c61e6962de6e3f4a5e9ae692e732c68deead10a7ce2135a7f68",
+        "/lib/x86_64-linux-gnu/libstdc++.so.6": "e7848e32af4932840ba775169041759a2a8dd5a008af360e5c55bce506eebcf4",
+        "/lib/x86_64-linux-gnu/libm.so.6": "958fd4988943ab6713d04d4c7de8e468e358c5671db2acf9a7b025b465d10910",
+        "/lib/x86_64-linux-gnu/libgcc_s.so.1": "2bd1552c47799ef67e701e81d4383061fd76059868e446e63560f0dd0d5ec14e",
+        "/lib/x86_64-linux-gnu/libc.so.6": "666bb96697d92290e2172a8403040f9e3ebdd06aa4d4769080649c92201a9aad",
+        "/lib64/ld-linux-x86-64.so.2": "7288c75488697bad29619f7ad123b8e467744f500369689d97de13197d282e87"
+      }
+    },
+    "rust": {
+      "sha256": "0a487ad7fdd57d01175313f18f38cd6a370c2e35000d8e35c0e576068921cfea",
+      "ldd": "\tlinux-vdso.so.1 (0x00007a464ed9b000)\n\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007a464ecfa000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007a464ec1b000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007a464ea3a000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007a464ed9d000)\n",
+      "libraries": {
+        "/lib/x86_64-linux-gnu/libgcc_s.so.1": "2bd1552c47799ef67e701e81d4383061fd76059868e446e63560f0dd0d5ec14e",
+        "/lib/x86_64-linux-gnu/libm.so.6": "958fd4988943ab6713d04d4c7de8e468e358c5671db2acf9a7b025b465d10910",
+        "/lib/x86_64-linux-gnu/libc.so.6": "666bb96697d92290e2172a8403040f9e3ebdd06aa4d4769080649c92201a9aad",
+        "/lib64/ld-linux-x86-64.so.2": "7288c75488697bad29619f7ad123b8e467744f500369689d97de13197d282e87"
+      }
+    }
+  },
+  "cpp_runtime": {
+    "rounding_mode": 0,
+    "glm_version": 1000,
+    "zlib_runtime": "1.2.13",
+    "mxcsr": 8064
+  },
+  "source_files": {
+    "zone/map_geometry.cpp": {
+      "sha256": "919ebafc057f474b1df59d83a0aff627045697aeea230f587df08df593f727e9",
+      "reference_commit": "f3826005ce96820291c2cdba48e5fe06b6426cf0",
+      "identical": false
+    },
+    "experiments/map-translation/capture.cpp": {
+      "sha256": "118028be5ab7f472fe26cfc761c14f727af89c24421d6313d160fbfaf4fff99f",
+      "reference_commit": "f3826005ce96820291c2cdba48e5fe06b6426cf0",
+      "identical": true
+    },
+    "experiments/map-translation/rust/src/lib.rs": {
+      "sha256": "b76fff122a859314e8b8dd0587917bf7da0ba372065acbceb040852f01f6625b",
+      "reference_commit": "1fa4f48d1198188662e4239c94fc71754dad5895",
+      "identical": true
+    },
+    "experiments/map-translation/rust/src/main.rs": {
+      "sha256": "3557894bc7ef32969f9562defb15054f4a23290b81c475269336ab01b3e2d93c",
+      "reference_commit": "1fa4f48d1198188662e4239c94fc71754dad5895",
+      "identical": true
+    },
+    "experiments/map-translation/rust/Cargo.lock": {
+      "sha256": "dfaa3fb2f28aa85fa8e83f71760a54cd4d91a9a978474dcc1530de82e24965cc",
+      "reference_commit": "1fa4f48d1198188662e4239c94fc71754dad5895",
+      "identical": true
+    }
+  },
+  "complete_provenance": "/home/bump/.local/state/eqemu-map-translation/additional-map-20261110/run-01/results/capture/provenance.json",
+  "complete_provenance_sha256": "e1c65d07272ef86f51523c0189e89c71487bd2778ad20b48c31afda9c34dccf4"
+}
