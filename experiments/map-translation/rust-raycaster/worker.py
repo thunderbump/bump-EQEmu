@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import subprocess
 import tempfile
+import sys
 
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--socket', required=True)
@@ -24,6 +25,7 @@ security = subprocess.check_output(docker + ['info', '--format', '{{json .Securi
 if 'name=rootless' not in json.loads(security):
     p.error('rootless Docker required')
 a.output.mkdir(parents=True, exist_ok=False)
+(a.output / "command.json").write_text(json.dumps(sys.argv,indent=2))
 commit = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
 script = '''set -eu
 mkdir -p /results
@@ -46,6 +48,8 @@ c++ --version > /results/compiler.txt
 sha256sum /reference-build/raycaster-reference > /results/reference-binary.sha256
 ldd /reference-build/raycaster-reference > /results/reference-ldd.txt
 ldd /reference-build/raycaster-reference | awk '{for(i=1;i<=NF;i++) if (index($i,"/") == 1) print $i}' | xargs sha256sum > /results/reference-libraries.sha256
+cp /rust-build/release/rust-raycaster-poc /results/
+cp /reference-build/raycaster-reference /results/
 python3 qualify.py
 '''
 with tempfile.TemporaryDirectory() as tmp:
