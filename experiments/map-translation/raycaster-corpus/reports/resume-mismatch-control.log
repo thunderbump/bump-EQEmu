@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/home/bump/.t3/worktrees/bump-EQEmu/t3-1a53c39d/experiments/map-translation/raycaster-corpus/runner.py", line 136, in <module>
+    if __name__=='__main__': main()
+                             ~~~~^^
+  File "/home/bump/.t3/worktrees/bump-EQEmu/t3-1a53c39d/experiments/map-translation/raycaster-corpus/runner.py", line 70, in main
+    if a.resume: assert json.loads((out/'identity.json').read_text())==identity, 'resume identity mismatch'
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: resume identity mismatch

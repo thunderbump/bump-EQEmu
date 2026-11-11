@@ -1,0 +1,7 @@
+{
+  "run": "qualification_v3",
+  "processed": 181,
+  "reason": "intentional SIGINT before final bounded-census revision",
+  "checkpoint_preserved": true,
+  "running_task_containers_after_interrupt": 0
+}

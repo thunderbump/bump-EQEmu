@@ -1,0 +1,11 @@
+[
+  "experiments/map-translation/raycaster-corpus/runner.py",
+  "--run",
+  "final",
+  "--socket",
+  "unix:///run/user/1000/eqemu-raycaster-corpus.sock",
+  "--collection",
+  "/home/bump/Projects/bump-eqemu/bump-akk-stack/server/maps",
+  "--deployed",
+  "/home/bump/.local/share/eqemu-upstream/state/server/maps"
+]
