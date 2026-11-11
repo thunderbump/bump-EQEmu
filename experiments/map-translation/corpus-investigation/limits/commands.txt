@@ -1,0 +1,24 @@
+# Working directory: /home/bump/.t3/worktrees/bump-EQEmu/t3-75636b95
+# Existing workflow inspected read-only:
+# /home/bump/.t3/worktrees/bump-EQEmu/t3-5f1c155b/experiments/map-translation/additional-map/{README.md,reports/commands.txt}
+# Original direct-launch failure remains in ../corpus-limit-gaps-20261110/daemon.log.
+# New owned daemon, no policy/security edits:
+systemd-run --user --unit=eqemu-corpus-limits-20261110 --setenv=DOCKERD_ROOTLESS_ROOTLESSKIT_STATE_DIR=/run/user/1000/eqemu-corpus-limits-20261110-kit /usr/bin/dockerd-rootless.sh --host=unix:///run/user/1000/eqemu-corpus-limits-20261110.sock --data-root=/home/bump/.local/state/eqemu-map-translation/corpus-limit-gaps-20261110/user-worker/docker --exec-root=/run/user/1000/eqemu-corpus-limits-20261110-exec --pidfile=/run/user/1000/eqemu-corpus-limits-20261110.pid
+# Executed host transport at 0710da38d:
+python3 experiments/map-translation/corpus-investigation/limits/import_image.py --socket unix:///run/user/1000/eqemu-corpus-limits-20261110.sock --output /home/bump/.local/state/eqemu-map-translation/corpus-limit-gaps-20261110/user-worker/image-import.json
+# At clean committed adff87f2b, fixtures first, then inspection:
+python3 experiments/map-translation/corpus-investigation/limits/run_inspector.py --socket unix:///run/user/1000/eqemu-corpus-limits-20261110.sock --output /home/bump/.local/state/eqemu-map-translation/corpus-limit-gaps-20261110/user-worker/inspection-01
+# At clean committed ddd466425, first lab failed at compile, not map execution:
+python3 experiments/map-translation/corpus-investigation/limits/run_lab.py --socket unix:///run/user/1000/eqemu-corpus-limits-20261110.sock --inspection /home/bump/.local/state/eqemu-map-translation/corpus-limit-gaps-20261110/user-worker/inspection-01 --output /home/bump/.local/state/eqemu-map-translation/corpus-limit-gaps-20261110/user-worker/lab-01
+# At clean committed 69a1eb3f3, corrected lab wrapper, successful:
+python3 experiments/map-translation/corpus-investigation/limits/run_lab.py --socket unix:///run/user/1000/eqemu-corpus-limits-20261110.sock --inspection /home/bump/.local/state/eqemu-map-translation/corpus-limit-gaps-20261110/user-worker/inspection-01 --output /home/bump/.local/state/eqemu-map-translation/corpus-limit-gaps-20261110/user-worker/lab-02
+# Actual docker commands are in each run's commands.json, container configs in container.json.
+# Guest commands are fully defined in committed runners; no host parser/native/Cargo execution.
+# Cleanup only the owned daemon/store after verifying zero remaining containers:
+docker --host unix:///run/user/1000/eqemu-corpus-limits-20261110.sock ps -aq
+docker --host unix:///run/user/1000/eqemu-corpus-limits-20261110.sock system prune -af --volumes
+systemctl --user stop eqemu-corpus-limits-20261110
+systemctl --user show eqemu-corpus-limits-20261110 -p ActiveState -p SubState -p Result
+systemd-run --user --unit=eqemu-corpus-limits-20261110-cleanup --wait --pipe /usr/bin/rootlesskit --state-dir=/run/user/1000/eqemu-corpus-limits-20261110-cleanup-kit rm -rf /home/bump/.local/state/eqemu-map-translation/corpus-limit-gaps-20261110/user-worker/docker
+# Inspection/lab output paths are exclusive. Reproduction uses new owned unit/socket/store/output paths.
+systemd-run --user --unit=eqemu-corpus-limits-20261110-cleanup-exec --wait --pipe /usr/bin/rootlesskit --state-dir=/run/user/1000/eqemu-corpus-limits-20261110-cleanup-exec-kit rm -rf /run/user/1000/eqemu-corpus-limits-20261110-exec

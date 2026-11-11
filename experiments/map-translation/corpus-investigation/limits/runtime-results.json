@@ -1,0 +1,681 @@
+{
+  "scope": "new ordinary C++ lab and retained mesh inspection; no Rust outcome",
+  "inspection_source": {
+    "commit": "adff87f2b7a99d19518db82d9a542e440f0f0371",
+    "image": "sha256:0aeb54f14590bf1631a27f60b3e7b7eed6dde549f08ba1f5738282e59d4cea1d",
+    "tools": {
+      "test_inspect.py": "90984b5f7a9e43c8531a362fe5f67254b22313097075e76b7e7d28cea24a7bfe",
+      "run_inspector.py": "7d6ac246a2d3ad55de24d44e318d1140a0fd675247d5a47fc1e3c41a6a9f28dd",
+      "import_image.py": "1e837132788050b4e9baf261342587a86801b12a534634d9c668e795edf60f30",
+      "inspect_mesh.py": "aaa71ca19aacba5e233092fcfdb6056a8bb200b5f8c31d565e351034b6cf9916"
+    }
+  },
+  "inspection": {
+    "scope": "investigation only; no engine or candidate qualification",
+    "admission": {
+      "memory.max": "2147483648",
+      "memory.swap.max": "0",
+      "memory.peak": "10477568",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+    },
+    "cases": [
+      {
+        "path": "base/chelsithreborn.map",
+        "mesh_sha256": "4b0e68eed94f79f6bc1d00cad9e23f79f9c4384aabaf961b260c067b35e848fd",
+        "vertices": 5810335,
+        "indices": 5985597,
+        "triangles": 1995199,
+        "bounds_min": [
+          -1531.4647216796875,
+          -1225.7586669921875,
+          -3776.33544921875
+        ],
+        "bounds_max": [
+          1519.9896240234375,
+          2833.57421875,
+          1103.4571533203125
+        ],
+        "nonfinite_components": 0,
+        "components_outside_core_range": 0,
+        "referenced_vertices": 5810335,
+        "unreferenced_vertices": 0,
+        "min_index": 0,
+        "max_index": 5810334,
+        "repeated_index_triangles": 1,
+        "geometric_degeneracy": "not measured",
+        "tree": "not built"
+      },
+      {
+        "path": "base/cityofbronze.map",
+        "mesh_sha256": "5734892a6bd482c236370a23f66e60480dffb675ac6600fc3736298fc42cf622",
+        "vertices": 6161009,
+        "indices": 6684999,
+        "triangles": 2228333,
+        "bounds_min": [
+          -3305.666748046875,
+          -3647.25048828125,
+          -1267.1986083984375
+        ],
+        "bounds_max": [
+          3336.332763671875,
+          2913.7490234375,
+          3474.8974609375
+        ],
+        "nonfinite_components": 0,
+        "components_outside_core_range": 0,
+        "referenced_vertices": 6161009,
+        "unreferenced_vertices": 0,
+        "min_index": 0,
+        "max_index": 6161008,
+        "repeated_index_triangles": 6,
+        "geometric_degeneracy": "not measured",
+        "tree": "not built"
+      },
+      {
+        "path": "base/riftseekers.map",
+        "mesh_sha256": "9d2674519f580782745327e6557548f925c511c25b3ea0f4fba8f188822106a8",
+        "vertices": 5001642,
+        "indices": 5497866,
+        "triangles": 1832622,
+        "bounds_min": [
+          -1638.4407958984375,
+          -840.9263305664062,
+          -861.5304565429688
+        ],
+        "bounds_max": [
+          1874.6309814453125,
+          2035.624755859375,
+          580.8037109375
+        ],
+        "nonfinite_components": 0,
+        "components_outside_core_range": 0,
+        "referenced_vertices": 5001642,
+        "unreferenced_vertices": 0,
+        "min_index": 0,
+        "max_index": 5001641,
+        "repeated_index_triangles": 0,
+        "geometric_degeneracy": "not measured",
+        "tree": "not built"
+      }
+    ],
+    "after": {
+      "memory.max": "2147483648",
+      "memory.swap.max": "0",
+      "memory.peak": "14700544",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+    }
+  },
+  "inspection_seconds": 8.749928408302367,
+  "fixture_tests": 10,
+  "lab_source": {
+    "commit": "69a1eb3f319706961e0c1e9e1da43fdd88b13731",
+    "image": "sha256:0aeb54f14590bf1631a27f60b3e7b7eed6dde549f08ba1f5738282e59d4cea1d",
+    "archive_sha256": "dae2aebd65296ad88d0dbc6663434c363efbd182aee8e8cecbff62aed1bcfab2",
+    "tools": {
+      "run_lab.py": "b365f2c6d62c799ba446a20185911cb5a76507bdde50183c24a940c124a44df4",
+      "test_inspect.py": "90984b5f7a9e43c8531a362fe5f67254b22313097075e76b7e7d28cea24a7bfe",
+      "run_inspector.py": "7d6ac246a2d3ad55de24d44e318d1140a0fd675247d5a47fc1e3c41a6a9f28dd",
+      "import_image.py": "1e837132788050b4e9baf261342587a86801b12a534634d9c668e795edf60f30",
+      "prepare_lab.py": "62efaff7b8be1f64676369554affab6981c7453350cb40ef905659c6b3c8a3c4",
+      "lab_guest.py": "4ccc19b0f1d85b621fffae6eaa4c718182a06dc4d5bdae5f85402637fc3bfd38",
+      "inspect_mesh.py": "aaa71ca19aacba5e233092fcfdb6056a8bb200b5f8c31d565e351034b6cf9916"
+    }
+  },
+  "lab_build": {
+    "scope": "lab C++ only; unchanged production engine, copied envelope adapter; no Rust qualification",
+    "admission": {
+      "memory.max": "2147483648",
+      "memory.swap.max": "0",
+      "memory.peak": "9322496",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+    },
+    "stages": [
+      {
+        "name": "generate",
+        "exit": 0,
+        "seconds": 0.0156456739641726,
+        "before": {
+          "memory.max": "2147483648",
+          "memory.swap.max": "0",
+          "memory.peak": "9322496",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+        },
+        "after": {
+          "memory.max": "2147483648",
+          "memory.swap.max": "0",
+          "memory.peak": "14721024",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+        }
+      },
+      {
+        "name": "compile",
+        "exit": 0,
+        "seconds": 1.2659598691388965,
+        "before": {
+          "memory.max": "2147483648",
+          "memory.swap.max": "0",
+          "memory.peak": "14721024",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+        },
+        "after": {
+          "memory.max": "2147483648",
+          "memory.swap.max": "0",
+          "memory.peak": "160854016",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+        }
+      },
+      {
+        "name": "controls",
+        "exit": 0,
+        "seconds": 0.06414751289412379,
+        "before": {
+          "memory.max": "2147483648",
+          "memory.swap.max": "0",
+          "memory.peak": "160854016",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+        },
+        "after": {
+          "memory.max": "2147483648",
+          "memory.swap.max": "0",
+          "memory.peak": "160854016",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+        }
+      }
+    ],
+    "binary_sha256": "28fcf09a6d376befb195900996221ca3c66933aea2938a3c65d3ca7ff1f3a3af",
+    "compiler": "c++ (Debian 12.2.0-14+deb12u1) 12.2.0\nCopyright (C) 2022 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\n"
+  },
+  "native_source_hashes": {
+    "/work/experiments/map-translation/collision/driver.cpp": "fd35dffc92ec0cc4c430440cb24926c4a2da854835f7930a92e2cd356fd973a7",
+    "/work/zone/raycast_mesh.cpp": "de0b71fa404839d899793e9e9814d410dc0505b6ba8b2bd0c068625c7ef131f4",
+    "/work/common/memory/ksm.cpp": "6423f05a9432b61dd6721d4b67d816da94872e68f26c5ce38f0fd4ab8665c139",
+    "/results/lab_driver.cpp": "1443393886495c575f25179955d161a5d903496c848a362e12ddc6078fe64ea2"
+  },
+  "maps": {
+    "chelsithreborn": {
+      "scope": "lab C++ only; unchanged production engine, copied envelope adapter; no Rust qualification",
+      "admission": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "8527872",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "stages": [
+        {
+          "name": "reference",
+          "exit": 0,
+          "seconds": 0.5658943699672818,
+          "before": {
+            "memory.max": "2147483648",
+            "memory.swap.max": "0",
+            "memory.peak": "8790016",
+            "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+          },
+          "after": {
+            "memory.max": "2147483648",
+            "memory.swap.max": "0",
+            "memory.peak": "275521536",
+            "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+          }
+        }
+      ],
+      "tree": {
+        "nodes": 49723,
+        "node_size": 56,
+        "allocated_nodes": 98303,
+        "leaf_nodes": 24862,
+        "leaf_references": 2345785,
+        "leaf_words": 2370647,
+        "leaf_capacity_words": 4194304,
+        "max_leaf_references": 9308
+      },
+      "mesh_sha256": "4b0e68eed94f79f6bc1d00cad9e23f79f9c4384aabaf961b260c067b35e848fd",
+      "input": {
+        "path": "base/chelsithreborn.map",
+        "bytes": 1724957,
+        "sha256": "c1ebe5fe799241693cdc46f9ca9450fe07c818a9d152b11f0ea0f74b4ceca87a",
+        "version": "00000002"
+      },
+      "queries": 5504,
+      "hits": 3467,
+      "misses": 2037,
+      "categories": {
+        "spatial": 2000,
+        "vertical": 1000,
+        "outside": 200,
+        "interior": 256,
+        "interior_adjacent": 256,
+        "edge": 256,
+        "edge_adjacent": 256,
+        "vertex": 256,
+        "vertex_adjacent": 256,
+        "short": 256,
+        "near_parallel": 256,
+        "zero_length": 256
+      },
+      "endpoint_max_abs": 3786.33544921875,
+      "trace_sha256": "f43d9a7bc3d493967d4afadbcf30c03a83e6c8491683f66451602964688c5580",
+      "gnu_time_text": "\tCommand being timed: \"/lab-reference --record /geometry.mesh c1ebe5fe799241693cdc46f9ca9450fe07c818a9d152b11f0ea0f74b4ceca87a unused /results/reference.trace\"\n\tUser time (seconds): 0.46\n\tSystem time (seconds): 0.09\n\tPercent of CPU this job got: 100%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.56\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 262380\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 121978\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 25\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 1704\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    "cityofbronze": {
+      "scope": "lab C++ only; unchanged production engine, copied envelope adapter; no Rust qualification",
+      "admission": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "9240576",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "stages": [
+        {
+          "name": "reference",
+          "exit": 0,
+          "seconds": 0.665784765034914,
+          "before": {
+            "memory.max": "2147483648",
+            "memory.swap.max": "0",
+            "memory.peak": "9502720",
+            "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+          },
+          "after": {
+            "memory.max": "2147483648",
+            "memory.swap.max": "0",
+            "memory.peak": "314384384",
+            "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+          }
+        }
+      ],
+      "tree": {
+        "nodes": 34609,
+        "node_size": 56,
+        "allocated_nodes": 98303,
+        "leaf_nodes": 17305,
+        "leaf_references": 2512354,
+        "leaf_words": 2529659,
+        "leaf_capacity_words": 4194304,
+        "max_leaf_references": 16033
+      },
+      "mesh_sha256": "5734892a6bd482c236370a23f66e60480dffb675ac6600fc3736298fc42cf622",
+      "input": {
+        "path": "base/cityofbronze.map",
+        "bytes": 2446659,
+        "sha256": "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+        "version": "00000002"
+      },
+      "queries": 5504,
+      "hits": 4217,
+      "misses": 1287,
+      "categories": {
+        "spatial": 2000,
+        "vertical": 1000,
+        "outside": 200,
+        "interior": 256,
+        "interior_adjacent": 256,
+        "edge": 256,
+        "edge_adjacent": 256,
+        "vertex": 256,
+        "vertex_adjacent": 256,
+        "short": 256,
+        "near_parallel": 256,
+        "zero_length": 256
+      },
+      "endpoint_max_abs": 3774.8974609375,
+      "trace_sha256": "4d71cc769a136eb7d6675cf3f568b4e8c69d97ae49f145f364bffb5187f6730e",
+      "gnu_time_text": "\tCommand being timed: \"/lab-reference --record /geometry.mesh ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3 unused /results/reference.trace\"\n\tUser time (seconds): 0.50\n\tSystem time (seconds): 0.12\n\tPercent of CPU this job got: 99%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.63\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 299440\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 1\n\tMinor (reclaiming a frame) page faults: 138249\n\tVoluntary context switches: 2\n\tInvoluntary context switches: 24\n\tSwaps: 0\n\tFile system inputs: 32\n\tFile system outputs: 1848\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    "riftseekers": {
+      "scope": "lab C++ only; unchanged production engine, copied envelope adapter; no Rust qualification",
+      "admission": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "10141696",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "stages": [
+        {
+          "name": "reference",
+          "exit": 0,
+          "seconds": 0.5653783869929612,
+          "before": {
+            "memory.max": "2147483648",
+            "memory.swap.max": "0",
+            "memory.peak": "10141696",
+            "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+          },
+          "after": {
+            "memory.max": "2147483648",
+            "memory.swap.max": "0",
+            "memory.peak": "251539456",
+            "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+          }
+        }
+      ],
+      "tree": {
+        "nodes": 62393,
+        "node_size": 56,
+        "allocated_nodes": 98303,
+        "leaf_nodes": 31197,
+        "leaf_references": 3006675,
+        "leaf_words": 3037872,
+        "leaf_capacity_words": 4194304,
+        "max_leaf_references": 3675
+      },
+      "mesh_sha256": "9d2674519f580782745327e6557548f925c511c25b3ea0f4fba8f188822106a8",
+      "input": {
+        "path": "base/riftseekers.map",
+        "bytes": 1589760,
+        "sha256": "94370b8d34bfc0a6be39749cae2f21821f46ede4fc869975cf1dca9c45041e78",
+        "version": "00000002"
+      },
+      "queries": 5504,
+      "hits": 3416,
+      "misses": 2088,
+      "categories": {
+        "spatial": 2000,
+        "vertical": 1000,
+        "outside": 200,
+        "interior": 256,
+        "interior_adjacent": 256,
+        "edge": 256,
+        "edge_adjacent": 256,
+        "vertex": 256,
+        "vertex_adjacent": 256,
+        "short": 256,
+        "near_parallel": 256,
+        "zero_length": 256
+      },
+      "endpoint_max_abs": 2335.624755859375,
+      "trace_sha256": "386c5d3fbce73835d6bd038a6b113f1550e50fe8176425cfcfe57abf387a925f",
+      "gnu_time_text": "\tCommand being timed: \"/lab-reference --record /geometry.mesh 94370b8d34bfc0a6be39749cae2f21821f46ede4fc869975cf1dca9c45041e78 unused /results/reference.trace\"\n\tUser time (seconds): 0.47\n\tSystem time (seconds): 0.08\n\tPercent of CPU this job got: 99%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.56\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 239616\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 112903\n\tVoluntary context switches: 1\n\tInvoluntary context switches: 16\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 1712\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    }
+  },
+  "failed_lab_01": "ddd466425 compile-only macro qualification error; logs retained; corrected at 69a1eb3f3",
+  "image_import": {
+    "manifest": "0aeb54f14590bf1631a27f60b3e7b7eed6dde549f08ba1f5738282e59d4cea1d",
+    "verified_blobs": [
+      {
+        "digest": "sha256:0aeb54f14590bf1631a27f60b3e7b7eed6dde549f08ba1f5738282e59d4cea1d",
+        "size": 4868
+      },
+      {
+        "mediaType": "application/vnd.oci.image.config.v1+json",
+        "digest": "sha256:f8de3c199631d78e4fb433d2b1dfeb3f9d8709a5c7e6fc76589bc740c5106558",
+        "size": 11135
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:7cf63256a31a4cc44f6defe8e1af95363aee5fa75f30a248d95cae684f87c53c",
+        "size": 28219301
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:4402161bf9471df6effb8de6b5fd3332933a4851a851a3869192eca93a7c5a84",
+        "size": 15174545
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:46a570f4dae69e476aefce98d9825b3a69fba77da6a0febdd86b8eee763f2601",
+        "size": 702005545
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:971e8e7e9e611684bd8fb1050e0fcb2ad89780e0c0d0ff638b6ae0da8084b4fd",
+        "size": 88545278
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:28310a58f419e45b387319911805e068dcf1ac893335d8d71007f0dfd0274b60",
+        "size": 187
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:7284bd8863236ad12edc6b1f65ae0f05e89e3e488c3f1a6120ba4b93e9eb9745",
+        "size": 639
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:1a6ace60f5428adaa035b461d1105d2b4c208ed8b988b7152c67588aed6c27a6",
+        "size": 29255308
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:3a33889e309a25713cbdd0bb6fa6b11366e658371543b073cae346681912cc5e",
+        "size": 20650843
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:81650739744f357929d591185bfd46b9ec100dc2ac5958897f393a1745741d7c",
+        "size": 282
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:782b89635431c3dbdc9f9ce67f8b215cac2bd758fd916d45c17bdf8f79ac4062",
+        "size": 181
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:782b89635431c3dbdc9f9ce67f8b215cac2bd758fd916d45c17bdf8f79ac4062",
+        "size": 181
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:406294f8c32f821d3b193ab0d4f61632c019219ac2c2d06ab1e7ded2a3de1807",
+        "size": 400
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:c1d5cce7d699d3c321ec306a7607c8134ae761dc5873f726a62072cdba275ea5",
+        "size": 167
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:2da92d0beb4f5238701b141de1fbc3b305badb58865051b08b7e5aa2b4ec46db",
+        "size": 1243
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:cfaf0761be807ae0182f77dc424af76b25821ab17dad9b4de0ea808c53a165af",
+        "size": 1255
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1",
+        "size": 32
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:4516ac906e2dd2d6e75daf110d6a20610b6aaa052f65c37cc7ed10fe93b62a9b",
+        "size": 391608828
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:7b1205ed4caeee1a5fab2f697e69a9eec998f5a05e84d5c55fd17021de181caa",
+        "size": 221869141
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:11c6caf9ae1776dbeb8d3d13a1c4d6de1815c1175c0bc057afe0b47e59c006b4",
+        "size": 1194301170
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:dabee984606b94d47077db02e7c1d41038094dee1a183dc4f4a12da0448cdb82",
+        "size": 2765859
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:9cfafd2d7eda3b020df73e709d7d6cfa99effd1b1d7dbd0f8190aab47bfacfdd",
+        "size": 15987955
+      }
+    ],
+    "transport": "streamed OCI tar; no store clone"
+  },
+  "containers": {
+    "inspection-01/fixtures/final.json": {
+      "elapsed_seconds": 0.22803148394450545,
+      "state": {
+        "Status": "exited",
+        "Running": false,
+        "Paused": false,
+        "Restarting": false,
+        "OOMKilled": false,
+        "Dead": false,
+        "Pid": 0,
+        "ExitCode": 0,
+        "Error": "",
+        "StartedAt": "2026-11-11T03:17:03.738903783Z",
+        "FinishedAt": "2026-11-11T03:17:03.860802924Z"
+      },
+      "memory": 2147483648,
+      "memory_swap": 2147483648,
+      "network_mode": "none",
+      "nano_cpus": 2000000000
+    },
+    "inspection-01/inspector/final.json": {
+      "elapsed_seconds": 8.749928408302367,
+      "state": {
+        "Status": "exited",
+        "Running": false,
+        "Paused": false,
+        "Restarting": false,
+        "OOMKilled": false,
+        "Dead": false,
+        "Pid": 0,
+        "ExitCode": 0,
+        "Error": "",
+        "StartedAt": "2026-11-11T03:17:04.03974302Z",
+        "FinishedAt": "2026-11-11T03:17:12.732571321Z"
+      },
+      "memory": 2147483648,
+      "memory_swap": 2147483648,
+      "network_mode": "none",
+      "nano_cpus": 2000000000
+    },
+    "lab-01/build/final.json": {
+      "elapsed_seconds": 0.5268333028070629,
+      "state": {
+        "Status": "exited",
+        "Running": false,
+        "Paused": false,
+        "Restarting": false,
+        "OOMKilled": false,
+        "Dead": false,
+        "Pid": 0,
+        "ExitCode": 1,
+        "Error": "",
+        "StartedAt": "2026-11-11T03:18:59.987569011Z",
+        "FinishedAt": "2026-11-11T03:19:00.450674449Z"
+      },
+      "memory": 2147483648,
+      "memory_swap": 2147483648,
+      "network_mode": "none",
+      "nano_cpus": 2000000000
+    },
+    "lab-02/build/final.json": {
+      "elapsed_seconds": 1.5339572210796177,
+      "state": {
+        "Status": "exited",
+        "Running": false,
+        "Paused": false,
+        "Restarting": false,
+        "OOMKilled": false,
+        "Dead": false,
+        "Pid": 0,
+        "ExitCode": 0,
+        "Error": "",
+        "StartedAt": "2026-11-11T03:19:22.441102414Z",
+        "FinishedAt": "2026-11-11T03:19:23.881862938Z"
+      },
+      "memory": 2147483648,
+      "memory_swap": 2147483648,
+      "network_mode": "none",
+      "nano_cpus": 2000000000
+    },
+    "lab-02/chelsithreborn/final.json": {
+      "elapsed_seconds": 0.8283920320682228,
+      "state": {
+        "Status": "exited",
+        "Running": false,
+        "Paused": false,
+        "Restarting": false,
+        "OOMKilled": false,
+        "Dead": false,
+        "Pid": 0,
+        "ExitCode": 0,
+        "Error": "",
+        "StartedAt": "2026-11-11T03:19:24.027821189Z",
+        "FinishedAt": "2026-11-11T03:19:24.771718667Z"
+      },
+      "memory": 2147483648,
+      "memory_swap": 2147483648,
+      "network_mode": "none",
+      "nano_cpus": 2000000000
+    },
+    "lab-02/cityofbronze/final.json": {
+      "elapsed_seconds": 0.931153355166316,
+      "state": {
+        "Status": "exited",
+        "Running": false,
+        "Paused": false,
+        "Restarting": false,
+        "OOMKilled": false,
+        "Dead": false,
+        "Pid": 0,
+        "ExitCode": 0,
+        "Error": "",
+        "StartedAt": "2026-11-11T03:19:24.907439953Z",
+        "FinishedAt": "2026-11-11T03:19:25.762219082Z"
+      },
+      "memory": 2147483648,
+      "memory_swap": 2147483648,
+      "network_mode": "none",
+      "nano_cpus": 2000000000
+    },
+    "lab-02/riftseekers/final.json": {
+      "elapsed_seconds": 0.8278640951029956,
+      "state": {
+        "Status": "exited",
+        "Running": false,
+        "Paused": false,
+        "Restarting": false,
+        "OOMKilled": false,
+        "Dead": false,
+        "Pid": 0,
+        "ExitCode": 0,
+        "Error": "",
+        "StartedAt": "2026-11-11T03:19:25.895078137Z",
+        "FinishedAt": "2026-11-11T03:19:26.639771102Z"
+      },
+      "memory": 2147483648,
+      "memory_swap": 2147483648,
+      "network_mode": "none",
+      "nano_cpus": 2000000000
+    }
+  },
+  "cleanup": {
+    "removed_snapshot_copies": [
+      {
+        "path": "/home/bump/.local/state/eqemu-map-translation/corpus-limit-gaps-20261110/user-worker/lab-01/source.tar",
+        "bytes": 83998720,
+        "sha256": "96abd5fc77eeecb0c268feba2809e7ca3845cf4d35f5ff3d189ea7f082720eae"
+      },
+      {
+        "path": "/home/bump/.local/state/eqemu-map-translation/corpus-limit-gaps-20261110/user-worker/lab-01/source",
+        "bytes": 81640287
+      },
+      {
+        "path": "/home/bump/.local/state/eqemu-map-translation/corpus-limit-gaps-20261110/user-worker/lab-02/source.tar",
+        "bytes": 83998720,
+        "sha256": "dae2aebd65296ad88d0dbc6663434c363efbd182aee8e8cecbff62aed1bcfab2"
+      },
+      {
+        "path": "/home/bump/.local/state/eqemu-map-translation/corpus-limit-gaps-20261110/user-worker/lab-02/source",
+        "bytes": 81640273
+      }
+    ],
+    "owned_daemon_state": "ActiveState=inactive\nSubState=dead\nResult=success\n",
+    "owned_store_absent": true,
+    "remaining_containers_before_prune": "",
+    "socket_absent": true,
+    "owned_exec_root_absent": true
+  }
+}
