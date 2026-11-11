@@ -88,11 +88,21 @@ void controls() {
   require(!cast(*e,{{1,1,2},{1,1,1},"short_miss"}).hit,"segment bound");
   require(!cast(*e,{{1,1,0},{1,1,0},"zero"}).hit,"zero ray");
   auto reverse=cast(*e,{{1,1,-2},{1,1,2},"reverse"}); require(reverse.hit && reverse.fields[6]==2,"two sided");
-  auto bad=h; bad.fields[6]=std::nextafter(bad.fields[6],INFINITY); require(!equal(h,bad),"field comparator control");
+  auto bad=h; for(int k=0;k<7;k++) { bad=h; bad.fields[k]=std::nextafter(bad.fields[k],INFINITY); require(!equal(h,bad),"field comparator control"); }
   bad=h; bad.hit=false; require(!equal(h,bad),"hit comparator control");
   Mesh moved=m; for(size_t i=2;i<moved.v.size();i+=3) moved.v[i]+=10;
   auto other=build(moved); require(!equal(h,cast(*other,r)),"perturbed geometry sensitivity");
  }
+ Mesh square{{0,0,0, 4,0,0, 4,4,0, 0,4,0}, {0,1,2,0,2,3}};
+ auto seam=build(square);
+ for(float x:{std::nextafter(2.0f,-INFINITY),2.0f,std::nextafter(2.0f,INFINITY)}) {
+  auto h=cast(*seam,{{x,2,2},{x,2,-2},"seam"});
+  require(h.hit && h.fields[2]==0 && h.fields[6]==2 && h.fields[5]==1,"analytic shared seam");
+ }
+ // A collinear face alongside the valid face must not invent a hit away from it.
+ Mesh degenerate=m; degenerate.v.insert(degenerate.v.end(),{10,0,0,11,0,0,12,0,0});
+ degenerate.i.insert(degenerate.i.end(),{3,4,5}); auto deg=build(degenerate);
+ require(!cast(*deg,{{11,0,2},{11,0,-2},"degenerate"}).hit,"collinear triangle miss");
  std::cout<<"{\"controls\":32,\"perturbed_geometry_disagreements\":32}\n";
 }
 int main(int argc,char** argv) { try {
