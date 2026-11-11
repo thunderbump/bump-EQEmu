@@ -8,7 +8,7 @@ def sha(p):
  with Path(p).open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
 def mem():return {n:(CG/n).read_text() for n in ['memory.current','memory.max','memory.swap.max','memory.peak','memory.events']}
 runs=[]
-def run(name,args,expected=0):
+def run(name,args,expected=0,message=None):
  before=mem();start=time.monotonic()
  with (O/(name+'.stdout')).open('w') as out,(O/(name+'.stderr')).open('w') as err:
   p=subprocess.Popen(['/usr/bin/time','-v','-o',str(O/(name+'.time')),*args],stdout=out,stderr=err,start_new_session=True)
@@ -16,6 +16,7 @@ def run(name,args,expected=0):
   except subprocess.TimeoutExpired:os.killpg(p.pid,signal.SIGKILL);p.wait();code='timeout'
  runs.append(dict(name=name,args=args,exit=code,seconds=time.monotonic()-start,before=before,after=mem()))
  (O/(sys.argv[1]+'.runs.json')).write_text(json.dumps(runs,indent=2));assert code==expected,(name,code)
+ if message:assert message in (O/(name+'.stderr')).read_text(),(name,message)
 assert mem()['memory.max'].strip()=='2147483648' and mem()['memory.swap.max'].strip()=='0'
 if sys.argv[1]=='build':
  os.environ['CARGO_TARGET_DIR']='/results/target'
@@ -28,7 +29,7 @@ if sys.argv[1]=='build':
  run('old-build',['cmake','--build','/results/old-reference','-j2'])
  run('cpp-controls',['/results/reference','--controls'])
  (O/'toolchain.txt').write_text(subprocess.check_output(['rustc','-Vv'],text=True)+subprocess.check_output(['c++','--version'],text=True))
- for name,cmd in [('rust','/results/target/release/rust-raycaster-poc'),('cpp','/results/reference')]:
+ for name,cmd in [('rust','/results/target/release/rust-raycaster-poc'),('cpp','/results/reference'),('regression-cpp','/results/old-reference/raycaster-reference')]:
   (O/(name+'.identity.json')).write_text(json.dumps({'sha256':sha(cmd),'ldd':subprocess.check_output(['ldd',cmd],text=True),'FP':'O3/default CPU, no fast math, default process FP environment'},indent=2))
 elif sys.argv[1]=='regressions':
  import runpy

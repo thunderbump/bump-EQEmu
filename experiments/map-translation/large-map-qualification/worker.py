@@ -11,6 +11,9 @@ with archive.open('wb') as f:subprocess.run(['git','archive','HEAD'],cwd=ROOT,st
 source=a.output/'source';source.mkdir()
 with tarfile.open(archive) as t:t.extractall(source,filter='data')
 (a.output/'source.json').write_text(json.dumps({'commit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),'archive_sha256':hashlib.sha256(archive.read_bytes()).hexdigest(),'image':IMAGE},indent=2))
+frozen=json.loads((HERE/'cases.json').read_text())['sources']
+for path in ['zone/raycast_mesh.cpp','zone/raycast_mesh.h','zone/map_geometry.cpp','common/memory/ksm.cpp']:
+ assert hashlib.sha256((source/path).read_bytes()).hexdigest()==frozen[path],path
 cases=json.loads((HERE/'cases.json').read_text())['cases'] if a.stage=='maps' else [None]
 commands=[]
 if a.stage != 'build':
@@ -19,7 +22,7 @@ if a.stage != 'build':
  current=json.loads((a.output/'source.json').read_text())
  assert origin['commit']==current['commit'] and origin['image']==IMAGE, 'build source/image mismatch'
  final=json.loads((a.build/'build.final.json').read_text())[0]['State'];assert final['ExitCode']==0 and not final['OOMKilled']
- for label,path in [('rust','target/release/rust-raycaster-poc'),('cpp','reference')]:
+ for label,path in [('rust','target/release/rust-raycaster-poc'),('cpp','reference'),('regression-cpp','old-reference/raycaster-reference')]:
   with (a.build/path).open('rb') as f:assert hashlib.file_digest(f,'sha256').hexdigest()==json.loads((a.build/(label+'.identity.json')).read_text())['sha256']
 for c,phase in [(c,phase) for c in cases for phase in (['controls','reference','rust'] if a.stage=='maps' else [a.stage])]:
  name=Path(c['input']['path']).stem if c else 'build';dest=a.output/name;dest.mkdir(exist_ok=True)
