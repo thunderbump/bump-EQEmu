@@ -1,0 +1,3116 @@
+{
+  "source": "c319cb077cbf5c2bfbf82544f3eab125e5e3277e",
+  "image": "sha256:0aeb54f14590bf1631a27f60b3e7b7eed6dde549f08ba1f5738282e59d4cea1d",
+  "inputs": [
+    {
+      "path": "base/abysmal.map",
+      "bytes": 1506945,
+      "sha256": "53f73097659703a3317b14defc63df57c10c55968806e4f82af3babb7dafe774",
+      "version": "00000002"
+    },
+    {
+      "path": "base/acrylia.map",
+      "bytes": 522636,
+      "sha256": "0d799e1a7ef384bc6db9ae03b3682f044ed7465b1b17f8048d85eda3a29ac2ca",
+      "version": "00000002"
+    },
+    {
+      "path": "base/airplane.map",
+      "bytes": 195392,
+      "sha256": "14f5ff983d88498832bbc6598503705f0e767600cff8103284aad7543feb6937",
+      "version": "00000002"
+    },
+    {
+      "path": "base/akanon.map",
+      "bytes": 203503,
+      "sha256": "0d003f05903776877ef822ea8e1ac57d9b352218d4a3d7036f49147dc6e27d02",
+      "version": "00000002"
+    },
+    {
+      "path": "base/akheva.map",
+      "bytes": 576864,
+      "sha256": "9104fbee8d27e4315433c2b141976db9ccde311cb3ba82830ff66bf9c013794c",
+      "version": "00000002"
+    },
+    {
+      "path": "base/alkabormare.map",
+      "bytes": 1761270,
+      "sha256": "a391b6a5013aa290b818f2f1201a7f0f948e7012d74d27257df5b231a3322586",
+      "version": "00000002"
+    },
+    {
+      "path": "base/anguish.map",
+      "bytes": 1797524,
+      "sha256": "5c3c5d058f3864d9a1228c9d06cb5d042d957723cf6c2581b1c5e5f2d0b1fb54",
+      "version": "00000002"
+    },
+    {
+      "path": "base/arcstone.map",
+      "bytes": 1280155,
+      "sha256": "e812c7d5ef9aa6478618060c19f0a772078ebe41ead5623cfe5ac13f76d9758e",
+      "version": "00000002"
+    },
+    {
+      "path": "base/arelis.map",
+      "bytes": 1457933,
+      "sha256": "729f995452b80ea627b9d6a868e317dd370bd2670c91f181f98280fbaece93a8",
+      "version": "00000002"
+    },
+    {
+      "path": "base/arena.map",
+      "bytes": 204352,
+      "sha256": "67b25ac100f233b79bd4240015da06bd6b8d5ac125868ee2f611cb2b88d3ef83",
+      "version": "00000002"
+    },
+    {
+      "path": "base/arena2.map",
+      "bytes": 204352,
+      "sha256": "67b25ac100f233b79bd4240015da06bd6b8d5ac125868ee2f611cb2b88d3ef83",
+      "version": "00000002"
+    },
+    {
+      "path": "base/argath.map",
+      "bytes": 1597027,
+      "sha256": "96936772b5e9691de5e464e34f4b016ea6db25a78b8925e9cd4122ae1cbced52",
+      "version": "00000002"
+    },
+    {
+      "path": "base/arthicrex.map",
+      "bytes": 1976504,
+      "sha256": "3fccf9665072ca230d4875db490def5389e9eb5aa4f59c89192e661e72c85e97",
+      "version": "00000002"
+    },
+    {
+      "path": "base/ashengate.map",
+      "bytes": 777417,
+      "sha256": "82086fc4797bb9bb61c6b2125c7ce5ee2e5b2a049b2ef8e41b52b767436fa8c3",
+      "version": "00000002"
+    },
+    {
+      "path": "base/atiiki.map",
+      "bytes": 1338359,
+      "sha256": "4160fd252a7da73c85c1ed6ba2c109e3c174e051fbfca786868f31f35e098263",
+      "version": "00000002"
+    },
+    {
+      "path": "base/barindu.map",
+      "bytes": 824160,
+      "sha256": "0220aaa04948f2a5ecd0907285b5fecf83eb2071dc426b48168ec5410f930bde",
+      "version": "00000002"
+    },
+    {
+      "path": "base/barren.map",
+      "bytes": 1663268,
+      "sha256": "68debfa7a766afbe266e0fb3d98fb8bd4af2b2012e617e3c06fe5e2e27dbcd61",
+      "version": "00000002"
+    },
+    {
+      "path": "base/barter.map",
+      "bytes": 1210023,
+      "sha256": "654c2146d89cfa3d25a54ec1fb39609c9c98ba1bd837b65c6f246f8d24b24c9c",
+      "version": "00000002"
+    },
+    {
+      "path": "base/bazaar.map",
+      "bytes": 1223940,
+      "sha256": "d0ce11a7502c895dffa7009bddb4fa089d1ba37eefeef18ad262a5237a5aea2c",
+      "version": "00000002"
+    },
+    {
+      "path": "base/bazaar_v0.map",
+      "bytes": 207550,
+      "sha256": "1ae620248efa20768307a0b0a899645280c467ddd59edebb5624ecf048ac8b9c",
+      "version": "00000002"
+    },
+    {
+      "path": "base/bazaar_v1.map",
+      "bytes": 1223940,
+      "sha256": "d0ce11a7502c895dffa7009bddb4fa089d1ba37eefeef18ad262a5237a5aea2c",
+      "version": "00000002"
+    },
+    {
+      "path": "base/beastdomain.map",
+      "bytes": 2038655,
+      "sha256": "f9989fab957bc211dffd695f8f24b0438b9a4d4bc81b08556b62d644027d31f5",
+      "version": "00000002"
+    },
+    {
+      "path": "base/befallen.map",
+      "bytes": 148609,
+      "sha256": "ff79e0f17c61eeb653648ead92abbf8aa5a658cf5f87c4ad26da18d85ac439b6",
+      "version": "00000002"
+    },
+    {
+      "path": "base/beholder.map",
+      "bytes": 70655,
+      "sha256": "817e0b9cf314ff12e0713d4a1097d790770f9c72d0a36d08a764c7d4ddaf5094",
+      "version": "00000002"
+    },
+    {
+      "path": "base/bertoxtemple.map",
+      "bytes": 671393,
+      "sha256": "ffb517b6fccc76171f071ea0420b235cc0ea5f4103cc7142625f06d8cce33508",
+      "version": "00000002"
+    },
+    {
+      "path": "base/blackburrow.map",
+      "bytes": 131144,
+      "sha256": "7ce27b4f371db575fd30b9905427022793eae59298416b75c5c5c95c4442952a",
+      "version": "00000002"
+    },
+    {
+      "path": "base/blacksail.map",
+      "bytes": 319244,
+      "sha256": "247ec0d0e196d7e2d56738123591e9ed847e3afe3d6f84ba7593a0f3dadde0d1",
+      "version": "00000002"
+    },
+    {
+      "path": "base/bloodfields.map",
+      "bytes": 2632061,
+      "sha256": "e8dd2ac00eea06a274b8ac810fb84521d0b67453d0fbf42207a886129f7e963f",
+      "version": "00000002"
+    },
+    {
+      "path": "base/bloodmoon.map",
+      "bytes": 1851709,
+      "sha256": "8716ffbeee339c19c408eb0be4288f0d89afe2865944fa1db838eaf57eeda2e8",
+      "version": "00000002"
+    },
+    {
+      "path": "base/bothunder.map",
+      "bytes": 617498,
+      "sha256": "f357918c122e2e98bbec38ec16578990767a7c5f9840fbbaabeffdab5df47920",
+      "version": "00000002"
+    },
+    {
+      "path": "base/breedinggrounds.map",
+      "bytes": 2901773,
+      "sha256": "d688d5e6e25d460c2ca0c64a6b6a282383bacb5ee9c4fac40fd20658be657a57",
+      "version": "00000002"
+    },
+    {
+      "path": "base/brellsarena.map",
+      "bytes": 74993,
+      "sha256": "e6ac8c68980c817e4cecadbd09d167d2e08a07203024b778950c9928258f5099",
+      "version": "00000002"
+    },
+    {
+      "path": "base/brellsrest.map",
+      "bytes": 1255085,
+      "sha256": "e77fe8a17145e850abdb16916a1fd0b7742158f11113c4fd1a95b0f23f6acaec",
+      "version": "00000002"
+    },
+    {
+      "path": "base/brellstemple.map",
+      "bytes": 1186462,
+      "sha256": "d982d8e14bc71648932cc790d6566833b00f1937a3316938b8cd22459cb62ad8",
+      "version": "00000002"
+    },
+    {
+      "path": "base/broodlands.map",
+      "bytes": 1042414,
+      "sha256": "4ac5ddbc183ce5abaf5d3e2597dc6347f2c37dc8ea546e255caaee10bf8d89d3",
+      "version": "00000002"
+    },
+    {
+      "path": "base/buriedsea.map",
+      "bytes": 3150301,
+      "sha256": "65fe1118fafc99221899f68b9c7e2a191184e04cddefb716b9978246be4524b0",
+      "version": "00000002"
+    },
+    {
+      "path": "base/burningwood.map",
+      "bytes": 754925,
+      "sha256": "a2bd1995091d155c8fa8b33215a1391670a75d9148010b4c0ff748dba9d46bf2",
+      "version": "00000002"
+    },
+    {
+      "path": "base/butcher.map",
+      "bytes": 417510,
+      "sha256": "7d6419f9d288502c29d55e86ab1543f518e6478c3f022fea14c685c460eabb94",
+      "version": "00000002"
+    },
+    {
+      "path": "base/cabeast.map",
+      "bytes": 271860,
+      "sha256": "747ae6e8bc41f327c9c74c2fb2732b152a3fe6b7f6b1ef1d27b649030dfa1670",
+      "version": "00000002"
+    },
+    {
+      "path": "base/cabwest.map",
+      "bytes": 158574,
+      "sha256": "a29b4db794694b066669850da22101655e52d3b75e8dc7025d20057c4153a87c",
+      "version": "00000002"
+    },
+    {
+      "path": "base/cauldron.map",
+      "bytes": 177034,
+      "sha256": "7a5d992d42da01c900bbf720fa267e70b1a3f57e9aac5efeec4b823ed2122c67",
+      "version": "00000002"
+    },
+    {
+      "path": "base/causeway.map",
+      "bytes": 1590658,
+      "sha256": "83ca49905d3b9f3a7ef11bc859a768cf5ea21336d5627903d4de6ebafefd0c9a",
+      "version": "00000002"
+    },
+    {
+      "path": "base/cazicthule.map",
+      "bytes": 202057,
+      "sha256": "fb6390b8862a25862fa839940191c1bb7fa9c2bb3031f430362a87bc3dd6434a",
+      "version": "00000002"
+    },
+    {
+      "path": "base/chambersa.map",
+      "bytes": 184079,
+      "sha256": "6baf0728e6107b7eeaeb6f3d89504e38f7940dc7d3bb63878519422cceee8233",
+      "version": "00000002"
+    },
+    {
+      "path": "base/chambersb.map",
+      "bytes": 184079,
+      "sha256": "6baf0728e6107b7eeaeb6f3d89504e38f7940dc7d3bb63878519422cceee8233",
+      "version": "00000002"
+    },
+    {
+      "path": "base/chambersc.map",
+      "bytes": 184079,
+      "sha256": "6baf0728e6107b7eeaeb6f3d89504e38f7940dc7d3bb63878519422cceee8233",
+      "version": "00000002"
+    },
+    {
+      "path": "base/chambersd.map",
+      "bytes": 184079,
+      "sha256": "6baf0728e6107b7eeaeb6f3d89504e38f7940dc7d3bb63878519422cceee8233",
+      "version": "00000002"
+    },
+    {
+      "path": "base/chamberse.map",
+      "bytes": 184079,
+      "sha256": "6baf0728e6107b7eeaeb6f3d89504e38f7940dc7d3bb63878519422cceee8233",
+      "version": "00000002"
+    },
+    {
+      "path": "base/chambersf.map",
+      "bytes": 184079,
+      "sha256": "6baf0728e6107b7eeaeb6f3d89504e38f7940dc7d3bb63878519422cceee8233",
+      "version": "00000002"
+    },
+    {
+      "path": "base/chapterhouse.map",
+      "bytes": 3457111,
+      "sha256": "8066c2ec6effc7d292ab31c4a3a684c2b6bf6e5302c167de506ef0ad3e784da0",
+      "version": "00000002"
+    },
+    {
+      "path": "base/charasis.map",
+      "bytes": 125367,
+      "sha256": "7e3d3ebe98e647ec72f0b23855523b3ad29282964394ba62422fda3f0494e822",
+      "version": "00000002"
+    },
+    {
+      "path": "base/chardok.map",
+      "bytes": 194380,
+      "sha256": "3e6910dea1e0d99aced6491b170a6aa84a52b50e22da32a1a391cf7b51529f94",
+      "version": "00000002"
+    },
+    {
+      "path": "base/chardokb.map",
+      "bytes": 651818,
+      "sha256": "2e422083d689415ded5351b70e786ddf21788f097e2f845b43c00dd683dea7a5",
+      "version": "00000002"
+    },
+    {
+      "path": "base/chelsithreborn.map",
+      "bytes": 1724957,
+      "sha256": "c1ebe5fe799241693cdc46f9ca9450fe07c818a9d152b11f0ea0f74b4ceca87a",
+      "version": "00000002"
+    },
+    {
+      "path": "base/citymist.map",
+      "bytes": 283552,
+      "sha256": "77f4c480a2d00dec578b0d46797d9d4e0a35c8649220eb17b239c768e83f07ae",
+      "version": "00000002"
+    },
+    {
+      "path": "base/cityofbronze.map",
+      "bytes": 2446659,
+      "sha256": "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "version": "00000002"
+    },
+    {
+      "path": "base/clz.map",
+      "bytes": 36241,
+      "sha256": "243efd162155e7271e6d509ea560b590071fac4eec0282d5b4b0033616a6aeb9",
+      "version": "00000002"
+    },
+    {
+      "path": "base/cobaltscar.map",
+      "bytes": 189400,
+      "sha256": "86fa333e0a278a30193d6d9beec21dbabb53bbecae5b3263663738cfab8fe37a",
+      "version": "00000002"
+    },
+    {
+      "path": "base/codecay.map",
+      "bytes": 486772,
+      "sha256": "48b79d235139a959016111de9880db618e2171db7910689980c8c9e74f1b878c",
+      "version": "00000002"
+    },
+    {
+      "path": "base/commonlands.map",
+      "bytes": 2045286,
+      "sha256": "3222012ec0c3499376a269dd307e2b22564a2eaaef4c3021daacee3447887543",
+      "version": "00000002"
+    },
+    {
+      "path": "base/commons.map",
+      "bytes": 108473,
+      "sha256": "3c05f50d69db462a9726469f251819c5dfdfbe2045439732b00a9bbcdfca6f14",
+      "version": "00000002"
+    },
+    {
+      "path": "base/convorteum.map",
+      "bytes": 1645028,
+      "sha256": "d2ce332cc958187756bd812b0bc29cf0ae80843ab28a37cd211ca26d162800d6",
+      "version": "00000002"
+    },
+    {
+      "path": "base/coolingchamber.map",
+      "bytes": 1886717,
+      "sha256": "5da6d0896dffaafb98583a837df191509f8fa87f68cbcd8673545dbca7eb6027",
+      "version": "00000002"
+    },
+    {
+      "path": "base/corathus.map",
+      "bytes": 884487,
+      "sha256": "4c693eeb4d4a486bcca550aeb7ac01748a3bd7c2884f340dc75cd68065e5bde7",
+      "version": "00000002"
+    },
+    {
+      "path": "base/corathusa.map",
+      "bytes": 477309,
+      "sha256": "25fab0b08c05e3fc310abbf911f37274d9839b9a8e9bde3188cc5402a06347b5",
+      "version": "00000002"
+    },
+    {
+      "path": "base/corathusb.map",
+      "bytes": 1031868,
+      "sha256": "0973c684e39d4666ffc21ac537c52af0af8b9a157f2f5e19aaae0cc237a1bd50",
+      "version": "00000002"
+    },
+    {
+      "path": "base/crescent.map",
+      "bytes": 1243352,
+      "sha256": "cd6fe35f66e32b201c3f12827974f29ef999d8ca3088fb4eed398a224456595d",
+      "version": "00000002"
+    },
+    {
+      "path": "base/crushbone.map",
+      "bytes": 153437,
+      "sha256": "c71947ec16390c697184922478564bc7163e82ec5750f66e809a69659adc88da",
+      "version": "00000002"
+    },
+    {
+      "path": "base/cryptofshade.map",
+      "bytes": 667077,
+      "sha256": "317d61f99470b1b1b33d5bbe2abcd6493d6b5164c165a88604728d699dbd0df4",
+      "version": "00000002"
+    },
+    {
+      "path": "base/crystal.map",
+      "bytes": 204075,
+      "sha256": "6f41b9f405cc7aef4283e015c48a59489965c15672242a3310c008a9f4a1f0bc",
+      "version": "00000002"
+    },
+    {
+      "path": "base/crystallos.map",
+      "bytes": 3018565,
+      "sha256": "c7a1198c5d365ef4c47037f0d948c87e6969de5b7f35208ab8b2b6daeb46709a",
+      "version": "00000002"
+    },
+    {
+      "path": "base/crystalshard.map",
+      "bytes": 204075,
+      "sha256": "6f41b9f405cc7aef4283e015c48a59489965c15672242a3310c008a9f4a1f0bc",
+      "version": "00000002"
+    },
+    {
+      "path": "base/cshome.map",
+      "bytes": 129272,
+      "sha256": "15a96162d7b5af0e0c83db75a4e93e0efca42490108ae7a964b2aca7e585eb66",
+      "version": "00000002"
+    },
+    {
+      "path": "base/dalnir.map",
+      "bytes": 145701,
+      "sha256": "eb8c78a552e8b87b597d5d45a2d2ab1a488c41351acc464a72c970a133be9804",
+      "version": "00000002"
+    },
+    {
+      "path": "base/dawnshroud.map",
+      "bytes": 1016903,
+      "sha256": "60ce9a3537e55dd3d401f162c02e32b38e9af4e826c8410b8150e0dad0064652",
+      "version": "00000002"
+    },
+    {
+      "path": "base/deadbone.map",
+      "bytes": 453584,
+      "sha256": "30804fa18e38db1a499662b821562a1695e04fe1860b82633be2c51d1272aa6f",
+      "version": "00000002"
+    },
+    {
+      "path": "base/delvea.map",
+      "bytes": 1883369,
+      "sha256": "13bd00a094141fa2d4560efebffcdcdafda68ca8dad25d23caad2d030c497e33",
+      "version": "00000002"
+    },
+    {
+      "path": "base/delveb.map",
+      "bytes": 1424106,
+      "sha256": "dcf86a0d2533704e82f9bb0fd5feabebefacc1e27867650fd8d2d0c40604f9aa",
+      "version": "00000002"
+    },
+    {
+      "path": "base/devastation.map",
+      "bytes": 1965477,
+      "sha256": "a6924c807601795d3179a43b4825c6d73956a7692ad2b5264649f822b84459dc",
+      "version": "00000002"
+    },
+    {
+      "path": "base/devastationa.map",
+      "bytes": 461446,
+      "sha256": "1ee33ba9c1b1b0c72046f91e0973bdd24a57ed3afb658fc580fac33c30918cf0",
+      "version": "00000002"
+    },
+    {
+      "path": "base/direwind.map",
+      "bytes": 2140802,
+      "sha256": "cd6ad4bc1255541ea1bf7469715fa9436888a63a903022b50ccc572997a88650",
+      "version": "00000002"
+    },
+    {
+      "path": "base/discord.map",
+      "bytes": 2649167,
+      "sha256": "9b2e6d7fe202894c08dcc44f7c5987eb7d33074c5861d1ff62133964062a84cf",
+      "version": "00000002"
+    },
+    {
+      "path": "base/discordtower.map",
+      "bytes": 1473875,
+      "sha256": "dfd80b0eb8f78c4f2628ee53f7ef21a545efe812245bb5ec2b6c931c40648d67",
+      "version": "00000002"
+    },
+    {
+      "path": "base/drachnidhive.map",
+      "bytes": 1651105,
+      "sha256": "b0137b9689a4503444b6759dbb9f7060f372aa0909b7e1e7e6b447b72aeca912",
+      "version": "00000002"
+    },
+    {
+      "path": "base/drachnidhivea.map",
+      "bytes": 200727,
+      "sha256": "92a6424b02a97d2cbb228597c1c7ecc3e7266f77037bc7b8ff31099311e7f9a7",
+      "version": "00000002"
+    },
+    {
+      "path": "base/drachnidhiveb.map",
+      "bytes": 103903,
+      "sha256": "00c9ce5222c1037b01137e7f1e55a7120ca65310e1436dc9a7bb909d65113670",
+      "version": "00000002"
+    },
+    {
+      "path": "base/drachnidhivec.map",
+      "bytes": 144231,
+      "sha256": "b4621eec80f3c0599748f84c18f201a303ab7aa09f756e291f5537126d55c827",
+      "version": "00000002"
+    },
+    {
+      "path": "base/dragoncrypt.map",
+      "bytes": 108633,
+      "sha256": "7bad9f2b3a54db5a9deb14f501ef93b08038596b8ef8374b9d6639ef157709b5",
+      "version": "00000002"
+    },
+    {
+      "path": "base/dragonscale.map",
+      "bytes": 3572123,
+      "sha256": "36c22c9f823a157f5f7974ef04d9e8d810a2bcca92fa751545704e3ada222d71",
+      "version": "00000002"
+    },
+    {
+      "path": "base/dragonscalea.map",
+      "bytes": 942037,
+      "sha256": "9b153ab5ef7561dc07235e6cb30ecdafd92108babd82cb324c536560d9339938",
+      "version": "00000002"
+    },
+    {
+      "path": "base/dragonscaleb.map",
+      "bytes": 1544439,
+      "sha256": "475a483c4c5c6ff0ad7d89c44d1a36653bfbf152cd2105d733f279d3ac1a6225",
+      "version": "00000002"
+    },
+    {
+      "path": "base/dranik.map",
+      "bytes": 2907900,
+      "sha256": "bf22e26bc44f58ed58311797a1c9c5010fcd37739e08214307077d6c1bef2cfe",
+      "version": "00000002"
+    },
+    {
+      "path": "base/dranikcatacombsa.map",
+      "bytes": 2131912,
+      "sha256": "fa7baf6f143143bc8e239b85c30ee606774850dc301516bc55a3e4428425033c",
+      "version": "00000002"
+    },
+    {
+      "path": "base/dranikcatacombsb.map",
+      "bytes": 1500763,
+      "sha256": "d401a56a7811d774998047708b80fbe8e7ef2fe8245344cb9773189faafd7d75",
+      "version": "00000002"
+    },
+    {
+      "path": "base/dranikcatacombsc.map",
+      "bytes": 2704490,
+      "sha256": "ae0d0efa9994807248b0cdc425254bcce9b7e59de42f019b61dbdc4dafdfddb8",
+      "version": "00000002"
+    },
+    {
+      "path": "base/dranikhollowsa.map",
+      "bytes": 1462241,
+      "sha256": "8d6e2adaa018003675983fec2357d8faae6ac15f6dd4bc8515d435545af710a9",
+      "version": "00000002"
+    },
+    {
+      "path": "base/dranikhollowsb.map",
+      "bytes": 973015,
+      "sha256": "597f39faa489e83aae3bffd7ba2bcad1747ce13d575e1d6e4a8a02a467c8c3d1",
+      "version": "00000002"
+    },
+    {
+      "path": "base/dranikhollowsc.map",
+      "bytes": 969520,
+      "sha256": "fcd5aad8d95b81385f69a1dbd6e67ad23958d9cc287e471214005d6e40ca32c1",
+      "version": "00000002"
+    },
+    {
+      "path": "base/draniksewersa.map",
+      "bytes": 1604346,
+      "sha256": "411b9cb4eeb95403c0c77887f0a5e319d8bc2cfef4ed5a4cb42e87f40243ecf7",
+      "version": "00000002"
+    },
+    {
+      "path": "base/draniksewersb.map",
+      "bytes": 1783290,
+      "sha256": "ae5072772a9be789e9d41ee09b37896cfbd148645301f13b73feb0a5af0b0110",
+      "version": "00000002"
+    },
+    {
+      "path": "base/draniksewersc.map",
+      "bytes": 1715576,
+      "sha256": "9f786ab3cdd0eeb9d4e7b43e358513641048853664f3727bfe3c842b457a25a8",
+      "version": "00000002"
+    },
+    {
+      "path": "base/draniksscar.map",
+      "bytes": 1573982,
+      "sha256": "8e515aba8f3d4fca2ff2e371e216f69fc98008c89333326ac7422ca8a07d69ae",
+      "version": "00000002"
+    },
+    {
+      "path": "base/dreadlands.map",
+      "bytes": 1380882,
+      "sha256": "d6a3e30736ef145d2ac5861a0708c613f8c80679d28c41d0ef6ef4a127d04f30",
+      "version": "00000002"
+    },
+    {
+      "path": "base/dreadspire.map",
+      "bytes": 1575669,
+      "sha256": "690c63ae6f6339902b7cc3b14ec3ee64722ab08cd018c38e61945e2fbd906f38",
+      "version": "00000002"
+    },
+    {
+      "path": "base/droga.map",
+      "bytes": 224491,
+      "sha256": "6dff571a4dd091c0da74656ac29d12f1f8800a30b0948f5924cc4652e4d228c9",
+      "version": "00000002"
+    },
+    {
+      "path": "base/dulak.map",
+      "bytes": 1386572,
+      "sha256": "a0ee2af1fac932e353fc901ceb53f4a9cb3d369a5b553fb8b8c7cfa6c488da3b",
+      "version": "00000002"
+    },
+    {
+      "path": "base/eastkarana.map",
+      "bytes": 149561,
+      "sha256": "9016c4957aa70ed3892579d08e3e330836548824b1ac92300bd53f87c5c569d0",
+      "version": "00000002"
+    },
+    {
+      "path": "base/eastkorlach.map",
+      "bytes": 2747399,
+      "sha256": "1674fb18c4252caa6e9cea742cc8944a5a573b413767b5f4db143b0f557ea896",
+      "version": "00000002"
+    },
+    {
+      "path": "base/eastkorlacha.map",
+      "bytes": 890012,
+      "sha256": "04bdccb08367d3155578a7149683aee55e553849e88c9f1fcc192bc7933fef4b",
+      "version": "00000002"
+    },
+    {
+      "path": "base/eastsepulcher.map",
+      "bytes": 1434758,
+      "sha256": "80f4d096026409762f5f1e7fbd06c7ee82f418a9a4fd7d0af3a13e170651d7dd",
+      "version": "00000002"
+    },
+    {
+      "path": "base/eastwastes.map",
+      "bytes": 875868,
+      "sha256": "d518d6c3cc95ff82a6c13a9a81703a54bdf3a5836d8785fc843d16de7db0cc14",
+      "version": "00000002"
+    },
+    {
+      "path": "base/eastwastesshard.map",
+      "bytes": 875868,
+      "sha256": "d518d6c3cc95ff82a6c13a9a81703a54bdf3a5836d8785fc843d16de7db0cc14",
+      "version": "00000002"
+    },
+    {
+      "path": "base/echo.map",
+      "bytes": 702818,
+      "sha256": "42cf28385515f47f63db2abb567e79d874b36ac18c863ccb42c50cc59babc528",
+      "version": "00000002"
+    },
+    {
+      "path": "base/ecommons.map",
+      "bytes": 133072,
+      "sha256": "861fa497df139138b13d08b6e16f2d50c6f1a0ccc3f0fa4ce0afadddb6a17915",
+      "version": "00000002"
+    },
+    {
+      "path": "base/elddar.map",
+      "bytes": 2863870,
+      "sha256": "529ff88d86f5b39cafc5d9a757ecdd5de8d70ef6dcc797176b39710a805cc877",
+      "version": "00000002"
+    },
+    {
+      "path": "base/elddara.map",
+      "bytes": 472424,
+      "sha256": "6e570d9e5eda37770dc351bcc5d7061b22343b790cdc3afe3c802bd114c6ac78",
+      "version": "00000002"
+    },
+    {
+      "path": "base/emeraldjungle.map",
+      "bytes": 3516608,
+      "sha256": "023d89b0878f24c4e628c8dcadf95d900ab3579597c3b0762ca82fbf0915a8c7",
+      "version": "00000002"
+    },
+    {
+      "path": "base/erudnext.map",
+      "bytes": 194508,
+      "sha256": "eb27dd8a37679f424d0e1ac2076fc4068914993147c37bd8c4f892a0856f0188",
+      "version": "00000002"
+    },
+    {
+      "path": "base/erudnint.map",
+      "bytes": 153494,
+      "sha256": "c41d95aa9028347e25c5c894174409df13f9d81f398ee21aa726823cbf53af59",
+      "version": "00000002"
+    },
+    {
+      "path": "base/erudsxing.map",
+      "bytes": 49657,
+      "sha256": "4ac78684198c99f4941e7be1d4396fded8a8a1c0325a1a84f79fddbf0e930fef",
+      "version": "00000002"
+    },
+    {
+      "path": "base/everfrost.map",
+      "bytes": 599625,
+      "sha256": "0d0d7e9892973d76f44f0d99a070fbec8b0295196f8818f0f2b5ee78b2bc5435",
+      "version": "00000002"
+    },
+    {
+      "path": "base/eviltree.map",
+      "bytes": 2064009,
+      "sha256": "a4f7d84436880e5753e0d96329071f1c3741c4fa566f95a272f94358b2aea5ee",
+      "version": "00000002"
+    },
+    {
+      "path": "base/fallen.map",
+      "bytes": 1282008,
+      "sha256": "ccab16c78d4d2d9e9c928abfdd6ac29d5ab591f9bc351da32d137313cfb44ce5",
+      "version": "00000002"
+    },
+    {
+      "path": "base/fearplane.map",
+      "bytes": 166818,
+      "sha256": "6019a02993021507bbe2ba19d31c277da9db8e980e97a99c54d04908cfa96652",
+      "version": "00000002"
+    },
+    {
+      "path": "base/feerrott.map",
+      "bytes": 239942,
+      "sha256": "5161fc04f22652cb5b0f30b6c30010c36103a4fb752799ff7011282163d5cbd5",
+      "version": "00000002"
+    },
+    {
+      "path": "base/feerrott2.map",
+      "bytes": 983560,
+      "sha256": "ed21350bc966f9bc14eacec0da5e4a6b3d6dd3acc6797b87ff78666384e6faaf",
+      "version": "00000002"
+    },
+    {
+      "path": "base/felwithea.map",
+      "bytes": 120720,
+      "sha256": "b42c15172ac2eb20917d8f9cf682ebbb6bc829adc2efcf7f4466ccbdc2dc599b",
+      "version": "00000002"
+    },
+    {
+      "path": "base/felwitheb.map",
+      "bytes": 90175,
+      "sha256": "ad9bd5d0f1ca1c555c6060f919c7fa42be3f3e51134c51e74204b7a17733fc1c",
+      "version": "00000002"
+    },
+    {
+      "path": "base/ferubi.map",
+      "bytes": 1121660,
+      "sha256": "15383cd42dee7c3d525aa1745f9f441a173605b5e59ac30005ba2fc572fc7ca4",
+      "version": "00000002"
+    },
+    {
+      "path": "base/fhalls.map",
+      "bytes": 321238,
+      "sha256": "ec1a39e1c2a86f2295df92c059853f89aee3e050a767e0394ec2acb87a4b4b02",
+      "version": "00000002"
+    },
+    {
+      "path": "base/fieldofbone.map",
+      "bytes": 780100,
+      "sha256": "86e9b3e5746372225512a1f8e52ee5652914d71405fe6f9fde13afb09eca6f15",
+      "version": "00000002"
+    },
+    {
+      "path": "base/firiona.map",
+      "bytes": 828455,
+      "sha256": "1e292e3144e5e44145bf3e835b864836700f5d380cdc0bf6f4f0d71a9cd8c019",
+      "version": "00000002"
+    },
+    {
+      "path": "base/firiona_lit.map",
+      "bytes": 39,
+      "sha256": "fd36a52d9a4e6f7a8e580f349381fb185a5edfcca5a775c67e6322abf052e05f",
+      "version": "00000001"
+    },
+    {
+      "path": "base/foundation.map",
+      "bytes": 1064418,
+      "sha256": "e848df5aa1a2866b98fb6d64bd1d4b912ac3f5ffe98c9a842b82af8290780e4c",
+      "version": "00000002"
+    },
+    {
+      "path": "base/freeportacademy.map",
+      "bytes": 365526,
+      "sha256": "86e125419729bb742087a6e7eb6a2fb40e9ceb60d50ffedd81ef95cb54ae033d",
+      "version": "00000002"
+    },
+    {
+      "path": "base/freeportarena.map",
+      "bytes": 349761,
+      "sha256": "20f53582f710df9f5de0d8f6e528c7f4e435d368b28636a18f6ee62252df76ab",
+      "version": "00000002"
+    },
+    {
+      "path": "base/freeportcityhall.map",
+      "bytes": 93320,
+      "sha256": "d16f77018429c04df89ff649af209303e04f95f4460a30a45cba6bdb5dc39b3e",
+      "version": "00000002"
+    },
+    {
+      "path": "base/freeporteast.map",
+      "bytes": 2462538,
+      "sha256": "af7c1a7121850a61c73264bb2958aa5ba91af5a56ab4c9268d76cda592062aff",
+      "version": "00000002"
+    },
+    {
+      "path": "base/freeporthall.map",
+      "bytes": 689065,
+      "sha256": "7b57d1bde3cffa61b1bb0f8c725a03b3984eed11e206ae905967a88297daf73d",
+      "version": "00000002"
+    },
+    {
+      "path": "base/freeportmilitia.map",
+      "bytes": 252659,
+      "sha256": "d7595ed6a5a29f72b0f6aa471daa3ba6e967f14215a8bc8c8d7beb5f036886c9",
+      "version": "00000002"
+    },
+    {
+      "path": "base/freeportsewers.map",
+      "bytes": 661496,
+      "sha256": "dfb892188f6de007a256c23e03155cc28a8433c62699f9c69010c9c6dc62a2c2",
+      "version": "00000002"
+    },
+    {
+      "path": "base/freeporttemple.map",
+      "bytes": 331007,
+      "sha256": "c2f4e83b4eb55230b1ea2dd48fcf39cc3030a6133037868bd1c1b38e49f33656",
+      "version": "00000002"
+    },
+    {
+      "path": "base/freeporttheater.map",
+      "bytes": 243473,
+      "sha256": "ad74a079a30f245958b5b76e38ad4da2417d99d55678b29012c7e54c571e04dc",
+      "version": "00000002"
+    },
+    {
+      "path": "base/freeportwest.map",
+      "bytes": 2760293,
+      "sha256": "670901ee50eb3f8d6ca1e225d0f296681b847cd63cdfab68e44fbe674d9a1363",
+      "version": "00000002"
+    },
+    {
+      "path": "base/freporte.map",
+      "bytes": 307169,
+      "sha256": "a04838813059ed6151c381469c37f4f1571f9b676759e60ebe38e2cecbc404ce",
+      "version": "00000002"
+    },
+    {
+      "path": "base/freportn.map",
+      "bytes": 239085,
+      "sha256": "f75d8c41201ed7bc1a8d2a043a7ca6d006f400855306668812b75878a91b9e07",
+      "version": "00000002"
+    },
+    {
+      "path": "base/freportw.map",
+      "bytes": 267985,
+      "sha256": "7234fc8d24c75a11bf2aa6038c8d98f9e487700b206cd56acea1d7520c8566b0",
+      "version": "00000002"
+    },
+    {
+      "path": "base/frogequip.map",
+      "bytes": 57831,
+      "sha256": "b58a19caaee3d537d74ea642cef90230c650f3dddb491bade37ff618b7fa42ae",
+      "version": "00000001"
+    },
+    {
+      "path": "base/frontiermtns.map",
+      "bytes": 1046087,
+      "sha256": "062b791d8940c3d218d02e2e167071f4755c1b97882a59b4ea465439b0c73e26",
+      "version": "00000002"
+    },
+    {
+      "path": "base/frostcrypt.map",
+      "bytes": 941281,
+      "sha256": "4f4e2d62ac00be88468077b9f7fcc5022e8df2518948b49e63e158aa7a75f44c",
+      "version": "00000002"
+    },
+    {
+      "path": "base/frozenshadow.map",
+      "bytes": 358440,
+      "sha256": "5fcea45b2a65b3f223ff47afd3fcc3510c8d1526cb6e61d0431bf5454ed157cf",
+      "version": "00000002"
+    },
+    {
+      "path": "base/fungalforest.map",
+      "bytes": 755979,
+      "sha256": "a57bfd38752e4b697553e5d00b080f72f6af783c7e4be44b078ced73ef96f0de",
+      "version": "00000002"
+    },
+    {
+      "path": "base/fungusgrove.map",
+      "bytes": 1066000,
+      "sha256": "b505ca196999fcbd2d163dd0b14deb6b43ebb607cd815762f45f261b12276f50",
+      "version": "00000002"
+    },
+    {
+      "path": "base/gfaydark.map",
+      "bytes": 548238,
+      "sha256": "c2f1d379d6b470401eed28d25a45028e2aadfedeefdbf7f405c1898b727a8181",
+      "version": "00000002"
+    },
+    {
+      "path": "base/greatdivide.map",
+      "bytes": 719951,
+      "sha256": "70434fe46aba6163bfb272355dd0075709bdd60810a8d7854241c65fdff11c96",
+      "version": "00000002"
+    },
+    {
+      "path": "base/grelleth.map",
+      "bytes": 3830827,
+      "sha256": "6b9a08164152063f700358177dbdb0ed8b6127128fa867859c0da6c59ecf30f1",
+      "version": "00000002"
+    },
+    {
+      "path": "base/griegsend.map",
+      "bytes": 636006,
+      "sha256": "2d12a9614a1db9a5cb1abcceca09b3007f0fdfc6ac497a61fe71c0a7724e9c58",
+      "version": "00000002"
+    },
+    {
+      "path": "base/grimling.map",
+      "bytes": 1153624,
+      "sha256": "a69fa96aba10a377faaebcdfa9f10feec2698adb2a52a53a7c7770c8a44b4355",
+      "version": "00000002"
+    },
+    {
+      "path": "base/grobb.map",
+      "bytes": 151723,
+      "sha256": "d8110a50cd678630242991e55188c29bf4a4285ade1e6453401f5b8279d4c89a",
+      "version": "00000002"
+    },
+    {
+      "path": "base/growthplane.map",
+      "bytes": 814594,
+      "sha256": "172de594fc01607c7272a633dfd6c349bc211e1dd08e03dca260828993979254",
+      "version": "00000002"
+    },
+    {
+      "path": "base/guardian.map",
+      "bytes": 1128597,
+      "sha256": "4de57c545541e26d67317635bff60e92f96f9bb3d64e983a0426dddff6d85d63",
+      "version": "00000002"
+    },
+    {
+      "path": "base/guildhall.map",
+      "bytes": 295295,
+      "sha256": "6af6b64420b29eeb146545a704758ab11e996ee2056c4f7e4446f5fad39c2030",
+      "version": "00000002"
+    },
+    {
+      "path": "base/guildhall3.map",
+      "bytes": 37175,
+      "sha256": "633f3123081aeb7158cfbd57874e6f0baf966bd56ba12b5bfc2dc0d4799ad222",
+      "version": "00000002"
+    },
+    {
+      "path": "base/guildhalllrg.map",
+      "bytes": 363961,
+      "sha256": "ec5e8c1d3a5ea6ff0506e608921c0fa271b098db0b1e087717f9e919670ed541",
+      "version": "00000002"
+    },
+    {
+      "path": "base/guildhallsml.map",
+      "bytes": 53863,
+      "sha256": "0988ed865a30e778a4522cddb7015c8d143a4104b8ca9637d525840156002119",
+      "version": "00000002"
+    },
+    {
+      "path": "base/guildlobby.map",
+      "bytes": 366852,
+      "sha256": "047662fe7de1e28a28cec507dd216bb267757730c8cf0909c148a7bacbfbf7bc",
+      "version": "00000002"
+    },
+    {
+      "path": "base/guka.map",
+      "bytes": 673362,
+      "sha256": "4afc02e4566dc53bd1af0ae1664992b7a21d728ac9c37abc306a319635420626",
+      "version": "00000002"
+    },
+    {
+      "path": "base/gukb.map",
+      "bytes": 682035,
+      "sha256": "6668f287ed5b5bdb9349fa46e26c6e49a484c4e071bc9d83a2e1efa7015e1b18",
+      "version": "00000002"
+    },
+    {
+      "path": "base/gukbottom.map",
+      "bytes": 198928,
+      "sha256": "fb7fd1f8a863ce87ad3b2effaa139c23593a00510b83437ee840a0fc85ee6e2c",
+      "version": "00000002"
+    },
+    {
+      "path": "base/gukc.map",
+      "bytes": 570891,
+      "sha256": "6c78f21d6b94b6a05a4ab5f3e89d3ac8bbb6efb1996ad656adc3a9fe25cd31d4",
+      "version": "00000002"
+    },
+    {
+      "path": "base/gukd.map",
+      "bytes": 651423,
+      "sha256": "04a35835d0def27ee09d14c89ae795065be0160b6a2b2e07fc2255d7090906f9",
+      "version": "00000002"
+    },
+    {
+      "path": "base/guke.map",
+      "bytes": 631238,
+      "sha256": "1816452805eb6ccd58bae2a3258fa03f9c59472640fde8e4dd58930d01c07d7c",
+      "version": "00000002"
+    },
+    {
+      "path": "base/gukf.map",
+      "bytes": 666965,
+      "sha256": "8cdd62361e5198eb00f8ff9f1d305e916f7e4f216a6c872fa8c59e32dfd1f717",
+      "version": "00000002"
+    },
+    {
+      "path": "base/gukg.map",
+      "bytes": 516961,
+      "sha256": "053d164a0dabc56673a50981b0f4b711aeb62c17a7957f11e5cac9101ea6fe9f",
+      "version": "00000002"
+    },
+    {
+      "path": "base/gukh.map",
+      "bytes": 657482,
+      "sha256": "83a0c970de21d36de66c52003bb69787e9ad4a0793fc7334e0fafefd017a9c55",
+      "version": "00000002"
+    },
+    {
+      "path": "base/guktop.map",
+      "bytes": 191231,
+      "sha256": "225531e47c92e702a24a0c7a34bc5be64f59efd1fd0c9e92c48d3b95e00d3038",
+      "version": "00000002"
+    },
+    {
+      "path": "base/gunthak.map",
+      "bytes": 1482897,
+      "sha256": "bd6444c24bc9b809d715e17991ca7dae410a4e2e4bf84e225947611dbfccf0db",
+      "version": "00000002"
+    },
+    {
+      "path": "base/gyrospireb.map",
+      "bytes": 953542,
+      "sha256": "756eec8d647721d37bf6dd76f84e7279daba4d2bb00950094784b4897626a8ec",
+      "version": "00000002"
+    },
+    {
+      "path": "base/gyrospirez.map",
+      "bytes": 1074183,
+      "sha256": "42c7ab77d58904b300fc20c47db9957a427a1ade716f662da7fb75f52c540004",
+      "version": "00000002"
+    },
+    {
+      "path": "base/halas.map",
+      "bytes": 209763,
+      "sha256": "4046845964f227e134c5a5439722c968af0d4afe7f5da22368978bbc9b979880",
+      "version": "00000002"
+    },
+    {
+      "path": "base/harbingers.map",
+      "bytes": 1064374,
+      "sha256": "af4eff3b3a5a375f146c4b9faf66215ff55b8bf82acd4f7d4b83528327f7cb8f",
+      "version": "00000002"
+    },
+    {
+      "path": "base/hateplane.map",
+      "bytes": 724665,
+      "sha256": "6a2102ad38830015a9d78bcb47ca145e062dfd71d24ae69a944bf13df8b76639",
+      "version": "00000002"
+    },
+    {
+      "path": "base/hateplaneb.map",
+      "bytes": 2179523,
+      "sha256": "26900b7b8e47f2526a2544244d742839d61b462a91212336c3a141eb65b38459",
+      "version": "00000002"
+    },
+    {
+      "path": "base/hatesfury.map",
+      "bytes": 973419,
+      "sha256": "721f744c723967a2b935fb05071db5bbdbb6ba5163f91f3e0d5e588e31c21e04",
+      "version": "00000002"
+    },
+    {
+      "path": "base/heartoffear.map",
+      "bytes": 3383282,
+      "sha256": "440808d2b50dd14df3b536a4a7022944ba734098c3d5c6db522c0cc73b2aa4f4",
+      "version": "00000002"
+    },
+    {
+      "path": "base/highkeep.map",
+      "bytes": 134536,
+      "sha256": "0640d5c11de83e128facb5b77331bf599b3d495e66974d22d8396527f9562a4b",
+      "version": "00000002"
+    },
+    {
+      "path": "base/highpass.map",
+      "bytes": 159245,
+      "sha256": "e9a62f626ba9e672d8f65d50ec879a4abd1135d5f31f4167d0228a01bef328ae",
+      "version": "00000002"
+    },
+    {
+      "path": "base/highpasshold.map",
+      "bytes": 1347982,
+      "sha256": "9d087e36a5c1b654776e95752f8bba45e2a606c3d485a82db5da5416ca494273",
+      "version": "00000002"
+    },
+    {
+      "path": "base/hillsofshade.map",
+      "bytes": 2060161,
+      "sha256": "81ae30b9b9b10476134a2abc8743a65d1a00c2f1b41409b0c0b737b0192c2c08",
+      "version": "00000002"
+    },
+    {
+      "path": "base/hohonora.map",
+      "bytes": 811723,
+      "sha256": "607a9694305f78a35d67f440513c5c68745a2abede62e78426a936f11e026b41",
+      "version": "00000002"
+    },
+    {
+      "path": "base/hohonorb.map",
+      "bytes": 192585,
+      "sha256": "23d6fbcd92899c8e98932eec589b94025f3b8b4992bbbf749e8eefe34692dda6",
+      "version": "00000002"
+    },
+    {
+      "path": "base/hole.map",
+      "bytes": 659024,
+      "sha256": "0ef90649ca040a99aa2bee06864a68e9e3e65d41a081e903723ec0d935252e93",
+      "version": "00000002"
+    },
+    {
+      "path": "base/hollowshade.map",
+      "bytes": 1210341,
+      "sha256": "151c71cf95d3dbc2e04974ff037260e3c9fb0716b047b7257ec2b67a7db9c851",
+      "version": "00000002"
+    },
+    {
+      "path": "base/housegarden.map",
+      "bytes": 1095830,
+      "sha256": "1079045af91f59345c537764b5bb34a034cbf639a5b00b14c6ee6a6fffb215f3",
+      "version": "00000002"
+    },
+    {
+      "path": "base/iceclad.map",
+      "bytes": 996279,
+      "sha256": "63118398574c27ab12a02cd2f07fa7dd14b32207ddad6bfd2cb2684c07428b8b",
+      "version": "00000002"
+    },
+    {
+      "path": "base/icefall.map",
+      "bytes": 2381842,
+      "sha256": "a09044eeae506c8fd4906253840da44b8c75e1c3de305aa86cbc5a81370a5139",
+      "version": "00000002"
+    },
+    {
+      "path": "base/ikkinz.map",
+      "bytes": 412338,
+      "sha256": "cc47fee1ee6428b80071cf3ff0bd574fdeb13ad6162fdf9fffc3608ea14821bb",
+      "version": "00000002"
+    },
+    {
+      "path": "base/illsalin.map",
+      "bytes": 1398437,
+      "sha256": "4ef71d1493e6a1ac0e8643cc5539ca02225dbb042b12811bb82747cde6558c6f",
+      "version": "00000002"
+    },
+    {
+      "path": "base/illsalina.map",
+      "bytes": 222977,
+      "sha256": "13ebf9b0758d90f13169ea84f8a852aee3149262a261411c107a1fada272013c",
+      "version": "00000002"
+    },
+    {
+      "path": "base/illsalinb.map",
+      "bytes": 325216,
+      "sha256": "60e1de99e076a8b18855390fcabd5ee3c68c8bcf2f132267b9a057247ad9ccda",
+      "version": "00000002"
+    },
+    {
+      "path": "base/illsalinc.map",
+      "bytes": 236288,
+      "sha256": "542b9fc38f08c52c04ae5fd72b05be83781dddeedc6b0c6b31694607549e849a",
+      "version": "00000002"
+    },
+    {
+      "path": "base/inktuta.map",
+      "bytes": 427676,
+      "sha256": "2b97a37c81c032f5bda8c95922b2a5942cd64827673c4316ba7be42f31895071",
+      "version": "00000002"
+    },
+    {
+      "path": "base/innothule.map",
+      "bytes": 213821,
+      "sha256": "1d59941fc9f9eed0e043086ccd32771e6329e18ebcbbd9d1b8e486f6639d76ba",
+      "version": "00000002"
+    },
+    {
+      "path": "base/innothuleb.map",
+      "bytes": 973455,
+      "sha256": "ecc2fd8bb14f83e7c86dbac6681376fd68343e3b962f52e5c059befae3b5ac14",
+      "version": "00000002"
+    },
+    {
+      "path": "base/jaggedpine.map",
+      "bytes": 2075392,
+      "sha256": "de119b9b170e679e5effedc37a508f6f3564e1ea1a5aa30894dfb6f65e3a1c24",
+      "version": "00000002"
+    },
+    {
+      "path": "base/jardelshook.map",
+      "bytes": 665330,
+      "sha256": "f5f89dfa41766eada51d6bb8e705801346ec23a955d348441389a4266273d76b",
+      "version": "00000002"
+    },
+    {
+      "path": "base/kael.map",
+      "bytes": 250172,
+      "sha256": "4d0af7dba6d7331fde51f7edf148a18c8b8a64f606d70617878ab5b4af2c719a",
+      "version": "00000002"
+    },
+    {
+      "path": "base/kaelshard.map",
+      "bytes": 250172,
+      "sha256": "4d0af7dba6d7331fde51f7edf148a18c8b8a64f606d70617878ab5b4af2c719a",
+      "version": "00000002"
+    },
+    {
+      "path": "base/kaesora.map",
+      "bytes": 181596,
+      "sha256": "b4ea38db7b3d53cb4b4a72f7b669bbd879c6aa8e55e34fa6e111844d89f460fa",
+      "version": "00000002"
+    },
+    {
+      "path": "base/kaladima.map",
+      "bytes": 120123,
+      "sha256": "add767bd016ae863e6493da7f92fc6166d40e6f108286a03212615c20ed305a6",
+      "version": "00000002"
+    },
+    {
+      "path": "base/kaladimb.map",
+      "bytes": 148364,
+      "sha256": "66bbe063f0b57777f0077addeec417c54d20f6e726d37f43091345a2ff6d34af",
+      "version": "00000002"
+    },
+    {
+      "path": "base/karnor.map",
+      "bytes": 221771,
+      "sha256": "6e9549746045bdff942e2038d1b4cca3cf1374b050974547ae0368d20db1691d",
+      "version": "00000002"
+    },
+    {
+      "path": "base/katta.map",
+      "bytes": 969991,
+      "sha256": "141bc4eaea548db879dc12a4c6e5a1104cc58e14d96f3fb8935122361130eb84",
+      "version": "00000002"
+    },
+    {
+      "path": "base/kattacastrum.map",
+      "bytes": 1898004,
+      "sha256": "987a50ffb473a18fdce54b9019088b41cb78de8d508f3ef16011a89d746a1fc9",
+      "version": "00000002"
+    },
+    {
+      "path": "base/kedge.map",
+      "bytes": 50253,
+      "sha256": "8cdb6253e0be8d6c54e62daf2ad7de6fdd9cdc038a09eee27dfe58d0c8621e99",
+      "version": "00000002"
+    },
+    {
+      "path": "base/kerraridge.map",
+      "bytes": 127054,
+      "sha256": "fb68fe66e3385da91900a4af43ec3359675a69469372b91fd69d78c18a234da1",
+      "version": "00000002"
+    },
+    {
+      "path": "base/kithicor.map",
+      "bytes": 124721,
+      "sha256": "66a6a01c9e8a5e441991b6b40a4e6d711b0abdd1c05d3ae5e7cb260af83fe42c",
+      "version": "00000002"
+    },
+    {
+      "path": "base/kodtaz.map",
+      "bytes": 1190199,
+      "sha256": "71583954c390d28fce0bfcfa1eb8c5668a169129761f3c124b6dfa4efe9af86a",
+      "version": "00000002"
+    },
+    {
+      "path": "base/korascian.map",
+      "bytes": 840631,
+      "sha256": "f3b48328890d24ba1a1dacd320890da21513ca5490d15641fdc6d178e64a361d",
+      "version": "00000002"
+    },
+    {
+      "path": "base/kurn.map",
+      "bytes": 233967,
+      "sha256": "faa97cf9069cc8283c62df107a8abddc903639a0319a7da083fb214ee50bb112",
+      "version": "00000002"
+    },
+    {
+      "path": "base/lakeofillomen.map",
+      "bytes": 1122729,
+      "sha256": "6c4f694bfa7267607fe99c2899f4673150ef81d3620b2f6257d6a51efadde13e",
+      "version": "00000002"
+    },
+    {
+      "path": "base/lakerathe.map",
+      "bytes": 253753,
+      "sha256": "4ef1566dea7810fbd094c14fce920f685a465652bec269e969fc60cac66db144",
+      "version": "00000002"
+    },
+    {
+      "path": "base/lavastorm.map",
+      "bytes": 955014,
+      "sha256": "8f6b02c30ff16d614c71c0bf0d11d5d7688350d6d044b7839e0f4e26bcf1d7a4",
+      "version": "00000002"
+    },
+    {
+      "path": "base/lavastorm_v0.map",
+      "bytes": 76430,
+      "sha256": "84ebb0e0806a4e3148678bdab7062c655f7a2ee9eb0e8851d5bba46570e18b25",
+      "version": "00000002"
+    },
+    {
+      "path": "base/lavastorm_v1.map",
+      "bytes": 955014,
+      "sha256": "8f6b02c30ff16d614c71c0bf0d11d5d7688350d6d044b7839e0f4e26bcf1d7a4",
+      "version": "00000002"
+    },
+    {
+      "path": "base/letalis.map",
+      "bytes": 1304685,
+      "sha256": "a6fab3aaf3ab249f1e6ac24b3187dac5ee93ff8819895bb381ca73d8750c6e7e",
+      "version": "00000002"
+    },
+    {
+      "path": "base/lfaydark.map",
+      "bytes": 241736,
+      "sha256": "bdc0987fe11c0e1fbf5fcd59527e7f1b4b8fd6f2dca55e1ce0e92790f51224d7",
+      "version": "00000002"
+    },
+    {
+      "path": "base/lichencreep.map",
+      "bytes": 1012594,
+      "sha256": "2c14cb10ffcb9fc2bec376e192bb8254bc4011e84c9d0eb66cf0e361f83dc730",
+      "version": "00000002"
+    },
+    {
+      "path": "base/load.map",
+      "bytes": 21961,
+      "sha256": "2de62a519c97bc133806323093b8a5975adc9788cf54217d9d44fdc1a2e464ce",
+      "version": "00000002"
+    },
+    {
+      "path": "base/load2.map",
+      "bytes": 542543,
+      "sha256": "395ac6938f9492bfb6a8b0c40486261833e021f35ed027a9b307434b400e4f6f",
+      "version": "00000002"
+    },
+    {
+      "path": "base/lopingplains.map",
+      "bytes": 3440829,
+      "sha256": "071d35bf804d22ce137440b5b79added54f6fc29ced3396818b516d36c09bbbd",
+      "version": "00000002"
+    },
+    {
+      "path": "base/maiden.map",
+      "bytes": 1051393,
+      "sha256": "b0abfc2a3b0e7731ef664330677e1dedcb03f7b2942151c7b9e7c174805f5e4a",
+      "version": "00000002"
+    },
+    {
+      "path": "base/maidensgrave.map",
+      "bytes": 339886,
+      "sha256": "3f4ead8a4900eeb3ef80ef9d37ce50eaebdd431e60354eba7a446791a08655fe",
+      "version": "00000002"
+    },
+    {
+      "path": "base/mansion.map",
+      "bytes": 2338198,
+      "sha256": "3ebc2d956f774709723aeb0697bfbea24b56a5b850fed665c7eb6d912c126583",
+      "version": "00000002"
+    },
+    {
+      "path": "base/mechanotus.map",
+      "bytes": 2058073,
+      "sha256": "73df14856d86a29d0e7dc6bd67ac1bbbb981dbf723e6fe70404e91d7c9b0f7e0",
+      "version": "00000002"
+    },
+    {
+      "path": "base/mesa.map",
+      "bytes": 2125542,
+      "sha256": "c26ff2653f94a47620cc443fe05d2b9b28b418f356c69959b7a40e36479bcf93",
+      "version": "00000002"
+    },
+    {
+      "path": "base/mira.map",
+      "bytes": 512976,
+      "sha256": "1933f984be978cdd80f35a743852bdb01e65ad517b5640831c104a3428af9518",
+      "version": "00000002"
+    },
+    {
+      "path": "base/miragulmare.map",
+      "bytes": 2078593,
+      "sha256": "ae0c737c7506e018f9e9323b73ca00908b1b992a1e5f21c2eb8440bea2fe077f",
+      "version": "00000002"
+    },
+    {
+      "path": "base/mirb.map",
+      "bytes": 407207,
+      "sha256": "18580c8b696b747b9db29edcda1e49d30f8d3c0601519c92ffeeef0ce10da291",
+      "version": "00000002"
+    },
+    {
+      "path": "base/mirc.map",
+      "bytes": 479041,
+      "sha256": "ab167150a492510d66380bdfc8a72e7b51d18b92cbdd63fa1404bdcc1b7ced0a",
+      "version": "00000002"
+    },
+    {
+      "path": "base/mird.map",
+      "bytes": 456589,
+      "sha256": "6b65f80c6d5780e68e13baf11bf26db3a5f50074645f9df937d40d3c2d71144e",
+      "version": "00000002"
+    },
+    {
+      "path": "base/mire.map",
+      "bytes": 366776,
+      "sha256": "f1d48e8d8270621804fb6fa201c29c8531cd4203bf5211bc5549e592323c720c",
+      "version": "00000002"
+    },
+    {
+      "path": "base/mirf.map",
+      "bytes": 328526,
+      "sha256": "4360fc5ac58e3ffa58cd3b3c889520a6426d9708f8647d397658d8b6ec7be4e7",
+      "version": "00000002"
+    },
+    {
+      "path": "base/mirg.map",
+      "bytes": 466391,
+      "sha256": "fe219ff1147409466e31d87b73a279f75ae1ff7c25623de529fd33ac229f1ed8",
+      "version": "00000002"
+    },
+    {
+      "path": "base/mirh.map",
+      "bytes": 663354,
+      "sha256": "054e75104469eb3612840a3b85a21b80292d76a5051bf34e1de1bc3e142fd725",
+      "version": "00000002"
+    },
+    {
+      "path": "base/miri.map",
+      "bytes": 514257,
+      "sha256": "026f6afecaa9b01f0223c252854714e00edfe6380ec64ee954368a1499561b68",
+      "version": "00000002"
+    },
+    {
+      "path": "base/mirj.map",
+      "bytes": 523132,
+      "sha256": "afd13523aea7fe6a8bb0f33043688f0dd008b8d2def99ba0b504cc330a3f306a",
+      "version": "00000002"
+    },
+    {
+      "path": "base/mischiefplane.map",
+      "bytes": 428854,
+      "sha256": "7a6343b1a6a29bf3a9a9d11db7eb82efa49a219e324d31d9b689a2390db5d47c",
+      "version": "00000002"
+    },
+    {
+      "path": "base/mistmoore.map",
+      "bytes": 162635,
+      "sha256": "d3d1727fe14d30b48cff88c2859d0caba5a6cb7293253545e5e508a7647b419d",
+      "version": "00000002"
+    },
+    {
+      "path": "base/misty.map",
+      "bytes": 93170,
+      "sha256": "91b1d550c8b33d487997e6d3b87d89a8e94b6ba10a0bd03b246fdca468772fb7",
+      "version": "00000002"
+    },
+    {
+      "path": "base/mistythicket.map",
+      "bytes": 861796,
+      "sha256": "35333089af4f387f5a08434ff4fbf4fe8c4d3bdce66a3347437c8802294ccc55",
+      "version": "00000002"
+    },
+    {
+      "path": "base/mmca.map",
+      "bytes": 522649,
+      "sha256": "efe4460bd5eaf6cf5738926bfb9ca4862946d4300c1b9d9144a41eb60c35ab6c",
+      "version": "00000002"
+    },
+    {
+      "path": "base/mmcb.map",
+      "bytes": 503911,
+      "sha256": "375b8eed346a441e668bb09708add52c97a5ff47071b1119ccf909eb4225c4e0",
+      "version": "00000002"
+    },
+    {
+      "path": "base/mmcc.map",
+      "bytes": 638290,
+      "sha256": "261dc7fcfe5cc756763b72bd0fb96ab6b72a497f4b07bc1a6c6b3ae8de07f0bf",
+      "version": "00000002"
+    },
+    {
+      "path": "base/mmcd.map",
+      "bytes": 437164,
+      "sha256": "489c8c27a2cbae8b4305e29f87bb4033e7387ac3f4badbc88a2e57a4222dce1f",
+      "version": "00000002"
+    },
+    {
+      "path": "base/mmce.map",
+      "bytes": 447633,
+      "sha256": "5d64a29369cafda610a05c2537cc6c82bf70cd8a8df665f78a9c29bd06ebfe63",
+      "version": "00000002"
+    },
+    {
+      "path": "base/mmcf.map",
+      "bytes": 425061,
+      "sha256": "c12e900e28af1d42cc1f9eccbe4e57c4689816d25ec17638aafde1c70a6705f9",
+      "version": "00000002"
+    },
+    {
+      "path": "base/mmcg.map",
+      "bytes": 402070,
+      "sha256": "5d7b4362b289bad214e6c80a39fa52973abb7354cc4c7b7c4a6cc6e9c8557406",
+      "version": "00000002"
+    },
+    {
+      "path": "base/mmch.map",
+      "bytes": 455331,
+      "sha256": "8106ea1b3256810d5e84c0463cbbf9799e87f5c8f3c81d605bf4dc62233171be",
+      "version": "00000002"
+    },
+    {
+      "path": "base/mmci.map",
+      "bytes": 446308,
+      "sha256": "9fb54259b19036f0e776510b1dc19eb0e6c7e2d22cecedf3c3bc2941e5c4651d",
+      "version": "00000002"
+    },
+    {
+      "path": "base/mmcj.map",
+      "bytes": 407174,
+      "sha256": "b88e93237a14309a62c88d52a036cf0c944d13257c8c27e76264b40bc723078b",
+      "version": "00000002"
+    },
+    {
+      "path": "base/monkeyrock.map",
+      "bytes": 493986,
+      "sha256": "95f08cc2dd7590515e1ffda0e9b0382038d60dbe79d34565f0036b4ae3ac5ea7",
+      "version": "00000002"
+    },
+    {
+      "path": "base/moors.map",
+      "bytes": 3145521,
+      "sha256": "aed67482c5f6fbae7426f36a8f296deaeccd3df57db0e1960672669a7927c111",
+      "version": "00000002"
+    },
+    {
+      "path": "base/morellcastle.map",
+      "bytes": 1990035,
+      "sha256": "0f2de063404bc994cf7f42f881514a6b2c8dca372338eba6c09682a2b2756bf8",
+      "version": "00000002"
+    },
+    {
+      "path": "base/mseru.map",
+      "bytes": 883220,
+      "sha256": "079d4b58b880b11ee6068cd3aa85118786b431e9dec80032e8999971b72bc48f",
+      "version": "00000002"
+    },
+    {
+      "path": "base/nadox.map",
+      "bytes": 1365535,
+      "sha256": "8a843e11a8e305447421b8ffd7709b0ee3a95f426934fad8e0442c750039bf21",
+      "version": "00000002"
+    },
+    {
+      "path": "base/najena.map",
+      "bytes": 98524,
+      "sha256": "02736c545cc8578a29ca543fdf5d010a70d166c23556b8c767b96fbc6fa0f309",
+      "version": "00000002"
+    },
+    {
+      "path": "base/natimbi.map",
+      "bytes": 2005981,
+      "sha256": "dc57343b35748960b408957a202ec55977541403f26c2076a7e41c8cdaa35674",
+      "version": "00000002"
+    },
+    {
+      "path": "base/necropolis.map",
+      "bytes": 229083,
+      "sha256": "8ad9e2f4f0b47b482f79ef2812a0701b74951cf719358f7cbd5ef70f4c2e064a",
+      "version": "00000002"
+    },
+    {
+      "path": "base/nedaria.map",
+      "bytes": 1089989,
+      "sha256": "9ef28ed1c52590e4fbbce598a55e8f2b54dedda99a473b1c0a067d492daafb9d",
+      "version": "00000002"
+    },
+    {
+      "path": "base/neighborhood.map",
+      "bytes": 717564,
+      "sha256": "d16b27d7c3a07797a45b2900017652d58875207122e7df9e0a506b270d5b6f14",
+      "version": "00000002"
+    },
+    {
+      "path": "base/nektropos.map",
+      "bytes": 200114,
+      "sha256": "1b44b6287d7ef825df89553e43393a6b1ffdda9eadf722d314fc183092c6da57",
+      "version": "00000002"
+    },
+    {
+      "path": "base/nektulos(v3).map",
+      "bytes": 2014516,
+      "sha256": "cd7b268f4262636e5eb2ff8e22b32306cc87cc19221a83d9631e0f3069ef0474",
+      "version": "00000002"
+    },
+    {
+      "path": "base/nektulos.map",
+      "bytes": 2017503,
+      "sha256": "46fa15766b6da905e3183a599dc845bbbe194621de599b415082e3bcf2175264",
+      "version": "00000002"
+    },
+    {
+      "path": "base/nektulos_classic.map",
+      "bytes": 102094,
+      "sha256": "559351c3a5b54c3cfb9e715b48d861cc55ac74ecdeb3c5abd48e55d7bfc9d1c7",
+      "version": "00000002"
+    },
+    {
+      "path": "base/nektulos_v0.map",
+      "bytes": 102094,
+      "sha256": "559351c3a5b54c3cfb9e715b48d861cc55ac74ecdeb3c5abd48e55d7bfc9d1c7",
+      "version": "00000002"
+    },
+    {
+      "path": "base/nektulos_v1.map",
+      "bytes": 2017503,
+      "sha256": "46fa15766b6da905e3183a599dc845bbbe194621de599b415082e3bcf2175264",
+      "version": "00000002"
+    },
+    {
+      "path": "base/nektulosa.map",
+      "bytes": 89861,
+      "sha256": "3f6f19ff4e75c44ae685d2da045fe65aa316878aa92055f91f6afd4b2eb48f6d",
+      "version": "00000002"
+    },
+    {
+      "path": "base/neriaka.map",
+      "bytes": 173287,
+      "sha256": "c83e03752767b74fac40f5039727682f221c7f762b603cf3ac9b5c3c3adf15dd",
+      "version": "00000002"
+    },
+    {
+      "path": "base/neriakb.map",
+      "bytes": 237371,
+      "sha256": "8dc5a0dba3d5bc0be88e9e137619eecacac475bedae49b715d39beeaf55fb02a",
+      "version": "00000002"
+    },
+    {
+      "path": "base/neriakc.map",
+      "bytes": 295742,
+      "sha256": "46a2a3c3a4a1735ac5569d8b001ee47a985d0d4650e37596210aae627ff20c67",
+      "version": "00000002"
+    },
+    {
+      "path": "base/neriakd.map",
+      "bytes": 3323406,
+      "sha256": "9f8315c3c3539662c03e60ac6ff6c23b766955ae21dc8996f86ac8684dacb852",
+      "version": "00000002"
+    },
+    {
+      "path": "base/netherbian.map",
+      "bytes": 1369189,
+      "sha256": "24925b6e1090f11a39226f4f5d2ef55c2d478f02a82d261e16ffea27baf4ad40",
+      "version": "00000002"
+    },
+    {
+      "path": "base/nexus.map",
+      "bytes": 238391,
+      "sha256": "50d0aabb93cef0657c3ca0130a359bd7f63c196ec79530fa0671a3c8d8f7928d",
+      "version": "00000002"
+    },
+    {
+      "path": "base/nightmareb.map",
+      "bytes": 376430,
+      "sha256": "846493d3aa1dcf0e760eb9c6460d6af6ee7c8a348a705013cd85f59bf7fb8120",
+      "version": "00000002"
+    },
+    {
+      "path": "base/northkarana.map",
+      "bytes": 123860,
+      "sha256": "da01b1b34efbfbcfeb42948cb6f221172219b581c724754d4445e6c1c1fb4757",
+      "version": "00000002"
+    },
+    {
+      "path": "base/northro.map",
+      "bytes": 2640184,
+      "sha256": "ca25764db6104c502619247d3337b00e84ac66f16e3615f2711bc9943367f10b",
+      "version": "00000002"
+    },
+    {
+      "path": "base/nro.map",
+      "bytes": 109485,
+      "sha256": "2a72643f2748328ba4abac6c07c58c929a0ae5d8451a2a5a88343138cf7707c5",
+      "version": "00000002"
+    },
+    {
+      "path": "base/nurga.map",
+      "bytes": 97484,
+      "sha256": "54f19891917f948447935948b82d3e9774b2221a798ed69f8039fed42b67a7b9",
+      "version": "00000002"
+    },
+    {
+      "path": "base/oasis.map",
+      "bytes": 111528,
+      "sha256": "e9779eea2ad3fc20367db5e20c687d0c624ddda6fe74784481fa763134761842",
+      "version": "00000002"
+    },
+    {
+      "path": "base/oceangreenhills.map",
+      "bytes": 1688002,
+      "sha256": "d8edf6881907cf882b84e628c46109033dc72c9b82625f11b826217eb2e08612",
+      "version": "00000002"
+    },
+    {
+      "path": "base/oceangreenvillage.map",
+      "bytes": 1296643,
+      "sha256": "663175d28948e7bb74cf9a9c1ecbe759d5ab267e161ed6d204b19124356355dd",
+      "version": "00000002"
+    },
+    {
+      "path": "base/oceanoftears.map",
+      "bytes": 1596878,
+      "sha256": "5a84df07ea30fd6371c6b419dad053f9794de23f716aa3b5569edbb1a38d3086",
+      "version": "00000002"
+    },
+    {
+      "path": "base/oggok.map",
+      "bytes": 2532717,
+      "sha256": "c81183778b23351bb80013b9877a92df84b916a31f7e4b0ef816045a68628ae1",
+      "version": "00000002"
+    },
+    {
+      "path": "base/oldblackburrow.map",
+      "bytes": 1589170,
+      "sha256": "c0cc378cd6666cf4eb73d80685934f2eab4a86253b284bc297a2d9f76566a72b",
+      "version": "00000002"
+    },
+    {
+      "path": "base/oldbloodfield.map",
+      "bytes": 2039628,
+      "sha256": "5fd62af64235ffb5ee68f31ae56b8d3915a364fda22b717a8c1d4ad975fa7391",
+      "version": "00000002"
+    },
+    {
+      "path": "base/oldcommons.map",
+      "bytes": 4062607,
+      "sha256": "8ac2d4c43c13a2d99748674786f7f90f3a0f5a1e9fe8f99a26d801e1df60b49e",
+      "version": "00000002"
+    },
+    {
+      "path": "base/olddranik.map",
+      "bytes": 2422792,
+      "sha256": "4789075b3a8cf036d624c3fd5744df477f195acb5775d6e69772cbb38c5066ab",
+      "version": "00000002"
+    },
+    {
+      "path": "base/oldfieldofbone.map",
+      "bytes": 3107659,
+      "sha256": "23d230400d58cc97b4e48974b39ef24ec4365713fd844eb2f59c35b55705281c",
+      "version": "00000002"
+    },
+    {
+      "path": "base/oldhighpass.map",
+      "bytes": 1232722,
+      "sha256": "9d4e780f30636a19bdc6f9989a87bd18820a3562f55c6baf3973bb5035f0f7aa",
+      "version": "00000002"
+    },
+    {
+      "path": "base/oldkaesoraa.map",
+      "bytes": 1836946,
+      "sha256": "b89b0460a42a544aa340b9bc50e67ac5351fa28a32a96618783e0f6adab33bd4",
+      "version": "00000002"
+    },
+    {
+      "path": "base/oldkaesorab.map",
+      "bytes": 229087,
+      "sha256": "f4993ebac9f3d958a1eaba2b60992af59d8b81dd41f049ded262139d18d7d6e6",
+      "version": "00000002"
+    },
+    {
+      "path": "base/oldkithicor.map",
+      "bytes": 3994460,
+      "sha256": "c904be93f23ec636842964d5a39f2b9a6f83d3c830c5ded5e20558e3f1d9a822",
+      "version": "00000002"
+    },
+    {
+      "path": "base/oldkurn.map",
+      "bytes": 560277,
+      "sha256": "131d6c375ae54439c58749ca8ec65b77ccb5121299fd4a226b74ff0ee0c1ae66",
+      "version": "00000002"
+    },
+    {
+      "path": "base/oot.map",
+      "bytes": 343343,
+      "sha256": "1fa37afc6da8d71ed5b08287f9e2dc6fe2b58b42ac41f31dd083546d62da37bb",
+      "version": "00000002"
+    },
+    {
+      "path": "base/overthere.map",
+      "bytes": 903093,
+      "sha256": "205ed5b7cab351e74c8e7b26fdf2b90377001313d6cfda2d832027d684965921",
+      "version": "00000002"
+    },
+    {
+      "path": "base/paineel.map",
+      "bytes": 344267,
+      "sha256": "544abf474fa5c79a32beaf0790d2744cbfe06d3fd8a9828a959d2edbc799d1a3",
+      "version": "00000002"
+    },
+    {
+      "path": "base/paludal.map",
+      "bytes": 458732,
+      "sha256": "45f3422e718347eb7e1376a98d37b118119c6185beb1c2d0ece5ead442c87f81",
+      "version": "00000002"
+    },
+    {
+      "path": "base/paw.map",
+      "bytes": 98919,
+      "sha256": "7d96d4cd41b0a13bd8f1df29ed71e3faa9ef0e3f157258edc7ec39977fa6e570",
+      "version": "00000002"
+    },
+    {
+      "path": "base/pellucid.map",
+      "bytes": 1153472,
+      "sha256": "7f5e697bf0d3d49f7e8bc2a5eb36063c1c700913b0ffbfbe1e2e04bad57fcab0",
+      "version": "00000002"
+    },
+    {
+      "path": "base/permafrost.map",
+      "bytes": 133070,
+      "sha256": "bd5c236151331ec667f9b4441c87f2cc5a429ee4324a5dbe250f745ea5099f7d",
+      "version": "00000002"
+    },
+    {
+      "path": "base/phinteriortree.map",
+      "bytes": 398444,
+      "sha256": "9834f7f44e98597da319f7711c5300373405b1ff79ba3f6fee003b0216c7d4bb",
+      "version": "00000002"
+    },
+    {
+      "path": "base/phylactery.map",
+      "bytes": 1097469,
+      "sha256": "61774280a7b9a478d841a49d4436b5bdf61a3379baaf7d734f741b7e7040af60",
+      "version": "00000002"
+    },
+    {
+      "path": "base/pillarsalra.map",
+      "bytes": 2826129,
+      "sha256": "46e6d767850acf5fa2305ff6bc2e97adf347d4aba563296cca4abff883ac6ad1",
+      "version": "00000002"
+    },
+    {
+      "path": "base/plhdkeinteriors1a1.map",
+      "bytes": 30708,
+      "sha256": "d28699ce02ba6e22df42fa2180ad88b0a7cd8fdb920b0e564588ddd6341e5414",
+      "version": "00000002"
+    },
+    {
+      "path": "base/plhdkeinteriors1a2.map",
+      "bytes": 30708,
+      "sha256": "d28699ce02ba6e22df42fa2180ad88b0a7cd8fdb920b0e564588ddd6341e5414",
+      "version": "00000002"
+    },
+    {
+      "path": "base/plhdkeinteriors1a3.map",
+      "bytes": 30708,
+      "sha256": "d28699ce02ba6e22df42fa2180ad88b0a7cd8fdb920b0e564588ddd6341e5414",
+      "version": "00000002"
+    },
+    {
+      "path": "base/plhdkeinteriors3a1.map",
+      "bytes": 40835,
+      "sha256": "df693e7441d484a0b98fd4cae7c3474274587c9533b0c7ea578499d2167fdc14",
+      "version": "00000002"
+    },
+    {
+      "path": "base/plhdkeinteriors3a2.map",
+      "bytes": 44195,
+      "sha256": "5e4bf076b06dacdb1f0362bf09920636e4cf0c4e20a9051fafb9829da1b3c939",
+      "version": "00000002"
+    },
+    {
+      "path": "base/plhdkeinteriors3a3.map",
+      "bytes": 44195,
+      "sha256": "5e4bf076b06dacdb1f0362bf09920636e4cf0c4e20a9051fafb9829da1b3c939",
+      "version": "00000002"
+    },
+    {
+      "path": "base/plhogrinteriors1a1.map",
+      "bytes": 11044,
+      "sha256": "0072d9a124658837574b228adf1e0a1c41a6773f527471054900cc60670904da",
+      "version": "00000002"
+    },
+    {
+      "path": "base/plhogrinteriors1a2.map",
+      "bytes": 11070,
+      "sha256": "beb59ada62941b740ddcb971a1b1be56c6e7f8cf99349c01e52add72c8a7b851",
+      "version": "00000002"
+    },
+    {
+      "path": "base/plhogrinteriors3a1.map",
+      "bytes": 17098,
+      "sha256": "4089763a5463fc222728e1b3ff7be145a61596c91a7b86f62207d9699938bf0f",
+      "version": "00000002"
+    },
+    {
+      "path": "base/plhogrinteriors3a2.map",
+      "bytes": 17099,
+      "sha256": "b8602e996dd9ec30d90c97e93efdb269024be61f34d93fb90eab4bbe7bdfdcc3",
+      "version": "00000002"
+    },
+    {
+      "path": "base/plhogrinteriors3b1.map",
+      "bytes": 27442,
+      "sha256": "e000c0f1a07663fbe3a924f0b489712394d77201a0621f8f15ba7ce58c72d490",
+      "version": "00000002"
+    },
+    {
+      "path": "base/plhogrinteriors3b2.map",
+      "bytes": 27437,
+      "sha256": "976ce34a8c06f63b865945aa0393f2308fda5c335dc47eb168683e4311caf467",
+      "version": "00000002"
+    },
+    {
+      "path": "base/poair.map",
+      "bytes": 700609,
+      "sha256": "b8ffc19ccd91d69bdbf9cbcd83518afa28b5c66dac3ac031fa5dfe918ae627ee",
+      "version": "00000002"
+    },
+    {
+      "path": "base/podisease.map",
+      "bytes": 1795251,
+      "sha256": "e14dc235bcc84e29f63cc935c2fdfe5ed1d05cead4b98946e69265165d6a789c",
+      "version": "00000002"
+    },
+    {
+      "path": "base/poeartha.map",
+      "bytes": 602225,
+      "sha256": "ddb1fb29d24e9ac09a9b8872275ca2e11982880287b934179c2a54cdd9db316d",
+      "version": "00000002"
+    },
+    {
+      "path": "base/poearthb.map",
+      "bytes": 258211,
+      "sha256": "88988d48d6aaa87fdd601c2128df96cdf5ac19a6a6e7ccae4cb99abf68818029",
+      "version": "00000002"
+    },
+    {
+      "path": "base/pofire.map",
+      "bytes": 1756852,
+      "sha256": "3fa8440643efe4acd5994bf25d3f3af849182e4611ed999dc534eef3c4b40f4e",
+      "version": "00000002"
+    },
+    {
+      "path": "base/poinnovation.map",
+      "bytes": 1567287,
+      "sha256": "32330d5152a2c27c183fdd4bc583a57a048ba362b02576a7a50890d61761f6c2",
+      "version": "00000002"
+    },
+    {
+      "path": "base/pojustice.map",
+      "bytes": 557094,
+      "sha256": "37005cc29739ba9671390d5e2fd4b5c06e6180b67e1e8ce3e62bf52587964ed2",
+      "version": "00000002"
+    },
+    {
+      "path": "base/poknowledge.map",
+      "bytes": 940304,
+      "sha256": "794b618d86852b47bd593424129aaf34eee326e5e3fec7290aeeb0e32bc41d20",
+      "version": "00000002"
+    },
+    {
+      "path": "base/ponightmare.map",
+      "bytes": 2054778,
+      "sha256": "aac247a1111dfa7a517592280bf2b8a19d1197e7375ffb5363f0694444788715",
+      "version": "00000002"
+    },
+    {
+      "path": "base/poshadow.map",
+      "bytes": 3729231,
+      "sha256": "c087d6144d3d08a636686e2f7e9d25a86122f3f50a73450413549b15148bc983",
+      "version": "00000002"
+    },
+    {
+      "path": "base/postorms.map",
+      "bytes": 2447998,
+      "sha256": "0d60ba827e44c495ca2bf9632ba32d9e159e3095369783ea666fd1d9024c129d",
+      "version": "00000002"
+    },
+    {
+      "path": "base/potactics.map",
+      "bytes": 1770119,
+      "sha256": "7b55807f88d63e5ee0c359a3cd641d3d480712d33fa757760dc92587b230e0c6",
+      "version": "00000002"
+    },
+    {
+      "path": "base/potimea.map",
+      "bytes": 442981,
+      "sha256": "a0825d1770ef0d766e73574980e69e47155fa3d18c54fa0c990ccd0febc5b2ae",
+      "version": "00000002"
+    },
+    {
+      "path": "base/potimeb.map",
+      "bytes": 514459,
+      "sha256": "d5430289785a99919c014b8e286174a3410aeefde953e3523373951bfdaf31df",
+      "version": "00000002"
+    },
+    {
+      "path": "base/potorment.map",
+      "bytes": 647935,
+      "sha256": "fde8839caf2496a155b85f9583ecdb5b7d018d3eb235a1e14c68a99a6bb20486",
+      "version": "00000002"
+    },
+    {
+      "path": "base/potranquility.map",
+      "bytes": 1146909,
+      "sha256": "1321a94c44bef7ac95834b5faff90f1bf65a81868f2256ffa7a3772fbb9f4db3",
+      "version": "00000002"
+    },
+    {
+      "path": "base/povalor.map",
+      "bytes": 1551351,
+      "sha256": "2090c6194a09382ed5fc210f0027662d5502b7d4a9aa6c73daeb7c1daf1f3ffa",
+      "version": "00000002"
+    },
+    {
+      "path": "base/powar.map",
+      "bytes": 714672,
+      "sha256": "6b650c3562df6396e1562650718f4c732d923602927bb26bdc5ed8fa88af7643",
+      "version": "00000002"
+    },
+    {
+      "path": "base/powater.map",
+      "bytes": 531136,
+      "sha256": "81cd53c579045ea77851b5bd1606ba89c6261831a1f07391f0fdb1aa2837fd13",
+      "version": "00000002"
+    },
+    {
+      "path": "base/precipiceofwar.map",
+      "bytes": 567788,
+      "sha256": "2b90bf1342948cdff1012c0730003c5d1f7a527366588ff7027dd2547809ea38",
+      "version": "00000002"
+    },
+    {
+      "path": "base/provinggrounds.map",
+      "bytes": 2304624,
+      "sha256": "96982989ae081b53faf5bb9bd41229e4c4838fc9c0cc12c2a1350542101b620f",
+      "version": "00000002"
+    },
+    {
+      "path": "base/qcat.map",
+      "bytes": 62146,
+      "sha256": "bc9eb0fe07dca8b3ac272596b5aadb36864b6bd9145565b3d0a1c831ed7d5dda",
+      "version": "00000002"
+    },
+    {
+      "path": "base/qey2hh1.map",
+      "bytes": 170571,
+      "sha256": "f1baa75532bc8599ca8f39207529d93e2d9e0340be5dc8296f005d80172d98c3",
+      "version": "00000002"
+    },
+    {
+      "path": "base/qeynos.map",
+      "bytes": 240292,
+      "sha256": "f13ebc4e787bf3bace1ee58ade68cd2bf334eccd1c8e3a4b443633ac746e5277",
+      "version": "00000002"
+    },
+    {
+      "path": "base/qeynos2.map",
+      "bytes": 131984,
+      "sha256": "040343c54e3b02bfd1637ce8fca8839dd676e17c41fb24c042ccfa0bd649435c",
+      "version": "00000002"
+    },
+    {
+      "path": "base/qeytoqrg.map",
+      "bytes": 90435,
+      "sha256": "09a292cf182d37c6b0c98bda49777e84306fc9d40d788940b269cae0381ba942",
+      "version": "00000002"
+    },
+    {
+      "path": "base/qinimi.map",
+      "bytes": 563754,
+      "sha256": "fb19594709e8e02e022b89879ad2ec5dcd640f9a852c453618db8432a016d144",
+      "version": "00000002"
+    },
+    {
+      "path": "base/qrg.map",
+      "bytes": 69534,
+      "sha256": "2a3f222123a14adef55c2d7e81a519fcae6acb71c4b8cdf1cc49967a174e71b2",
+      "version": "00000002"
+    },
+    {
+      "path": "base/qvic.map",
+      "bytes": 802048,
+      "sha256": "5b8c8598201479aa3031fb239009b2016e1c1b33cc638725fdf111dc6633dbae",
+      "version": "00000002"
+    },
+    {
+      "path": "base/qvicb.map",
+      "bytes": 56314,
+      "sha256": "ea0485a83d72369e84b2bc8e8352971f46c805fe20b4ce03ebc50dbd375b7b5c",
+      "version": "00000002"
+    },
+    {
+      "path": "base/rage.map",
+      "bytes": 792184,
+      "sha256": "40c290a4bf9437493dc8895b60f061656f01ddda03e5de43676531a40c4552ad",
+      "version": "00000002"
+    },
+    {
+      "path": "base/ragea.map",
+      "bytes": 1028036,
+      "sha256": "662c6e096f8d7053790bf7aec810ad63f20e03eab4ed1a5d000d2ae827188572",
+      "version": "00000002"
+    },
+    {
+      "path": "base/rathechamber.map",
+      "bytes": 1201380,
+      "sha256": "0f05da7797d78e12a5e79e209c6bbd0b97e7d9767776256ff29ea462a770eff6",
+      "version": "00000002"
+    },
+    {
+      "path": "base/rathemtn.map",
+      "bytes": 334534,
+      "sha256": "32fb530de1d75201c57b405399395984ccc796b524f8d5b435e489a2a37be9ff",
+      "version": "00000002"
+    },
+    {
+      "path": "base/redfeather.map",
+      "bytes": 589578,
+      "sha256": "4d04c70be713e7c33b9df8f12dec59fbd5bbc9af27cbe2a9073eaa597c4b02f8",
+      "version": "00000002"
+    },
+    {
+      "path": "base/relic.map",
+      "bytes": 370786,
+      "sha256": "83c52fff571fc099178f1176adad3825b8ef585fcdcea13122b8ac88c7b2eb2f",
+      "version": "00000002"
+    },
+    {
+      "path": "base/resplendent.map",
+      "bytes": 3595154,
+      "sha256": "ff901054e7a2411a2f6377a79289566d50c474c619fd4f9823d3252258792e24",
+      "version": "00000002"
+    },
+    {
+      "path": "base/riftseekers.map",
+      "bytes": 1589760,
+      "sha256": "94370b8d34bfc0a6be39749cae2f21821f46ede4fc869975cf1dca9c45041e78",
+      "version": "00000002"
+    },
+    {
+      "path": "base/rivervale.map",
+      "bytes": 149021,
+      "sha256": "30ff5ffa8954c9624b0c268acb7c4d74a0eeb1c8d29aed514f42103dd3d01398",
+      "version": "00000002"
+    },
+    {
+      "path": "base/riwwi.map",
+      "bytes": 531075,
+      "sha256": "78ddb0e7ae20804ba46635d3d7fa931ff0eda87cb7e1e61c9326e16bd9e7c894",
+      "version": "00000002"
+    },
+    {
+      "path": "base/roost.map",
+      "bytes": 609781,
+      "sha256": "6207ff8f46467d3173ada38fac39b86c18bf53620f72766a8866b3da0f63f0c3",
+      "version": "00000002"
+    },
+    {
+      "path": "base/rubak.map",
+      "bytes": 1882209,
+      "sha256": "3fa47c22aa45555a1560e8cf3f0712c1f9c420b8597b52a2b6787c24bfa846c8",
+      "version": "00000002"
+    },
+    {
+      "path": "base/ruja.map",
+      "bytes": 627655,
+      "sha256": "16d00c381aa88ad6fd7acbd89e2883a27844cd74e506111d9c0bf8af9e255f85",
+      "version": "00000002"
+    },
+    {
+      "path": "base/rujb.map",
+      "bytes": 608978,
+      "sha256": "ee5de44390fafef130845531cf16b8383cf4377b050729a36f8a2d821b9699fd",
+      "version": "00000002"
+    },
+    {
+      "path": "base/rujc.map",
+      "bytes": 833251,
+      "sha256": "d741f421059ca73589ca0a199d6826231c724f23d3b2e2f30e4b8da2b85b1301",
+      "version": "00000002"
+    },
+    {
+      "path": "base/rujd.map",
+      "bytes": 800162,
+      "sha256": "93541734df688ce3923b3506327639009205960640c8d24c3e53cd03c8395ad6",
+      "version": "00000002"
+    },
+    {
+      "path": "base/ruje.map",
+      "bytes": 587210,
+      "sha256": "c76bef0a99431ad5010fecd96caef7586be64d3d609e3334ef3e9bc41b37d672",
+      "version": "00000002"
+    },
+    {
+      "path": "base/rujf.map",
+      "bytes": 528300,
+      "sha256": "eb2adc76698d78649453955faeb157e47ee6f9c0e3eb4dda3492c0b1744b8a2b",
+      "version": "00000002"
+    },
+    {
+      "path": "base/rujg.map",
+      "bytes": 491771,
+      "sha256": "d20ae82b04d0339a99024c737337d24074ceb0fe193004e71c620ba9fff7e819",
+      "version": "00000002"
+    },
+    {
+      "path": "base/rujh.map",
+      "bytes": 428592,
+      "sha256": "ffa0ba0c3d49d00d65066da8f0e5d425951c9f7fe9110e8fef9025a2c6c7d77c",
+      "version": "00000002"
+    },
+    {
+      "path": "base/ruji.map",
+      "bytes": 470740,
+      "sha256": "31b84beec2c616e34302a8c5dfed698db25355e7e5f97587dbb0b5b2636d9c74",
+      "version": "00000002"
+    },
+    {
+      "path": "base/rujj.map",
+      "bytes": 482097,
+      "sha256": "80badc15fdc712f5e87eb144ddec3aa56645b0e8c3d7d7655fa0b85dc618e089",
+      "version": "00000002"
+    },
+    {
+      "path": "base/runnyeye.map",
+      "bytes": 160814,
+      "sha256": "204eac659a2e56d2efeff25f0e5e1d77e071e5875b6c0e3ebd53a17dc0151a8f",
+      "version": "00000002"
+    },
+    {
+      "path": "base/sarithcity.map",
+      "bytes": 1718651,
+      "sha256": "f47dbe15334440fc7f8eb4d110465000a42417419364f76f54ed5c37c44e034c",
+      "version": "00000002"
+    },
+    {
+      "path": "base/scarlet.map",
+      "bytes": 1537170,
+      "sha256": "f92aa5aab7d4a1a6308dbbbe4dc25448c2a45494bfd02f1dbf200fdf9956f32f",
+      "version": "00000002"
+    },
+    {
+      "path": "base/sebilis.map",
+      "bytes": 259429,
+      "sha256": "e5d796f4d862aefa7f6f498e5923082d14cff77dfa015b2939022e03cbdeaaae",
+      "version": "00000002"
+    },
+    {
+      "path": "base/sepulcher.map",
+      "bytes": 2336124,
+      "sha256": "da95dc3f1d6d9abdcf9592b75b266ae4a92c28f8c6425a3c52b9afe2e0859b2d",
+      "version": "00000002"
+    },
+    {
+      "path": "base/shadeweaver.map",
+      "bytes": 1138288,
+      "sha256": "231daa849c17f074a4994d9bfd6dac31d7dfc7bc1a9c77e073d170bbce682ee7",
+      "version": "00000002"
+    },
+    {
+      "path": "base/shadowedmount.map",
+      "bytes": 850034,
+      "sha256": "5faf02ea7c02202c37841140d89ebc1099dd4f9ef3c7b8cfcd4c6bb1d3450b55",
+      "version": "00000002"
+    },
+    {
+      "path": "base/shadowhaven.map",
+      "bytes": 1073277,
+      "sha256": "96a7daf790a112eddf2095d571c35dded68fd856e9cc97a971228f11673bfe1a",
+      "version": "00000002"
+    },
+    {
+      "path": "base/shadowrest.map",
+      "bytes": 200114,
+      "sha256": "1b44b6287d7ef825df89553e43393a6b1ffdda9eadf722d314fc183092c6da57",
+      "version": "00000002"
+    },
+    {
+      "path": "base/shadowspine.map",
+      "bytes": 92556,
+      "sha256": "3de6e88327f082cf1ce1c9252589d2ca60a36b667fc54d49593d0556f8a078d3",
+      "version": "00000002"
+    },
+    {
+      "path": "base/shardslanding.map",
+      "bytes": 2143159,
+      "sha256": "60f3f0059fa7f41fe5d25b91ec8912274d6f163eee224c029dbab62be0066d24",
+      "version": "00000002"
+    },
+    {
+      "path": "base/sharvahl.map",
+      "bytes": 1091682,
+      "sha256": "d76b5c9527764a5d900e8d948fe9addd350effa165056f26becc01555a43ac8b",
+      "version": "00000002"
+    },
+    {
+      "path": "base/shiningcity.map",
+      "bytes": 1934660,
+      "sha256": "fa40ebbfe7265b82198079cc05d00c3662a58b55b7b057d407080f5f08bc9a29",
+      "version": "00000002"
+    },
+    {
+      "path": "base/shipmvm.map",
+      "bytes": 374667,
+      "sha256": "7ecee9a853a3a940da71d3a28ca4620f2434bf310aeb5aa306b8a7919c978cf5",
+      "version": "00000002"
+    },
+    {
+      "path": "base/shipmvp.map",
+      "bytes": 1133350,
+      "sha256": "58bb9861adfd371e3fd8ae324e95ead3375896961ebee59ba0218443e309081d",
+      "version": "00000002"
+    },
+    {
+      "path": "base/shipmvu.map",
+      "bytes": 439153,
+      "sha256": "545e61f1d774e145f80cf84c7cf8e84cf605a41ce6db8d53e28a8f67ee2c4ea7",
+      "version": "00000002"
+    },
+    {
+      "path": "base/shippvu.map",
+      "bytes": 628692,
+      "sha256": "3c7d7ed12cbd43dc434fb38734fc6c2ba4c5f07d094109cb8485dc97155b5712",
+      "version": "00000002"
+    },
+    {
+      "path": "base/shipuvu.map",
+      "bytes": 249111,
+      "sha256": "13d24cb517cf5836543dc6134aef314f78ada6e0b0cb31038f3ae7ca5107691b",
+      "version": "00000002"
+    },
+    {
+      "path": "base/shipworkshop.map",
+      "bytes": 1493113,
+      "sha256": "b946dd98f410e766f781c402fd329f353f9b70a8700629717c0aba6cb2f8d9d9",
+      "version": "00000002"
+    },
+    {
+      "path": "base/silyssar.map",
+      "bytes": 641697,
+      "sha256": "31001d8f41ac47a3e5768553a31fcb13dd3a9ab07912a3118261ec3cd85ce684",
+      "version": "00000002"
+    },
+    {
+      "path": "base/sirens.map",
+      "bytes": 202436,
+      "sha256": "534bccb3304cb75822c02a1cf15b9c27b8d8d5313c765679ceaf8aa3844cc2b2",
+      "version": "00000002"
+    },
+    {
+      "path": "base/sky.map",
+      "bytes": 1446631,
+      "sha256": "b7f0a8ed3f312444d28256e4966916b807e93db6a5d47830011fb15f625fca7e",
+      "version": "00000001"
+    },
+    {
+      "path": "base/skyfire.map",
+      "bytes": 1168855,
+      "sha256": "56a359087e7e98c1c76119c2f959004f06c8a293aad2ec4b85e28407734d24ae",
+      "version": "00000002"
+    },
+    {
+      "path": "base/skylance.map",
+      "bytes": 614780,
+      "sha256": "1d27f1e3a6e91c7448c78137ef9c23cb43bedecd60eb49ccb40781f0a60ccc29",
+      "version": "00000002"
+    },
+    {
+      "path": "base/skyshrine.map",
+      "bytes": 383566,
+      "sha256": "86268f427d5ea08ba32d7d8fd7f2a5afc61733205449c10733538844f9ce119a",
+      "version": "00000002"
+    },
+    {
+      "path": "base/sleeper.map",
+      "bytes": 136989,
+      "sha256": "7595726d44dfa2ebd1debbd3c1529be311ebf71cc98d77fe3c89d1ca1ed9b35d",
+      "version": "00000002"
+    },
+    {
+      "path": "base/sncrematory.map",
+      "bytes": 345115,
+      "sha256": "9a9c2c079aa7bc76a4df52addcd4ce96528eb77063912749278fd14d3fd7300d",
+      "version": "00000002"
+    },
+    {
+      "path": "base/snlair.map",
+      "bytes": 344343,
+      "sha256": "c486ca061d29803348923db2a0c3893c4ad94b554f74120236cbe50adcd0a740",
+      "version": "00000002"
+    },
+    {
+      "path": "base/snplant.map",
+      "bytes": 276579,
+      "sha256": "d789b4b7f75e4c2318ff78d8413b7336db48afaca37d0fe083066786e5fb2ede",
+      "version": "00000002"
+    },
+    {
+      "path": "base/snpool.map",
+      "bytes": 321866,
+      "sha256": "43c133cd7f6de4420023e73f5cb635af31208319019583d0271ba72d27d73d08",
+      "version": "00000002"
+    },
+    {
+      "path": "base/soldunga.map",
+      "bytes": 256655,
+      "sha256": "b526c645ab0391bfb295f63bea45101d175bec609f17dd10d16d84ea2b112d60",
+      "version": "00000002"
+    },
+    {
+      "path": "base/soldungb.map",
+      "bytes": 194599,
+      "sha256": "6457a51f76aa7d6a4ebff4b7fa7ca1ed79edeb473b3cf09154e736fbd95bb108",
+      "version": "00000002"
+    },
+    {
+      "path": "base/soldungc.map",
+      "bytes": 701249,
+      "sha256": "17e4dbb0ad6d7fd83ebaf9c92981481a6730face5fcbde8cd43bf86479040ce2",
+      "version": "00000002"
+    },
+    {
+      "path": "base/solrotower.map",
+      "bytes": 874364,
+      "sha256": "30f1e6f2f1c170cc442bef8a92f50845be10abef2a75162c28a568e239874a40",
+      "version": "00000002"
+    },
+    {
+      "path": "base/soltemple.map",
+      "bytes": 94643,
+      "sha256": "c28f780bbd60e405108949a8c9669b43c20fdd80fc8b5eb44758065d4879a597",
+      "version": "00000002"
+    },
+    {
+      "path": "base/solteris.map",
+      "bytes": 951260,
+      "sha256": "9329c6fc6b2316c74f29f24accaf1623bcca5b5adaed854d6d9a8118e335b0f8",
+      "version": "00000002"
+    },
+    {
+      "path": "base/somnium.map",
+      "bytes": 3474907,
+      "sha256": "a20ae26007e0846bdad8c55ed9260f2b0725384da2217c158db7b1c570f4156a",
+      "version": "00000002"
+    },
+    {
+      "path": "base/southkarana.map",
+      "bytes": 181380,
+      "sha256": "7251751d9053679174c6498a905f61efe0164651587b58a0739250c5c700e3a3",
+      "version": "00000002"
+    },
+    {
+      "path": "base/southro.map",
+      "bytes": 3522103,
+      "sha256": "49c8189e50696d7c71cc7d6d8ae74c78679443f33bb61058a2a779d7a86cc020",
+      "version": "00000002"
+    },
+    {
+      "path": "base/sro.map",
+      "bytes": 97625,
+      "sha256": "4af7f881a434e2bb903e76613869687c658e64bebdd99ccd82408d7b4bfcbf7d",
+      "version": "00000002"
+    },
+    {
+      "path": "base/sseru.map",
+      "bytes": 1642948,
+      "sha256": "963e77c705595c3e6545b985d9a628c8e8f6f5293505d1afb3f2d626d1b952eb",
+      "version": "00000002"
+    },
+    {
+      "path": "base/ssratemple.map",
+      "bytes": 894079,
+      "sha256": "0b284ab1066e4bdbca4c4b07bb0ec337cd0d6c3e00bbcb69432aa6fee42cc4f5",
+      "version": "00000002"
+    },
+    {
+      "path": "base/steamfactory.map",
+      "bytes": 1063152,
+      "sha256": "ea475c634984ba1adbf3c284450eeb3e1d1cd184aec08140166d18bc56108833",
+      "version": "00000002"
+    },
+    {
+      "path": "base/steamfont.map",
+      "bytes": 177665,
+      "sha256": "4b81fe7df822dcf84f8ef07371102f11173cd103c548c5c1ea9a023869d46783",
+      "version": "00000002"
+    },
+    {
+      "path": "base/steamfontmts.map",
+      "bytes": 1204735,
+      "sha256": "ab7f7b3a14ce2c43fc4adff5b3393392ad1451d28ae79b67b7f0a650eb019c7d",
+      "version": "00000002"
+    },
+    {
+      "path": "base/steppes.map",
+      "bytes": 1776141,
+      "sha256": "ae36bbcdac82fbcf8fc50c8165a92975f2457b8752ad69f21d91bebfd7d8c9d1",
+      "version": "00000002"
+    },
+    {
+      "path": "base/stillmoona.map",
+      "bytes": 2353839,
+      "sha256": "9e4a8c5dcd51d72765d5a56f3c2ebcdf7556d4ad52d891a7cb6875d10847c9a1",
+      "version": "00000002"
+    },
+    {
+      "path": "base/stillmoonb.map",
+      "bytes": 868738,
+      "sha256": "bde3b4fd70f7ec97f3cffb039084b42fe3987a5b699316deb97ec10141a19c32",
+      "version": "00000002"
+    },
+    {
+      "path": "base/stonebrunt.map",
+      "bytes": 612167,
+      "sha256": "7fddc36619a3a531347c5160a594b5a459f36a4374034670261c35693d5b4cb7",
+      "version": "00000002"
+    },
+    {
+      "path": "base/stonehive.map",
+      "bytes": 859998,
+      "sha256": "7d0392d295940b6b5e5c3cb57c0d1c54076a3464ea6530544a31780587d45ebf",
+      "version": "00000002"
+    },
+    {
+      "path": "base/stonesnake.map",
+      "bytes": 3591339,
+      "sha256": "4b0f7be28e454feac8eedb44a911bbfe6f8692ee4d84709d187af0b43cc6b747",
+      "version": "00000002"
+    },
+    {
+      "path": "base/suncrest.map",
+      "bytes": 877707,
+      "sha256": "9420a4ccf84a1a3443e5fdc329f31a7fd5ee51bfc2e07b150a95f7f023142050",
+      "version": "00000002"
+    },
+    {
+      "path": "base/sunderock.map",
+      "bytes": 2059050,
+      "sha256": "e3c5a2a6f81dc1b2b7732691fb6ca297e1c173f86440b5c86315f22a9846d578",
+      "version": "00000002"
+    },
+    {
+      "path": "base/swampofnohope.map",
+      "bytes": 673846,
+      "sha256": "615eb782c2008692a9ac8aeef15f28a720b160eb41858bdca4f83717dc98cd07",
+      "version": "00000002"
+    },
+    {
+      "path": "base/tacvi.map",
+      "bytes": 270328,
+      "sha256": "df8dbf22d1c734a1832662672d914a145cf7bec4aaedc1bbd3dd84a9da4ea27d",
+      "version": "00000002"
+    },
+    {
+      "path": "base/taka.map",
+      "bytes": 593167,
+      "sha256": "a57b78db61890b869895b9b1786cbee9dc60497e1c029836f22efd32410816da",
+      "version": "00000002"
+    },
+    {
+      "path": "base/takb.map",
+      "bytes": 709811,
+      "sha256": "71cf25ae3f8f578cf8ad841a743ffe9f3464d26b1f78b806e4bc6b9d7b0a91af",
+      "version": "00000002"
+    },
+    {
+      "path": "base/takc.map",
+      "bytes": 594854,
+      "sha256": "3d2e4647b17458d9103375591ff0d9bd782cdf40b9aaa1c4d1b21065e3aafbdd",
+      "version": "00000002"
+    },
+    {
+      "path": "base/takd.map",
+      "bytes": 769749,
+      "sha256": "5c376e862e37e4bad38b4ddfe96cb1675a5745379fa03bcd85a097467f475bf2",
+      "version": "00000002"
+    },
+    {
+      "path": "base/take.map",
+      "bytes": 507826,
+      "sha256": "2d6522332d775eb9b9a1d5c21f31afdfd03cde333b0a9e2882be0c25cba8f81e",
+      "version": "00000002"
+    },
+    {
+      "path": "base/takf.map",
+      "bytes": 535824,
+      "sha256": "12e83c091b00ecf4f11bbd5d25d87478a99a54b5c26b75a416b896316f0b942d",
+      "version": "00000002"
+    },
+    {
+      "path": "base/takg.map",
+      "bytes": 715201,
+      "sha256": "35a027bc7695e5808900d7c91f7297031138ae29047e746ffac90eb2a6d795b6",
+      "version": "00000002"
+    },
+    {
+      "path": "base/takh.map",
+      "bytes": 745229,
+      "sha256": "6596ee2e6d94c058c4ec6b9e93f17453c50466b803ef38e70ea6f554e315f0ed",
+      "version": "00000002"
+    },
+    {
+      "path": "base/taki.map",
+      "bytes": 562857,
+      "sha256": "65fc34a4ae24f7ef893cf28058712ea4c30033a91c01f6e66caa67db586acc0b",
+      "version": "00000002"
+    },
+    {
+      "path": "base/takishruins.map",
+      "bytes": 784093,
+      "sha256": "6f6fcb5af1ce59c86f0c2251fe11c31854c435bc80e3c5d1cee13e1a3e0574e2",
+      "version": "00000002"
+    },
+    {
+      "path": "base/takishruinsa.map",
+      "bytes": 620980,
+      "sha256": "244f26a8db9c463d46fc501dba657ed73020fb415c56a2dadaeebc3bb14c259b",
+      "version": "00000002"
+    },
+    {
+      "path": "base/takj.map",
+      "bytes": 537152,
+      "sha256": "1c4dbfbdda3e832138e5ba82be4daecd4b49ce76f4bec6e237efc562d5328f56",
+      "version": "00000002"
+    },
+    {
+      "path": "base/templeveeshan.map",
+      "bytes": 162129,
+      "sha256": "d72f06140bfd13b67d09d0f0246525d8cc8ee5cc3e842fb992156fa09d2c04e7",
+      "version": "00000002"
+    },
+    {
+      "path": "base/tenebrous.map",
+      "bytes": 805209,
+      "sha256": "704e47d2700ccbfaa79579af17971d4c3782e66e1c1a6b8cc56c32ab7c96a911",
+      "version": "00000002"
+    },
+    {
+      "path": "base/thalassius.map",
+      "bytes": 1673773,
+      "sha256": "40f60199b48f361acad0687d020db9fffd404b646b343384e079dc26712d03dc",
+      "version": "00000002"
+    },
+    {
+      "path": "base/theater.map",
+      "bytes": 2795530,
+      "sha256": "1fe4a39c3c595514e9adb45432d0b3cf726cbf1fdcc9a408e1b11fe1a21b811d",
+      "version": "00000002"
+    },
+    {
+      "path": "base/theatera.map",
+      "bytes": 375351,
+      "sha256": "53a4716512d57955dd623d34314c0031e038feeb6d4a0ca9bdb134b066b7650e",
+      "version": "00000002"
+    },
+    {
+      "path": "base/thedeep.map",
+      "bytes": 372070,
+      "sha256": "00c66b7afdcd1c1bcdbd2e59a6201ec16954674129ef166beb4f2f90e6d941d8",
+      "version": "00000002"
+    },
+    {
+      "path": "base/thegrey.map",
+      "bytes": 869122,
+      "sha256": "ea1a88cb0b23d3ba0cf23bb2ff3fc01af5137b3adb6623b89bde5f3b57f09b7a",
+      "version": "00000002"
+    },
+    {
+      "path": "base/thenest.map",
+      "bytes": 3036702,
+      "sha256": "5d234b462a1d29a878fdf177b19513d3dc82b76c47ce38989c28cf7e8a756f91",
+      "version": "00000002"
+    },
+    {
+      "path": "base/thevoida.map",
+      "bytes": 546617,
+      "sha256": "9d55321b360ac7337ab8052a90893b1b1abe3bf2c8e818ebbfe1958ba1813d1b",
+      "version": "00000002"
+    },
+    {
+      "path": "base/thevoidb.map",
+      "bytes": 546262,
+      "sha256": "b2ac4fbb99827d98e845ab623320ad58b6ccc48d461469f7d5baac1add02daa2",
+      "version": "00000002"
+    },
+    {
+      "path": "base/thevoidc.map",
+      "bytes": 544821,
+      "sha256": "5ce14735e44c86a78479337abdda713160584c2ba99fa1c3e59a17ceb32d369c",
+      "version": "00000002"
+    },
+    {
+      "path": "base/thevoidd.map",
+      "bytes": 544821,
+      "sha256": "5ce14735e44c86a78479337abdda713160584c2ba99fa1c3e59a17ceb32d369c",
+      "version": "00000002"
+    },
+    {
+      "path": "base/thevoide.map",
+      "bytes": 544821,
+      "sha256": "5ce14735e44c86a78479337abdda713160584c2ba99fa1c3e59a17ceb32d369c",
+      "version": "00000002"
+    },
+    {
+      "path": "base/thevoidf.map",
+      "bytes": 544821,
+      "sha256": "5ce14735e44c86a78479337abdda713160584c2ba99fa1c3e59a17ceb32d369c",
+      "version": "00000002"
+    },
+    {
+      "path": "base/thevoidg.map",
+      "bytes": 544821,
+      "sha256": "5ce14735e44c86a78479337abdda713160584c2ba99fa1c3e59a17ceb32d369c",
+      "version": "00000002"
+    },
+    {
+      "path": "base/thuledream.map",
+      "bytes": 1633681,
+      "sha256": "c5b9dcde6a2b090bf326ff6d6c995975276e306a33f33b56727dad66856a1d9d",
+      "version": "00000002"
+    },
+    {
+      "path": "base/thulehouse1.map",
+      "bytes": 2678038,
+      "sha256": "22b3219d400f84569a6247a9f7aad07277ff0747292bf649cad461935b386164",
+      "version": "00000002"
+    },
+    {
+      "path": "base/thulehouse2.map",
+      "bytes": 4224747,
+      "sha256": "6443dcc7574173a69bbabaf244a297200991c2ff5835acfa0be1e7c764991d29",
+      "version": "00000002"
+    },
+    {
+      "path": "base/thulelibrary.map",
+      "bytes": 881854,
+      "sha256": "b867c6fb5c0134d4ef207a6ef27702aadbffa6ded6211c1e7afb10a1474a0a41",
+      "version": "00000002"
+    },
+    {
+      "path": "base/thuliasaur.map",
+      "bytes": 2168598,
+      "sha256": "20c3590d3c39057a25b817b775ab23269ddef221d07c61e3926f139e377f496f",
+      "version": "00000002"
+    },
+    {
+      "path": "base/thuliasaur2.map",
+      "bytes": 2013250,
+      "sha256": "ebd0091ba437a76a99918cb5e3591c230efdf7ab0eac00a7732ca1facbf73be7",
+      "version": "00000002"
+    },
+    {
+      "path": "base/thundercrest.map",
+      "bytes": 2509395,
+      "sha256": "baa24f60cdcfa82976bcdd80258c0f5b7965ab032402dc0a49fdde3401a51d66",
+      "version": "00000002"
+    },
+    {
+      "path": "base/thurgadina.map",
+      "bytes": 409508,
+      "sha256": "9e7a796413bdcf160775709fb87957ce767ac16eec50294ed6faa04b6f84dddd",
+      "version": "00000002"
+    },
+    {
+      "path": "base/thurgadinb.map",
+      "bytes": 261164,
+      "sha256": "bc23abaafc5dc8c68f43e24d4cb89cac26eb9e9cdcbf133e0f08a7cff3619c7b",
+      "version": "00000002"
+    },
+    {
+      "path": "base/timorous.map",
+      "bytes": 1882554,
+      "sha256": "f5eb83e44c0ad7533752acaf776e86b530350d0312820fb47be4228a33e1e534",
+      "version": "00000002"
+    },
+    {
+      "path": "base/tipt.map",
+      "bytes": 619231,
+      "sha256": "9620ca47d74a965c34053f5a961d1818ac97472bab139d7068e4e0a5dc2db762",
+      "version": "00000002"
+    },
+    {
+      "path": "base/torgiran.map",
+      "bytes": 1033873,
+      "sha256": "033b01eadbcb0f3ffdcfa79ae6e4748d47eb6c56dc4575accf408ead5ea4bc93",
+      "version": "00000002"
+    },
+    {
+      "path": "base/toskirakk.map",
+      "bytes": 1305463,
+      "sha256": "e4340d04415b3d889cdcbe6a6bcf9068abed23ef7da34d05aa80cbf9e6f78028",
+      "version": "00000002"
+    },
+    {
+      "path": "base/tox.map",
+      "bytes": 160369,
+      "sha256": "14885be4b9147c561f279533b3cf3c1ed10476e01548079933c9ebdb8194314f",
+      "version": "00000002"
+    },
+    {
+      "path": "base/toxxulia.map",
+      "bytes": 1991396,
+      "sha256": "fe7737aa88d1cf0e0448ea2efa4573bb1e8359d9a3e2c70283a85992cdd5fa68",
+      "version": "00000002"
+    },
+    {
+      "path": "base/trakanon.map",
+      "bytes": 1832757,
+      "sha256": "b8486c1efb6966690f88fcb51be53502d75ee318d1b786d600718b9c4a175004",
+      "version": "00000002"
+    },
+    {
+      "path": "base/tutorial.map",
+      "bytes": 68828,
+      "sha256": "6bf53075df40d6c6b8c1395ce7c90f559bfd78c7e57634f6c77acbf1cbc72385",
+      "version": "00000002"
+    },
+    {
+      "path": "base/tutoriala.map",
+      "bytes": 255147,
+      "sha256": "fe09a622a150b2c8aeedebff9c0e01c302eb4d894749b5f8df8491deaf0a13c5",
+      "version": "00000002"
+    },
+    {
+      "path": "base/tutoriala2.map",
+      "bytes": 255146,
+      "sha256": "97621cc10b8e150a159a021137ae4aeda67d0305f5a658e89394349ad4715c03",
+      "version": "00000002"
+    },
+    {
+      "path": "base/tutorialb.map",
+      "bytes": 1405146,
+      "sha256": "330e9816f18d076ccf472a961a5a4c2e3363f78659789939cb42dee613e30948",
+      "version": "00000002"
+    },
+    {
+      "path": "base/twilight.map",
+      "bytes": 1712083,
+      "sha256": "1c99cae3b10e4c9d2e8a9917579616f74a8cc1efb51ff8da0312fd2d7b1a97fa",
+      "version": "00000002"
+    },
+    {
+      "path": "base/txevu.map",
+      "bytes": 722212,
+      "sha256": "7e71ea14bbc237ce190d958b39b7137d66bcc8eadb75d7378b9f54b9e103e59b",
+      "version": "00000002"
+    },
+    {
+      "path": "base/umbral.map",
+      "bytes": 1127632,
+      "sha256": "7b0efd865c56a74be4b0c0c8b0eea1c1cf941dc6cbbbbf3e8b096644594d341a",
+      "version": "00000002"
+    },
+    {
+      "path": "base/underquarry.map",
+      "bytes": 1437191,
+      "sha256": "e69b615f58a463ae27eb3ba8dedb2d71f4cc857cc848f87b1537ac06100ef9e0",
+      "version": "00000002"
+    },
+    {
+      "path": "base/unrest.map",
+      "bytes": 166845,
+      "sha256": "4f0aa04aaf4f9cee3b6dca60eaa181b99e8753d372c8e5bd1fa928b2489c8a23",
+      "version": "00000002"
+    },
+    {
+      "path": "base/uqua.map",
+      "bytes": 320591,
+      "sha256": "bd742066eac9ad876e245d83f76ce73f8c9899e6dddecb19517e43e5406ffa4a",
+      "version": "00000002"
+    },
+    {
+      "path": "base/valdeholm.map",
+      "bytes": 3703442,
+      "sha256": "af9d60bc4b5860386d9d1e3495b5176cdf779e19682c852418d947b9dc9e123b",
+      "version": "00000002"
+    },
+    {
+      "path": "base/veeshan.map",
+      "bytes": 261119,
+      "sha256": "027d969aefdfbfd0b472b7f7482105588bfcb2f629df0c4d5fb15d224f743d28",
+      "version": "00000002"
+    },
+    {
+      "path": "base/veksar.map",
+      "bytes": 703518,
+      "sha256": "bb0bdee06b5258bc591a7ed93e94fb094a707df134ff391a076e21913c8b2cf5",
+      "version": "00000002"
+    },
+    {
+      "path": "base/velketor.map",
+      "bytes": 209063,
+      "sha256": "8a4728fdddcafd8b75072c24f526c7f1b3eaeac9a93103d2a49491a31cdd0d12",
+      "version": "00000002"
+    },
+    {
+      "path": "base/vequip.map",
+      "bytes": 223479,
+      "sha256": "fe9f86c692da0bc5096497cf5925ff9b2e8a3186f937263b3b8627a756a163f3",
+      "version": "00000001"
+    },
+    {
+      "path": "base/vergalid.map",
+      "bytes": 1335278,
+      "sha256": "c32b0cf2ab0ac6c779a9e5f08500e5994f510ef0cb9d294babf0b144e389068a",
+      "version": "00000002"
+    },
+    {
+      "path": "base/vexthal.map",
+      "bytes": 1310613,
+      "sha256": "7cae75b1c496c66de06d02f55a62fea24131f3b01bbd4c31ff5e1160293d1ce0",
+      "version": "00000002"
+    },
+    {
+      "path": "base/vxed.map",
+      "bytes": 604604,
+      "sha256": "ee2f9e566f3b574884fa1e01af5d118795b33e167d157afdf64eeaab8fa6b4c7",
+      "version": "00000002"
+    },
+    {
+      "path": "base/wakening.map",
+      "bytes": 2029008,
+      "sha256": "7b06858b1f7ce87686f413cb1bda503d7d35ab6c8290930ef2162a08d5fa6293",
+      "version": "00000002"
+    },
+    {
+      "path": "base/wallofslaughter.map",
+      "bytes": 1883393,
+      "sha256": "fc3f3ec65bdd916839832cb84290a5808d79c60c78e807b9685ce7e977ffd819",
+      "version": "00000002"
+    },
+    {
+      "path": "base/warrens.map",
+      "bytes": 174661,
+      "sha256": "f1a41109fcb0b773c3a2ef86fb90748a9e2d3acf005acbd21c11fb40ed6f6657",
+      "version": "00000002"
+    },
+    {
+      "path": "base/warrens2.map",
+      "bytes": 1632012,
+      "sha256": "b1de8f312f66bbccd3c1212dfada6f264cf2a852f981c2bcb5df893b6025122c",
+      "version": "00000001"
+    },
+    {
+      "path": "base/warslikswood.map",
+      "bytes": 2025205,
+      "sha256": "33768cd991dac020a9bb6ad21a601cabb786f9d4508f188ca6663124cae1ae15",
+      "version": "00000002"
+    },
+    {
+      "path": "base/warslikswood_lit.map",
+      "bytes": 39,
+      "sha256": "fd36a52d9a4e6f7a8e580f349381fb185a5edfcca5a775c67e6322abf052e05f",
+      "version": "00000001"
+    },
+    {
+      "path": "base/weddingchapel.map",
+      "bytes": 174339,
+      "sha256": "e3f98061ca1f04ce33cbce98e93915ca6b370d4065900c0bb876b425d8952dc1",
+      "version": "00000002"
+    },
+    {
+      "path": "base/weddingchapeldark.map",
+      "bytes": 174115,
+      "sha256": "128c82c9dee2daa076051bc99466fa6558a47cbd15061ca609449105eff6c75b",
+      "version": "00000002"
+    },
+    {
+      "path": "base/well.map",
+      "bytes": 261185,
+      "sha256": "323c2d6293dd6cc07cedd2ce35929f4055018a050a8797080f43589573fd8053",
+      "version": "00000002"
+    },
+    {
+      "path": "base/westkorlach.map",
+      "bytes": 1818694,
+      "sha256": "dc261a3c19019fa14d5bb18cfcb1c588c91971cbc7e6d5d03d9b6dfdbce78798",
+      "version": "00000002"
+    },
+    {
+      "path": "base/westkorlacha.map",
+      "bytes": 660850,
+      "sha256": "d9b67e3e23d61c147474396c6614f27ef8f207d5a6650a56b9ebe7c28679560c",
+      "version": "00000002"
+    },
+    {
+      "path": "base/westkorlachb.map",
+      "bytes": 485935,
+      "sha256": "8b1bba6916217860f6bd3e20466143baa7f984af833cdf9056fa137718b0154f",
+      "version": "00000002"
+    },
+    {
+      "path": "base/westkorlachc.map",
+      "bytes": 294853,
+      "sha256": "82158a33b9cc18e1f3a89d9ef418a5f3aca79888f1ec5983d19c5d830d2a1563",
+      "version": "00000002"
+    },
+    {
+      "path": "base/westsepulcher.map",
+      "bytes": 1940875,
+      "sha256": "82fa1efcf2057efba9fe6fb804edb2d263f36acae54dc80d9565aa7aebd92ce9",
+      "version": "00000002"
+    },
+    {
+      "path": "base/westwastes.map",
+      "bytes": 573204,
+      "sha256": "ee0ae8bebc0718039494536e87745d760bdffc94d91d6b45c89a5c303e007512",
+      "version": "00000002"
+    },
+    {
+      "path": "base/windsong.map",
+      "bytes": 1540591,
+      "sha256": "103633337e7dfa2719d501b3294d530b4cce73131ae8c8baaa41be9b382bb980",
+      "version": "00000002"
+    },
+    {
+      "path": "base/xorbb.map",
+      "bytes": 2707998,
+      "sha256": "e2260a7d192d8b469118f195c706a18ed9a602bc14786105a2f9bb594acb94b8",
+      "version": "00000002"
+    },
+    {
+      "path": "base/yxtta.map",
+      "bytes": 730525,
+      "sha256": "c742d77ef46e2b299f502e5d002511edeaed373d4c3a2175d59493fe9d5224c4",
+      "version": "00000002"
+    },
+    {
+      "path": "base/zhisza.map",
+      "bytes": 872056,
+      "sha256": "9c440311d81767849b89e530ba8798dbaab7b2b996266c542338418576f1074c",
+      "version": "00000002"
+    },
+    {
+      "path": "legacy/base/arena.map",
+      "bytes": 28809,
+      "sha256": "b9284040aceea283d2fa9a346530935f7c1780fae64cce8fdc2f854baf72d367",
+      "version": "00000002"
+    },
+    {
+      "path": "legacy/base/bazaar.map",
+      "bytes": 207636,
+      "sha256": "c835f4e224948f94ac4d76ff90653fd0c624659f50be9827ef0b1c9b999158c9",
+      "version": "00000002"
+    },
+    {
+      "path": "legacy/base/lavastorm.map",
+      "bytes": 76430,
+      "sha256": "84ebb0e0806a4e3148678bdab7062c655f7a2ee9eb0e8851d5bba46570e18b25",
+      "version": "00000002"
+    },
+    {
+      "path": "legacy/base/nektulos.map",
+      "bytes": 102094,
+      "sha256": "559351c3a5b54c3cfb9e715b48d861cc55ac74ecdeb3c5abd48e55d7bfc9d1c7",
+      "version": "00000002"
+    }
+  ],
+  "collection": "/home/bump/Projects/bump-eqemu/bump-akk-stack/server/maps",
+  "deployed": "/home/bump/.local/share/eqemu-upstream/state/server/maps",
+  "only": null,
+  "retain": false,
+  "memory": 2147483648,
+  "stage_timeout": 120,
+  "container_timeout": 420,
+  "recipe": "driver.cpp 0x854f2026"
+}

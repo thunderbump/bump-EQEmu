@@ -1,0 +1,32 @@
+{
+  "removed_owned_reproducible": [
+    {
+      "path": "image.tar",
+      "bytes": 2710456320,
+      "sha256": "0038ff4606329b3fa336843be5f1ef177d3a957b9a8b14bb660c68d5f2dff2e5"
+    },
+    {
+      "path": "qualification/source.tar",
+      "bytes": 83435520,
+      "sha256": "57aff12882ceeaa8f6365ffbe56dc6b10eb812086dcf43cfa855b499d1986714"
+    },
+    {
+      "path": "qualification_v2/source.tar",
+      "bytes": 83435520,
+      "sha256": "01797e80f830bac221cd3ede7f726b470ea79ccfa5af5379e7c6c72367973177"
+    },
+    {
+      "path": "qualification/source",
+      "bytes": 81093155,
+      "kind": "extracted committed source archive"
+    },
+    {
+      "path": "qualification_v2/source",
+      "bytes": 81093158,
+      "kind": "extracted committed source archive"
+    }
+  ],
+  "failed_geometry_retained": true,
+  "final_asset_bytes": 363125577,
+  "inputs_and_prior_evidence_preserved": true
+}
