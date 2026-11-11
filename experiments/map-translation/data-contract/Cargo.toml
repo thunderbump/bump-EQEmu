@@ -1,0 +1,14 @@
+[package]
+name = "map-data-contract"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+rust-raycaster-poc = { path = "../rust-raycaster" }
+
+[[bin]]
+name = "contract-probe"
+path = "probe.rs"

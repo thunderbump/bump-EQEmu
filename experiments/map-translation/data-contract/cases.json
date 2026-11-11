@@ -1,0 +1,181 @@
+[
+  {
+    "name": "breedinggrounds",
+    "path": "base/breedinggrounds.map",
+    "files": {
+      "original": {
+        "path": "/home/bump/Projects/bump-eqemu/bump-akk-stack/server/maps/base/breedinggrounds.map",
+        "bytes": 2901773,
+        "sha256": "d688d5e6e25d460c2ca0c64a6b6a282383bacb5ee9c4fac40fd20658be657a57"
+      },
+      "deployed": {
+        "path": "/home/bump/.local/share/eqemu-upstream/state/server/maps/base/breedinggrounds.map",
+        "bytes": 2901773,
+        "sha256": "d688d5e6e25d460c2ca0c64a6b6a282383bacb5ee9c4fac40fd20658be657a57"
+      },
+      "mesh": {
+        "path": "/home/bump/.local/state/eqemu-map-translation/raycaster-corpus-20261110/final/assets/base/breedinggrounds/geometry.mesh",
+        "bytes": 31583052,
+        "sha256": "fefc4b03ea54eaf9b892bf87fa2f2634069cecb9c0c49485d30279e9b4c91cc3"
+      }
+    },
+    "vertices": 1961990,
+    "indices": 2009772,
+    "nonfinite": [
+      {
+        "vertex": 239353,
+        "axis": 0,
+        "bits": "ffc00000"
+      },
+      {
+        "vertex": 239353,
+        "axis": 1,
+        "bits": "ffc00000"
+      },
+      {
+        "vertex": 239353,
+        "axis": 2,
+        "bits": "ffc00000"
+      }
+    ],
+    "export_provenance": {
+      "compiler.txt": "caf794435afe6be08582cd57c892872e093d9b6a9d45df9940cfe7d2398e3c91",
+      "rustc.txt": "b569b0c98ea3133c7252b4b8ea6b39b7b353813df0dd5f5c412c355691424112",
+      "capture-compile.json": "c5930c38bf256f2d4afbfbc992d3a07cdfab6d66664af028b7c65094b2b6c3a6",
+      "final.json": "03d93a618e8ac8efedaf95a10dfed43f43a19ad7fab7bb4da45f1c7d29f6ff36",
+      "binaries.sha256": "1155d97443618dab38d112172bfced134b585937df50d22d1cb7b2154d862d88",
+      "cpp-decode.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "expected": "load_error_nonfinite"
+  },
+  {
+    "name": "chapterhouse",
+    "path": "base/chapterhouse.map",
+    "files": {
+      "original": {
+        "path": "/home/bump/Projects/bump-eqemu/bump-akk-stack/server/maps/base/chapterhouse.map",
+        "bytes": 3457111,
+        "sha256": "8066c2ec6effc7d292ab31c4a3a684c2b6bf6e5302c167de506ef0ad3e784da0"
+      },
+      "deployed": {
+        "path": "/home/bump/.local/share/eqemu-upstream/state/server/maps/base/chapterhouse.map",
+        "bytes": 3457111,
+        "sha256": "8066c2ec6effc7d292ab31c4a3a684c2b6bf6e5302c167de506ef0ad3e784da0"
+      },
+      "mesh": {
+        "path": "/home/bump/.local/state/eqemu-map-translation/raycaster-corpus-20261110/final/assets/base/chapterhouse/geometry.mesh",
+        "bytes": 36437088,
+        "sha256": "ea1759428279ca0c12b1b288a74d9ffdcf9b4b3e8286d1cd6b37ffc1963143df"
+      }
+    },
+    "vertices": 2277011,
+    "indices": 2278218,
+    "nonfinite": [
+      {
+        "vertex": 1450240,
+        "axis": 0,
+        "bits": "ffc00000"
+      },
+      {
+        "vertex": 1450240,
+        "axis": 1,
+        "bits": "ffc00000"
+      },
+      {
+        "vertex": 1450240,
+        "axis": 2,
+        "bits": "ffc00000"
+      },
+      {
+        "vertex": 1450241,
+        "axis": 0,
+        "bits": "ffc00000"
+      },
+      {
+        "vertex": 1450241,
+        "axis": 1,
+        "bits": "ffc00000"
+      },
+      {
+        "vertex": 1450241,
+        "axis": 2,
+        "bits": "ffc00000"
+      }
+    ],
+    "export_provenance": {
+      "compiler.txt": "caf794435afe6be08582cd57c892872e093d9b6a9d45df9940cfe7d2398e3c91",
+      "rustc.txt": "b569b0c98ea3133c7252b4b8ea6b39b7b353813df0dd5f5c412c355691424112",
+      "capture-compile.json": "c5930c38bf256f2d4afbfbc992d3a07cdfab6d66664af028b7c65094b2b6c3a6",
+      "final.json": "470d6afde72c760f9a18d5de7f6224da95235e36357803151030f41ad342ea15",
+      "binaries.sha256": "1155d97443618dab38d112172bfced134b585937df50d22d1cb7b2154d862d88",
+      "cpp-decode.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "expected": "load_error_nonfinite"
+  },
+  {
+    "name": "firiona_lit",
+    "path": "base/firiona_lit.map",
+    "files": {
+      "original": {
+        "path": "/home/bump/Projects/bump-eqemu/bump-akk-stack/server/maps/base/firiona_lit.map",
+        "bytes": 39,
+        "sha256": "fd36a52d9a4e6f7a8e580f349381fb185a5edfcca5a775c67e6322abf052e05f"
+      },
+      "deployed": {
+        "path": "/home/bump/.local/share/eqemu-upstream/state/server/maps/base/firiona_lit.map",
+        "bytes": 39,
+        "sha256": "fd36a52d9a4e6f7a8e580f349381fb185a5edfcca5a775c67e6322abf052e05f"
+      },
+      "mesh": {
+        "path": "/home/bump/.local/state/eqemu-map-translation/raycaster-corpus-20261110/final/assets/base/firiona_lit/geometry.mesh",
+        "bytes": 84,
+        "sha256": "e07f97a667b1c2b93dcbc4baf8a8d6de9b3ce8e94c475962e2080fe271f64e9f"
+      }
+    },
+    "vertices": 0,
+    "indices": 0,
+    "nonfinite": [],
+    "export_provenance": {
+      "compiler.txt": "caf794435afe6be08582cd57c892872e093d9b6a9d45df9940cfe7d2398e3c91",
+      "rustc.txt": "b569b0c98ea3133c7252b4b8ea6b39b7b353813df0dd5f5c412c355691424112",
+      "capture-compile.json": "c5930c38bf256f2d4afbfbc992d3a07cdfab6d66664af028b7c65094b2b6c3a6",
+      "final.json": "8a12feb7c1d3ba056f7eb3014c338b61f4b7a22d5087a38022ca2359b75de8e9",
+      "binaries.sha256": "1155d97443618dab38d112172bfced134b585937df50d22d1cb7b2154d862d88",
+      "cpp-decode.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "expected": "valid_empty"
+  },
+  {
+    "name": "warslikswood_lit",
+    "path": "base/warslikswood_lit.map",
+    "files": {
+      "original": {
+        "path": "/home/bump/Projects/bump-eqemu/bump-akk-stack/server/maps/base/warslikswood_lit.map",
+        "bytes": 39,
+        "sha256": "fd36a52d9a4e6f7a8e580f349381fb185a5edfcca5a775c67e6322abf052e05f"
+      },
+      "deployed": {
+        "path": "/home/bump/.local/share/eqemu-upstream/state/server/maps/base/warslikswood_lit.map",
+        "bytes": 39,
+        "sha256": "fd36a52d9a4e6f7a8e580f349381fb185a5edfcca5a775c67e6322abf052e05f"
+      },
+      "mesh": {
+        "path": "/home/bump/.local/state/eqemu-map-translation/raycaster-corpus-20261110/final/assets/base/warslikswood_lit/geometry.mesh",
+        "bytes": 84,
+        "sha256": "e07f97a667b1c2b93dcbc4baf8a8d6de9b3ce8e94c475962e2080fe271f64e9f"
+      }
+    },
+    "vertices": 0,
+    "indices": 0,
+    "nonfinite": [],
+    "export_provenance": {
+      "compiler.txt": "caf794435afe6be08582cd57c892872e093d9b6a9d45df9940cfe7d2398e3c91",
+      "rustc.txt": "b569b0c98ea3133c7252b4b8ea6b39b7b353813df0dd5f5c412c355691424112",
+      "capture-compile.json": "c5930c38bf256f2d4afbfbc992d3a07cdfab6d66664af028b7c65094b2b6c3a6",
+      "final.json": "e2e641838a2693ab2a04df3104df760647938ccdc40d2c16d34f5bb24b0b3e6c",
+      "binaries.sha256": "1155d97443618dab38d112172bfced134b585937df50d22d1cb7b2154d862d88",
+      "cpp-decode.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "expected": "valid_empty"
+  }
+]
