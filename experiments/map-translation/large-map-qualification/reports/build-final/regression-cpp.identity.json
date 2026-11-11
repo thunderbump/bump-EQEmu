@@ -1,0 +1,5 @@
+{
+  "sha256": "b0065e57f36d3196b8b7a49f5e572c60e4a0d4eb4a46a32365f0ab6f1f66e239",
+  "ldd": "\tlinux-vdso.so.1 (0x000072135551f000)\n\tlibstdc++.so.6 => /lib/x86_64-linux-gnu/libstdc++.so.6 (0x00007213552d9000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007213551fa000)\n\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007213551da000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x0000721354ff9000)\n\t/lib64/ld-linux-x86-64.so.2 (0x0000721355521000)\n",
+  "FP": "O3/default CPU, no fast math, default process FP environment"
+}
