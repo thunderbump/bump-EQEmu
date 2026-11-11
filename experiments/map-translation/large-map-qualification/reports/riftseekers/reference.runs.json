@@ -1,0 +1,32 @@
+[
+  {
+    "name": "reference",
+    "args": [
+      "/build/reference",
+      "--record",
+      "/geometry.mesh",
+      "94370b8d34bfc0a6be39749cae2f21821f46ede4fc869975cf1dca9c45041e78",
+      "unused",
+      "/results/reference.trace",
+      "--known-asset",
+      "base/riftseekers.map",
+      "/original.map"
+    ],
+    "exit": 0,
+    "seconds": 0.7149670789949596,
+    "before": {
+      "memory.current": "11743232\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "13328384\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "13262848\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "240222208\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  }
+]

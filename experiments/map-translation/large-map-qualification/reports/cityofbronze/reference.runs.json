@@ -1,0 +1,32 @@
+[
+  {
+    "name": "reference",
+    "args": [
+      "/build/reference",
+      "--record",
+      "/geometry.mesh",
+      "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "unused",
+      "/results/reference.trace",
+      "--known-asset",
+      "base/cityofbronze.map",
+      "/original.map"
+    ],
+    "exit": 0,
+    "seconds": 0.7657302361913025,
+    "before": {
+      "memory.current": "11935744\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "12201984\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "13860864\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "297168896\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  }
+]

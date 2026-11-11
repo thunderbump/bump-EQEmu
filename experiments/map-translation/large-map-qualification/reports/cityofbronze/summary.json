@@ -1,0 +1,22 @@
+{
+  "exact": {
+    "queries": 5504,
+    "hits": 4217,
+    "misses": 1287,
+    "differences": 0
+  },
+  "numeric": {
+    "classification_changes": 0,
+    "field_bit_changes": 0,
+    "max_abs": 0.0,
+    "max_relative": 0.0,
+    "max_ulp": 0,
+    "signed_zero_changes": 0,
+    "nonfinite": 0,
+    "first_failures": []
+  },
+  "mesh_sha256": "5734892a6bd482c236370a23f66e60480dffb675ac6600fc3736298fc42cf622",
+  "reference_sha256": "4d71cc769a136eb7d6675cf3f568b4e8c69d97ae49f145f364bffb5187f6730e",
+  "queries_sha256": "deeb7439f7cb6bf005b0655aae314e3e3773f17948867b9a122d2fe76c87fbe5",
+  "candidate_sha256": "83a64f69a59959bb3138a393921ef9b7b22e6a5727fb613810fd02bfef1c5c37"
+}

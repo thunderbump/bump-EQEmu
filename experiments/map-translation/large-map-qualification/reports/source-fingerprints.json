@@ -1,0 +1,16 @@
+{
+  "zone/raycast_mesh.cpp": "de0b71fa404839d899793e9e9814d410dc0505b6ba8b2bd0c068625c7ef131f4",
+  "zone/raycast_mesh.h": "6236b02f26774682cb7a4e2d94acedf725fcda0af93ed798dd6db39cca263c71",
+  "common/memory/ksm.cpp": "6423f05a9432b61dd6721d4b67d816da94872e68f26c5ce38f0fd4ab8665c139",
+  "experiments/map-translation/large-map-qualification/admission.rs": "3d3dbe72b09e3d5d37139f332ccc6a4b53a50d99fed438d7aa08b709b442b85f",
+  "experiments/map-translation/large-map-qualification/import_image.py": "1e837132788050b4e9baf261342587a86801b12a534634d9c668e795edf60f30",
+  "experiments/map-translation/large-map-qualification/admission.h": "228592f86b4a317bebd5de05d970a2589b556e27d9b0cfea469602555f1c9269",
+  "experiments/map-translation/large-map-qualification/assets.inc": "fc66fbb83fe95332ff2697a06f168c8a7c5a76bb18622c96472ffee54e8ddae7",
+  "experiments/map-translation/large-map-qualification/cases.json": "03a9db7a096ed19259c266af2f2bc3bd769eda94cd6da473aaa082606bc701e9",
+  "experiments/map-translation/large-map-qualification/guest.py": "83021ddfb7a8a5807311802839a31310e2a97392d5122b28024f291634362d6a",
+  "experiments/map-translation/large-map-qualification/worker.py": "79fb71a6bede26eee49915aef6d10090bd44a97e9162f72c4db8d36ab4fbb3ae",
+  "experiments/map-translation/large-map-qualification/controls.py": "da6cc7d78af15b35b168ae9dd90cb5704c1cd2d96c77991bc9958d74cdd2476c",
+  "experiments/map-translation/rust-raycaster/src/tests.rs": "7e16e006f815886c62473c134dbb840ddf4461b8a25c0a9aac56429c64c7637d",
+  "experiments/map-translation/rust-raycaster/src/main.rs": "63fbbde5f742d5629f5facf08a66bba612abaa1a774d86d7879977498b7a42af",
+  "experiments/map-translation/rust-raycaster/src/lib.rs": "0d1563030bf9deae3d121a99e3812150d4913d6c695f3a985af2ff6296d14d19"
+}

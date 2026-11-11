@@ -1,0 +1,47 @@
+[
+  {
+    "path": "/home/bump/Projects/bump-eqemu/bump-akk-stack/server/maps/base/chelsithreborn.map",
+    "bytes": 1724957,
+    "sha256": "c1ebe5fe799241693cdc46f9ca9450fe07c818a9d152b11f0ea0f74b4ceca87a"
+  },
+  {
+    "path": "/home/bump/.local/share/eqemu-upstream/state/server/maps/base/chelsithreborn.map",
+    "bytes": 1724957,
+    "sha256": "c1ebe5fe799241693cdc46f9ca9450fe07c818a9d152b11f0ea0f74b4ceca87a"
+  },
+  {
+    "path": "/home/bump/.local/state/eqemu-map-translation/raycaster-corpus-20261110/final/assets/base/chelsithreborn/geometry.mesh",
+    "bytes": 93666492,
+    "sha256": "4b0e68eed94f79f6bc1d00cad9e23f79f9c4384aabaf961b260c067b35e848fd"
+  },
+  {
+    "path": "/home/bump/Projects/bump-eqemu/bump-akk-stack/server/maps/base/cityofbronze.map",
+    "bytes": 2446659,
+    "sha256": "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3"
+  },
+  {
+    "path": "/home/bump/.local/share/eqemu-upstream/state/server/maps/base/cityofbronze.map",
+    "bytes": 2446659,
+    "sha256": "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3"
+  },
+  {
+    "path": "/home/bump/.local/state/eqemu-map-translation/raycaster-corpus-20261110/final/assets/base/cityofbronze/geometry.mesh",
+    "bytes": 100672188,
+    "sha256": "5734892a6bd482c236370a23f66e60480dffb675ac6600fc3736298fc42cf622"
+  },
+  {
+    "path": "/home/bump/Projects/bump-eqemu/bump-akk-stack/server/maps/base/riftseekers.map",
+    "bytes": 1589760,
+    "sha256": "94370b8d34bfc0a6be39749cae2f21821f46ede4fc869975cf1dca9c45041e78"
+  },
+  {
+    "path": "/home/bump/.local/share/eqemu-upstream/state/server/maps/base/riftseekers.map",
+    "bytes": 1589760,
+    "sha256": "94370b8d34bfc0a6be39749cae2f21821f46ede4fc869975cf1dca9c45041e78"
+  },
+  {
+    "path": "/home/bump/.local/state/eqemu-map-translation/raycaster-corpus-20261110/final/assets/base/riftseekers/geometry.mesh",
+    "bytes": 82011252,
+    "sha256": "9d2674519f580782745327e6557548f925c511c25b3ea0f4fba8f188822106a8"
+  }
+]

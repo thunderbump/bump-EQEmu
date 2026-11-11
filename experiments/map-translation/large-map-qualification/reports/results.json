@@ -1,0 +1,272 @@
+{
+  "executed_commit": "2d72772d6519037acebc26b657a9eb8671b3900e",
+  "fixed_point": "2d6cc88a5ea891f79b72fc0e9530b35d7b2caec8",
+  "memory_limit": 2147483648,
+  "swap_limit": 0,
+  "ram_bump_used": false,
+  "optimization_required": false,
+  "cases": [
+    {
+      "name": "chelsithreborn",
+      "exact": {
+        "queries": 5504,
+        "hits": 3467,
+        "misses": 2037,
+        "differences": 0
+      },
+      "numeric": {
+        "classification_changes": 0,
+        "field_bit_changes": 0,
+        "max_abs": 0.0,
+        "max_relative": 0.0,
+        "max_ulp": 0,
+        "signed_zero_changes": 0,
+        "nonfinite": 0,
+        "first_failures": []
+      },
+      "mesh_sha256": "4b0e68eed94f79f6bc1d00cad9e23f79f9c4384aabaf961b260c067b35e848fd",
+      "reference_sha256": "f43d9a7bc3d493967d4afadbcf30c03a83e6c8491683f66451602964688c5580",
+      "queries_sha256": "0b1d0fc3d0cac2a75df6ef438a38b89b0593b0682417ff6f2db86681e845e16f",
+      "candidate_sha256": "9d5a6ff98f02914ad7f60d7189505873b837365a94c264682c6ee1fd342bf118",
+      "processes": {
+        "reference": {
+          "peak_rss_kib": 259696,
+          "name": "reference",
+          "args": [
+            "/build/reference",
+            "--record",
+            "/geometry.mesh",
+            "c1ebe5fe799241693cdc46f9ca9450fe07c818a9d152b11f0ea0f74b4ceca87a",
+            "unused",
+            "/results/reference.trace",
+            "--known-asset",
+            "base/chelsithreborn.map",
+            "/original.map"
+          ],
+          "exit": 0,
+          "seconds": 0.7156258197501302,
+          "before": {
+            "memory.current": "11853824\n",
+            "memory.max": "2147483648\n",
+            "memory.swap.max": "0\n",
+            "memory.peak": "11853824\n",
+            "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+          },
+          "after": {
+            "memory.current": "13860864\n",
+            "memory.max": "2147483648\n",
+            "memory.swap.max": "0\n",
+            "memory.peak": "277188608\n",
+            "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+          }
+        },
+        "rust": {
+          "peak_rss_kib": 186124,
+          "name": "rust",
+          "args": [
+            "/build/target/release/rust-raycaster-poc",
+            "/geometry.mesh",
+            "c1ebe5fe799241693cdc46f9ca9450fe07c818a9d152b11f0ea0f74b4ceca87a",
+            "/results/queries.bin",
+            "/results/rust.bin",
+            "--known-asset",
+            "base/chelsithreborn.map",
+            "/original.map"
+          ],
+          "exit": 0,
+          "seconds": 0.916053403634578,
+          "before": {
+            "memory.current": "11767808\n",
+            "memory.max": "2147483648\n",
+            "memory.swap.max": "0\n",
+            "memory.peak": "12111872\n",
+            "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+          },
+          "after": {
+            "memory.current": "12607488\n",
+            "memory.max": "2147483648\n",
+            "memory.swap.max": "0\n",
+            "memory.peak": "202412032\n",
+            "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+          }
+        }
+      }
+    },
+    {
+      "name": "cityofbronze",
+      "exact": {
+        "queries": 5504,
+        "hits": 4217,
+        "misses": 1287,
+        "differences": 0
+      },
+      "numeric": {
+        "classification_changes": 0,
+        "field_bit_changes": 0,
+        "max_abs": 0.0,
+        "max_relative": 0.0,
+        "max_ulp": 0,
+        "signed_zero_changes": 0,
+        "nonfinite": 0,
+        "first_failures": []
+      },
+      "mesh_sha256": "5734892a6bd482c236370a23f66e60480dffb675ac6600fc3736298fc42cf622",
+      "reference_sha256": "4d71cc769a136eb7d6675cf3f568b4e8c69d97ae49f145f364bffb5187f6730e",
+      "queries_sha256": "deeb7439f7cb6bf005b0655aae314e3e3773f17948867b9a122d2fe76c87fbe5",
+      "candidate_sha256": "83a64f69a59959bb3138a393921ef9b7b22e6a5727fb613810fd02bfef1c5c37",
+      "processes": {
+        "reference": {
+          "peak_rss_kib": 279804,
+          "name": "reference",
+          "args": [
+            "/build/reference",
+            "--record",
+            "/geometry.mesh",
+            "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+            "unused",
+            "/results/reference.trace",
+            "--known-asset",
+            "base/cityofbronze.map",
+            "/original.map"
+          ],
+          "exit": 0,
+          "seconds": 0.7657302361913025,
+          "before": {
+            "memory.current": "11935744\n",
+            "memory.max": "2147483648\n",
+            "memory.swap.max": "0\n",
+            "memory.peak": "12201984\n",
+            "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+          },
+          "after": {
+            "memory.current": "13860864\n",
+            "memory.max": "2147483648\n",
+            "memory.swap.max": "0\n",
+            "memory.peak": "297168896\n",
+            "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+          }
+        },
+        "rust": {
+          "peak_rss_kib": 201688,
+          "name": "rust",
+          "args": [
+            "/build/target/release/rust-raycaster-poc",
+            "/geometry.mesh",
+            "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+            "/results/queries.bin",
+            "/results/rust.bin",
+            "--known-asset",
+            "base/cityofbronze.map",
+            "/original.map"
+          ],
+          "exit": 0,
+          "seconds": 0.966285299975425,
+          "before": {
+            "memory.current": "11894784\n",
+            "memory.max": "2147483648\n",
+            "memory.swap.max": "0\n",
+            "memory.peak": "12763136\n",
+            "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+          },
+          "after": {
+            "memory.current": "12656640\n",
+            "memory.max": "2147483648\n",
+            "memory.swap.max": "0\n",
+            "memory.peak": "218550272\n",
+            "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+          }
+        }
+      }
+    },
+    {
+      "name": "riftseekers",
+      "exact": {
+        "queries": 5504,
+        "hits": 3416,
+        "misses": 2088,
+        "differences": 0
+      },
+      "numeric": {
+        "classification_changes": 0,
+        "field_bit_changes": 0,
+        "max_abs": 0.0,
+        "max_relative": 0.0,
+        "max_ulp": 0,
+        "signed_zero_changes": 0,
+        "nonfinite": 0,
+        "first_failures": []
+      },
+      "mesh_sha256": "9d2674519f580782745327e6557548f925c511c25b3ea0f4fba8f188822106a8",
+      "reference_sha256": "386c5d3fbce73835d6bd038a6b113f1550e50fe8176425cfcfe57abf387a925f",
+      "queries_sha256": "14cba670393e987200e138579d6a3b1df7bf2e9c175b43b745f711509309df66",
+      "candidate_sha256": "2f1222a22ed0fe7b1049fc03fa5677e4865e9b7ff671087f28c49d20b3a1d4ad",
+      "processes": {
+        "reference": {
+          "peak_rss_kib": 224492,
+          "name": "reference",
+          "args": [
+            "/build/reference",
+            "--record",
+            "/geometry.mesh",
+            "94370b8d34bfc0a6be39749cae2f21821f46ede4fc869975cf1dca9c45041e78",
+            "unused",
+            "/results/reference.trace",
+            "--known-asset",
+            "base/riftseekers.map",
+            "/original.map"
+          ],
+          "exit": 0,
+          "seconds": 0.7149670789949596,
+          "before": {
+            "memory.current": "11743232\n",
+            "memory.max": "2147483648\n",
+            "memory.swap.max": "0\n",
+            "memory.peak": "13328384\n",
+            "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+          },
+          "after": {
+            "memory.current": "13262848\n",
+            "memory.max": "2147483648\n",
+            "memory.swap.max": "0\n",
+            "memory.peak": "240222208\n",
+            "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+          }
+        },
+        "rust": {
+          "peak_rss_kib": 163340,
+          "name": "rust",
+          "args": [
+            "/build/target/release/rust-raycaster-poc",
+            "/geometry.mesh",
+            "94370b8d34bfc0a6be39749cae2f21821f46ede4fc869975cf1dca9c45041e78",
+            "/results/queries.bin",
+            "/results/rust.bin",
+            "--known-asset",
+            "base/riftseekers.map",
+            "/original.map"
+          ],
+          "exit": 0,
+          "seconds": 0.9164756187237799,
+          "before": {
+            "memory.current": "12812288\n",
+            "memory.max": "2147483648\n",
+            "memory.swap.max": "0\n",
+            "memory.peak": "12898304\n",
+            "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+          },
+          "after": {
+            "memory.current": "13828096\n",
+            "memory.max": "2147483648\n",
+            "memory.swap.max": "0\n",
+            "memory.peak": "179904512\n",
+            "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+          }
+        }
+      }
+    }
+  ],
+  "regressions": {
+    "failures": []
+  },
+  "storage_before_cleanup_bytes": 513172201
+}

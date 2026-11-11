@@ -1,0 +1,862 @@
+[
+  {
+    "name": "reject-schema-rust",
+    "args": [
+      "/build/target/release/rust-raycaster-poc",
+      "/results/bad.mesh",
+      "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "/results/control.queries",
+      "/results/schema.rust.result",
+      "--known-asset",
+      "base/cityofbronze.map",
+      "/original.map"
+    ],
+    "exit": 1,
+    "seconds": 0.06387159787118435,
+    "before": {
+      "memory.current": "214679552\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "315289600\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "214331392\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "319848448\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "reject-schema-cpp",
+    "args": [
+      "/build/reference",
+      "--record",
+      "/results/bad.mesh",
+      "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "unused",
+      "/results/schema.cpp.result",
+      "--known-asset",
+      "base/cityofbronze.map",
+      "/original.map"
+    ],
+    "exit": 2,
+    "seconds": 0.06411564815789461,
+    "before": {
+      "memory.current": "214331392\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "319848448\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "214224896\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "319848448\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "reject-count-rust",
+    "args": [
+      "/build/target/release/rust-raycaster-poc",
+      "/results/bad.mesh",
+      "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "/results/control.queries",
+      "/results/count.rust.result",
+      "--known-asset",
+      "base/cityofbronze.map",
+      "/original.map"
+    ],
+    "exit": 1,
+    "seconds": 0.0646328222937882,
+    "before": {
+      "memory.current": "213950464\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "415805440\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "214142976\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "415805440\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "reject-count-cpp",
+    "args": [
+      "/build/reference",
+      "--record",
+      "/results/bad.mesh",
+      "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "unused",
+      "/results/count.cpp.result",
+      "--known-asset",
+      "base/cityofbronze.map",
+      "/original.map"
+    ],
+    "exit": 2,
+    "seconds": 0.06438458384945989,
+    "before": {
+      "memory.current": "214138880\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "415805440\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "214761472\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "415805440\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "reject-indices-rust",
+    "args": [
+      "/build/target/release/rust-raycaster-poc",
+      "/results/bad.mesh",
+      "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "/results/control.queries",
+      "/results/indices.rust.result",
+      "--known-asset",
+      "base/cityofbronze.map",
+      "/original.map"
+    ],
+    "exit": 1,
+    "seconds": 0.06417633313685656,
+    "before": {
+      "memory.current": "214769664\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416178176\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "214446080\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416178176\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "reject-indices-cpp",
+    "args": [
+      "/build/reference",
+      "--record",
+      "/results/bad.mesh",
+      "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "unused",
+      "/results/indices.cpp.result",
+      "--known-asset",
+      "base/cityofbronze.map",
+      "/original.map"
+    ],
+    "exit": 2,
+    "seconds": 0.0646034968085587,
+    "before": {
+      "memory.current": "214441984\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416178176\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "214626304\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416178176\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "reject-hash-rust",
+    "args": [
+      "/build/target/release/rust-raycaster-poc",
+      "/results/bad.mesh",
+      "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "/results/control.queries",
+      "/results/hash.rust.result",
+      "--known-asset",
+      "base/cityofbronze.map",
+      "/original.map"
+    ],
+    "exit": 1,
+    "seconds": 0.26522547798231244,
+    "before": {
+      "memory.current": "214798336\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "215293952\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "reject-hash-cpp",
+    "args": [
+      "/build/reference",
+      "--record",
+      "/results/bad.mesh",
+      "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "unused",
+      "/results/hash.cpp.result",
+      "--known-asset",
+      "base/cityofbronze.map",
+      "/original.map"
+    ],
+    "exit": 2,
+    "seconds": 0.3149857558310032,
+    "before": {
+      "memory.current": "215285760\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "157540352\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "reject-identity-rust",
+    "args": [
+      "/build/target/release/rust-raycaster-poc",
+      "/results/bad.mesh",
+      "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "/results/control.queries",
+      "/results/identity.rust.result",
+      "--known-asset",
+      "base/cityofbronze.map",
+      "/original.map"
+    ],
+    "exit": 1,
+    "seconds": 0.06475108489394188,
+    "before": {
+      "memory.current": "216289280\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "216305664\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "reject-identity-cpp",
+    "args": [
+      "/build/reference",
+      "--record",
+      "/results/bad.mesh",
+      "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "unused",
+      "/results/identity.cpp.result",
+      "--known-asset",
+      "base/cityofbronze.map",
+      "/original.map"
+    ],
+    "exit": 2,
+    "seconds": 0.06426097173243761,
+    "before": {
+      "memory.current": "216297472\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "216399872\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "reject-truncated-rust",
+    "args": [
+      "/build/target/release/rust-raycaster-poc",
+      "/results/bad.mesh",
+      "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "/results/control.queries",
+      "/results/truncated.rust.result",
+      "--known-asset",
+      "base/cityofbronze.map",
+      "/original.map"
+    ],
+    "exit": 1,
+    "seconds": 0.0641658422537148,
+    "before": {
+      "memory.current": "216199168\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "216256512\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "reject-truncated-cpp",
+    "args": [
+      "/build/reference",
+      "--record",
+      "/results/bad.mesh",
+      "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "unused",
+      "/results/truncated.cpp.result",
+      "--known-asset",
+      "base/cityofbronze.map",
+      "/original.map"
+    ],
+    "exit": 2,
+    "seconds": 0.06392044993117452,
+    "before": {
+      "memory.current": "216244224\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "216420352\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "reject-trailing-rust",
+    "args": [
+      "/build/target/release/rust-raycaster-poc",
+      "/results/bad.mesh",
+      "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "/results/control.queries",
+      "/results/trailing.rust.result",
+      "--known-asset",
+      "base/cityofbronze.map",
+      "/original.map"
+    ],
+    "exit": 1,
+    "seconds": 0.03214533906430006,
+    "before": {
+      "memory.current": "216465408\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "216936448\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "reject-trailing-cpp",
+    "args": [
+      "/build/reference",
+      "--record",
+      "/results/bad.mesh",
+      "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "unused",
+      "/results/trailing.cpp.result",
+      "--known-asset",
+      "base/cityofbronze.map",
+      "/original.map"
+    ],
+    "exit": 2,
+    "seconds": 0.0640545729547739,
+    "before": {
+      "memory.current": "216936448\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "216334336\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "reject-unknown-policy-rust",
+    "args": [
+      "/build/target/release/rust-raycaster-poc",
+      "/geometry.mesh",
+      "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "/results/control.queries",
+      "/results/unknown-policy.rust.result",
+      "--known-asset",
+      "../base/cityofbronze.map",
+      "/original.map"
+    ],
+    "exit": 1,
+    "seconds": 0.0038270889781415462,
+    "before": {
+      "memory.current": "216322048\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "216711168\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "reject-unknown-policy-cpp",
+    "args": [
+      "/build/reference",
+      "--record",
+      "/geometry.mesh",
+      "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "unused",
+      "/results/unknown-policy.cpp.result",
+      "--known-asset",
+      "../base/cityofbronze.map",
+      "/original.map"
+    ],
+    "exit": 2,
+    "seconds": 0.003299254924058914,
+    "before": {
+      "memory.current": "216690688\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "216879104\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "reject-wrong-input-rust",
+    "args": [
+      "/build/target/release/rust-raycaster-poc",
+      "/geometry.mesh",
+      "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "/results/control.queries",
+      "/results/wrong-input.rust.result",
+      "--known-asset",
+      "base/cityofbronze.map",
+      "/results/control.queries"
+    ],
+    "exit": 1,
+    "seconds": 0.0013714628294110298,
+    "before": {
+      "memory.current": "216862720\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "217153536\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "reject-wrong-input-cpp",
+    "args": [
+      "/build/reference",
+      "--record",
+      "/geometry.mesh",
+      "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "unused",
+      "/results/wrong-input.cpp.result",
+      "--known-asset",
+      "base/cityofbronze.map",
+      "/results/control.queries"
+    ],
+    "exit": 2,
+    "seconds": 0.003446411807090044,
+    "before": {
+      "memory.current": "217051136\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "217329664\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "reject-input-hash-rust",
+    "args": [
+      "/build/target/release/rust-raycaster-poc",
+      "/geometry.mesh",
+      "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "/results/control.queries",
+      "/results/input-hash.rust.result",
+      "--known-asset",
+      "base/cityofbronze.map",
+      "/results/bad-original.map"
+    ],
+    "exit": 1,
+    "seconds": 0.015517458319664001,
+    "before": {
+      "memory.current": "222203904\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "222703616\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "reject-input-hash-cpp",
+    "args": [
+      "/build/reference",
+      "--record",
+      "/geometry.mesh",
+      "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "unused",
+      "/results/input-hash.cpp.result",
+      "--known-asset",
+      "base/cityofbronze.map",
+      "/results/bad-original.map"
+    ],
+    "exit": 2,
+    "seconds": 0.01541948365047574,
+    "before": {
+      "memory.current": "222564352\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "221450240\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "reject-wrong-id-rust",
+    "args": [
+      "/build/target/release/rust-raycaster-poc",
+      "/geometry.mesh",
+      "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "/results/control.queries",
+      "/results/wrong-id.rust.result",
+      "--known-asset",
+      "base/cityofbronze.map",
+      "/original.map"
+    ],
+    "exit": 1,
+    "seconds": 0.003504420630633831,
+    "before": {
+      "memory.current": "218976256\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "218988544\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "reject-wrong-id-cpp",
+    "args": [
+      "/build/reference",
+      "--record",
+      "/geometry.mesh",
+      "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "unused",
+      "/results/wrong-id.cpp.result",
+      "--known-asset",
+      "base/cityofbronze.map",
+      "/original.map"
+    ],
+    "exit": 2,
+    "seconds": 0.0013630068860948086,
+    "before": {
+      "memory.current": "218890240\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "219435008\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "reject-default-rust",
+    "args": [
+      "/build/target/release/rust-raycaster-poc",
+      "/geometry.mesh",
+      "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "/results/control.queries",
+      "/results/default.rust.result"
+    ],
+    "exit": 1,
+    "seconds": 0.03147906390950084,
+    "before": {
+      "memory.current": "219312128\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "219144192\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "reject-default-cpp",
+    "args": [
+      "/build/reference",
+      "--record",
+      "/geometry.mesh",
+      "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "unused",
+      "/results/default.cpp.result"
+    ],
+    "exit": 2,
+    "seconds": 0.03238543123006821,
+    "before": {
+      "memory.current": "219381760\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "219320320\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "reject-nonfinite-rust",
+    "args": [
+      "/build/target/release/rust-raycaster-poc",
+      "/results/bad.mesh",
+      "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "/results/control.queries",
+      "/results/nonfinite.rust.result"
+    ],
+    "exit": 1,
+    "seconds": 0.0039318460039794445,
+    "before": {
+      "memory.current": "115957760\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "116244480\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "reject-nonfinite-cpp",
+    "args": [
+      "/build/reference",
+      "--record",
+      "/results/bad.mesh",
+      "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "unused",
+      "/results/nonfinite.cpp.result"
+    ],
+    "exit": 2,
+    "seconds": 0.003508329391479492,
+    "before": {
+      "memory.current": "116219904\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "116756480\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "reject-index-rust",
+    "args": [
+      "/build/target/release/rust-raycaster-poc",
+      "/results/bad.mesh",
+      "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "/results/control.queries",
+      "/results/index.rust.result"
+    ],
+    "exit": 1,
+    "seconds": 0.003384204115718603,
+    "before": {
+      "memory.current": "116641792\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "116977664\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "reject-index-cpp",
+    "args": [
+      "/build/reference",
+      "--record",
+      "/results/bad.mesh",
+      "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "unused",
+      "/results/index.cpp.result"
+    ],
+    "exit": 2,
+    "seconds": 0.003364147152751684,
+    "before": {
+      "memory.current": "116834304\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "116899840\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "reject-range",
+    "args": [
+      "/build/target/release/rust-raycaster-poc",
+      "/results/bad.mesh",
+      "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "/results/control.queries",
+      "/results/range.bin"
+    ],
+    "exit": 1,
+    "seconds": 0.001344481948763132,
+    "before": {
+      "memory.current": "116867072\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "117166080\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "reject-order",
+    "args": [
+      "/build/target/release/rust-raycaster-poc",
+      "/results/bad.mesh",
+      "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "/results/control.queries",
+      "/results/order.bin"
+    ],
+    "exit": 1,
+    "seconds": 0.0013263281434774399,
+    "before": {
+      "memory.current": "117039104\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "117317632\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.peak": "416468992\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  }
+]
