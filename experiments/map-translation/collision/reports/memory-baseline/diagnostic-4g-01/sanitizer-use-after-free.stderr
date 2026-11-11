@@ -1,0 +1,55 @@
+=================================================================
+==103==ERROR: AddressSanitizer: heap-use-after-free on address 0x602000000010 at pc 0x0000004e058d bp 0x7ffeab3e2a50 sp 0x7ffeab3e2a48
+READ of size 4 at 0x602000000010 thread T0
+    #0 0x4e058c in SanitizerUseAfterFree() /work/tests/sanitizer_controls.cpp:10
+    #1 0x4e09aa in main /work/tests/sanitizer_controls.cpp:44
+    #2 0x70d3b713f249 in __libc_start_call_main csu/../sysdeps/x86/libc-start.c:58
+    #3 0x70d3b713f304 in __libc_start_main_impl csu/../csu/libc-start.c:360
+    #4 0x420300 in _start ??:?
+
+0x602000000010 is located 0 bytes inside of 4-byte region [0x602000000010,0x602000000014)
+freed by thread T0 here:
+    #0 0x4de77d in operator delete(void*) ??:?
+    #1 0x4e0550 in SanitizerUseAfterFree() /work/tests/sanitizer_controls.cpp:9
+    #2 0x4e09aa in main /work/tests/sanitizer_controls.cpp:44
+    #3 0x70d3b713f249 in __libc_start_call_main csu/../sysdeps/x86/libc-start.c:58
+
+previously allocated by thread T0 here:
+    #0 0x4ddf1d in operator new(unsigned long) ??:?
+    #1 0x4e0528 in SanitizerUseAfterFree() /work/tests/sanitizer_controls.cpp:8
+    #2 0x4e09aa in main /work/tests/sanitizer_controls.cpp:44
+    #3 0x70d3b713f249 in __libc_start_call_main csu/../sysdeps/x86/libc-start.c:58
+
+SUMMARY: AddressSanitizer: heap-use-after-free /work/tests/sanitizer_controls.cpp:10 in SanitizerUseAfterFree()
+Shadow bytes around the buggy address:
+  0x0c047fff7fb0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c047fff7fc0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c047fff7fd0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c047fff7fe0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c047fff7ff0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+=>0x0c047fff8000: fa fa[fd]fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c047fff8010: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c047fff8020: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c047fff8030: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c047fff8040: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c047fff8050: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==103==ABORTING

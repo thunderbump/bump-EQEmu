@@ -1,0 +1,184 @@
+{
+  "ordinary-01": {
+    "passed": true,
+    "processes": [
+      {
+        "name": "qeynos2-reference",
+        "peak_rss_kib": 11464,
+        "cgroup_before": {
+          "memory.current": "32030720",
+          "memory.peak": "104099840",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+          "memory.max": "2147483648",
+          "memory.swap.max": "0"
+        },
+        "cgroup_after": {
+          "memory.current": "33435648",
+          "memory.peak": "104099840",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+          "memory.max": "2147483648",
+          "memory.swap.max": "0"
+        }
+      },
+      {
+        "name": "qeynos2-candidate",
+        "peak_rss_kib": 12136,
+        "cgroup_before": {
+          "memory.current": "33431552",
+          "memory.peak": "104099840",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+          "memory.max": "2147483648",
+          "memory.swap.max": "0"
+        },
+        "cgroup_after": {
+          "memory.current": "34152448",
+          "memory.peak": "104099840",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+          "memory.max": "2147483648",
+          "memory.swap.max": "0"
+        }
+      },
+      {
+        "name": "poknowledge-reference",
+        "peak_rss_kib": 47504,
+        "cgroup_before": {
+          "memory.current": "38166528",
+          "memory.peak": "104099840",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+          "memory.max": "2147483648",
+          "memory.swap.max": "0"
+        },
+        "cgroup_after": {
+          "memory.current": "39055360",
+          "memory.peak": "104099840",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+          "memory.max": "2147483648",
+          "memory.swap.max": "0"
+        }
+      },
+      {
+        "name": "poknowledge-candidate",
+        "peak_rss_kib": 47304,
+        "cgroup_before": {
+          "memory.current": "39043072",
+          "memory.peak": "104099840",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+          "memory.max": "2147483648",
+          "memory.swap.max": "0"
+        },
+        "cgroup_after": {
+          "memory.current": "39313408",
+          "memory.peak": "104099840",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+          "memory.max": "2147483648",
+          "memory.swap.max": "0"
+        }
+      }
+    ],
+    "maps": {
+      "qeynos2": {
+        "queries": 5504,
+        "hits": 3231,
+        "misses": 2273,
+        "differences": 0
+      },
+      "poknowledge": {
+        "queries": 5504,
+        "hits": 3354,
+        "misses": 2150,
+        "differences": 0
+      }
+    }
+  },
+  "diagnostic-4g-01": {
+    "passed": true,
+    "processes": [
+      {
+        "name": "qeynos2-reference",
+        "peak_rss_kib": 1041056,
+        "cgroup_before": {
+          "memory.current": "23494656",
+          "memory.peak": "345804800",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+          "memory.max": "4294967296",
+          "memory.swap.max": "0"
+        },
+        "cgroup_after": {
+          "memory.current": "27959296",
+          "memory.peak": "1089396736",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+          "memory.max": "4294967296",
+          "memory.swap.max": "0"
+        }
+      },
+      {
+        "name": "qeynos2-candidate",
+        "peak_rss_kib": 1041000,
+        "cgroup_before": {
+          "memory.current": "27951104",
+          "memory.peak": "1089396736",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+          "memory.max": "4294967296",
+          "memory.swap.max": "0"
+        },
+        "cgroup_after": {
+          "memory.current": "27705344",
+          "memory.peak": "1089937408",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+          "memory.max": "4294967296",
+          "memory.swap.max": "0"
+        }
+      },
+      {
+        "name": "poknowledge-reference",
+        "peak_rss_kib": 2952476,
+        "cgroup_before": {
+          "memory.current": "28352512",
+          "memory.peak": "1089937408",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+          "memory.max": "4294967296",
+          "memory.swap.max": "0"
+        },
+        "cgroup_after": {
+          "memory.current": "37027840",
+          "memory.peak": "3057238016",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+          "memory.max": "4294967296",
+          "memory.swap.max": "0"
+        }
+      },
+      {
+        "name": "poknowledge-candidate",
+        "peak_rss_kib": 2953692,
+        "cgroup_before": {
+          "memory.current": "37015552",
+          "memory.peak": "3057238016",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+          "memory.max": "4294967296",
+          "memory.swap.max": "0"
+        },
+        "cgroup_after": {
+          "memory.current": "37535744",
+          "memory.peak": "3058315264",
+          "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0",
+          "memory.max": "4294967296",
+          "memory.swap.max": "0"
+        }
+      }
+    ],
+    "maps": {
+      "qeynos2": {
+        "queries": 5504,
+        "hits": 3231,
+        "misses": 2273,
+        "differences": 0
+      },
+      "poknowledge": {
+        "queries": 5504,
+        "hits": 3354,
+        "misses": 2150,
+        "differences": 0
+      }
+    }
+  }
+}

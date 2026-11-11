@@ -1,0 +1,13 @@
+{
+  "daemon": "eqemu-raycaster-memory.service",
+  "status": "ActiveState=inactive\nSubState=dead\nResult=success\n",
+  "containers_before_prune": [],
+  "store_removed": true,
+  "archive_removed": true,
+  "ordinary": {
+    "container_removed": "c343f4716b34c849ce0cb8fa65e528b2988d18649b8624e50057758266e08528"
+  },
+  "diagnostic": {
+    "container_removed": "22968458d651c04dcc34533873aacc30d1899986faccaa9226b624da4d84dc91"
+  }
+}

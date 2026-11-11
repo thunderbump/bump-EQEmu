@@ -1,0 +1,49 @@
+=================================================================
+==108==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x602000000014 at pc 0x0000004e072b bp 0x7ffd4094a750 sp 0x7ffd4094a748
+READ of size 4 at 0x602000000014 thread T0
+    #0 0x4e072a in SanitizerOutOfBounds() /work/tests/sanitizer_controls.cpp:17
+    #1 0x4e09b1 in main /work/tests/sanitizer_controls.cpp:48
+    #2 0x76490755d249 in __libc_start_call_main csu/../sysdeps/x86/libc-start.c:58
+    #3 0x76490755d304 in __libc_start_main_impl csu/../csu/libc-start.c:360
+    #4 0x420300 in _start ??:?
+
+0x602000000014 is located 0 bytes to the right of 4-byte region [0x602000000010,0x602000000014)
+allocated by thread T0 here:
+    #0 0x4de02d in operator new[](unsigned long) ??:?
+    #1 0x4e0633 in SanitizerOutOfBounds() /work/tests/sanitizer_controls.cpp:15
+    #2 0x4e09b1 in main /work/tests/sanitizer_controls.cpp:48
+    #3 0x76490755d249 in __libc_start_call_main csu/../sysdeps/x86/libc-start.c:58
+
+SUMMARY: AddressSanitizer: heap-buffer-overflow /work/tests/sanitizer_controls.cpp:17 in SanitizerOutOfBounds()
+Shadow bytes around the buggy address:
+  0x0c047fff7fb0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c047fff7fc0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c047fff7fd0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c047fff7fe0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c047fff7ff0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+=>0x0c047fff8000: fa fa[04]fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c047fff8010: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c047fff8020: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c047fff8030: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c047fff8040: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c047fff8050: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==108==ABORTING
