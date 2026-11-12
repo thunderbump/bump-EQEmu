@@ -42,3 +42,21 @@ and exact built binaries. This runner does not claim that coverage or modify liv
 services. Keep original maps read-only. Keep resource increases explicit and
 retain the first failure; do not rerun into an existing build directory and call
 it a clean build. Large artifacts stay outside Git.
+
+`runtime.py` adapts the reviewed Stack rootless smoke recipe at
+`b9c881a6b24956f398699a34f777e330e049f740`. Run it only inside a disposable
+runtime worker with MariaDB server installed. Mount fresh writable `/runtime`
+and `/runtime-results`, read-only `/binaries`, `/fixture`, `/fixture-manifest.json`,
+and `/originals`. The manifest uses the retained public fixture's `files` records.
+It hashes every declared fixture input, imports the fixed public SQL members,
+keeps one original North Qeynos Rat, and boots both original zones. A fixture-only
+Rat quest calls the production Perl `FindGroundZ` API each second. No real player
+or deployment state is used.
+
+The check requests map reload through the localhost world console. It removes
+only the disposable Qeynos map copy for a failed reload, restores it in `finally`,
+and checks ground-query recovery. Failed-reload engine retention is a separate
+boolean assertion. An unchanged baseline failure must be reported, not silently
+repaired as part of the Rust integration. Every owned database/world/zone process
+is terminated and awaited; nonzero exits prevent a cleanup pass. This is a
+headless check and cannot establish client movement safety.
