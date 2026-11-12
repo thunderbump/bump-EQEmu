@@ -89,7 +89,7 @@ try:
     checked = command(['mariadb','--no-defaults','--socket='+str(root/'mysql.sock'),'-uroot','--batch','--skip-column-names','smoke'], input=b'SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE(); SELECT version,bots_version,custom_version FROM db_version;', capture_output=True).stdout.decode().strip()
     assert checked == '221\n9328\t0\t0', 'public fixture schema/version mismatch'
     receipt['imported_schema'] = checked
-    query("USE smoke; DELETE FROM spawn2 WHERE zone='poknowledge'; DELETE FROM spawn2 WHERE zone='qeynos2' AND id<>10863; UPDATE zone SET idle_when_empty=0 WHERE zoneidnumber IN (2,202) AND version=0; UPDATE logsys_categories SET log_to_console=1 WHERE log_category_description IN ('Quest Debug','Quests','QuestErrors'); UPDATE rule_values SET rule_value='false' WHERE rule_name IN ('Zone:UseZoneController','Bots:Enabled','Analytics:CrashReporting','Zone:StateSavingOnShutdown');")
+    query("USE smoke; DELETE FROM spawn2 WHERE zone='poknowledge'; DELETE FROM spawn2 WHERE zone='qeynos2' AND id<>10863; UPDATE zone SET idle_when_empty=0 WHERE zoneidnumber IN (2,202) AND version=0; UPDATE rule_values SET rule_value='false' WHERE rule_name IN ('Zone:UseZoneController','Bots:Enabled','Analytics:CrashReporting','Zone:StateSavingOnShutdown');")
     for name in ('opcodes',):
         shutil.copytree(fixture/name, root/name)
     shutil.copytree(fixture/'maps',root/'maps')
@@ -97,10 +97,12 @@ try:
         shutil.copyfile(p,root/'maps/base'/p.name)
     command(['tar', 'xzf', str(fixture/'quests/quests-b3e34b8.tar.gz'), '-C', str(root), '--no-same-owner'])
     next(root.glob('projecteqquests-*')).rename(root/'quests')
-    # Fixture-only ground query through the existing public Rat's Perl API.
-    (root/'quests/qeynos2/v0').mkdir(exist_ok=True)
-    (root/'quests/qeynos2/v0/2011.lua').unlink(missing_ok=True)
-    (root/'quests/qeynos2/v0/2011.pl').write_text('sub EVENT_SPAWN { quest::settimer("map_validation",1); }\nsub EVENT_TIMER { if ($timer eq "map_validation") { $|=1; my $z=$npc->FindGroundZ(-935,1194,100); quest::debug("MAP_SERVER_QUERY z=$z"); } }\n')
+    if os.environ.get('EQEMU_MAP_INSERVER_CHECK') != '1':
+        query("USE smoke; UPDATE logsys_categories SET log_to_console=1 WHERE log_category_description IN ('Quest Debug','Quests','QuestErrors');")
+        # Fixture-only ground query through the existing public Rat's Perl API.
+        (root/'quests/qeynos2/v0').mkdir(exist_ok=True)
+        (root/'quests/qeynos2/v0/2011.lua').unlink(missing_ok=True)
+        (root/'quests/qeynos2/v0/2011.pl').write_text('sub EVENT_SPAWN { quest::settimer("map_validation",1); }\nsub EVENT_TIMER { if ($timer eq "map_validation") { $|=1; my $z=$npc->FindGroundZ(-935,1194,100); quest::debug("MAP_SERVER_QUERY z=$z"); } }\n')
     for name in ('shared','logs'):
         (root/name).mkdir()
     config = {'server': {'auto_database_updates':'false', 'world': {'shortname':'smoke','longname':'Disposable smoke','address':'127.0.0.1','localaddress':'127.0.0.1','key':'disposable-smoke','tcp':{'ip':'127.0.0.1','port':'9000'},'telnet':{'ip':'127.0.0.1','port':'9001','enabled':'true'},'loginserver':{'host':'127.0.0.1','port':'5998'}}, 'database':{'host':'127.0.0.1','port':'3306','username':'smoke','password':'','db':'smoke'}, 'directories':{'quests':'quests','plugins':'quests/plugins','lua_modules':'quests/lua_modules','maps':'maps','patches':'opcodes/','opcodes':'opcodes/','shared_memory':'shared/','logs':'logs/'}}}
