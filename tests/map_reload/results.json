@@ -1,0 +1,320 @@
+{
+  "executed_source": "4ce5d7391a048f609b037817b772d6c15ea482d6",
+  "base": "1a2ef74ec19899d2d97b429878e5832b42e6d5af",
+  "build_scope": "incremental full default targets OFF/ON, not clean",
+  "build_runs": [
+    {
+      "name": "ownership-compile",
+      "args": [
+        "clang++",
+        "-std=c++17",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "/work/tests/map_reload/ownership.cpp",
+        "-o",
+        "/results/ownership"
+      ],
+      "exit": 0,
+      "seconds": 0.36664440389722586,
+      "before": {
+        "memory.max": "4294967296",
+        "memory.swap.max": "0",
+        "memory.peak": "22446080",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "after": {
+        "memory.max": "4294967296",
+        "memory.swap.max": "0",
+        "memory.peak": "169160704",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "cumulative_child_maxrss_kib": 103420
+    },
+    {
+      "name": "ownership",
+      "args": [
+        "/results/ownership"
+      ],
+      "exit": 0,
+      "seconds": 0.003023435827344656,
+      "before": {
+        "memory.max": "4294967296",
+        "memory.swap.max": "0",
+        "memory.peak": "169160704",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "after": {
+        "memory.max": "4294967296",
+        "memory.swap.max": "0",
+        "memory.peak": "169160704",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "cumulative_child_maxrss_kib": 103420
+    },
+    {
+      "name": "OFF-incremental-full-build",
+      "args": [
+        "cmake",
+        "--build",
+        "/results/OFF",
+        "--parallel",
+        "1"
+      ],
+      "exit": 0,
+      "seconds": 8.219259310979396,
+      "before": {
+        "memory.max": "4294967296",
+        "memory.swap.max": "0",
+        "memory.peak": "169160704",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "after": {
+        "memory.max": "4294967296",
+        "memory.swap.max": "0",
+        "memory.peak": "1564979200",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "cumulative_child_maxrss_kib": 718104
+    },
+    {
+      "name": "OFF-utility",
+      "args": [
+        "/results/OFF/bin/tests"
+      ],
+      "exit": 0,
+      "seconds": 0.06512652896344662,
+      "before": {
+        "memory.max": "4294967296",
+        "memory.swap.max": "0",
+        "memory.peak": "1564979200",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "after": {
+        "memory.max": "4294967296",
+        "memory.swap.max": "0",
+        "memory.peak": "1564979200",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "cumulative_child_maxrss_kib": 718104
+    },
+    {
+      "name": "ON-incremental-full-build",
+      "args": [
+        "cmake",
+        "--build",
+        "/results/ON",
+        "--parallel",
+        "1"
+      ],
+      "exit": 0,
+      "seconds": 8.92135737510398,
+      "before": {
+        "memory.max": "4294967296",
+        "memory.swap.max": "0",
+        "memory.peak": "1564979200",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "after": {
+        "memory.max": "4294967296",
+        "memory.swap.max": "0",
+        "memory.peak": "2364256256",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "cumulative_child_maxrss_kib": 719204
+    },
+    {
+      "name": "ON-utility",
+      "args": [
+        "/results/ON/bin/tests"
+      ],
+      "exit": 0,
+      "seconds": 0.06545206112787127,
+      "before": {
+        "memory.max": "4294967296",
+        "memory.swap.max": "0",
+        "memory.peak": "2364256256",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "after": {
+        "memory.max": "4294967296",
+        "memory.swap.max": "0",
+        "memory.peak": "2364256256",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "cumulative_child_maxrss_kib": 719204
+    }
+  ],
+  "runtime": {
+    "OFF": {
+      "ready": true,
+      "imported_schema": "221\n9328\t0\t0",
+      "protocol_successes": {
+        "7000": 6,
+        "7001": 6
+      },
+      "successful_reload": true,
+      "ground_before_failure": 7.62939453125e-06,
+      "ground_after_recovery": 7.62939453125e-06,
+      "reload_contract_passed": true,
+      "probe_quiesced": true,
+      "exits": {
+        "qeynos2": 0,
+        "poknowledge": 0,
+        "world": 0,
+        "database": 0
+      },
+      "cleanup": true,
+      "memory_after": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "1347735552",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "seconds": 84.70445422688499,
+      "child_maxrss_kib": 771008,
+      "phases": {
+        "missing": {
+          "attempt_counts": [
+            2,
+            3
+          ],
+          "ground": 7.62939453125e-06,
+          "queries": 9,
+          "requested_at": 1794452452.5761201,
+          "observed_at": 1794452462.5763748
+        },
+        "invalid_header": {
+          "attempt_counts": [
+            3,
+            4
+          ],
+          "ground": 7.62939453125e-06,
+          "queries": 8,
+          "requested_at": 1794452462.5849216,
+          "observed_at": 1794452472.5853286
+        },
+        "valid_replacement": {
+          "attempt_counts": [
+            4,
+            5
+          ],
+          "ground": 42.0,
+          "queries": 8,
+          "requested_at": 1794452472.5859241,
+          "observed_at": 1794452482.5864172
+        },
+        "recovery": {
+          "attempt_counts": [
+            5,
+            6
+          ],
+          "ground": 7.62939453125e-06,
+          "queries": 8,
+          "requested_at": 1794452482.5868864,
+          "observed_at": 1794452492.5873523
+        }
+      }
+    },
+    "ON": {
+      "ready": true,
+      "imported_schema": "221\n9328\t0\t0",
+      "protocol_successes": {
+        "7000": 6,
+        "7001": 6
+      },
+      "successful_reload": true,
+      "ground_before_failure": 7.62939453125e-06,
+      "ground_after_recovery": 7.62939453125e-06,
+      "reload_contract_passed": true,
+      "probe_quiesced": true,
+      "exits": {
+        "qeynos2": 0,
+        "poknowledge": 0,
+        "world": 0,
+        "database": 0
+      },
+      "cleanup": true,
+      "memory_after": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "1295052800",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "seconds": 84.70227238116786,
+      "child_maxrss_kib": 768728,
+      "phases": {
+        "missing": {
+          "attempt_counts": [
+            2,
+            3
+          ],
+          "ground": 7.62939453125e-06,
+          "queries": 8,
+          "requested_at": 1794452560.993463,
+          "observed_at": 1794452570.993915
+        },
+        "invalid_header": {
+          "attempt_counts": [
+            3,
+            4
+          ],
+          "ground": 7.62939453125e-06,
+          "queries": 9,
+          "requested_at": 1794452570.994384,
+          "observed_at": 1794452580.994887
+        },
+        "valid_replacement": {
+          "attempt_counts": [
+            4,
+            5
+          ],
+          "ground": 42.0,
+          "queries": 7,
+          "requested_at": 1794452580.9954183,
+          "observed_at": 1794452590.995854
+        },
+        "recovery": {
+          "attempt_counts": [
+            5,
+            6
+          ],
+          "ground": 7.62939453125e-06,
+          "queries": 9,
+          "requested_at": 1794452590.9963732,
+          "observed_at": 1794452600.9968934
+        }
+      }
+    }
+  },
+  "reuse": {
+    "OFF": {
+      "unchanged_objects": 382,
+      "changed_objects": [
+        "zone/CMakeFiles/zone.dir/zone.cpp.o"
+      ],
+      "zone_compile_commands": [
+        {
+          "directory": "/results/OFF",
+          "command": "/usr/bin/clang++ -DBOOST_BIND_GLOBAL_PLACEHOLDERS -DCPPHTTPLIB_OPENSSL_SUPPORT -DEMBPERL -DEMBPERL_PLUGIN -DENABLE_SECURITY -DEQEMU_BUILD_TESTS -DEQEMU_RUST_BOOTSTRAP_BRIDGE -DGLM_ENABLE_EXPERIMENTAL -DGLM_FORCE_CTOR_INIT -DGLM_FORCE_RADIANS -DHAS_UNION_SEMUN -DLUA_EQEMU -DPERLBIND_NO_STRICT_SCALAR_TYPES -DZONE -I/results/cargo-OFF/cxxbridge -I/results/cargo-OFF/x86_64-unknown-linux-gnu/cxxbridge -I/work/zone/.. -I/work/common/../submodules/websocketpp -I/work/libs/luabind -I/deps/installed/x64-linux/include/luajit-2.1 -I/opt/eqemu-perl/lib/5.32.1/x86_64-linux-thread-multi/CORE -I/work/libs/perlbind/include -isystem /deps/installed/x64-linux/include -isystem /deps/installed/x64-linux/include/mysql -isystem /deps/installed/x64-linux/include/recastnavigation -O2 -g -DNDEBUG -Wformat -Werror=format -std=c++20 -Winvalid-pch -Xclang -include-pch -Xclang /results/OFF/zone/CMakeFiles/zone.dir/cmake_pch.hxx.pch -Xclang -include -Xclang /results/OFF/zone/CMakeFiles/zone.dir/cmake_pch.hxx -o zone/CMakeFiles/zone.dir/zone.cpp.o -c /work/zone/zone.cpp",
+          "file": "/work/zone/zone.cpp"
+        }
+      ],
+      "new_zone_sha256": "7a0cb456c697c3fad5c5350cf84979f23b2c7d7940399ac16fce9171a8fc5b81"
+    },
+    "ON": {
+      "unchanged_objects": 382,
+      "changed_objects": [
+        "zone/CMakeFiles/zone.dir/zone.cpp.o"
+      ],
+      "zone_compile_commands": [
+        {
+          "directory": "/results/ON",
+          "command": "/usr/bin/clang++ -DBOOST_BIND_GLOBAL_PLACEHOLDERS -DCPPHTTPLIB_OPENSSL_SUPPORT -DEMBPERL -DEMBPERL_PLUGIN -DENABLE_SECURITY -DEQEMU_BUILD_TESTS -DEQEMU_RUST_BOOTSTRAP_BRIDGE -DEQEMU_RUST_MAP_RAYCASTER -DGLM_ENABLE_EXPERIMENTAL -DGLM_FORCE_CTOR_INIT -DGLM_FORCE_RADIANS -DHAS_UNION_SEMUN -DLUA_EQEMU -DPERLBIND_NO_STRICT_SCALAR_TYPES -DZONE -I/results/cargo-ON/cxxbridge -I/results/cargo-ON/x86_64-unknown-linux-gnu/cxxbridge -I/work/zone/.. -I/work/common/../submodules/websocketpp -I/work/libs/luabind -I/deps/installed/x64-linux/include/luajit-2.1 -I/opt/eqemu-perl/lib/5.32.1/x86_64-linux-thread-multi/CORE -I/work/libs/perlbind/include -isystem /deps/installed/x64-linux/include -isystem /deps/installed/x64-linux/include/mysql -isystem /deps/installed/x64-linux/include/recastnavigation -O2 -g -DNDEBUG -Wformat -Werror=format -std=c++20 -Winvalid-pch -Xclang -include-pch -Xclang /results/ON/zone/CMakeFiles/zone.dir/cmake_pch.hxx.pch -Xclang -include -Xclang /results/ON/zone/CMakeFiles/zone.dir/cmake_pch.hxx -o zone/CMakeFiles/zone.dir/zone.cpp.o -c /work/zone/zone.cpp",
+          "file": "/work/zone/zone.cpp"
+        }
+      ],
+      "new_zone_sha256": "18025f30ef137f235e23598258100e1edf59db17ea40858075ca64876e448d90"
+    }
+  }
+}
