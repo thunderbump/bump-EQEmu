@@ -83,7 +83,7 @@ try:
     checked = command(['mariadb','--no-defaults','--socket='+str(root/'mysql.sock'),'-uroot','--batch','--skip-column-names','smoke'], input=b'SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE(); SELECT version,bots_version,custom_version FROM db_version;', capture_output=True).stdout.decode().strip()
     assert checked == '221\n9328\t0\t0', 'public fixture schema/version mismatch'
     receipt['imported_schema'] = checked
-    query("USE smoke; DELETE FROM spawn2 WHERE zone='poknowledge'; DELETE FROM spawn2 WHERE zone='qeynos2' AND id<>10863; UPDATE zone SET idle_when_empty=0 WHERE zoneidnumber IN (2,202) AND version=0; UPDATE rule_values SET rule_value='false' WHERE rule_name IN ('Zone:UseZoneController','Bots:Enabled','Analytics:CrashReporting','Zone:StateSavingOnShutdown');")
+    query("USE smoke; DELETE FROM spawn2 WHERE zone='poknowledge'; DELETE FROM spawn2 WHERE zone='qeynos2' AND id<>10863; UPDATE zone SET idle_when_empty=0 WHERE zoneidnumber IN (2,202) AND version=0; UPDATE logsys_categories SET log_to_console=1 WHERE log_category_description IN ('Quest Debug','Quests','QuestErrors'); UPDATE rule_values SET rule_value='false' WHERE rule_name IN ('Zone:UseZoneController','Bots:Enabled','Analytics:CrashReporting','Zone:StateSavingOnShutdown');")
     for name in ('opcodes',):
         shutil.copytree(fixture/name, root/name)
     (root/'maps/base').mkdir(parents=True)
@@ -94,7 +94,7 @@ try:
     # Fixture-only ground query through the existing public Rat's Perl API.
     (root/'quests/qeynos2/v0').mkdir(exist_ok=True)
     (root/'quests/qeynos2/v0/2011.lua').unlink(missing_ok=True)
-    (root/'quests/qeynos2/v0/2011.pl').write_text('sub EVENT_SPAWN { quest::settimer("map_validation",1); }\nsub EVENT_TIMER { if ($timer eq "map_validation") { $|=1; my $z=$npc->FindGroundZ(-935,1194,100); print "MAP_SERVER_QUERY z=$z\\n"; } }\n')
+    (root/'quests/qeynos2/v0/2011.pl').write_text('sub EVENT_SPAWN { quest::settimer("map_validation",1); }\nsub EVENT_TIMER { if ($timer eq "map_validation") { $|=1; my $z=$npc->FindGroundZ(-935,1194,100); quest::debug("MAP_SERVER_QUERY z=$z"); } }\n')
     for name in ('shared','logs'):
         (root/name).mkdir()
     config = {'server': {'auto_database_updates':'false', 'world': {'shortname':'smoke','longname':'Disposable smoke','address':'127.0.0.1','localaddress':'127.0.0.1','key':'disposable-smoke','tcp':{'ip':'127.0.0.1','port':'9000'},'telnet':{'ip':'127.0.0.1','port':'9001','enabled':'true'},'loginserver':{'host':'127.0.0.1','port':'5998'}}, 'database':{'host':'127.0.0.1','port':'3306','username':'smoke','password':'','db':'smoke'}, 'directories':{'quests':'quests','plugins':'quests/plugins','lua_modules':'quests/lua_modules','maps':'maps','patches':'opcodes/','opcodes':'opcodes/','shared_memory':'shared/','logs':'logs/'}}}
@@ -125,11 +125,11 @@ try:
     with socket.create_connection(('127.0.0.1',9001),timeout=10) as console:
         console.settimeout(2)
         console.recv(4096)
-        console.sendall(b'api reload Maps\r\n')
+        console.sendall(b'api reload maps\r\n')
         time.sleep(10)
         try: (results/'reload-console.log').write_bytes(console.recv(16384))
         except TimeoutError: pass
-    receipt['successful_reload'] = all((results/(n+'-smoke.log')).read_text(errors='replace').count('Loaded V2 Map File') >= 2 for n in ['poknowledge','qeynos2'])
+    receipt['successful_reload'] = all((results/(n+'-smoke.log')).read_text(errors='replace').count('Loaded V2 Map File') + (results/(n+'-smoke.log')).read_text(errors='replace').count('Loaded .MMF Map File') >= 2 for n in ['poknowledge','qeynos2'])
     assert receipt['successful_reload'], 'reload evidence missing'
     def ground_values():
         import re
@@ -140,7 +140,7 @@ try:
     def reload_maps():
         with socket.create_connection(('127.0.0.1',9001),timeout=10) as c:
             c.recv(4096)
-            c.sendall(b'api reload Maps\r\n')
+            c.sendall(b'api reload maps\r\n')
             time.sleep(10)
     victim=root/'maps/base/qeynos2.map'
     victim.rename(victim.with_suffix('.held'))
