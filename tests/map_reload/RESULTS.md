@@ -64,3 +64,20 @@ this task's evidence root after evidence retention review. No live world changes
 Operations worklog is authoritative for cross-project handoff. Parent should
 review PR113 and decide acceptance/Beads closure; no automatic merge, deployment
 or Rust default change.
+
+## Parent packaging review
+
+Parent review moved the byte-identical replacement helper from tests/map_reload
+to zone/replace_collision_map.h and updated production/test includes. Source
+`346d5c0b7142234c2afc092af702a2bb5765f10b` passed the ownership executable and both production OFF/ON zone.cpp
+compile commands inside a separate rootless 2 GiB/no-swap container. This is
+focused compile/ownership validation, not another full-target build or runtime
+run. The earlier executed `4ce5d7391a048f609b037817b772d6c15ea482d6` remains the
+source identity for the disposable runtime results above.
+
+The first parent compile attempt stopped on a precompiled-header mtime mismatch.
+Only byte-identical source timestamps were restored from the qualified snapshot,
+then the focused checks passed. Both attempts and exact commands are retained at
+`~/.local/state/eqemu-map-translation/zone-map-reload-parent-review-20261111`.
+The production ownership helper has SHA256
+`6d28ef10c980a62f7ce71e9a2bf67d4cad8dbfeefc1cb2cd2ce86d101cc6173b`, unchanged by relocation.
