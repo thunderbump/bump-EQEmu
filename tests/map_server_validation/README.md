@@ -68,3 +68,10 @@ and navigation assets, and include those files in the input hash manifest.
 This mode validates the fresh report identity, finalization, counts and every
 case result, then requires orderly process exits. It runs separately from the
 two-zone reload probe, so suite-driven zone visits cannot weaken endpoint proof.
+
+`launch_runtime.py OFF|ON UNIQUE_LABEL` reproduces this task's retained runtime
+mounts/image and writes the exact Docker command, source identity and removal
+receipt. Labels beginning `inserver` select the original-quest suite. The launcher
+is task-specific and expects the artifact root named in RESULTS.md. It propagates
+the guest failure, including expected failed-retention assertions. Do not treat
+container removal as an orderly native-shutdown pass.
