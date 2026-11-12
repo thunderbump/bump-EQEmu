@@ -40,6 +40,9 @@ for line in assets:
  q=out/(Path(name).stem+'.queries')
  q.write_bytes(b'EQRAYS01'+identity.encode()+struct.pack('<I',1)+struct.pack('<I6f',0,0,0,1,0,0,-1))
  run(Path(name).stem,['/results/build/bridge_replay',str(mesh),identity,str(q),str(out/(Path(name).stem+'.bin'))])
+run('default-focused-configure',['cmake','-S','/work/tests/map_bridge','-B','/results/native','-DEQEMU_RUST_MAP_RAYCASTER=OFF','-DCMAKE_BUILD_TYPE=Release'])
+run('default-focused-build',['cmake','--build','/results/native','--target','default_map_compile','-j2'])
+
 # Separate sanitizer archive/build identity. Controls qualify diagnostics first.
 os.environ['CARGO_TARGET_DIR']='/results/sanitizer-target'
 os.environ['CC']='/usr/bin/gcc'
@@ -50,11 +53,14 @@ os.environ['ASAN_SYMBOLIZER_PATH']='/usr/bin/addr2line'
 run('san-configure',['cmake','-S','/work/tests/map_bridge','-B','/results/sanitizer','-DEQEMU_RUST_MAP_RAYCASTER=ON','-DEQEMU_SANITIZERS=ON','-DCMAKE_BUILD_TYPE=Release','-DCMAKE_CXX_COMPILER=/usr/bin/g++'])
 run('san-build',['cmake','--build','/results/sanitizer','-j2'])
 run('control-pass',['/results/sanitizer/sanitizer_controls','pass'])
+qualified=True
 for name,diagnostic,frame in [('use-after-free','heap-use-after-free','SanitizerUseAfterFree'),('out-of-bounds','heap-buffer-overflow','SanitizerOutOfBounds'),('undefined','runtime error','SanitizerUndefined'),('leak','LeakSanitizer','SanitizerLeak')]:
  code=run('control-'+name,['/results/sanitizer/sanitizer_controls',name],False)
  message=(out/('control-'+name+'.stderr')).read_text()
- assert code!=0 and diagnostic in message and frame in message and 'sanitizer_controls.cpp:' in message
-run('san-bridge',['/results/sanitizer/bridge_test'])
-run('san-wrapper',['/results/sanitizer/wrapper_test'])
-run('default-focused-configure',['cmake','-S','/work/tests/map_bridge','-B','/results/native','-DEQEMU_RUST_MAP_RAYCASTER=OFF','-DCMAKE_BUILD_TYPE=Release'])
-run('default-focused-build',['cmake','--build','/results/native','--target','default_map_compile','-j2'])
+ qualified = qualified and code!=0 and diagnostic in message and frame in message and 'sanitizer_controls.cpp:' in message
+(out/'sanitizer-qualification.json').write_text(json.dumps({'qualified':qualified,'workload_executed':qualified}))
+if qualified:
+ run('san-bridge',['/results/sanitizer/bridge_test'])
+ run('san-wrapper',['/results/sanitizer/wrapper_test'])
+else:
+ raise SystemExit('Sanitizer controls did not qualify; workload skipped')
