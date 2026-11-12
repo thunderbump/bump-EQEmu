@@ -23,6 +23,9 @@
 #include "zone/map.h"
 #include "zone/map_geometry.h"
 #include "zone/raycast_mesh.h"
+#ifdef EQEMU_RUST_MAP_RAYCASTER
+#include "zone/rust_raycast_mesh.h"
+#endif
 #include "zone/zone.h"
 
 #include <algorithm>
@@ -64,7 +67,7 @@ float Map::FindBestZ(glm::vec3 &start, glm::vec3 *result) const {
 	bool hit = false;
 
 	hit = imp->rm->raycast((const RmReal*)&from, (const RmReal*)&to, (RmReal*)result, nullptr, &hit_distance);
-	if (hit && zone->newzone_data.underworld != 0.0f && result->z < zone->newzone_data.underworld) {
+	if (hit && zone && zone->newzone_data.underworld != 0.0f && result->z < zone->newzone_data.underworld) {
 		hit = false;
 	}
 
@@ -75,7 +78,7 @@ float Map::FindBestZ(glm::vec3 &start, glm::vec3 *result) const {
 	// Find nearest Z above us
 	to.z = -BEST_Z_INVALID;
 	hit = imp->rm->raycast((const RmReal*)&from, (const RmReal*)&to, (RmReal*)result, nullptr, &hit_distance);
-	if (zone->newzone_data.max_z != 0.0f && result->z > zone->newzone_data.max_z) {
+	if (hit && zone && zone->newzone_data.max_z != 0.0f && result->z > zone->newzone_data.max_z) {
 		hit = false;
 	}
 
@@ -168,7 +171,7 @@ float Map::FindGround(glm::vec3 &start, glm::vec3 *result) const {
 	// Find nearest Z below us
 	hit = imp->rm->raycast((const RmReal*)&from, (const RmReal*)&to, (RmReal*)result, nullptr, &hit_distance);
 
-	if (hit && zone->newzone_data.underworld != 0.0f && result->z < zone->newzone_data.underworld) {
+	if (hit && zone && zone->newzone_data.underworld != 0.0f && result->z < zone->newzone_data.underworld) {
 		hit = false;
 	}
 
@@ -303,10 +306,12 @@ Map *Map::LoadMapFile(std::string file) {
 #ifdef USE_MAP_MMFS
 bool Map::Load(std::string filename, bool force_mmf_overwrite)
 {
+#ifndef EQEMU_RUST_MAP_RAYCASTER
 	if (LoadMMF(filename, force_mmf_overwrite)) {
 		LogInfo("Loaded .MMF Map File in place of [{}]", filename.c_str());
 		return true;
 	}
+#endif
 #else
 
 /**
@@ -336,7 +341,7 @@ bool Map::Load(const std::string &filename)
 				LogError("Failed to load V1 Map File [{}]", filename.c_str());
 			}
 
-#ifdef USE_MAP_MMFS
+#if defined(USE_MAP_MMFS) && !defined(EQEMU_RUST_MAP_RAYCASTER)
 			if (loaded_map_file)
 				return SaveMMF(filename, force_mmf_overwrite);
 #endif /*USE_MAP_MMFS*/
@@ -354,7 +359,7 @@ bool Map::Load(const std::string &filename)
 				LogError("Failed to load V2 Map File [{}]", filename.c_str());
 			}
 
-#ifdef USE_MAP_MMFS
+#if defined(USE_MAP_MMFS) && !defined(EQEMU_RUST_MAP_RAYCASTER)
 			if (loaded_map_file)
 				return SaveMMF(filename, force_mmf_overwrite);
 #endif /*USE_MAP_MMFS*/
@@ -376,49 +381,49 @@ bool Map::LoadV1(FILE *f) {
 	if (!MapGeometry::LoadV1(f, verts, indices)) {
 		return false;
 	}
-	uint32 face_count = indices.size() / 3;
-	if(imp) {
-		imp->rm->release();
-		imp->rm = nullptr;
-	} else {
-		imp = new impl;
-	}
-
-	imp->rm = createRaycastMesh((RmUint32)verts.size(), (const RmReal*)&verts[0], face_count, &indices[0]);
-
-	if(!imp->rm) {
-		delete imp;
-		imp = nullptr;
-		return false;
-	}
-
-	return true;
+	return InstallGeometry(verts, indices);
 }
 
 bool Map::LoadV2(FILE *f) {
-	std::vector<glm::vec3> verts;
-	std::vector<uint32> indices;
-	if (!MapGeometry::LoadV2(f, verts, indices)) {
-		return false;
-	}
-	uint32 face_count = indices.size() / 3;
-	if (imp) {
-		imp->rm->release();
-		imp->rm = nullptr;
-	}
-	else {
-		imp = new impl;
-	}
+    std::vector<glm::vec3> verts;
+    std::vector<uint32> indices;
+    if (!MapGeometry::LoadV2(f, verts, indices)) return false;
+    return InstallGeometry(verts, indices);
+}
 
-	imp->rm = createRaycastMesh((RmUint32)verts.size(), (const RmReal*)&verts[0], face_count, &indices[0]);
-
-	if (!imp->rm) {
-		delete imp;
-		imp = nullptr;
-		return false;
-	}
-
-	return true;
+bool Map::InstallGeometry(const std::vector<glm::vec3>& verts, const std::vector<uint32>& indices) {
+    RaycastMesh* replacement = nullptr;
+#ifdef EQEMU_RUST_MAP_RAYCASTER
+    if (verts.size() > 8000000 || indices.size() > 12000000 || indices.size() % 3) {
+        LogError("Rust map load failed: invalid geometry counts");
+        return false;
+    }
+    try {
+        std::vector<std::array<float,3>> points;
+        points.reserve(verts.size());
+        for (const auto& v : verts) points.push_back({v.x,v.y,v.z});
+        std::string error;
+        replacement = createRustRaycastMesh(points, indices, error);
+        if (!replacement) LogError("Rust map load failed: [{}]", error);
+    } catch (const std::exception& e) {
+        LogError("Rust map load failed: [{}]", e.what());
+        return false;
+    }
+#else
+    replacement = createRaycastMesh((RmUint32)verts.size(),
+        reinterpret_cast<const RmReal*>(verts.data()), indices.size()/3, indices.data());
+#endif
+    if (!replacement) return false;
+    // Allocate the holder before transferring ownership. Failed reload keeps the old engine.
+    if (!imp) {
+        try { imp = new impl{replacement}; }
+        catch (...) { replacement->release(); throw; }
+    } else {
+        auto* previous = imp->rm;
+        imp->rm = replacement;
+        previous->release();
+    }
+    return true;
 }
 
 #ifdef USE_MAP_MMFS

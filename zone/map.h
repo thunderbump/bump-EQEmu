@@ -21,6 +21,7 @@
 #include "zone/zone_config.h"
 
 #include <cstdio>
+#include <vector>
 
 #define BEST_Z_INVALID -99999
 
@@ -49,6 +50,7 @@ public:
 
 	static Map *LoadMapFile(std::string file);
 private:
+	bool InstallGeometry(const std::vector<glm::vec3>& verts, const std::vector<uint32>& indices);
 	bool LoadV1(FILE *f);
 	bool LoadV2(FILE *f);
 
