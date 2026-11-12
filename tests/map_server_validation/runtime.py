@@ -135,7 +135,7 @@ try:
         import re
         return [float(v) for v in re.findall(r'MAP_SERVER_QUERY z=([-+0-9.eE]+)', (results/'qeynos2-smoke.log').read_text(errors='replace'))]
     initial = ground_values()
-    assert initial and initial[-1] > -999000, 'fixture ground query unavailable'
+    assert initial and initial[-1] != -99999, 'fixture ground query unavailable'
     receipt['ground_before_failure'] = initial[-1]
     def reload_maps():
         with socket.create_connection(('127.0.0.1',9001),timeout=10) as c:
