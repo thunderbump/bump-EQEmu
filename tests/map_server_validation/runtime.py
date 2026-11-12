@@ -161,9 +161,10 @@ try:
             except TimeoutError: pass
         receipt['successful_reload'] = all((results/(n+'-smoke.log')).read_text(errors='replace').count('Loaded V2 Map File') + (results/(n+'-smoke.log')).read_text(errors='replace').count('Loaded .MMF Map File') >= 2 for n in ['poknowledge','qeynos2'])
         assert receipt['successful_reload'], 'reload evidence missing'
-        def ground_values():
+        def ground_values(text=None):
             import re
-            return [float(v) for v in re.findall(r'MAP_SERVER_QUERY z=([-+0-9.eE]+)', (results/'qeynos2-smoke.log').read_text(errors='replace'))]
+            if text is None: text=(results/'qeynos2-smoke.log').read_text(errors='replace')
+            return [float(v) for v in re.findall(r'MAP_SERVER_QUERY z=([-+0-9.eE]+)', text)]
         initial = ground_values()
         assert initial and initial[-1] != -99999, 'fixture ground query unavailable'
         receipt['ground_before_failure'] = initial[-1]
@@ -180,8 +181,10 @@ try:
             attempts_after = (results/'qeynos2-smoke.log').read_text(errors='replace').count('Attempting to load Map File')
             receipt['failed_reload_attempt_counts'] = [attempts_before, attempts_after]
             assert attempts_after > attempts_before, 'failed reload was not processed'
-            failed = ground_values()
-            assert len(failed)>len(initial), 'no ground query after failed reload'
+            after_attempt=(results/'qeynos2-smoke.log').read_text(errors='replace').rsplit('Attempting to load Map File',1)[-1]
+            failed = ground_values(after_attempt)
+            assert failed, 'no ground query after failed reload attempt'
+            receipt['queries_after_failed_attempt']=len(failed)
             receipt['ground_after_failed_reload'] = failed[-1]
             receipt['failed_reload_engine_retention'] = failed[-1] == initial[-1]
         finally:
