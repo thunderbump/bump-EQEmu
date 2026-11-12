@@ -102,7 +102,7 @@ try:
         # Fixture-only ground query through the existing public Rat's Perl API.
         (root/'quests/qeynos2/v0').mkdir(exist_ok=True)
         (root/'quests/qeynos2/v0/2011.lua').unlink(missing_ok=True)
-        (root/'quests/qeynos2/v0/2011.pl').write_text('sub EVENT_SPAWN { quest::settimer("map_validation",1); }\nsub EVENT_TIMER { if ($timer eq "map_validation") { $|=1; my $z=$npc->FindGroundZ(-935,1194,100); quest::debug("MAP_SERVER_QUERY z=$z"); } }\n')
+        (root/'quests/qeynos2/v0/2011.pl').write_text('sub EVENT_SPAWN { quest::settimer("map_validation",1); }\nsub EVENT_TIMER { if ($timer eq "map_validation") { if (-e "/runtime/stop-map-validation") { quest::stoptimer("map_validation"); quest::debug("MAP_SERVER_PROBE_STOPPED"); return; } $|=1; my $z=$npc->FindGroundZ(-935,1194,100); quest::debug("MAP_SERVER_QUERY z=$z"); } }\n')
     for name in ('shared','logs'):
         (root/name).mkdir()
     config = {'server': {'auto_database_updates':'false', 'world': {'shortname':'smoke','longname':'Disposable smoke','address':'127.0.0.1','localaddress':'127.0.0.1','key':'disposable-smoke','tcp':{'ip':'127.0.0.1','port':'9000'},'telnet':{'ip':'127.0.0.1','port':'9001','enabled':'true'},'loginserver':{'host':'127.0.0.1','port':'5998'}}, 'database':{'host':'127.0.0.1','port':'3306','username':'smoke','password':'','db':'smoke'}, 'directories':{'quests':'quests','plugins':'quests/plugins','lua_modules':'quests/lua_modules','maps':'maps','patches':'opcodes/','opcodes':'opcodes/','shared_memory':'shared/','logs':'logs/'}}}
@@ -192,6 +192,11 @@ try:
 
 
 finally:
+    # Retire our added timer before shutting down the native quest interpreter.
+    if os.environ.get('EQEMU_MAP_INSERVER_CHECK') != '1' and (results/'qeynos2-smoke.log').exists():
+        (root/'stop-map-validation').touch()
+        time.sleep(2)
+        receipt['probe_quiesced']='MAP_SERVER_PROBE_STOPPED' in (results/'qeynos2-smoke.log').read_text(errors='replace')
     exits = {}
     for name,p in reversed(processes):
         p.terminate()
