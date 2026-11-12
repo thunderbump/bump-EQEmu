@@ -1,0 +1,15 @@
+{
+  "executed_pushed_sha": "f4429f7bb19e5be632fd245e4d5f1fa5f571b267",
+  "source_manifest_sha256": "f418b1a5517e01687cc8553c3c7cf55c6640b7cc0c3b8f8a513a812bbb4a4476",
+  "artifact_root": "/home/bump/.local/state/eqemu-map-translation/rust-map-integration-20261111",
+  "ordinary_container_exit": 0,
+  "image": "sha256:0aeb54f14590bf1631a27f60b3e7b7eed6dde549f08ba1f5738282e59d4cea1d",
+  "memory_max": 2147483648,
+  "swap_max": 0,
+  "peak_cgroup_bytes": 821858304,
+  "final_memory_events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n",
+  "sanitizers_qualified": false,
+  "server_build": "blocked during configure: missing vcpkg toolchain; with explicit empty toolchain missing boost_dynamic_bitset metadata",
+  "startup": "not executed: no qualified full Server build/DB fixture in this run",
+  "client": "not executed"
+}

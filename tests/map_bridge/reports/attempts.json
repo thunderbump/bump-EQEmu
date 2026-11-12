@@ -1,0 +1,132 @@
+[
+  {
+    "run": "attempt-01",
+    "exit": 1,
+    "oom_killed": false,
+    "worker_log": "Traceback (most recent call last):\n  File \"/work/tests/map_bridge/guest.py\", line 22, in <module>\n    run('configure',['cmake','-S','/work/tests/map_bridge','-B','/results/build','-DEQEMU_RUST_MAP_RAYCASTER=ON','-DCMAKE_BUILD_TYPE=Release','-DCMAKE_EXPORT_COMPILE_COMMANDS=ON'])\n  File \"/work/tests/map_bridge/guest.py\", line 14, in run\n    if ok: assert code==0,(name,code)\n                  ^^^^^^^\nAssertionError: ('configure', 1)\n",
+    "cleanup": {
+      "container_removed": "36332aeca99f5ba8db14b917db9defc4ef38204f67a0446d9452da65c1f040e9"
+    },
+    "source_head": "60346d90b79b9c2b1a86590125b955219ecd1a41"
+  },
+  {
+    "run": "attempt-02",
+    "exit": 1,
+    "oom_killed": false,
+    "worker_log": "Traceback (most recent call last):\n  File \"/work/tests/map_bridge/guest.py\", line 23, in <module>\n    run('build',['cmake','--build','/results/build','-j2'])\n  File \"/work/tests/map_bridge/guest.py\", line 14, in run\n    if ok: assert code==0,(name,code)\n                  ^^^^^^^\nAssertionError: ('build', 2)\n",
+    "cleanup": {
+      "container_removed": "f916f670bcf09604fa4c4cc7a45c606f8ec6022e464c360613c1bb3aa02859bc"
+    },
+    "source_head": "60346d90b79b9c2b1a86590125b955219ecd1a41"
+  },
+  {
+    "run": "attempt-03",
+    "exit": 0,
+    "oom_killed": false,
+    "worker_log": "",
+    "cleanup": {
+      "container_removed": "3fd8f8062a7cd1f5efed87a01f0b661b29be2b666d5249794bdef1bd827be5a6"
+    },
+    "source_head": "60346d90b79b9c2b1a86590125b955219ecd1a41"
+  },
+  {
+    "run": "attempt-04",
+    "exit": 1,
+    "oom_killed": false,
+    "worker_log": "Traceback (most recent call last):\n  File \"/work/tests/map_bridge/guest.py\", line 22, in <module>\n    run('configure',['cmake','-S','/work/tests/map_bridge','-B','/results/build','-DEQEMU_RUST_MAP_RAYCASTER=ON','-DCMAKE_BUILD_TYPE=Release','-DCMAKE_EXPORT_COMPILE_COMMANDS=ON'])\n  File \"/work/tests/map_bridge/guest.py\", line 14, in run\n    if ok: assert code==0,(name,code)\n                  ^^^^^^^\nAssertionError: ('configure', 1)\n",
+    "cleanup": {
+      "container_removed": "015785b9acfc6659b618b444e8944d5f0d2c6dee85ca0044c5a81117a37200cc"
+    },
+    "source_head": "60346d90b79b9c2b1a86590125b955219ecd1a41"
+  },
+  {
+    "run": "attempt-05",
+    "exit": 1,
+    "oom_killed": false,
+    "worker_log": "Traceback (most recent call last):\n  File \"/work/tests/map_bridge/guest.py\", line 25, in <module>\n    run('wrapper',['/results/build/wrapper_test'])\n  File \"/work/tests/map_bridge/guest.py\", line 14, in run\n    if ok: assert code==0,(name,code)\n                  ^^^^^^^\nAssertionError: ('wrapper', 134)\n",
+    "cleanup": {
+      "container_removed": "a799ee3d35254267d49d64234bda0401cc9e19717c91c89b036acbbc873d8ca4"
+    },
+    "source_head": "60346d90b79b9c2b1a86590125b955219ecd1a41"
+  },
+  {
+    "run": "attempt-06",
+    "exit": 0,
+    "oom_killed": false,
+    "worker_log": "",
+    "cleanup": {
+      "container_removed": "deed8d7b76207238e61b0b15e66866427db816df1f5bb75753d614ef05f7c714"
+    },
+    "source_head": "60346d90b79b9c2b1a86590125b955219ecd1a41"
+  },
+  {
+    "run": "attempt-07",
+    "exit": 0,
+    "oom_killed": false,
+    "worker_log": "",
+    "cleanup": {
+      "container_removed": "089533cf8f4d11bf2f2636bc67f28a221b8fbbba5a7e1ae3e1448c5ccb8e6f31"
+    },
+    "source_head": "60346d90b79b9c2b1a86590125b955219ecd1a41"
+  },
+  {
+    "run": "attempt-08",
+    "exit": 1,
+    "oom_killed": false,
+    "worker_log": "Traceback (most recent call last):\n  File \"/work/tests/map_bridge/guest.py\", line 54, in <module>\n    assert code!=0 and diagnostic in message and frame in message and 'sanitizer_controls.cpp:' in message\n                                                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError\n",
+    "cleanup": {
+      "container_removed": "51b9aed8bcb08bdb674b1739dc42e96984b9791a28be7436997643fbdd9a496b"
+    },
+    "source_head": "60346d90b79b9c2b1a86590125b955219ecd1a41"
+  },
+  {
+    "run": "qualified-01",
+    "exit": 1,
+    "oom_killed": false,
+    "worker_log": "Traceback (most recent call last):\n  File \"/work/tests/map_bridge/guest.py\", line 19, in <module>\n    run('lock',['cargo','metadata','--manifest-path','/work/rust/raycaster/Cargo.toml','--frozen','--offline','--format-version','1'])\n  File \"/work/tests/map_bridge/guest.py\", line 14, in run\n    if ok: assert code==0,(name,code)\n                  ^^^^^^^\nAssertionError: ('lock', 101)\n",
+    "cleanup": {
+      "container_removed": "88fec24df47bb15c4da1a7af80f5a2ced0b11b1c07e519748957bcebeeb45b95"
+    },
+    "source_head": "1f786d36d6cf3875423bd4f3e38cf1429dc9a321"
+  },
+  {
+    "run": "qualified-02",
+    "exit": 1,
+    "oom_killed": false,
+    "worker_log": "Traceback (most recent call last):\n  File \"/work/tests/map_bridge/guest.py\", line 56, in <module>\n    assert code!=0 and diagnostic in message and frame in message and 'sanitizer_controls.cpp:' in message\n                                                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError\n",
+    "cleanup": {
+      "container_removed": "bc6ad1e372739028ddef6af5071dfc81cc6aed6dd47363862e81851336d8ece6"
+    },
+    "source_head": "7d16eafc497847d7ccc3632cb7935de7d8edc57f"
+  },
+  {
+    "run": "qualified-03",
+    "exit": 137,
+    "oom_killed": false,
+    "worker_log": "",
+    "cleanup": {
+      "container_removed": "b7d838e6c0476443f0dcfeeb546615be19ea81b5d1cecb9eb88174904a362958"
+    },
+    "source_head": "852f788950f79ea15b03c7e9ed62f0dd6982b34e"
+  },
+  {
+    "run": "qualified-04",
+    "exit": 1,
+    "oom_killed": false,
+    "worker_log": "Traceback (most recent call last):\n  File \"/work/tests/map_bridge/guest.py\", line 55, in <module>\n    run('san-build',['cmake','--build','/results/sanitizer','-j2'])\n  File \"/work/tests/map_bridge/guest.py\", line 14, in run\n    if ok: assert code==0,(name,code)\n                  ^^^^^^^\nAssertionError: ('san-build', 2)\n",
+    "cleanup": {
+      "container_removed": "c67ed51f3a9c8a2f51f2486d4d5afde637f4f92e4fafe76e11d99339b0063d1f"
+    },
+    "source_head": "1e09970e809326a923465b08503a96f0abbd2322"
+  },
+  {
+    "run": "qualified-ordinary-final",
+    "exit": 0,
+    "oom_killed": false,
+    "worker_log": "",
+    "cleanup": {
+      "container_removed": "f6a06cb5a951d377e117defeeb118609e98e9a741e377f6f9b9198f1cb696596"
+    },
+    "source_head": "f4429f7bb19e5be632fd245e4d5f1fa5f571b267"
+  }
+]

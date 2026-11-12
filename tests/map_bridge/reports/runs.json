@@ -1,0 +1,494 @@
+[
+  {
+    "name": "toolchain",
+    "args": [
+      "rustc",
+      "-Vv"
+    ],
+    "exit": 0,
+    "seconds": 0.01564132608473301,
+    "before": {
+      "memory.current": "9404416\n",
+      "memory.peak": "10084352\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "11653120\n",
+      "memory.peak": "16879616\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "compiler",
+    "args": [
+      "c++",
+      "--version"
+    ],
+    "exit": 0,
+    "seconds": 0.0035361298359930515,
+    "before": {
+      "memory.current": "11653120\n",
+      "memory.peak": "16879616\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "12181504\n",
+      "memory.peak": "16879616\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "lock",
+    "args": [
+      "cargo",
+      "metadata",
+      "--manifest-path",
+      "/work/rust/raycaster/Cargo.toml",
+      "--frozen",
+      "--offline",
+      "--format-version",
+      "1",
+      "--no-deps"
+    ],
+    "exit": 0,
+    "seconds": 0.015628060791641474,
+    "before": {
+      "memory.current": "12173312\n",
+      "memory.peak": "16879616\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "12775424\n",
+      "memory.peak": "16879616\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "fmt",
+    "args": [
+      "cargo",
+      "fmt",
+      "--manifest-path",
+      "/work/rust/raycaster/Cargo.toml",
+      "--check"
+    ],
+    "exit": 0,
+    "seconds": 0.06388259492814541,
+    "before": {
+      "memory.current": "12771328\n",
+      "memory.peak": "16879616\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "11554816\n",
+      "memory.peak": "19554304\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "configure",
+    "args": [
+      "cmake",
+      "-S",
+      "/work/tests/map_bridge",
+      "-B",
+      "/results/build",
+      "-DEQEMU_RUST_MAP_RAYCASTER=ON",
+      "-DCMAKE_BUILD_TYPE=Release",
+      "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+    ],
+    "exit": 0,
+    "seconds": 0.3658667509444058,
+    "before": {
+      "memory.current": "11550720\n",
+      "memory.peak": "19554304\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "14323712\n",
+      "memory.peak": "50659328\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "build",
+    "args": [
+      "cmake",
+      "--build",
+      "/results/build",
+      "-j2"
+    ],
+    "exit": 0,
+    "seconds": 12.232451213989407,
+    "before": {
+      "memory.current": "14319616\n",
+      "memory.peak": "50659328\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "254513152\n",
+      "memory.peak": "454373376\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "bridge",
+    "args": [
+      "/results/build/bridge_test"
+    ],
+    "exit": 0,
+    "seconds": 0.00420808419585228,
+    "before": {
+      "memory.current": "254771200\n",
+      "memory.peak": "454373376\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "254947328\n",
+      "memory.peak": "454373376\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "wrapper",
+    "args": [
+      "/results/build/wrapper_test"
+    ],
+    "exit": 0,
+    "seconds": 0.0037630656734108925,
+    "before": {
+      "memory.current": "254939136\n",
+      "memory.peak": "454373376\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "255094784\n",
+      "memory.peak": "454373376\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "wrapper-mmf",
+    "args": [
+      "/results/build/wrapper_mmf_test"
+    ],
+    "exit": 0,
+    "seconds": 0.00355742871761322,
+    "before": {
+      "memory.current": "255082496\n",
+      "memory.peak": "454373376\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "255193088\n",
+      "memory.peak": "454373376\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "core",
+    "args": [
+      "cargo",
+      "test",
+      "--manifest-path",
+      "/work/rust/raycaster/Cargo.toml",
+      "--release",
+      "--frozen",
+      "--offline"
+    ],
+    "exit": 0,
+    "seconds": 4.924258799292147,
+    "before": {
+      "memory.current": "255184896\n",
+      "memory.peak": "454373376\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "392224768\n",
+      "memory.peak": "590364672\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "default-configure",
+    "args": [
+      "cmake",
+      "-S",
+      "/work",
+      "-B",
+      "/results/default",
+      "-DEQEMU_BUILD_TESTS=ON",
+      "-DCMAKE_TOOLCHAIN_FILE="
+    ],
+    "exit": 1,
+    "seconds": 0.21494197519496083,
+    "before": {
+      "memory.current": "392409088\n",
+      "memory.peak": "590364672\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "393408512\n",
+      "memory.peak": "590364672\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "rust-configure",
+    "args": [
+      "cmake",
+      "-S",
+      "/work",
+      "-B",
+      "/results/rust",
+      "-DEQEMU_RUST_MAP_RAYCASTER=ON",
+      "-DEQEMU_BUILD_TESTS=ON",
+      "-DCMAKE_TOOLCHAIN_FILE="
+    ],
+    "exit": 1,
+    "seconds": 0.21472246199846268,
+    "before": {
+      "memory.current": "393400320\n",
+      "memory.peak": "590364672\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "393637888\n",
+      "memory.peak": "590364672\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "qeynos2",
+    "args": [
+      "/results/build/bridge_replay",
+      "/evidence/rust-poc-20261110/qualified/results/rust/qeynos2.0.mesh",
+      "040343c54e3b02bfd1637ce8fca8839dd676e17c41fb24c042ccfa0bd649435c",
+      "/results/qeynos2.queries",
+      "/results/qeynos2.bin"
+    ],
+    "exit": 0,
+    "seconds": 0.032267848029732704,
+    "before": {
+      "memory.current": "398274560\n",
+      "memory.peak": "590364672\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "398491648\n",
+      "memory.peak": "590364672\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "poknowledge",
+    "args": [
+      "/results/build/bridge_replay",
+      "/evidence/rust-poc-20261110/qualified/results/rust/poknowledge.0.mesh",
+      "794b618d86852b47bd593424129aaf34eee326e5e3fec7290aeeb0e32bc41d20",
+      "/results/poknowledge.queries",
+      "/results/poknowledge.bin"
+    ],
+    "exit": 0,
+    "seconds": 0.2149303243495524,
+    "before": {
+      "memory.current": "401661952\n",
+      "memory.peak": "590364672\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "401883136\n",
+      "memory.peak": "590364672\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "chelsithreborn",
+    "args": [
+      "/results/build/bridge_replay",
+      "/evidence/raycaster-corpus-20261110/final/assets/base/chelsithreborn/geometry.mesh",
+      "c1ebe5fe799241693cdc46f9ca9450fe07c818a9d152b11f0ea0f74b4ceca87a",
+      "/results/chelsithreborn.queries",
+      "/results/chelsithreborn.bin"
+    ],
+    "exit": 0,
+    "seconds": 0.766465060878545,
+    "before": {
+      "memory.current": "403460096\n",
+      "memory.peak": "590364672\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "402141184\n",
+      "memory.peak": "794873856\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "cityofbronze",
+    "args": [
+      "/results/build/bridge_replay",
+      "/evidence/raycaster-corpus-20261110/final/assets/base/cityofbronze/geometry.mesh",
+      "ac305ff834d696a6c7ca93aa37bf22a7752eef99cb46ec782e269ee3ece725e3",
+      "/results/cityofbronze.queries",
+      "/results/cityofbronze.bin"
+    ],
+    "exit": 0,
+    "seconds": 0.7664411370642483,
+    "before": {
+      "memory.current": "402751488\n",
+      "memory.peak": "794873856\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "402259968\n",
+      "memory.peak": "821858304\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "riftseekers",
+    "args": [
+      "/results/build/bridge_replay",
+      "/evidence/raycaster-corpus-20261110/final/assets/base/riftseekers/geometry.mesh",
+      "94370b8d34bfc0a6be39749cae2f21821f46ede4fc869975cf1dca9c45041e78",
+      "/results/riftseekers.queries",
+      "/results/riftseekers.bin"
+    ],
+    "exit": 0,
+    "seconds": 0.765925866086036,
+    "before": {
+      "memory.current": "402378752\n",
+      "memory.peak": "821858304\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "400805888\n",
+      "memory.peak": "821858304\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "default-focused-configure",
+    "args": [
+      "cmake",
+      "-S",
+      "/work/tests/map_bridge",
+      "-B",
+      "/results/native",
+      "-DEQEMU_RUST_MAP_RAYCASTER=OFF",
+      "-DCMAKE_BUILD_TYPE=Release"
+    ],
+    "exit": 0,
+    "seconds": 0.2147997277788818,
+    "before": {
+      "memory.current": "400519168\n",
+      "memory.peak": "821858304\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "401494016\n",
+      "memory.peak": "821858304\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  },
+  {
+    "name": "default-focused-build",
+    "args": [
+      "cmake",
+      "--build",
+      "/results/native",
+      "--target",
+      "default_map_compile",
+      "-j2"
+    ],
+    "exit": 0,
+    "seconds": 1.9179326840676367,
+    "before": {
+      "memory.current": "401477632\n",
+      "memory.peak": "821858304\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    },
+    "after": {
+      "memory.current": "401915904\n",
+      "memory.peak": "821858304\n",
+      "memory.max": "2147483648\n",
+      "memory.swap.max": "0\n",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+    }
+  }
+]
