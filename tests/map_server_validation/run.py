@@ -47,8 +47,13 @@ identity = {'source': subprocess.check_output(['git', 'rev-parse', 'HEAD']).deco
 container = subprocess.check_output(command).decode().strip()
 try:
     with (args.output / 'worker.log').open('w') as log:
-        subprocess.run(docker + ['start', '-a', container], stdout=log, stderr=subprocess.STDOUT, timeout=33000)
-    (args.output / 'container-final.json').write_bytes(subprocess.check_output(docker + ['inspect', container]))
+        attached = subprocess.run(docker + ['start', '-a', container], stdout=log, stderr=subprocess.STDOUT, timeout=50000)
+    (args.output / 'transport-result.json').write_text(json.dumps({'attach_exit': attached.returncode}))
 finally:
+    inspected = subprocess.run(docker + ['inspect', container], capture_output=True)
+    (args.output / 'container-final.json').write_bytes(inspected.stdout)
+    (args.output / 'inspect.stderr').write_bytes(inspected.stderr)
     subprocess.run(docker + ['rm', '-f', container], check=True)
     (args.output / 'cleanup.json').write_text(json.dumps({'container_removed': container}))
+
+raise SystemExit(attached.returncode)
