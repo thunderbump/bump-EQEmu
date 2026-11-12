@@ -21,7 +21,7 @@ assert phase in ('build','OFF','ON')
 mounts = []
 if phase == 'build':
     for name in ('source','results','cargo','deps'):
-        shutil.copytree(prior/name,root/name,copy_function=shutil.copy2)
+        shutil.copytree(prior/name,root/name,copy_function=shutil.copy2,symlinks=True)
     # Preserve source mtimes for identical inputs so Ninja can reuse the actual
     # qualified objects. Every changed/added tracked file is overlaid explicitly.
     delta = []
