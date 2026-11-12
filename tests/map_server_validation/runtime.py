@@ -101,25 +101,27 @@ try:
     (root/'eqemu_config.json').write_text(json.dumps(config))
     command(['/binaries/shared_memory'], cwd=root)
     world = start('world', ['/binaries/world'])
-    zone = start('poknowledge', ['/binaries/zone','poknowledge','7000'])
-    north = start('qeynos2', ['/binaries/zone','qeynos2','7001'])
-    successes = 0
+    zone = start('poknowledge', ['/binaries/zone','poknowledge:7000'])
+    north = start('qeynos2', ['/binaries/zone','qeynos2:7001'])
+    successes = {7000:0,7001:0}
     deadline = time.monotonic()+120
     while time.monotonic() < deadline:
         assert world.poll() is None and zone.poll() is None and north.poll() is None
-        with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as sock:
-            sock.settimeout(.25)
-            challenge = os.urandom(4)
-            sock.sendto(b'\x00\x01'+struct.pack('!I',2)+challenge+struct.pack('!I',512), ('127.0.0.1',7000))
-            try:
-                response = sock.recv(512)
-                successes += int(response[:6] == b'\x00\x02'+challenge)
-            except (TimeoutError, ConnectionRefusedError):
-                pass
-        if successes >= 6 and world_connected(world.pid, zone.pid) and world_connected(world.pid,north.pid) and all(('Loaded V2 Map File' in (results/(n+'-smoke.log')).read_text(errors='replace')) for n in ['poknowledge','qeynos2']):
+        for port in successes:
+            with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as sock:
+                sock.settimeout(.25)
+                challenge = os.urandom(4)
+                sock.sendto(b'\x00\x01'+struct.pack('!I',2)+challenge+struct.pack('!I',512), ('127.0.0.1',port))
+                try:
+                    response = sock.recv(512)
+                    successes[port] += int(response[:6] == b'\x00\x02'+challenge)
+                except (TimeoutError, ConnectionRefusedError):
+                    pass
+        if min(successes.values()) >= 6 and world_connected(world.pid, zone.pid) and world_connected(world.pid,north.pid) and all(('Loaded V2 Map File' in (results/(n+'-smoke.log')).read_text(errors='replace')) for n in ['poknowledge','qeynos2']):
             receipt['ready'] = True
             break
         time.sleep(1)
+    receipt['protocol_successes'] = successes
     assert receipt['ready'], 'two-zone map/session readiness missing'
     # The localhost world console authorizes this isolated namespace only.
     with socket.create_connection(('127.0.0.1',9001),timeout=10) as console:
@@ -143,9 +145,13 @@ try:
             c.sendall(b'api reload maps\r\n')
             time.sleep(10)
     victim=root/'maps/base/qeynos2.map'
+    attempts_before = (results/'qeynos2-smoke.log').read_text(errors='replace').count('Attempting to load Map File')
     victim.rename(victim.with_suffix('.held'))
     try:
         reload_maps()
+        attempts_after = (results/'qeynos2-smoke.log').read_text(errors='replace').count('Attempting to load Map File')
+        receipt['failed_reload_attempt_counts'] = [attempts_before, attempts_after]
+        assert attempts_after > attempts_before, 'failed reload was not processed'
         failed = ground_values()
         assert len(failed)>len(initial), 'no ground query after failed reload'
         receipt['ground_after_failed_reload'] = failed[-1]
