@@ -102,7 +102,7 @@ try:
         # Fixture-only ground query through the existing public Rat's Perl API.
         (root/'quests/qeynos2/v0').mkdir(exist_ok=True)
         (root/'quests/qeynos2/v0/2011.lua').unlink(missing_ok=True)
-        (root/'quests/qeynos2/v0/2011.pl').write_text('sub EVENT_SPAWN { quest::settimer("map_validation",1); }\nsub EVENT_TIMER { if ($timer eq "map_validation") { if (-e "/runtime/stop-map-validation") { quest::stoptimer("map_validation"); quest::debug("MAP_SERVER_PROBE_STOPPED"); return; } $|=1; my $z=$npc->FindGroundZ(-935,1194,100); quest::debug("MAP_SERVER_QUERY z=$z"); } }\n')
+        (root/'quests/qeynos2/v0/2011.pl').write_text('sub EVENT_SPAWN { quest::settimer("map_validation",1); }\nsub EVENT_TIMER { if ($timer eq "map_validation") { if (-e "/runtime/stop-map-validation") { quest::stoptimer("map_validation"); quest::debug("MAP_SERVER_PROBE_STOPPED"); return; } $|=1; my $z=$npc->FindGroundZ(-935,1194,100); quest::debug("MAP_SERVER_QUERY z=$z time=".time().""); } }\n')
     for name in ('shared','logs'):
         (root/name).mkdir()
     config = {'server': {'auto_database_updates':'false', 'world': {'shortname':'smoke','longname':'Disposable smoke','address':'127.0.0.1','localaddress':'127.0.0.1','key':'disposable-smoke','tcp':{'ip':'127.0.0.1','port':'9000'},'telnet':{'ip':'127.0.0.1','port':'9001','enabled':'true'},'loginserver':{'host':'127.0.0.1','port':'5998'}}, 'database':{'host':'127.0.0.1','port':'3306','username':'smoke','password':'','db':'smoke'}, 'directories':{'quests':'quests','plugins':'quests/plugins','lua_modules':'quests/lua_modules','maps':'maps','patches':'opcodes/','opcodes':'opcodes/','shared_memory':'shared/','logs':'logs/'}}}
@@ -174,24 +174,47 @@ try:
                 c.sendall(b'api reload maps\r\n')
                 time.sleep(10)
         victim=root/'maps/base/qeynos2.map'
-        attempts_before = (results/'qeynos2-smoke.log').read_text(errors='replace').count('Attempting to load Map File')
+        def check_reload(label, expected, failure=False):
+            before = (results/'qeynos2-smoke.log').read_text(errors='replace').count('Attempting to load Map File')
+            requested = time.time()
+            reload_maps()
+            observed = time.time()
+            text = (results/'qeynos2-smoke.log').read_text(errors='replace')
+            after = text.count('Attempting to load Map File')
+            tail = text.rsplit('Attempting to load Map File',1)[-1]
+            values = ground_values(tail)
+            record = {'requested_at': requested, 'observed_at': observed,
+                      'attempt_counts': [before,after], 'queries': values,
+                      'query_lines': [line for line in tail.splitlines() if 'MAP_SERVER_QUERY' in line],
+                      'retained_map_log': 'retaining previous map [true]' in tail}
+            receipt.setdefault('reload_phases',{})[label] = record
+            assert after > before and values, 'no processed reload and subsequent query: '+label
+            assert abs(values[-1]-expected)<0.001, 'wrong ground after '+label
+            if failure: assert record['retained_map_log'], 'missing failure retention log'
         victim.rename(victim.with_suffix('.held'))
         try:
-            reload_maps()
-            attempts_after = (results/'qeynos2-smoke.log').read_text(errors='replace').count('Attempting to load Map File')
-            receipt['failed_reload_attempt_counts'] = [attempts_before, attempts_after]
-            assert attempts_after > attempts_before, 'failed reload was not processed'
-            after_attempt=(results/'qeynos2-smoke.log').read_text(errors='replace').rsplit('Attempting to load Map File',1)[-1]
-            failed = ground_values(after_attempt)
-            assert failed, 'no ground query after failed reload attempt'
-            receipt['queries_after_failed_attempt']=len(failed)
-            receipt['ground_after_failed_reload'] = failed[-1]
-            receipt['failed_reload_engine_retention'] = failed[-1] == initial[-1]
+            check_reload('missing', initial[-1], True)
+            # Unknown complete version header exits Map::Load before either decoder.
+            victim.write_bytes(struct.pack('<I',0x7f123456))
+            check_reload('invalid_header', initial[-1], True)
+            # Nonempty finite V1 floor covers the same production ground query.
+            # The legacy decoder reads scalar/vector fields with fread, no packed V2 parser.
+            points = [(-2000.,0.,42.), (0.,0.,42.), (0.,2000.,42.),
+                      (-2000.,0.,42.), (0.,2000.,42.), (-2000.,2000.,42.)]
+            payload = struct.pack('<IIHI',0x01000000,2,0,0)
+            for offset in (0,3):
+                payload += struct.pack('<13f',*(v for xyz in points[offset:offset+3] for v in xyz),0.,0.,1.,0.)
+            victim.write_bytes(payload)
+            receipt['replacement_fixture_sha256'] = hashlib.sha256(payload).hexdigest()
+            check_reload('valid_replacement',42.)
         finally:
+            victim.unlink(missing_ok=True)
             victim.with_suffix('.held').rename(victim)
-            reload_maps()
+            check_reload('recovery',initial[-1])
+        receipt['failed_reload_engine_retention'] = True
+        receipt['reload_contract_passed'] = True
         receipt['ground_after_recovery'] = ground_values()[-1]
-        assert receipt['ground_after_recovery'] == initial[-1], 'restored map query did not recover'
+
 
 
 finally:
