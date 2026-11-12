@@ -47,7 +47,7 @@ identity = {'source': subprocess.check_output(['git', 'rev-parse', 'HEAD']).deco
 container = subprocess.check_output(command).decode().strip()
 try:
     with (args.output / 'worker.log').open('w') as log:
-        attached = subprocess.run(docker + ['start', '-a', container], stdout=log, stderr=subprocess.STDOUT, timeout=50000)
+        attached = subprocess.run(docker + ['start', '-a', container], stdout=log, stderr=subprocess.STDOUT, timeout=60000)
     (args.output / 'transport-result.json').write_text(json.dumps({'attach_exit': attached.returncode}))
 finally:
     inspected = subprocess.run(docker + ['inspect', container], capture_output=True)
