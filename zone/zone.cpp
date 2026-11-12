@@ -60,7 +60,7 @@
 #include "zone/worldserver.h"
 #include "zone/zone_config.h"
 #include "zone/zone_reload.h"
-#include "tests/map_reload/replace_collision_map.h"
+#include "zone/replace_collision_map.h"
 
 #include <cfloat>
 #include <cstdlib>

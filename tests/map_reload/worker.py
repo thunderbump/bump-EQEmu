@@ -10,7 +10,7 @@ exec(compile(source[:source.index("assert memory()")], 'guest-recording', 'exec'
 assert memory()['memory.swap.max'] == '0'
 os.environ.update(CARGO_HOME='/cargo', CARGO_BUILD_JOBS='1', CARGO_NET_OFFLINE='true',
                   CCACHE_DISABLE='1', RUSTUP_AUTO_INSTALL='0')
-assert run('ownership-compile', ['clang++', '-std=c++17', '-Wall', '-Wextra', '-Werror',
+assert run('ownership-compile', ['clang++', '-std=c++17', '-Wall', '-Wextra', '-Werror', '-I/work',
     '/work/tests/map_reload/ownership.cpp', '-o', '/results/ownership'])
 assert run('ownership', ['/results/ownership'])
 for mode in ('OFF', 'ON'):

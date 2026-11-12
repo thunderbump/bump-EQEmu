@@ -1,6 +1,6 @@
 # Zone collision reload regression
 
-`replace_collision_map.h` is the ownership decision used by the real Zone caller.
+`zone/replace_collision_map.h` is the ownership decision used by the real Zone caller.
 The focused probe checks failed first load, two rejected replacements, a throwing
 loader, successful replacement, valid empty replacement and exactly-once cleanup.
 Compile and execute only inside the disposable worker, as `worker.py` does.
