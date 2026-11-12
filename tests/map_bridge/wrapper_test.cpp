@@ -5,6 +5,7 @@
 #include <limits>
 #include <iostream>
 #include <cmath>
+#include <filesystem>
 bool near(float a,float b) { return std::abs(a-b)<0.02f; }
 Zone* zone=nullptr;
 const ZoneConfig* Config=nullptr;
@@ -20,6 +21,8 @@ void fixture(const char* path, float z, bool empty=false) {
 int main() {
  fixture("/results/triangle.map",0);fixture("/results/moved.map",10);
  fixture("/results/empty.map",0,true);fixture("/results/bad.map",std::numeric_limits<float>::quiet_NaN());
+ // A stale native cache must neither override decoded geometry nor be rewritten.
+ { std::ofstream cache("/results/triangle.mmf"); cache<<"stale native cache"; }
  Map m; glm::vec3 start(1,1,2), result(99), norm(99);float distance=99;
  assert(m.FindBestZ(start,nullptr)==BEST_Z_INVALID);
  assert(!m.CheckLoS(start,{1,1,-2}));
@@ -47,5 +50,8 @@ int main() {
  assert(!m.LineIntersectsZoneNoZLeaps(start,below,1,nullptr));
  assert(!m.DoCollisionCheck(start,below,norm,distance) && norm.z==99 && distance==99);
  assert(!m.Load("/results/bad.map"));assert(m.CheckLoS(start,below));
+ std::ifstream cache("/results/triangle.mmf"); std::string contents; std::getline(cache,contents);
+ assert(contents=="stale native cache");
+ assert(!std::filesystem::exists("/results/moved.mmf"));
  std::cout<<"production Map wrapper and reload assertions passed\n";
 }

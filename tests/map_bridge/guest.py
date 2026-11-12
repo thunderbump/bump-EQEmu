@@ -23,6 +23,7 @@ run('configure',['cmake','-S','/work/tests/map_bridge','-B','/results/build','-D
 run('build',['cmake','--build','/results/build','-j2'])
 run('bridge',['/results/build/bridge_test'])
 run('wrapper',['/results/build/wrapper_test'])
+run('wrapper-mmf',['/results/build/wrapper_mmf_test'])
 run('core',['cargo','test','--manifest-path','/work/rust/raycaster/Cargo.toml','--release','--frozen','--offline'])
 for name in ['bridge_test','bridge_replay']:
  p=out/'build'/name
