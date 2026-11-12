@@ -126,6 +126,8 @@ try:
         assert data['selected']==data['started']==data['completed']==len(data['tests']) and data['selected']>0
         assert all(t['passed'] for t in data['tests'])
         receipt['ready']=True
+        # Match the ordinary observer's five-second post-suite baseline.
+        time.sleep(5)
     else:
         zone = start('poknowledge', ['/binaries/zone','poknowledge:7000'])
         north = start('qeynos2', ['/binaries/zone','qeynos2:7001'])
