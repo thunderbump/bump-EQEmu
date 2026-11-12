@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import resource
 from pathlib import Path
 import shutil
 import socket
@@ -57,7 +58,12 @@ def world_connected(world, zone):
     return False
 
 
-receipt = {'ready': False, 'cleanup': False}
+def memory():
+    cg=Path('/sys/fs/cgroup')
+    return {n:(cg/n).read_text().strip() for n in ['memory.max','memory.swap.max','memory.peak','memory.events']}
+
+receipt = {'ready': False, 'cleanup': False, 'memory_before':memory()}
+started=time.monotonic()
 try:
     manifest = json.loads((fixture.parent/"fixture-manifest.json").read_text())
     for item in manifest["files"]:
@@ -116,6 +122,7 @@ try:
         receipt['inserver_tests']=data
         assert data['run_id']==run_id and data['finalized'] and data['passed'] and data['failed']==0
         assert data['selected']==data['started']==data['completed']==len(data['tests']) and data['selected']>0
+        assert all(t['passed'] for t in data['tests'])
         receipt['ready']=True
     else:
         zone = start('poknowledge', ['/binaries/zone','poknowledge:7000'])
@@ -190,6 +197,9 @@ finally:
             p.kill()
             exits[name] = p.wait()
     receipt['exits'] = exits
+    receipt['memory_after']=memory()
+    receipt['seconds']=time.monotonic()-started
+    receipt['child_maxrss_kib']=resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
     receipt['cleanup'] = all(rc == 0 for rc in exits.values())
     (results/'smoke.json').write_text(json.dumps(receipt))
 assert receipt['cleanup'], receipt

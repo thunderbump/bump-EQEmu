@@ -60,3 +60,11 @@ boolean assertion. An unchanged baseline failure must be reported, not silently
 repaired as part of the Rust integration. Every owned database/world/zone process
 is terminated and awaited; nonzero exits prevent a cleanup pass. This is a
 headless check and cannot establish client movement safety.
+
+Set `EQEMU_MAP_INSERVER_CHECK=1` for a separate fresh invocation of the complete
+source-owned in-server suite. It boots one PoK host and lets the suite perform
+its own zone visits. Supply the full retained fixture map tree, including water
+and navigation assets, and include those files in the input hash manifest.
+This mode validates the fresh report identity, finalization, counts and every
+case result, then requires orderly process exits. It runs separately from the
+two-zone reload probe, so suite-driven zone visits cannot weaken endpoint proof.
