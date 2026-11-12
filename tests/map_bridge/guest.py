@@ -44,6 +44,8 @@ for line in assets:
 run('default-focused-configure',['cmake','-S','/work/tests/map_bridge','-B','/results/native','-DEQEMU_RUST_MAP_RAYCASTER=OFF','-DCMAKE_BUILD_TYPE=Release'])
 run('default-focused-build',['cmake','--build','/results/native','--target','default_map_compile','-j2'])
 
+if os.environ.get('EQEMU_MAP_SKIP_SANITIZERS') == '1':
+ raise SystemExit(0)
 # Separate sanitizer archive/build identity. Controls qualify diagnostics first.
 os.environ['CARGO_TARGET_DIR']='/results/sanitizer-target'
 os.environ['CC']='/usr/bin/gcc'

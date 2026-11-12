@@ -42,3 +42,7 @@ target_compile_definitions(wrapper_mmf_test PRIVATE FMT_HEADER_ONLY USE_MAP_MMFS
 target_compile_options(wrapper_mmf_test PRIVATE -UNDEBUG)
 target_link_libraries(wrapper_mmf_test PRIVATE ZLIB::ZLIB)
 eqemu_link_map_raycaster(wrapper_mmf_test)
+if(EQEMU_SANITIZERS)
+  target_compile_options(wrapper_mmf_test PRIVATE -fsanitize=address,undefined -fno-sanitize-recover=all -g -O1 -fno-omit-frame-pointer)
+  target_link_options(wrapper_mmf_test PRIVATE -fsanitize=address,undefined)
+endif()
