@@ -1,0 +1,751 @@
+{
+  "date": "2026-11-11",
+  "source": {
+    "source": "239480beac57c78770a209b8fb4f3a2b79fd68b3",
+    "source_archive_sha256": "477dbd6ffce6b5c47694457512554f01efd155ee7dd363e17c0ef76722d935aa",
+    "vcpkg": "d1ff36c6520ee43f1a656c03cd6425c2974a449e",
+    "worker": "sha256:dc2003a3fb395b63706f6dd975cb29e94c18fccf04784b4c47dab00d913f1894",
+    "dependency_origin": "/home/bump/.local/state/eqemu-staging-commission/2026-10-30/code/build/vcpkg_installed"
+  },
+  "build_runs": [
+    {
+      "name": "compiler",
+      "args": [
+        "clang++",
+        "--version"
+      ],
+      "exit": 0,
+      "seconds": 0.015877866186201572,
+      "before": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "17465344",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "after": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "30568448",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      }
+    },
+    {
+      "name": "cmake",
+      "args": [
+        "cmake",
+        "--version"
+      ],
+      "exit": 0,
+      "seconds": 0.007670051418244839,
+      "before": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "30568448",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "after": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "30568448",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      }
+    },
+    {
+      "name": "rust",
+      "args": [
+        "rustc",
+        "-Vv"
+      ],
+      "exit": 0,
+      "seconds": 0.015527004841715097,
+      "before": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "30568448",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "after": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "30568448",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      }
+    },
+    {
+      "name": "packages",
+      "args": [
+        "dpkg-query",
+        "-W"
+      ],
+      "exit": 0,
+      "seconds": 0.01646181708201766,
+      "before": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "30568448",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "after": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "30568448",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      }
+    },
+    {
+      "name": "OFF-configure",
+      "args": [
+        "cmake",
+        "-S",
+        "/work",
+        "-B",
+        "/results/OFF",
+        "-G",
+        "Ninja",
+        "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
+        "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+        "-DCMAKE_C_COMPILER=/usr/bin/clang",
+        "-DCMAKE_CXX_COMPILER=/usr/bin/clang++",
+        "-DCMAKE_TOOLCHAIN_FILE=/deps/vcpkg/scripts/buildsystems/vcpkg.cmake",
+        "-DVCPKG_MANIFEST_INSTALL=OFF",
+        "-DVCPKG_INSTALLED_DIR=/deps/installed",
+        "-DVCPKG_TARGET_TRIPLET=x64-linux",
+        "-DVCPKG_HOST_TRIPLET=x64-linux",
+        "-DEQEMU_SANITIZERS=OFF",
+        "-DEQEMU_RUST_MAP_RAYCASTER=OFF",
+        "-DPERL_EXECUTABLE=/opt/eqemu-perl/bin/perl",
+        "-DPERL_LIBRARY=/opt/eqemu-perl/lib/5.32.1/x86_64-linux-thread-multi/CORE/libperl.so",
+        "-DPERL_INCLUDE_PATH=/opt/eqemu-perl/lib/5.32.1/x86_64-linux-thread-multi/CORE",
+        "-DEQEMU_BUILD_SERVER=ON",
+        "-DEQEMU_BUILD_TESTS=ON",
+        "-DEQEMU_BUILD_LOGIN=ON",
+        "-DEQEMU_BUILD_LUA=ON",
+        "-DEQEMU_BUILD_PERL=ON",
+        "-DEQEMU_BUILD_CLIENT_FILES=ON"
+      ],
+      "exit": 0,
+      "seconds": 0.8658760096877813,
+      "before": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "30568448",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "after": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "82915328",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      }
+    },
+    {
+      "name": "OFF-build",
+      "args": [
+        "cmake",
+        "--build",
+        "/results/OFF",
+        "--parallel",
+        "1"
+      ],
+      "exit": 0,
+      "seconds": 937.2079239212908,
+      "before": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "82915328",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "after": {
+        "memory.max": "4294967296",
+        "memory.swap.max": "0",
+        "memory.peak": "2631532544",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      }
+    },
+    {
+      "name": "OFF-ctest-inventory",
+      "args": [
+        "ctest",
+        "--test-dir",
+        "/results/OFF",
+        "-N"
+      ],
+      "exit": 0,
+      "seconds": 0.04115410801023245,
+      "before": {
+        "memory.max": "4294967296",
+        "memory.swap.max": "0",
+        "memory.peak": "2631532544",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "after": {
+        "memory.max": "4294967296",
+        "memory.swap.max": "0",
+        "memory.peak": "2631532544",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      }
+    },
+    {
+      "name": "OFF-tests",
+      "args": [
+        "/results/OFF/bin/tests"
+      ],
+      "exit": 0,
+      "seconds": 0.06423156289383769,
+      "before": {
+        "memory.max": "4294967296",
+        "memory.swap.max": "0",
+        "memory.peak": "2631532544",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "after": {
+        "memory.max": "4294967296",
+        "memory.swap.max": "0",
+        "memory.peak": "2631532544",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      }
+    },
+    {
+      "name": "OFF-rust-tests",
+      "args": [
+        "cargo",
+        "test",
+        "--manifest-path",
+        "/work/rust/raycaster/Cargo.toml",
+        "--release",
+        "--frozen",
+        "--offline"
+      ],
+      "exit": 0,
+      "seconds": 9.03328044898808,
+      "before": {
+        "memory.max": "4294967296",
+        "memory.swap.max": "0",
+        "memory.peak": "2631532544",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "after": {
+        "memory.max": "4294967296",
+        "memory.swap.max": "0",
+        "memory.peak": "2631532544",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      }
+    },
+    {
+      "name": "ON-configure",
+      "args": [
+        "cmake",
+        "-S",
+        "/work",
+        "-B",
+        "/results/ON",
+        "-G",
+        "Ninja",
+        "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
+        "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+        "-DCMAKE_C_COMPILER=/usr/bin/clang",
+        "-DCMAKE_CXX_COMPILER=/usr/bin/clang++",
+        "-DCMAKE_TOOLCHAIN_FILE=/deps/vcpkg/scripts/buildsystems/vcpkg.cmake",
+        "-DVCPKG_MANIFEST_INSTALL=OFF",
+        "-DVCPKG_INSTALLED_DIR=/deps/installed",
+        "-DVCPKG_TARGET_TRIPLET=x64-linux",
+        "-DVCPKG_HOST_TRIPLET=x64-linux",
+        "-DEQEMU_SANITIZERS=OFF",
+        "-DEQEMU_RUST_MAP_RAYCASTER=ON",
+        "-DPERL_EXECUTABLE=/opt/eqemu-perl/bin/perl",
+        "-DPERL_LIBRARY=/opt/eqemu-perl/lib/5.32.1/x86_64-linux-thread-multi/CORE/libperl.so",
+        "-DPERL_INCLUDE_PATH=/opt/eqemu-perl/lib/5.32.1/x86_64-linux-thread-multi/CORE",
+        "-DEQEMU_BUILD_SERVER=ON",
+        "-DEQEMU_BUILD_TESTS=ON",
+        "-DEQEMU_BUILD_LOGIN=ON",
+        "-DEQEMU_BUILD_LUA=ON",
+        "-DEQEMU_BUILD_PERL=ON",
+        "-DEQEMU_BUILD_CLIENT_FILES=ON"
+      ],
+      "exit": 0,
+      "seconds": 0.7158724209293723,
+      "before": {
+        "memory.max": "4294967296",
+        "memory.swap.max": "0",
+        "memory.peak": "2631532544",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "after": {
+        "memory.max": "4294967296",
+        "memory.swap.max": "0",
+        "memory.peak": "2631532544",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      }
+    },
+    {
+      "name": "ON-build",
+      "args": [
+        "cmake",
+        "--build",
+        "/results/ON",
+        "--parallel",
+        "1"
+      ],
+      "exit": 0,
+      "seconds": 949.3260454619303,
+      "before": {
+        "memory.max": "4294967296",
+        "memory.swap.max": "0",
+        "memory.peak": "2631532544",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "after": {
+        "memory.max": "4294967296",
+        "memory.swap.max": "0",
+        "memory.peak": "3840131072",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      }
+    },
+    {
+      "name": "ON-ctest-inventory",
+      "args": [
+        "ctest",
+        "--test-dir",
+        "/results/ON",
+        "-N"
+      ],
+      "exit": 0,
+      "seconds": 0.016099057625979185,
+      "before": {
+        "memory.max": "4294967296",
+        "memory.swap.max": "0",
+        "memory.peak": "3840131072",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "after": {
+        "memory.max": "4294967296",
+        "memory.swap.max": "0",
+        "memory.peak": "3840131072",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      }
+    },
+    {
+      "name": "ON-tests",
+      "args": [
+        "/results/ON/bin/tests"
+      ],
+      "exit": 0,
+      "seconds": 0.06366519816219807,
+      "before": {
+        "memory.max": "4294967296",
+        "memory.swap.max": "0",
+        "memory.peak": "3840131072",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "after": {
+        "memory.max": "4294967296",
+        "memory.swap.max": "0",
+        "memory.peak": "3840131072",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      }
+    },
+    {
+      "name": "ON-rust-tests",
+      "args": [
+        "cargo",
+        "test",
+        "--manifest-path",
+        "/work/rust/raycaster/Cargo.toml",
+        "--release",
+        "--frozen",
+        "--offline"
+      ],
+      "exit": 0,
+      "seconds": 8.882956685964018,
+      "before": {
+        "memory.max": "4294967296",
+        "memory.swap.max": "0",
+        "memory.peak": "3840131072",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "after": {
+        "memory.max": "4294967296",
+        "memory.swap.max": "0",
+        "memory.peak": "3840131072",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      }
+    }
+  ],
+  "zone_sha256": {
+    "OFF": "b323df011aa7065d807602a20cb089316ffb9c6c2a971865f66200afd0f49c9a",
+    "ON": "18a27e53a2949cbd29252f8112a5ad9d320a93aaf3a12ff788aa34ca5a7fb005"
+  },
+  "runtime": {
+    "ON-runtime-inserver1": {
+      "ready": true,
+      "cleanup": true,
+      "memory_before": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "10559488",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "imported_schema": "221\n9328\t0\t0",
+      "inserver_tests": {
+        "completed": 21,
+        "failed": 0,
+        "finalized": true,
+        "passed": true,
+        "run_id": "9f8e337a806a975635eff20587ba8a9e",
+        "selected": 21,
+        "started": 21,
+        "suite": "zone",
+        "version": 1,
+        "failing_cases": []
+      },
+      "exits": {
+        "inserver-zone": 0,
+        "world": 0,
+        "database": 0
+      },
+      "memory_after": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "1279627264",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "seconds": 87.32819544430822,
+      "child_maxrss_kib": 770116
+    },
+    "OFF-runtime-v2": {
+      "ready": true,
+      "cleanup": false,
+      "imported_schema": "221\n9328\t0\t0",
+      "successful_reload": true,
+      "ground_before_failure": 7.62939453125e-06,
+      "ground_after_failed_reload": -99999.0,
+      "failed_reload_engine_retention": false,
+      "ground_after_recovery": 7.62939453125e-06,
+      "exits": {
+        "qeynos2": 0,
+        "poknowledge": -9,
+        "world": 0,
+        "database": 0
+      }
+    },
+    "OFF-runtime-inserver2": {
+      "ready": false,
+      "cleanup": true,
+      "memory_before": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "10579968",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "imported_schema": "221\n9328\t0\t0",
+      "inserver_tests": {
+        "completed": 21,
+        "failed": 1,
+        "finalized": true,
+        "passed": false,
+        "run_id": "aa9a15415bf34fb6dcab266f51999aaa",
+        "selected": 21,
+        "started": 21,
+        "suite": "zone",
+        "version": 1,
+        "failing_cases": [
+          {
+            "diagnostic": "melee native refusal/range/flee/defeat s=3 ms=4861 n=17 d=16.01 hp=2 dmg=9 swings=2 cadence=2023 stop=0 xy=5.26 dz=5.02 rat-z...",
+            "name": "rust_native_qeynos_melee",
+            "passed": false
+          }
+        ]
+      },
+      "exits": {
+        "inserver-zone": 0,
+        "world": 0,
+        "database": 0
+      },
+      "memory_after": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "1294909440",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "seconds": 79.99951627384871,
+      "child_maxrss_kib": 768272
+    },
+    "OFF-runtime-inserver1": {
+      "ready": true,
+      "cleanup": false,
+      "imported_schema": "221\n9328\t0\t0",
+      "inserver_tests": {
+        "completed": 21,
+        "failed": 0,
+        "finalized": true,
+        "passed": true,
+        "run_id": "51d065f8f1cd902e9f3af8651c7013dd",
+        "selected": 21,
+        "started": 21,
+        "suite": "zone",
+        "version": 1,
+        "failing_cases": []
+      },
+      "exits": {
+        "inserver-zone": -9,
+        "world": 0,
+        "database": 0
+      }
+    },
+    "OFF-runtime-v5": {
+      "ready": true,
+      "cleanup": false,
+      "memory_before": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "10735616",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "imported_schema": "221\n9328\t0\t0",
+      "protocol_successes": {
+        "7000": 6,
+        "7001": 6
+      },
+      "successful_reload": true,
+      "ground_before_failure": 7.62939453125e-06,
+      "failed_reload_attempt_counts": [
+        2,
+        3
+      ],
+      "queries_after_failed_attempt": 8,
+      "ground_after_failed_reload": -99999.0,
+      "failed_reload_engine_retention": false,
+      "ground_after_recovery": 7.62939453125e-06,
+      "probe_quiesced": true,
+      "exits": {
+        "qeynos2": -9,
+        "poknowledge": 0,
+        "world": 0,
+        "database": 0
+      },
+      "memory_after": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "1303314432",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "seconds": 95.6995980059728,
+      "child_maxrss_kib": 768804
+    },
+    "ON-runtime-v1": {
+      "ready": true,
+      "cleanup": false,
+      "memory_before": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "10940416",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "imported_schema": "221\n9328\t0\t0",
+      "protocol_successes": {
+        "7000": 6,
+        "7001": 6
+      },
+      "successful_reload": true,
+      "ground_before_failure": 7.62939453125e-06,
+      "failed_reload_attempt_counts": [
+        2,
+        3
+      ],
+      "ground_after_failed_reload": -99999.0,
+      "failed_reload_engine_retention": false,
+      "ground_after_recovery": 7.62939453125e-06,
+      "exits": {
+        "qeynos2": 1,
+        "poknowledge": 0,
+        "world": 0,
+        "database": 0
+      },
+      "memory_after": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "1295511552",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "seconds": 65.98857212392613,
+      "child_maxrss_kib": 770704
+    },
+    "ON-runtime-v2": {
+      "ready": true,
+      "cleanup": true,
+      "memory_before": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "11452416",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "imported_schema": "221\n9328\t0\t0",
+      "protocol_successes": {
+        "7000": 6,
+        "7001": 6
+      },
+      "successful_reload": true,
+      "ground_before_failure": 7.62939453125e-06,
+      "failed_reload_attempt_counts": [
+        2,
+        3
+      ],
+      "queries_after_failed_attempt": 9,
+      "ground_after_failed_reload": -99999.0,
+      "failed_reload_engine_retention": false,
+      "ground_after_recovery": 7.62939453125e-06,
+      "probe_quiesced": true,
+      "exits": {
+        "qeynos2": 0,
+        "poknowledge": 0,
+        "world": 0,
+        "database": 0
+      },
+      "memory_after": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "1291370496",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "seconds": 64.5131580256857,
+      "child_maxrss_kib": 769112
+    },
+    "OFF-runtime-inserver3": {
+      "ready": true,
+      "cleanup": true,
+      "memory_before": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "10756096",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "imported_schema": "221\n9328\t0\t0",
+      "inserver_tests": {
+        "completed": 21,
+        "failed": 0,
+        "finalized": true,
+        "passed": true,
+        "run_id": "e06528707794936f7bee722bc7968a07",
+        "selected": 21,
+        "started": 21,
+        "suite": "zone",
+        "version": 1,
+        "failing_cases": []
+      },
+      "exits": {
+        "inserver-zone": 0,
+        "world": 0,
+        "database": 0
+      },
+      "memory_after": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "1287929856",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "seconds": 90.41148703778163,
+      "child_maxrss_kib": 767808
+    },
+    "OFF-runtime-v4": {
+      "ready": true,
+      "cleanup": true,
+      "memory_before": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "10981376",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "imported_schema": "221\n9328\t0\t0",
+      "protocol_successes": {
+        "7000": 6,
+        "7001": 6
+      },
+      "successful_reload": true,
+      "ground_before_failure": 7.62939453125e-06,
+      "failed_reload_attempt_counts": [
+        2,
+        3
+      ],
+      "ground_after_failed_reload": -99999.0,
+      "failed_reload_engine_retention": false,
+      "ground_after_recovery": 7.62939453125e-06,
+      "exits": {
+        "qeynos2": 0,
+        "poknowledge": 0,
+        "world": 0,
+        "database": 0
+      },
+      "memory_after": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "1314869248",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "seconds": 63.02966981893405,
+      "child_maxrss_kib": 768832
+    },
+    "OFF-runtime": {
+      "ready": true,
+      "cleanup": true,
+      "imported_schema": "221\n9328\t0\t0",
+      "successful_reload": false,
+      "exits": {
+        "qeynos2": 0,
+        "poknowledge": 0,
+        "world": 0,
+        "database": 0
+      }
+    },
+    "OFF-runtime-v3": {
+      "ready": true,
+      "cleanup": true,
+      "imported_schema": "221\n9328\t0\t0",
+      "protocol_successes": {
+        "7000": 6,
+        "7001": 6
+      },
+      "successful_reload": true,
+      "ground_before_failure": 7.62939453125e-06,
+      "failed_reload_attempt_counts": [
+        2,
+        3
+      ],
+      "ground_after_failed_reload": -99999.0,
+      "failed_reload_engine_retention": false,
+      "ground_after_recovery": 7.62939453125e-06,
+      "exits": {
+        "qeynos2": 0,
+        "poknowledge": 0,
+        "world": 0,
+        "database": 0
+      }
+    }
+  },
+  "cleanup": {
+    "user_unit_state": "inactive",
+    "socket_exists": false,
+    "containers_removed": true,
+    "retained_artifact_root": "/home/bump/.local/state/eqemu-map-translation/rust-map-server-validation-20261111",
+    "retained_docker_store": "/home/bump/.local/state/eqemu-map-translation/rust-map-server-validation-20261111/docker",
+    "note": "No standing worker or game deployment. Task-owned images, caches, data and failed-run files retained as removable evidence."
+  },
+  "unqualified": [
+    "failed reload engine retention in both backends",
+    "intermittent native teardown",
+    "one unchanged C++ baseline melee assertion failure",
+    "sanitizers explicitly deferred",
+    "interactive client checks deferred"
+  ],
+  "evidence_sha256": {
+    "input.json": "b7c7b704e9d6333bec8a59d31870e3b79426bccb6f3274aaf171ae98c363663d",
+    "packages.json": "26ace6c49cee90fb387a0af485e8c9ea1e966a55e980efea3459505df3bc798e",
+    "dependency-files.json": "d095bd5282fcb630b623c54796a0bab3dc3da7501138397bbbf2127bf8567c58",
+    "toolchain-hashes.txt": "d13844b9f6d08cba37607ff0f134861afe80118526078a831ebbb627cfc919de",
+    "fixture-inventory.json": "282c08999184ea919a8e973673148e63a99821d87f9c6a3a6e0373b0b82c1d73",
+    "fixture-manifest-v2.json": "be36134f9a8cc009cd05c73ed55510d9f7ea1adb38996ae04ad1cb0d84c54351",
+    "backend-build-proof.json": "14cb2f44d1dfa4d62346969f828f67682cbb86be63070944d019197486f39861",
+    "resource-increase.json": "56353085237ed7e94505456a38a420d600445f295b42ae0529324a6dca86ae08",
+    "sampled-maxrss.json": "ec213b4956a478ce29fd14d7df8f50ac6a199c9b5fcbb9813cee6e32df7bc14d",
+    "final-cleanup.json": "8fdf62faed8ec2c4e938a6f16466557643016e18e7fc1ba65f94985cefc4b246"
+  }
+}
