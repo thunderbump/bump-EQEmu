@@ -16,7 +16,7 @@ def run(name,args,ok=True):
 assert mem()['memory.max'].strip()=='2147483648' and mem()['memory.swap.max'].strip()=='0'
 os.environ['CARGO_TARGET_DIR']='/results/target'
 run('toolchain',['rustc','-Vv']);run('compiler',['c++','--version'])
-run('lock',['cargo','metadata','--manifest-path','/work/rust/raycaster/Cargo.toml','--frozen','--offline','--format-version','1'])
+run('lock',['cargo','metadata','--manifest-path','/work/rust/raycaster/Cargo.toml','--frozen','--offline','--format-version','1','--no-deps'])
 (out/'Cargo.lock').write_bytes(Path('/work/rust/raycaster/Cargo.lock').read_bytes())
 run('fmt',['cargo','fmt','--manifest-path','/work/rust/raycaster/Cargo.toml','--check'])
 run('configure',['cmake','-S','/work/tests/map_bridge','-B','/results/build','-DEQEMU_RUST_MAP_RAYCASTER=ON','-DCMAKE_BUILD_TYPE=Release','-DCMAKE_EXPORT_COMPILE_COMMANDS=ON'])
