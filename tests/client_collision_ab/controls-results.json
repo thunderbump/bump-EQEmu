@@ -1,0 +1,502 @@
+{
+  "date": "2026-11-14",
+  "executed_harness": "7621b0e4afc396fb33fbd853fb79fd5fbb8746f8",
+  "artifact_root": "/home/bump/.local/state/eqemu-map-translation/client-collision-ab-controls-20261114",
+  "arms": {
+    "OFF": {
+      "ready": true,
+      "phase_verdicts": {
+        "backend_direct_query": true,
+        "client_command_smoke": true,
+        "server_pose_observation": true,
+        "orderly_shutdown": false
+      },
+      "error": null,
+      "executables": {
+        "database": {
+          "pid": 54,
+          "sha256": "9b44b62ca59523e04fa8c3f8f08850bdbd15f305971241c10a2d92f952fb6efa"
+        },
+        "login": {
+          "pid": 108,
+          "sha256": "d50569e9c4d976709840d1bf0a5d9ed8edd5bc5d47710bfb63df2f4258267834"
+        },
+        "world": {
+          "pid": 109,
+          "sha256": "c69e02802aa8d177180eef6832066a4d1cbbe22bde3bcf65c27fc5b274df9698"
+        },
+        "qeynos2": {
+          "pid": 110,
+          "sha256": "7a0cb456c697c3fad5c5350cf84979f23b2c7d7940399ac16fce9171a8fc5b81"
+        }
+      },
+      "client_sha256": "6271c614d1668d2966f68867e2cdab50df6b94f4c8339a37c1750c564c460505",
+      "identity": {
+        "world": {
+          "name": "Client collision AB private",
+          "host": "127.0.0.1"
+        },
+        "zone": "qeynos2",
+        "account": "clientab",
+        "character": "Clientab",
+        "api_port": 18766,
+        "profile_path": "/runtime/client-profile.json",
+        "profile_mode": "0600",
+        "host_publication": false
+      },
+      "session_identity": [
+        "128-1794679291896334117",
+        1,
+        75
+      ],
+      "movement_commands_sent": 1,
+      "commands": [
+        {
+          "id": "b8e3a67490e149e8f6bfd69bd62cb2d4",
+          "operation": {
+            "kind": "move_for",
+            "east": 1,
+            "north": 0,
+            "duration_ms": 100
+          },
+          "monotonic": 3021158.573581418,
+          "utc": 1794679293.5289717,
+          "receipt": {
+            "id": "b8e3a67490e149e8f6bfd69bd62cb2d4",
+            "status": "accepted"
+          },
+          "terminal_receipt": {
+            "id": "b8e3a67490e149e8f6bfd69bd62cb2d4",
+            "status": "applied_local",
+            "evidence": {
+              "duration_ms": 100,
+              "kind": "controller_intent",
+              "server_position_confirmed": false
+            }
+          }
+        },
+        {
+          "id": "5b485d17d8a3e29d9046c70ecb7fec94",
+          "operation": {
+            "kind": "stop"
+          },
+          "monotonic": 3021158.695770197,
+          "utc": 1794679293.6511605,
+          "receipt": {
+            "id": "5b485d17d8a3e29d9046c70ecb7fec94",
+            "status": "accepted"
+          },
+          "terminal_receipt": {
+            "id": "5b485d17d8a3e29d9046c70ecb7fec94",
+            "status": "applied_local",
+            "evidence": {
+              "kind": "controller_stopped"
+            }
+          }
+        },
+        {
+          "id": "7b2115f55a3cb2b1e73be09554e3d588",
+          "operation": {
+            "kind": "camp"
+          },
+          "monotonic": 3021161.972637814,
+          "utc": 1794679296.928028,
+          "receipt": {
+            "id": "7b2115f55a3cb2b1e73be09554e3d588",
+            "status": "accepted"
+          },
+          "terminal_receipt": {
+            "id": "7b2115f55a3cb2b1e73be09554e3d588",
+            "status": "unknown",
+            "reason": "queued_without_server_receipt"
+          }
+        }
+      ],
+      "command_results": {
+        "b8e3a67490e149e8f6bfd69bd62cb2d4": {
+          "id": "b8e3a67490e149e8f6bfd69bd62cb2d4",
+          "status": "applied_local",
+          "evidence": {
+            "duration_ms": 100,
+            "kind": "controller_intent",
+            "server_position_confirmed": false
+          }
+        },
+        "5b485d17d8a3e29d9046c70ecb7fec94": {
+          "id": "5b485d17d8a3e29d9046c70ecb7fec94",
+          "status": "applied_local",
+          "evidence": {
+            "kind": "controller_stopped"
+          }
+        }
+      },
+      "camp_client_exit": 0,
+      "probe_quiescent": true,
+      "exits": {
+        "client": 0,
+        "qeynos2": 0,
+        "world": 1,
+        "login": -15,
+        "database": 0
+      },
+      "orderly_exit": false,
+      "elapsed_s": 66.21144057065248,
+      "memory_after": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "1302122496",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "direct_query_records": 70,
+      "queries": {
+        "clear": {
+          "origin": "297.75,344,3.75",
+          "size": "6",
+          "eyes": "297.75,344,6.44999980926514",
+          "target": "288,344,3.75",
+          "target_size": "6",
+          "target_eyes": "288,344,5.25",
+          "ground": "19.5276260375977",
+          "los": "1"
+        },
+        "blocked": {
+          "origin": "297.75,344,3.75",
+          "size": "6",
+          "eyes": "297.75,344,6.44999980926514",
+          "target": "320,344,3.75",
+          "target_size": "6",
+          "target_eyes": "320,344,5.25",
+          "ground": "20",
+          "los": "0"
+        }
+      },
+      "inputs_sha256": "05ea6d9c987ac81d325f909a7f9822431d919b5f1e37f572f382cd9dcc0aa7dd",
+      "harness_scripts": {
+        "/worker.py": "d2da1255f6fe0b54448be64c5989c8c6c141120fb4c1e05c8d7c3e75bf995a0a",
+        "/controls.py": "0b0d91e2b4de145afd12d4e438f894c20231a22adb6344d5c52c9fb2faeb15fe",
+        "/probe.pl": "4644982d3d4a62e9b406cc1a935784af4bef8dc5e129e5209c7ca07a5721e268"
+      },
+      "local_samples": 41,
+      "local_first": {
+        "utc": 1794679293.5281544,
+        "monotonic": 3021158.572595492,
+        "feet": [
+          288.0,
+          344.0,
+          0.0
+        ]
+      },
+      "local_last": {
+        "utc": 1794679296.9279935,
+        "monotonic": 3021161.97250809,
+        "feet": [
+          290.81292724609375,
+          344.0,
+          0.0
+        ]
+      },
+      "server_samples": [
+        {
+          "time": 1794679293.48286,
+          "observed": 3021158.527296906,
+          "name": "Clientab",
+          "entity": 75,
+          "account": 1,
+          "character": 1,
+          "aggro": 0,
+          "pose": "288,344,3.75"
+        },
+        {
+          "time": 1794679294.51383,
+          "observed": 3021159.5582901714,
+          "name": "Clientab",
+          "entity": 75,
+          "account": 1,
+          "character": 1,
+          "aggro": 0,
+          "pose": "288,344,3.75"
+        },
+        {
+          "time": 1794679295.54472,
+          "observed": 3021160.5892342725,
+          "name": "Clientab",
+          "entity": 75,
+          "account": 1,
+          "character": 1,
+          "aggro": 0,
+          "pose": "290.812927246094,344,3.125"
+        },
+        {
+          "time": 1794679296.57035,
+          "observed": 3021161.6148675852,
+          "name": "Clientab",
+          "entity": 75,
+          "account": 1,
+          "character": 1,
+          "aggro": 0,
+          "pose": "290.812927246094,344,3.125"
+        }
+      ],
+      "raw_receipt_sha256": "3b95e7d04e9360918c493a21e21ad225bb2c09dc3105aec0d4a281fba8bf2a9a",
+      "container_removed": {
+        "removed": "918ad6e42b9c3d724265ec8ef6edc380684da3d0ef555824e9a46abbf4868598"
+      }
+    },
+    "ON": {
+      "ready": true,
+      "phase_verdicts": {
+        "backend_direct_query": true,
+        "client_command_smoke": true,
+        "server_pose_observation": true,
+        "orderly_shutdown": false
+      },
+      "error": null,
+      "executables": {
+        "database": {
+          "pid": 54,
+          "sha256": "9b44b62ca59523e04fa8c3f8f08850bdbd15f305971241c10a2d92f952fb6efa"
+        },
+        "login": {
+          "pid": 109,
+          "sha256": "b95f45c3b52f2f4e80bf5377512f06a361db2bbe3141501dd65c7a7f34dc1ac6"
+        },
+        "world": {
+          "pid": 110,
+          "sha256": "1a922b6a7b56e052d27e4a841a9e1a02b67779c472860e54897d15eab0b70dec"
+        },
+        "qeynos2": {
+          "pid": 111,
+          "sha256": "18025f30ef137f235e23598258100e1edf59db17ea40858075ca64876e448d90"
+        }
+      },
+      "client_sha256": "6271c614d1668d2966f68867e2cdab50df6b94f4c8339a37c1750c564c460505",
+      "identity": {
+        "world": {
+          "name": "Client collision AB private",
+          "host": "127.0.0.1"
+        },
+        "zone": "qeynos2",
+        "account": "clientab",
+        "character": "Clientab",
+        "api_port": 18766,
+        "profile_path": "/runtime/client-profile.json",
+        "profile_mode": "0600",
+        "host_publication": false
+      },
+      "session_identity": [
+        "129-1794679368567467966",
+        1,
+        75
+      ],
+      "movement_commands_sent": 1,
+      "commands": [
+        {
+          "id": "7f5205e04b3ae05e17a05cbfae7474e8",
+          "operation": {
+            "kind": "move_for",
+            "east": 1,
+            "north": 0,
+            "duration_ms": 100
+          },
+          "monotonic": 3021235.311444934,
+          "utc": 1794679370.2668352,
+          "receipt": {
+            "id": "7f5205e04b3ae05e17a05cbfae7474e8",
+            "status": "accepted"
+          },
+          "terminal_receipt": {
+            "id": "7f5205e04b3ae05e17a05cbfae7474e8",
+            "status": "applied_local",
+            "evidence": {
+              "duration_ms": 100,
+              "kind": "controller_intent",
+              "server_position_confirmed": false
+            }
+          }
+        },
+        {
+          "id": "54729e62befe9a7fa452d20c40c17dd5",
+          "operation": {
+            "kind": "stop"
+          },
+          "monotonic": 3021235.435065905,
+          "utc": 1794679370.3904564,
+          "receipt": {
+            "id": "54729e62befe9a7fa452d20c40c17dd5",
+            "status": "accepted"
+          },
+          "terminal_receipt": {
+            "id": "54729e62befe9a7fa452d20c40c17dd5",
+            "status": "applied_local",
+            "evidence": {
+              "kind": "controller_stopped"
+            }
+          }
+        },
+        {
+          "id": "2a798ac8b694a704cb657cfc328b0c86",
+          "operation": {
+            "kind": "camp"
+          },
+          "monotonic": 3021238.726318081,
+          "utc": 1794679373.6817086,
+          "receipt": {
+            "id": "2a798ac8b694a704cb657cfc328b0c86",
+            "status": "accepted"
+          },
+          "terminal_receipt": {
+            "id": "2a798ac8b694a704cb657cfc328b0c86",
+            "status": "unknown",
+            "reason": "queued_without_server_receipt"
+          }
+        }
+      ],
+      "command_results": {
+        "7f5205e04b3ae05e17a05cbfae7474e8": {
+          "id": "7f5205e04b3ae05e17a05cbfae7474e8",
+          "status": "applied_local",
+          "evidence": {
+            "duration_ms": 100,
+            "kind": "controller_intent",
+            "server_position_confirmed": false
+          }
+        },
+        "54729e62befe9a7fa452d20c40c17dd5": {
+          "id": "54729e62befe9a7fa452d20c40c17dd5",
+          "status": "applied_local",
+          "evidence": {
+            "kind": "controller_stopped"
+          }
+        }
+      },
+      "camp_client_exit": 0,
+      "probe_quiescent": true,
+      "exits": {
+        "client": 0,
+        "qeynos2": 0,
+        "world": 1,
+        "login": -15,
+        "database": 0
+      },
+      "orderly_exit": false,
+      "elapsed_s": 66.1986671150662,
+      "memory_after": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "1278550016",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "direct_query_records": 70,
+      "queries": {
+        "clear": {
+          "origin": "297.75,344,3.75",
+          "size": "6",
+          "eyes": "297.75,344,6.44999980926514",
+          "target": "288,344,3.75",
+          "target_size": "6",
+          "target_eyes": "288,344,5.25",
+          "ground": "19.5276260375977",
+          "los": "1"
+        },
+        "blocked": {
+          "origin": "297.75,344,3.75",
+          "size": "6",
+          "eyes": "297.75,344,6.44999980926514",
+          "target": "320,344,3.75",
+          "target_size": "6",
+          "target_eyes": "320,344,5.25",
+          "ground": "20",
+          "los": "0"
+        }
+      },
+      "inputs_sha256": "7606434302e09b957aebfb0424cb048aa687c6e3a3c80e5e62ac8c97c569a8e0",
+      "harness_scripts": {
+        "/worker.py": "d2da1255f6fe0b54448be64c5989c8c6c141120fb4c1e05c8d7c3e75bf995a0a",
+        "/controls.py": "0b0d91e2b4de145afd12d4e438f894c20231a22adb6344d5c52c9fb2faeb15fe",
+        "/probe.pl": "4644982d3d4a62e9b406cc1a935784af4bef8dc5e129e5209c7ca07a5721e268"
+      },
+      "local_samples": 41,
+      "local_first": {
+        "utc": 1794679370.2656336,
+        "monotonic": 3021235.310087197,
+        "feet": [
+          288.0,
+          344.0,
+          0.0
+        ]
+      },
+      "local_last": {
+        "utc": 1794679373.6816735,
+        "monotonic": 3021238.726170092,
+        "feet": [
+          290.8118591308594,
+          344.0,
+          0.0
+        ]
+      },
+      "server_samples": [
+        {
+          "time": 1794679370.23373,
+          "observed": 3021235.2782119107,
+          "name": "Clientab",
+          "entity": 75,
+          "account": 1,
+          "character": 1,
+          "aggro": 0,
+          "pose": "288,344,3.75"
+        },
+        {
+          "time": 1794679371.25903,
+          "observed": 3021236.303536248,
+          "name": "Clientab",
+          "entity": 75,
+          "account": 1,
+          "character": 1,
+          "aggro": 0,
+          "pose": "290.107330322266,344,3.125"
+        },
+        {
+          "time": 1794679372.28585,
+          "observed": 3021237.3303499008,
+          "name": "Clientab",
+          "entity": 75,
+          "account": 1,
+          "character": 1,
+          "aggro": 0,
+          "pose": "290.811859130859,344,3.125"
+        },
+        {
+          "time": 1794679373.31446,
+          "observed": 3021238.3589597037,
+          "name": "Clientab",
+          "entity": 75,
+          "account": 1,
+          "character": 1,
+          "aggro": 0,
+          "pose": "290.811859130859,344,3.125"
+        }
+      ],
+      "raw_receipt_sha256": "a66cb4daf73d8651a3cd25e7081d8a1619e32f73132d9294a5c38d271202ddf3",
+      "container_removed": {
+        "removed": "93c2247673ffe503241616bf2eda12d324e3729e6c77acb8aa20779e22d88f74"
+      }
+    }
+  },
+  "prior_failures_preserved": [
+    "OFF-controls-v1: Perl false serialization rejected before movement",
+    "OFF-controls-v2: strict 2-second idle freshness abort after move/stop"
+  ],
+  "full_client_qualification": false,
+  "ordinary_observer": false,
+  "exact_canonical_inputs_and_values_equal": true,
+  "cleanup": {
+    "unit_inactive": true,
+    "socket_absent": true,
+    "no_containers": true,
+    "maps": {
+      "poknowledge.map": "794b618d86852b47bd593424129aaf34eee326e5e3fec7290aeeb0e32bc41d20",
+      "qeynos2.map": "040343c54e3b02bfd1637ce8fca8839dd676e17c41fb24c042ccfa0bd649435c"
+    }
+  },
+  "daemon_memory_events": "low 0\nhigh 0\nmax 8637\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0\n"
+}
