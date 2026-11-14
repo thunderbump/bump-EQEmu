@@ -182,7 +182,7 @@ try:
                 raise RuntimeError('ordinary client session reported failed; inspect private state')
             if state.get('phase') == 'ready':
                 assert state['zone']['name']=='qeynos2', 'unexpected isolated zone'
-                assert state['geometry']['digest']=='040343c54e3b02bfd1637ce8fca8839dd676e17c41fb24c042ccfa0bd649435c', 'unexpected geometry'
+                assert state['geometry']['digest']=='sha256:040343c54e3b02bfd1637ce8fca8839dd676e17c41fb24c042ccfa0bd649435c', 'unexpected geometry'
                 receipt['ready'] = True
                 break
         except (OSError, TimeoutError):

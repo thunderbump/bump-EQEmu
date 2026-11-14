@@ -73,7 +73,7 @@ def main():
         pin(original, '/originals/' + name + '.map',
             sha(FIXTURE / 'maps/base' / (name + '.map')))
     mounts.append((ROOT.parent / 'two-maps-v1/inputs', '/originals'))
-    out = ROOT / ('preflight' if args.stage == 'preflight' else args.stage + '-runtime-registered')
+    out = ROOT / ('preflight' if args.stage == 'preflight' else args.stage + '-runtime-final1')
     out.mkdir(parents=True, mode=0o700)  # refuses overwriting first failure
     script = out / 'worker.py'
     worker = 'preflight.py' if args.stage == 'preflight' else 'world.py'
