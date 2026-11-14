@@ -7,79 +7,64 @@ Central Beads `central-ysg5` owns preparation; integration `central-cs66` stays 
 Operations publication is reserved by the independent Client research thread.
 This pinned report is an interim handoff for parent consolidation, not its replacement.
 
-## Implemented check
+## Executed scope and commands
 
-`run.py` verifies the selected client, both sets of Server executables, every
-public fixture manifest input and the immutable runtime image. It captures the
-committed harness identity and freezes the executed worker script. It only accepts
-this task's rootless socket and refuses dirty source or an existing output run.
-`preflight.py` runs inside a disposable container at 2 GiB, no swap, one CPU,
-network disabled and no published ports. It hashes inputs again, attempts client
-startup without arguments, and inspects both loginserver dependency closures with
-`ldd -r`. Client usage exit 2 is expected; failure to reach usage is a loader failure.
-No profile, token, account or password is read or generated. No world, DB, client
-login or gameplay is started. Loader success would still not prove login readiness
-or OpenSSL provider initialization. The launcher has no gameplay execution path.
-
-From a clean committed checkout, after preparing the documented rootless daemon:
+See [RESULTS.md](RESULTS.md) and [results.json](results.json) for observed outcomes.
+`run.py` pins all fixture inputs, Server/client binaries and scripts, verifies a
+clean committed harness, and accepts only the task's rootless socket. `preflight`
+checks client loading and both loginserver linked closures inside the immutable
+runtime image. `OFF` and `ON` each initialize a fresh public PEQ DB, import the
+source-owned login schema, pre-register only the private world, enable local
+account creation, and run login/world/Qeynos2/client serially in one namespace.
+The container has networking disabled, no host ports, 2 GiB/no swap and one CPU.
 
 ```sh
-python3 tests/client_collision_ab/run.py \
-  --socket unix:///run/user/1000/eqemu-client-collision-ab-20261114.sock
+python3 tests/client_collision_ab/run.py --socket unix:///run/user/1000/eqemu-client-collision-ab-20261114.sock --stage preflight
+python3 tests/client_collision_ab/run.py --socket unix:///run/user/1000/eqemu-client-collision-ab-20261114.sock --stage OFF
+python3 tests/client_collision_ab/run.py --socket unix:///run/user/1000/eqemu-client-collision-ab-20261114.sock --stage ON
 ```
 
-Artifacts are under
-`~/.local/state/eqemu-map-translation/client-collision-ab-20261114/preflight`.
-The exact command, inputs, process exit, container inspect, cgroup readings,
-loader stdout/stderr and container removal receipt are retained. A failing closure
-is a blocked client experiment, never an OFF/ON backend verdict. The operator must
-stop the task daemon and check socket/containers after the launcher exits.
+The launcher refuses existing output names, preserving first failures. This
+retained run has already used all three output names; reproducing requires a
+reviewed new output suffix in the harness. Prepare the unique daemon through
+Stack's `validation/rootless-prototype/run` systemd user-service recipe. Use an
+independent store/socket/unit, offline verified OCI import, 2 GiB/no swap, and
+stop the daemon afterward. No daemon lifecycle is hidden in `run.py`.
 
-## Prepared direct query fixture
+Private artifacts live at
+`~/.local/state/eqemu-map-translation/client-collision-ab-20261114`. Each run
+retains exact Docker argv, committed harness and frozen script hashes, inputs,
+process-bound `/proc/PID/exe` hashes, stdout/stderr, API state, resource limits,
+process exits, and container removal. Private DBs/logs can contain generated
+credentials/authentication material and must not be published. No existing
+service profile, token or control port is read by this harness.
 
-`2011.pl` is a prepared replacement for the public Qeynos2 Rat's fixture quest,
-not an installed or executed script. It logs production `FindGroundZ` and
-`CheckLoSToLoc` results at two identical endpoints per backend, with source position,
-size, target position, target size and timestamps. These are diagnostic server
-facts, never ordinary client perception. It needs quest-debug logging enabled,
-the one retained Rat spawn, and its timer retired before shutdown. Preflight does
-not load or syntax-qualify this quest in Server.
+## Production query fixture
 
-Verified source chain at the baseline:
+`2011.pl` replaces only the disposable public Qeynos2 Rat quest. It calls the
+production Perl `FindGroundZ` and `CheckLoSToLoc` bindings at two fixed endpoints,
+logging source/target coordinates, source/target size, time, ground and LoS.
+These server diagnostics are never client perception. The worker enables quest
+debug logging, retains one original Rat, and retires its timer before shutdown.
 
-- `zone/perl_mob.cpp` exports `FindGroundZ` and `CheckLoSToLoc`.
-- `zone/mob.cpp::FindGroundZ` queries `zone->zonemap->FindBestZ`, with origin
-  `z = NPC.GetZ() + offset`. The offset 100 is not an absolute query height.
-- `zone/aggro.cpp::CheckLosFN` adds source/target size-dependent eye heights,
-  then calls `zone->zonemap->CheckLoS`. Record the raw endpoints and sizes;
-  do not compare against an unadjusted client ray.
-
-The endpoints are a small survey, not a qualified wall/clear LoS control. A later
-worker must prove positive and negative controls, loaded-map/backend identity and
-same source/target coordinates before reporting LoS parity or coverage. This
-quest alone does not prove that the intended Rust branch was called at runtime.
-Retained build feature/symbol proof is in `tests/map_reload/RESULTS.md` and
-`tests/map_server_validation/RESULTS.md`; preserve its actual source identity.
+The source chain is `zone/perl_mob.cpp` to `zone/mob.cpp::FindGroundZ` to
+`Map::FindBestZ`, and `zone/aggro.cpp::CheckLosFN` to `Map::CheckLoS`.
+Ground origin is `NPC.GetZ()+100`; LoS adds size-dependent source/target eye
+heights. The two endpoints survey clear LoS only, with no blocked control or
+client-coordinate correlation. Process hash plus qualified OFF/ON build proof
+identifies the selected implementation. No new Rust core call counter exists.
+See `tests/map_reload/RESULTS.md` and `tests/map_server_validation/RESULTS.md`
+for the retained feature/symbol/build provenance at the actual binary source.
 
 ## Pending ordinary client experiment
 
-First qualify a runtime closure that can load the exact CPU binary, including
-its glibc requirements. Then add a guest-only worker using the retained public
-PEQ archive, fixed import order, schema 221 tables and version 9328/0/0. Existing
-`tests/map_server_validation/runtime.py` starts world/zones but no loginserver.
-The private login path still needs `login.json`, opcode files, login schema,
-OpenSSL providers and ordinary account creation tested; dependency resolution
-alone is insufficient. Never use shared login or copy a player DB.
-
-Keep DB, loginserver, world, one Qeynos2 zone and client in one task-owned
-network namespace with no host publication. Advertise 127.0.0.1 consistently:
-RoF2 login 5999, world 9000, explicit zone 7001. Disable the login web API.
-Use world `Client collision AB private`, host `127.0.0.1`, account `clientab`,
-character `Clientab`, control port 18766. These identities are reserved in this
-plan only; nothing has registered or used them. Generate a fresh disposable
-password and >=32-character token inside that namespace, in mode-600 profile
-files. Never borrow the existing service's profile/control port/token. Retain
-private identity receipts without emitting credentials.
+The closure and ordinary isolated login path are now exercised. The world is
+`Client collision AB private`, host `127.0.0.1`, RoF2 login 5999, world 9000,
+zone 7001, account `clientab`, character `Clientab`, control port 18766. Private
+password/token files are generated inside each container, mode 600. The expected
+world selection guard and Qeynos2 geometry guard fail closed. No player movement
+is implemented. Runtime shutdown errors must be investigated before broader
+qualification. World, DB, source inputs and client profile remain disposable.
 
 Run C++ OFF then Rust ON serially with fresh equal DBs, same maps/client binary,
 normal character creation, equal starting state and identical bounded commands.
