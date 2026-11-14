@@ -101,7 +101,18 @@ def main():
         probe = Path(__file__).with_name('2011.pl').resolve()
         pin(probe, '/probe.pl')
         mounts.append((probe, '/probe.pl'))
-    inputs = out / 'inputs.json'
+    if args.stage == 'ON':
+        reference = ROOT / ('OFF-' + args.run_label)
+        prior_receipt = json.loads((reference / 'results/receipt.json').read_text())
+        if not prior_receipt.get('canonical_queries'):
+            raise SystemExit('OFF must establish clear and blocked controls before ON')
+        prior_inputs = json.loads((reference / 'inputs.json').read_text())
+        for guest in ('/worker.py', '/probe.pl', '/controls.py'):
+            before = next(f['sha256'] for f in prior_inputs['files'] if f['guest_path']==guest)
+            after = next(f['sha256'] for f in files if f['guest_path']==guest)
+            if before != after:
+                raise SystemExit('OFF/ON harness bytes differ')
+    inputs = out / 'inputs.json' 
     inputs.write_text(json.dumps({'files': files, 'baseline': BASELINE,
         'harness_commit': sp.check_output(['git', 'rev-parse', 'HEAD']).decode().strip(),
         'binary_source': BINARY_SOURCE, 'client_source': CLIENT_SOURCE,

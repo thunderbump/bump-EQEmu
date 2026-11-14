@@ -124,3 +124,12 @@ pure admission/JSON controls with `python3 -B -m unittest discover -s
 tests/client_collision_ab -p test_controls.py -v`. Native execution stays inside
 the network-disabled 2 GiB/no-swap worker. All input and harness identities are
 retained in each uniquely named output directory.
+
+First second-checkpoint attempt `OFF-controls-v1` is retained: Perl false
+stringified as an empty string, so strict query parsing refused it before any
+movement. The quest now explicitly serializes booleans as 0/1; assertions remain.
+Actual OFF geometry established clear=1/blocked=false at the frozen endpoints.
+FindGroundZ's +100 search finds overhead surfaces here, 19.527626/20, rather than
+the client's floor at zero. These are canonical query values, not standing height.
+ON admission requires a matching-label OFF with both classifications established
+and byte-identical worker/quest/admission scripts. Final run label is controls-v2.

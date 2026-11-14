@@ -324,4 +324,4 @@ finally:
     receipt['elapsed_s'] = time.monotonic()-started
     receipt['memory_after'] = memory()
     (results/'receipt.json').write_text(json.dumps(receipt,indent=2)+'\n')
-raise SystemExit(0 if receipt['ready'] and receipt['cleanup'] and all(receipt['phase_verdicts'].values()) and 'error' not in receipt else 1)
+raise SystemExit(0 if receipt['ready'] and receipt['cleanup'] and all(receipt['phase_verdicts'].values()) and receipt.get('probe_quiescent', False) and 'error' not in receipt else 1)

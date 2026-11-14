@@ -14,7 +14,7 @@ sub EVENT_TIMER {
     for my $t (@targets) {
         my ($id,$x,$y,$z) = @$t;
         my $ground = $npc->FindGroundZ($x,$y,100);
-        my $los = $npc->CheckLoSToLoc($x,$y,$z,6.0);
+        my $los = $npc->CheckLoSToLoc($x,$y,$z,6.0) ? 1 : 0;
         my $eye = unpack("f",pack("f",$npc->GetZ()+unpack("f",pack("f",$npc->GetSize()/2*unpack("f",pack("f",0.9))))));
         my $target_eye = $z+6/2*0.5;
         quest::debug("CLIENT_AB_QUERY id=$id time=".time()." from=".$npc->GetX().",".$npc->GetY().",".$npc->GetZ()." size=".$npc->GetSize()." eyes=297.75,344,$eye to=$x,$y,$z target_size=6 target_eyes=$x,$y,$target_eye ground=$ground los=$los");
