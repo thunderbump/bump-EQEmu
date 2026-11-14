@@ -112,7 +112,7 @@ def main():
             after = next(f['sha256'] for f in files if f['guest_path']==guest)
             if before != after:
                 raise SystemExit('OFF/ON harness bytes differ')
-    inputs = out / 'inputs.json' 
+    inputs = out / 'inputs.json'
     inputs.write_text(json.dumps({'files': files, 'baseline': BASELINE,
         'harness_commit': sp.check_output(['git', 'rev-parse', 'HEAD']).decode().strip(),
         'binary_source': BINARY_SOURCE, 'client_source': CLIENT_SOURCE,
