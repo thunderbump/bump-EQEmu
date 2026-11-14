@@ -213,6 +213,7 @@ try:
             return json.load(response)
 
     def observation():
+        assert all(p.poll() is None for _,p in processes), 'owned process died'
         state = api('state')
         stamp = time.monotonic()
         log = (results/'qeynos2-smoke.log').read_text(errors='replace')
@@ -259,6 +260,15 @@ try:
         entry['receipt'] = api('commands/'+cid, {'session':identity[0],'zone_epoch':identity[1],'operation':op})
         if kind=='move_for':
             receipt['movement_commands_sent'] += 1
+        # Observe terminal local application before any subsequent action.
+        terminal_deadline = time.monotonic()+.4
+        while time.monotonic()<terminal_deadline:
+            entry['terminal_receipt'] = api('commands/'+cid)
+            if entry['terminal_receipt']['status'] not in ('accepted','sent'):
+                break
+            time.sleep(.01)
+        if kind in ('move_for','stop'):
+            assert entry['terminal_receipt']['status']=='applied_local', 'command not locally applied'
         return cid
 
     try:

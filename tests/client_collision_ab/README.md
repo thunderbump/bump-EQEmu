@@ -133,3 +133,14 @@ FindGroundZ's +100 search finds overhead surfaces here, 19.527626/20, rather tha
 the client's floor at zero. These are canonical query values, not standing height.
 ON admission requires a matching-label OFF with both classifications established
 and byte-identical worker/quest/admission scripts. Final run label is controls-v2.
+
+`OFF-controls-v2` sent one 100 ms move and stop, then aborted at ~2 seconds of
+idle inbound silence. Its original two-second network guard was stricter than
+the unchanged client's existing 15-second link-health Ready rule. It did not
+complete two idle intervals. Revised admission uses <=250 ms network tick age,
+<=5 s link/inbound age, fresh <=2.5 s server quest observations, and the same
+12-second movement deadline/box/epoch/aggro checks. This permits the planned
+3.2-second idle observation without treating normal inbound silence as failure.
+Each move/stop now polls its terminal receipt within 400 ms before another
+command. All state checks remain active; the finite move expires after 100 ms.
+Final paired label is controls-v3, superseding the planned v2 label above.

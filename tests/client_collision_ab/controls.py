@@ -13,7 +13,7 @@ def admit(state, identity, world, now, deadline, server):
     assert state['phase'] == 'ready' and not state.get('failure'), 'phase guard'
     assert state['zone']['name'] == 'qeynos2' and state['zone']['id'] == 2, 'zone guard'
     assert state['geometry']['digest'] == MAP and state['geometry']['status'] == 'ready', 'map guard'
-    assert all(state['freshness'][key] <= 2000 for key in ('link_age_ms','network_tick_age_ms','inbound_age_ms')), 'freshness guard'
+    assert state['freshness']['network_tick_age_ms'] <= 250 and all(state['freshness'][key] <= 5000 for key in ('link_age_ms','inbound_age_ms')), 'freshness guard'
     body = state['self']
     assert body['name'] == 'Clientab' and body['on_ground'] and not body['in_water'] and not body['attack_on'], 'body guard'
     assert all(math.isfinite(v) and lo <= v <= hi for v,(lo,hi) in zip(body['position'], BOX)) and len(body['position']) == 3, 'position guard'

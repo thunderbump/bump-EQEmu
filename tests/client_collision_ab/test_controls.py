@@ -11,7 +11,7 @@ class Controls(unittest.TestCase):
         admit(state or self.state,('own',1,75),world or WORLD,now,12,self.server)
     def test_admission_and_refusals(self):
         self.check()
-        for path,value in [('session','foreign'),('zone_epoch',2),('phase','loading'),('geometry.digest','wrong'),('self.on_ground',False),('self.in_water',True),('self.attack_on',True),('self.position',[306,344,0]),('freshness.inbound_age_ms',3000)]:
+        for path,value in [('session','foreign'),('zone_epoch',2),('phase','loading'),('geometry.digest','wrong'),('self.on_ground',False),('self.in_water',True),('self.attack_on',True),('self.position',[306,344,0]),('freshness.inbound_age_ms',6000)]:
             s=copy.deepcopy(self.state); parts=path.split('.'); d=s
             for p in parts[:-1]: d=d[p]
             d[parts[-1]]=value
