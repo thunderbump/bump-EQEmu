@@ -1,0 +1,253 @@
+{
+  "date": "2026-11-14",
+  "source_baseline": "3c2f12b8fc8e12cdc9cca7e0ab753fd22a8ad597",
+  "binary_source": "4ce5d7391a048f609b037817b772d6c15ea482d6",
+  "client_source": "d034b7eafae6a0c9cbd4461da6a09a847d61ba4a",
+  "client_sha256": "6271c614d1668d2966f68867e2cdab50df6b94f4c8339a37c1750c564c460505",
+  "image": "sha256:93429edbf01c1631611af6c88220405136072afd78dc65b6ebf47415b54c38e1",
+  "arms": {
+    "OFF": {
+      "ready": true,
+      "executables": {
+        "database": {
+          "pid": 53,
+          "sha256": "9b44b62ca59523e04fa8c3f8f08850bdbd15f305971241c10a2d92f952fb6efa"
+        },
+        "login": {
+          "pid": 106,
+          "sha256": "d50569e9c4d976709840d1bf0a5d9ed8edd5bc5d47710bfb63df2f4258267834"
+        },
+        "world": {
+          "pid": 107,
+          "sha256": "c69e02802aa8d177180eef6832066a4d1cbbe22bde3bcf65c27fc5b274df9698"
+        },
+        "qeynos2": {
+          "pid": 108,
+          "sha256": "7a0cb456c697c3fad5c5350cf84979f23b2c7d7940399ac16fce9171a8fc5b81"
+        }
+      },
+      "identity": {
+        "world": {
+          "name": "Client collision AB private",
+          "host": "127.0.0.1"
+        },
+        "zone": "qeynos2",
+        "account": "clientab",
+        "character": "Clientab",
+        "api_port": 18766,
+        "profile_path": "/runtime/client-profile.json",
+        "profile_mode": "0600",
+        "host_publication": false
+      },
+      "exits": {
+        "client": 0,
+        "qeynos2": 0,
+        "world": 1,
+        "login": -15,
+        "database": 0
+      },
+      "orderly_exit": false,
+      "elapsed_s": 34.165311550721526,
+      "direct_query_records": 4,
+      "memory_after": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "1288007680",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "cases": {
+        "0": {
+          "origin": "-935,1194,9.10000038146973",
+          "source_size": 7.0,
+          "target": "-935,1194,0",
+          "target_size": 6.0,
+          "ground": 7.62939453125e-06,
+          "los": 1
+        },
+        "1": {
+          "origin": "-935,1194,9.10000038146973",
+          "source_size": 7.0,
+          "target": "-925,1194,0",
+          "target_size": 6.0,
+          "ground": 1.52587890625e-05,
+          "los": 1
+        }
+      },
+      "client_zone": {
+        "id": 2,
+        "instance_id": null,
+        "name": "qeynos2"
+      },
+      "client_geometry": {
+        "digest": "sha256:040343c54e3b02bfd1637ce8fca8839dd676e17c41fb24c042ccfa0bd649435c",
+        "dynamic_doors": "unsupported",
+        "models": 48,
+        "placements": 480,
+        "region": {
+          "reason": "Missing",
+          "status": "unavailable"
+        },
+        "source": "eqemu-map-v2",
+        "status": "ready",
+        "triangles": 24285
+      },
+      "client_self": {
+        "attack_on": false,
+        "heading": 270.0,
+        "hold": null,
+        "hp": {
+          "confirmed": false,
+          "known": true,
+          "max": 1000,
+          "value": 1000
+        },
+        "id": 75,
+        "in_water": false,
+        "motion_active": false,
+        "name": "Clientab",
+        "on_ground": false,
+        "position": [
+          288.0,
+          344.0,
+          1.0187665224075317
+        ],
+        "position_source": "local_prediction_from_received_self_spawn",
+        "sitting": false,
+        "target_id": null
+      },
+      "harness_commit": "fda63e5526a4f16d907ef81fdbcee0ce8de2e3be",
+      "v2_map_load_logged": true,
+      "container_removed": true,
+      "profile_mode": "0o600"
+    },
+    "ON": {
+      "ready": true,
+      "executables": {
+        "database": {
+          "pid": 52,
+          "sha256": "9b44b62ca59523e04fa8c3f8f08850bdbd15f305971241c10a2d92f952fb6efa"
+        },
+        "login": {
+          "pid": 106,
+          "sha256": "b95f45c3b52f2f4e80bf5377512f06a361db2bbe3141501dd65c7a7f34dc1ac6"
+        },
+        "world": {
+          "pid": 107,
+          "sha256": "1a922b6a7b56e052d27e4a841a9e1a02b67779c472860e54897d15eab0b70dec"
+        },
+        "qeynos2": {
+          "pid": 108,
+          "sha256": "18025f30ef137f235e23598258100e1edf59db17ea40858075ca64876e448d90"
+        }
+      },
+      "identity": {
+        "world": {
+          "name": "Client collision AB private",
+          "host": "127.0.0.1"
+        },
+        "zone": "qeynos2",
+        "account": "clientab",
+        "character": "Clientab",
+        "api_port": 18766,
+        "profile_path": "/runtime/client-profile.json",
+        "profile_mode": "0600",
+        "host_publication": false
+      },
+      "exits": {
+        "client": 0,
+        "qeynos2": 0,
+        "world": 1,
+        "login": -15,
+        "database": 0
+      },
+      "orderly_exit": false,
+      "elapsed_s": 32.91302836732939,
+      "direct_query_records": 4,
+      "memory_after": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "1287606272",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "cases": {
+        "0": {
+          "origin": "-935,1194,9.10000038146973",
+          "source_size": 7.0,
+          "target": "-935,1194,0",
+          "target_size": 6.0,
+          "ground": 7.62939453125e-06,
+          "los": 1
+        },
+        "1": {
+          "origin": "-935,1194,9.10000038146973",
+          "source_size": 7.0,
+          "target": "-925,1194,0",
+          "target_size": 6.0,
+          "ground": 1.52587890625e-05,
+          "los": 1
+        }
+      },
+      "client_zone": {
+        "id": 2,
+        "instance_id": null,
+        "name": "qeynos2"
+      },
+      "client_geometry": {
+        "digest": "sha256:040343c54e3b02bfd1637ce8fca8839dd676e17c41fb24c042ccfa0bd649435c",
+        "dynamic_doors": "unsupported",
+        "models": 48,
+        "placements": 480,
+        "region": {
+          "reason": "Missing",
+          "status": "unavailable"
+        },
+        "source": "eqemu-map-v2",
+        "status": "ready",
+        "triangles": 24285
+      },
+      "client_self": {
+        "attack_on": false,
+        "heading": 270.0,
+        "hold": null,
+        "hp": {
+          "confirmed": false,
+          "known": true,
+          "max": 1000,
+          "value": 1000
+        },
+        "id": 75,
+        "in_water": false,
+        "motion_active": false,
+        "name": "Clientab",
+        "on_ground": false,
+        "position": [
+          288.0,
+          344.0,
+          0.6091172695159912
+        ],
+        "position_source": "local_prediction_from_received_self_spawn",
+        "sitting": false,
+        "target_id": null
+      },
+      "harness_commit": "fda63e5526a4f16d907ef81fdbcee0ce8de2e3be",
+      "v2_map_load_logged": true,
+      "container_removed": true,
+      "profile_mode": "0o600"
+    }
+  },
+  "movement_commands": 0,
+  "backend_call_trace": false,
+  "blocked_los_control": false,
+  "live_staging_qualification": false,
+  "paired_survey_equal": true,
+  "cleanup": {
+    "unit_inactive": true,
+    "socket_absent": true,
+    "no_containers": true,
+    "own_new_store": true,
+    "original_map_hashes": {
+      "qeynos2": "040343c54e3b02bfd1637ce8fca8839dd676e17c41fb24c042ccfa0bd649435c",
+      "poknowledge": "794b618d86852b47bd593424129aaf34eee326e5e3fec7290aeeb0e32bc41d20"
+    }
+  }
+}
