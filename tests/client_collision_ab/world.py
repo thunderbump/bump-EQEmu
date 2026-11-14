@@ -116,6 +116,9 @@ try:
     os.umask(0o077)
     # Public source-owned login schema goes only into this fresh private DB.
     query('USE smoke; ' + Path('/login-assets/login_schema.sql').read_text())
+    # Pre-register the private world so the normal existing-registration path
+    # assigns a nonzero advertised ID. Preserve first auto-registration failure.
+    query("USE smoke; INSERT INTO login_world_servers (id,long_name,short_name,login_server_list_type_id,login_server_admin_id,is_server_trusted) VALUES (1,'Client collision AB private','clientab',3,0,0);")
     for name in ('login_opcodes.conf', 'login_opcodes_sod.conf'):
         shutil.copyfile(Path('/login-assets', name), root/name)
     login_config = {

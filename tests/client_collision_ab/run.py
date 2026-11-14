@@ -68,7 +68,12 @@ def main():
         path = FIXTURE / item['path']
         pin(path, '/fixture/' + item['path'], item['sha256'])
     mounts.append((FIXTURE, '/fixture'))
-    out = ROOT / ('preflight' if args.stage == 'preflight' else args.stage + '-runtime')
+    for name in ('qeynos2', 'poknowledge'):
+        original = ROOT.parent / 'two-maps-v1/inputs' / (name + '.map')
+        pin(original, '/originals/' + name + '.map',
+            sha(FIXTURE / 'maps/base' / (name + '.map')))
+    mounts.append((ROOT.parent / 'two-maps-v1/inputs', '/originals'))
+    out = ROOT / ('preflight' if args.stage == 'preflight' else args.stage + '-runtime-registered')
     out.mkdir(parents=True, mode=0o700)  # refuses overwriting first failure
     script = out / 'worker.py'
     worker = 'preflight.py' if args.stage == 'preflight' else 'world.py'
@@ -106,8 +111,7 @@ def main():
     else:
         cmd += ['--mount', f'type=bind,src={out / "runtime"},dst=/runtime',
                 '--mount', f'type=bind,src={out / "results"},dst=/runtime-results',
-                '--mount', f'type=bind,src={fixture_manifest},dst=/fixture-manifest.json,readonly',
-                '--mount', f'type=bind,src={ROOT.parent / "two-maps-v1/inputs"},dst=/originals,readonly']
+                '--mount', f'type=bind,src={fixture_manifest},dst=/fixture-manifest.json,readonly']
     cmd += ['--entrypoint', 'python3', IMAGE, '/worker.py']
     (out / 'command.json').write_text(json.dumps(cmd, indent=2) + '\n')
     cid = sp.check_output(cmd).decode().strip()
