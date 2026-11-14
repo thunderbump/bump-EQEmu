@@ -84,3 +84,63 @@ was launched; a human-controlled independent client remains a later gate.
 Empty Rust engines, NaN load rejection and failed-reload retention need separate
 private fixtures. Never run an empty C++ engine or relabel NaN rejection as empty.
 No such state or broader gameplay/sanitizer/staging qualification is claimed here.
+
+## Second checkpoint controls, central-i07a
+
+The extension uses artifact root `client-collision-ab-controls-20261114`, a unique
+rootless socket of that name, and required `--run-label` to refuse reuse of output
+names. Prior RESULTS.md/results.json and private first failures remain historical.
+Example, after starting the task-owned daemon and verifying/importing all OCI blobs:
+
+```sh
+python3 tests/client_collision_ab/run.py --socket unix:///run/user/1000/eqemu-client-collision-ab-controls-20261114.sock --stage OFF --run-label controls-v1
+python3 tests/client_collision_ab/run.py --socket unix:///run/user/1000/eqemu-client-collision-ab-controls-20261114.sock --stage ON --run-label controls-v1
+```
+
+Frozen BEFORE ON: stationary fixture Rat origin `[297.75,344,3.75]`, size 6;
+clear target `[288,344,3.75]`, blocked target `[320,344,3.75]`, target size 6.
+The client native route fixture identifies the east wall contact at x=304.825.
+OFF must establish the real server blocked/clear classification before ON.
+Mob source eye is origin Z + size/2 * float32(0.9); target eye adds size/2 * 0.5.
+Perl FindGroundZ uses offset 100 relative to source Z. The Rat quest resets only
+its own model pose per timer; fixture SQL disables its roaming/aggro/assistance.
+One retained NPC and no other NPC spawns in Qeynos2. No production source changes.
+
+Admission waits for grounded dry feet, exact private world/profile, fresh Ready,
+map digest, pinned session/epoch/entity, server account/character and zero aggro.
+Client account identity comes from generated private profile plus actual server
+entity observation. Safe local feet box is x=[287,293], y=[343,345], z=[-.02,.02].
+One east=1,north=0,duration_ms=100 command then explicit stop uses distinct IDs.
+Observe >two 1300 ms idle keepalive intervals, then ordinary camp while services
+remain alive. Stop on exception is restricted to the exact own session/epoch.
+The quest logs server entity pose independently once per second; these samples
+are not packet-by-packet traces, nor proof of server body collision. AppliedLocal
+and local prediction are not server confirmations. No ordinary observer qualifies
+stop appearance. No PoK movement, dynamic doors, climbing or gameplay claim.
+
+`phase_verdicts` keeps queries, commands, server pose observation and shutdown
+separate. A world nonzero/login signal exit remains an overall failure. Test
+pure admission/JSON controls with `python3 -B -m unittest discover -s
+tests/client_collision_ab -p test_controls.py -v`. Native execution stays inside
+the network-disabled 2 GiB/no-swap worker. All input and harness identities are
+retained in each uniquely named output directory.
+
+First second-checkpoint attempt `OFF-controls-v1` is retained: Perl false
+stringified as an empty string, so strict query parsing refused it before any
+movement. The quest now explicitly serializes booleans as 0/1; assertions remain.
+Actual OFF geometry established clear=1/blocked=false at the frozen endpoints.
+FindGroundZ's +100 search finds overhead surfaces here, 19.527626/20, rather than
+the client's floor at zero. These are canonical query values, not standing height.
+ON admission requires a matching-label OFF with both classifications established
+and byte-identical worker/quest/admission scripts. Final run label is controls-v2.
+
+`OFF-controls-v2` sent one 100 ms move and stop, then aborted at ~2 seconds of
+idle inbound silence. Its original two-second network guard was stricter than
+the unchanged client's existing 15-second link-health Ready rule. It did not
+complete two idle intervals. Revised admission uses <=250 ms network tick age,
+<=5 s link/inbound age, fresh <=2.5 s server quest observations, and the same
+12-second movement deadline/box/epoch/aggro checks. This permits the planned
+3.2-second idle observation without treating normal inbound silence as failure.
+Each move/stop now polls its terminal receipt within 400 ms before another
+command. All state checks remain active; the finite move expires after 100 ms.
+Final paired label is controls-v3, superseding the planned v2 label above.

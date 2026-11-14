@@ -15,7 +15,7 @@ CLIENT_SHA = '6271c614d1668d2966f68867e2cdab50df6b94f4c8339a37c1750c564c460505'
 ZONE_SHA = {'OFF': '7a0cb456c697c3fad5c5350cf84979f23b2c7d7940399ac16fce9171a8fc5b81',
             'ON': '18025f30ef137f235e23598258100e1edf59db17ea40858075ca64876e448d90'}
 STATE = Path.home() / '.local/state'
-ROOT = STATE / 'eqemu-map-translation/client-collision-ab-20261114'
+ROOT = STATE / 'eqemu-map-translation/client-collision-ab-controls-20261114'
 PRIOR = ROOT.parent / 'zone-map-reload-20261111'
 FIXTURE = STATE / 'eqemu-vm-proof/runtime-qeynos2-inputs-20261025/payload'
 CLIENT = STATE / 'eqoxide-headless-poc/2026-11-03/eqoxide-headless-d034b7e'
@@ -29,9 +29,12 @@ def sha(path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--socket', required=True)
+    parser.add_argument('--run-label', required=True, help='fresh evidence name, never reused')
     parser.add_argument('--stage', choices=['preflight', 'OFF', 'ON'], default='preflight')
     args = parser.parse_args()
-    expected_socket = 'unix:///run/user/' + str(__import__('os').getuid()) + '/eqemu-client-collision-ab-20261114.sock'
+    if not __import__('re').fullmatch(r'[a-z0-9][a-z0-9-]{0,48}', args.run_label):
+        raise SystemExit('invalid run label')
+    expected_socket = 'unix:///run/user/' + str(__import__('os').getuid()) + '/eqemu-client-collision-ab-controls-20261114.sock'
     if args.socket != expected_socket:
         raise SystemExit('refusing a daemon outside this task')
     if sp.check_output(['git', 'status', '--porcelain']).strip():
@@ -73,14 +76,14 @@ def main():
         pin(original, '/originals/' + name + '.map',
             sha(FIXTURE / 'maps/base' / (name + '.map')))
     mounts.append((ROOT.parent / 'two-maps-v1/inputs', '/originals'))
-    out = ROOT / ('preflight' if args.stage == 'preflight' else args.stage + '-runtime-final1')
+    out = ROOT / (args.stage + '-' + args.run_label)
     out.mkdir(parents=True, mode=0o700)  # refuses overwriting first failure
     script = out / 'worker.py'
     worker = 'preflight.py' if args.stage == 'preflight' else 'world.py'
     shutil.copyfile(Path(__file__).with_name(worker), script)
     pin(script, '/worker.py')
     if args.stage != 'preflight':
-        if not json.loads((ROOT / 'preflight/receipt.json').read_text())['closure_ready']:
+        if not json.loads((ROOT.parent / 'client-collision-ab-20261114/preflight/receipt.json').read_text())['closure_ready']:
             raise SystemExit('runtime closure not qualified')
         for name in ('runtime', 'results'):
             (out / name).mkdir(mode=0o700)
@@ -92,16 +95,30 @@ def main():
             (login_assets / name).write_bytes(data)
             pin(login_assets / name, '/login-assets/' + name)
         mounts.append((login_assets, '/login-assets'))
+        controls = Path(__file__).with_name('controls.py').resolve()
+        pin(controls, '/controls.py')
+        mounts.append((controls, '/controls.py'))
         probe = Path(__file__).with_name('2011.pl').resolve()
         pin(probe, '/probe.pl')
         mounts.append((probe, '/probe.pl'))
+    if args.stage == 'ON':
+        reference = ROOT / ('OFF-' + args.run_label)
+        prior_receipt = json.loads((reference / 'results/receipt.json').read_text())
+        if not prior_receipt.get('canonical_queries'):
+            raise SystemExit('OFF must establish clear and blocked controls before ON')
+        prior_inputs = json.loads((reference / 'inputs.json').read_text())
+        for guest in ('/worker.py', '/probe.pl', '/controls.py'):
+            before = next(f['sha256'] for f in prior_inputs['files'] if f['guest_path']==guest)
+            after = next(f['sha256'] for f in files if f['guest_path']==guest)
+            if before != after:
+                raise SystemExit('OFF/ON harness bytes differ')
     inputs = out / 'inputs.json'
     inputs.write_text(json.dumps({'files': files, 'baseline': BASELINE,
         'harness_commit': sp.check_output(['git', 'rev-parse', 'HEAD']).decode().strip(),
         'binary_source': BINARY_SOURCE, 'client_source': CLIENT_SOURCE,
-        'image': IMAGE, 'image_config': image['Config']}, indent=2) + '\n')
+        'run_label': args.run_label, 'stage': args.stage, 'image': IMAGE, 'image_config': image['Config']}, indent=2) + '\n')
     mounts.extend([(inputs, '/inputs.json'), (script, '/worker.py')])
-    cmd = docker + ['create', '--name', 'eqemu-client-collision-ab-' + args.stage.lower(),
+    cmd = docker + ['create', '--name', 'eqemu-client-collision-ab-controls-' + args.stage.lower() + '-' + args.run_label,
         '--network', 'none', '--memory', '2g', '--memory-swap', '2g',
         '--cpus', '1', '--pids-limit', '128', '--user', '0']
     for src, dst in mounts:
