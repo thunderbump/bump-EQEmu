@@ -15,6 +15,7 @@ import zipfile
 import urllib.request
 import re
 import secrets
+from controls import admit, parse_queries, verdicts
 
 root = Path('/runtime')
 fixture = Path('/fixture')
@@ -96,6 +97,8 @@ try:
     assert checked == '221\n9328\t0\t0', 'public fixture schema/version mismatch'
     receipt['imported_schema'] = checked
     query("USE smoke; DELETE FROM spawn2 WHERE zone='poknowledge'; DELETE FROM spawn2 WHERE zone='qeynos2' AND id<>10863; UPDATE zone SET idle_when_empty=0 WHERE zoneidnumber IN (2,202) AND version=0; UPDATE rule_values SET rule_value='false' WHERE rule_name IN ('Zone:UseZoneController','Bots:Enabled','Analytics:CrashReporting','Zone:StateSavingOnShutdown');")
+    # Only retained fixture Rat; no roaming or aggro in the owned private zone.
+    query("USE smoke; UPDATE spawn2 SET x=297.75,y=344,z=3.75,pathgrid=0 WHERE id=10863; UPDATE npc_types SET size=6,aggroradius=0,assistradius=0,npc_faction_id=0,runspeed=0 WHERE id=2011;")
     for name in ('opcodes',):
         shutil.copytree(fixture/name, root/name)
     shutil.copytree(fixture/'maps',root/'maps')
@@ -190,11 +193,116 @@ try:
         time.sleep(.5)
     assert receipt['ready'], 'ordinary login/world/zone readiness not reached within 90 seconds'
     receipt['movement_commands_sent'] = 0
+    # Freeze both endpoints before candidate ON. Fail immediately on either positive control.
+    receipt['queries'] = parse_queries((results/'qeynos2-smoke.log').read_text(errors='replace'))
+    receipt['canonical_queries'] = True
+    identity = (last['session'], last['zone_epoch'], last['self']['id'])
+    samples, commands, server_samples = [], [], []
+    receipt['local_samples'], receipt['commands'], receipt['server_samples'] = samples, commands, server_samples
+    receipt['session_identity'] = identity
+    issued = set()
+    deadline = time.monotonic()+12
+    pinned_server = None
+
+    def api(path, body=None):
+        request = urllib.request.Request('http://127.0.0.1:18766/v2/player/'+path,
+            data=None if body is None else json.dumps(body).encode(),
+            method='GET' if body is None else 'PUT',
+            headers={'Authorization':'Bearer '+profile['control_token'], 'Content-Type':'application/json'})
+        with urllib.request.urlopen(request, timeout=.5) as response:
+            return json.load(response)
+
+    def observation():
+        state = api('state')
+        stamp = time.monotonic()
+        log = (results/'qeynos2-smoke.log').read_text(errors='replace')
+        rows = re.findall(r'CLIENT_AB_POSE time=(\S+) name=Clientab entity=(\d+) account=(\d+) character=(\d+) aggro=(\d+) pose=(\S+)',log)
+        if not rows and time.monotonic() < deadline:
+            time.sleep(.05)
+            return observation()
+        assert rows, 'no actual server entity pose/aggro observation'
+        utc,entity,account,character,aggro,pose = rows[-1]
+        server = {'time':float(utc),'observed':stamp-(time.time()-float(utc)), 'name':'Clientab',
+                  'entity':int(entity),'account':int(account),'character':int(character),'aggro':int(aggro),'pose':pose}
+        samples.append({'monotonic':stamp,'utc':time.time(),'state':state})
+        server_samples.append(server)
+        return state, server
+
+    # Let initial local falling settle. No command before every admission condition passes.
+    while True:
+        state, server = observation()
+        if state['self']['on_ground']:
+            admit(state, identity, profile['expected_world'], time.monotonic(), deadline, server)
+            pinned_server = (server['account'],server['character'])
+            break
+        assert time.monotonic()<deadline, 'grounded admission deadline'
+        assert state['phase']=='ready' and state['session']==identity[0] and state['zone_epoch']==identity[1]
+        time.sleep(.05)
+
+    def send(kind, guarded=True):
+        state, server = observation()
+        if guarded:
+            admit(state, identity, profile['expected_world'], time.monotonic(), deadline, server)
+            assert (server['account'],server['character']) == pinned_server, 'account/character changed'
+            assert all(p.poll() is None for _,p in processes), 'owned process died'
+        else:
+            # Emergency stop is restricted to the exact admitted own session, never a new epoch.
+            assert (state['session'],state['zone_epoch'],state['self']['id']) == identity
+        cid = secrets.token_hex(16)
+        assert cid not in issued, 'replay refused'
+        issued.add(cid)
+        op = {'kind':kind}
+        if kind=='move_for':
+            op.update(east=1,north=0,duration_ms=100)
+        entry = {'id':cid,'operation':op,'monotonic':time.monotonic(),'utc':time.time()}
+        commands.append(entry)
+        entry['receipt'] = api('commands/'+cid, {'session':identity[0],'zone_epoch':identity[1],'operation':op})
+        if kind=='move_for':
+            receipt['movement_commands_sent'] += 1
+        return cid
+
+    try:
+        move_id = send('move_for')
+        until = time.monotonic()+.1
+        while time.monotonic()<until:
+            state, server = observation()
+            admit(state, identity, profile['expected_world'], time.monotonic(), deadline, server)
+            time.sleep(.02)
+        stop_id = send('stop')
+        # 1300 ms idle position keepalive, observe >2 intervals after stop.
+        until = time.monotonic()+3.2
+        while time.monotonic()<until:
+            state, server = observation()
+            admit(state, identity, profile['expected_world'], time.monotonic(), deadline, server)
+            assert (server['account'],server['character']) == pinned_server
+            time.sleep(.1)
+        receipt['command_results'] = {cid:api('commands/'+cid) for cid in (move_id,stop_id)}
+        assert all(r['status']=='applied_local' for r in receipt['command_results'].values()), 'command not locally applied'
+        receipt['movement_complete'] = True
+        receipt['server_pose_observed'] = len({row['time'] for row in server_samples}) >= 3
+    except Exception:
+        try:
+            send('stop', guarded=False)
+        except Exception as stop_error:
+            receipt['emergency_stop_error'] = str(stop_error)
+        raise
+    # Ordinary camp while all dependencies remain alive; no source lifecycle repair.
+    deadline = time.monotonic()+2
+    send('camp')
+    camp_deadline = time.monotonic()+40
+    while client.poll() is None and time.monotonic()<camp_deadline:
+        time.sleep(.2)
+    receipt['camp_client_exit'] = client.poll()
 except Exception as error:
     receipt['error'] = str(error)
 finally:
     (root/'stop-client-collision-ab').touch()
-    time.sleep(2)
+    quiesce_deadline = time.monotonic()+3
+    while 'north' in globals() and north.poll() is None and time.monotonic()<quiesce_deadline:
+        if 'CLIENT_AB_PROBE_STOPPED' in (results/'qeynos2-smoke.log').read_text(errors='replace'):
+            receipt['probe_quiescent'] = True
+            break
+        time.sleep(.1)
     receipt['exits'] = {}
     for name, process in reversed(processes):
         if process.poll() is None:
@@ -211,8 +319,9 @@ finally:
         (results/'server-queries.log').write_text('\n'.join(queries)+'\n')
         receipt['direct_query_records'] = len(queries)
     receipt['cleanup'] = all(p.poll() is not None for _, p in processes)
+    receipt['phase_verdicts'] = verdicts(receipt)
     receipt['orderly_exit'] = all(code==0 for code in receipt['exits'].values())
     receipt['elapsed_s'] = time.monotonic()-started
     receipt['memory_after'] = memory()
     (results/'receipt.json').write_text(json.dumps(receipt,indent=2)+'\n')
-raise SystemExit(0 if receipt['ready'] and receipt['cleanup'] and receipt['orderly_exit'] else 1)
+raise SystemExit(0 if receipt['ready'] and receipt['cleanup'] and all(receipt['phase_verdicts'].values()) and 'error' not in receipt else 1)
