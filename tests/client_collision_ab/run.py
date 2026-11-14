@@ -29,6 +29,7 @@ def sha(path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--socket', required=True)
+    parser.add_argument('--stage', choices=['preflight', 'OFF', 'ON'], default='preflight')
     args = parser.parse_args()
     expected_socket = 'unix:///run/user/' + str(__import__('os').getuid()) + '/eqemu-client-collision-ab-20261114.sock'
     if args.socket != expected_socket:
@@ -67,29 +68,52 @@ def main():
         path = FIXTURE / item['path']
         pin(path, '/fixture/' + item['path'], item['sha256'])
     mounts.append((FIXTURE, '/fixture'))
-    out = ROOT / 'preflight'
+    out = ROOT / ('preflight' if args.stage == 'preflight' else args.stage + '-runtime')
     out.mkdir(parents=True, mode=0o700)  # refuses overwriting first failure
-    script = out / 'preflight.py'
-    shutil.copyfile(Path(__file__).with_name('preflight.py'), script)
-    pin(script, '/preflight.py')
+    script = out / 'worker.py'
+    worker = 'preflight.py' if args.stage == 'preflight' else 'world.py'
+    shutil.copyfile(Path(__file__).with_name(worker), script)
+    pin(script, '/worker.py')
+    if args.stage != 'preflight':
+        if not json.loads((ROOT / 'preflight/receipt.json').read_text())['closure_ready']:
+            raise SystemExit('runtime closure not qualified')
+        for name in ('runtime', 'results'):
+            (out / name).mkdir(mode=0o700)
+        mounts.append((PRIOR / 'results' / args.stage / 'bin', '/binaries'))
+        login_assets = out / 'login-assets'
+        login_assets.mkdir()
+        for name in ('login_schema.sql', 'login_opcodes.conf', 'login_opcodes_sod.conf'):
+            data = sp.check_output(['git', 'show', BASELINE + ':loginserver/login_util/' + name])
+            (login_assets / name).write_bytes(data)
+            pin(login_assets / name, '/login-assets/' + name)
+        mounts.append((login_assets, '/login-assets'))
+        probe = Path(__file__).with_name('2011.pl').resolve()
+        pin(probe, '/probe.pl')
+        mounts.append((probe, '/probe.pl'))
     inputs = out / 'inputs.json'
     inputs.write_text(json.dumps({'files': files, 'baseline': BASELINE,
         'harness_commit': sp.check_output(['git', 'rev-parse', 'HEAD']).decode().strip(),
         'binary_source': BINARY_SOURCE, 'client_source': CLIENT_SOURCE,
         'image': IMAGE, 'image_config': image['Config']}, indent=2) + '\n')
-    mounts.extend([(inputs, '/inputs.json'), (script, '/preflight.py')])
-    cmd = docker + ['create', '--name', 'eqemu-client-collision-ab-preflight',
+    mounts.extend([(inputs, '/inputs.json'), (script, '/worker.py')])
+    cmd = docker + ['create', '--name', 'eqemu-client-collision-ab-' + args.stage.lower(),
         '--network', 'none', '--memory', '2g', '--memory-swap', '2g',
         '--cpus', '1', '--pids-limit', '128', '--user', '0']
     for src, dst in mounts:
         cmd += ['--mount', f'type=bind,src={src},dst={dst},readonly']
-    cmd += ['--mount', f'type=bind,src={out},dst=/evidence',
-            '--entrypoint', 'python3', IMAGE, '/preflight.py']
+    if args.stage == 'preflight':
+        cmd += ['--mount', f'type=bind,src={out},dst=/evidence']
+    else:
+        cmd += ['--mount', f'type=bind,src={out / "runtime"},dst=/runtime',
+                '--mount', f'type=bind,src={out / "results"},dst=/runtime-results',
+                '--mount', f'type=bind,src={fixture_manifest},dst=/fixture-manifest.json,readonly',
+                '--mount', f'type=bind,src={ROOT.parent / "two-maps-v1/inputs"},dst=/originals,readonly']
+    cmd += ['--entrypoint', 'python3', IMAGE, '/worker.py']
     (out / 'command.json').write_text(json.dumps(cmd, indent=2) + '\n')
     cid = sp.check_output(cmd).decode().strip()
     try:
         with (out / 'worker.log').open('wb') as log:
-            result = sp.run(docker + ['start', '-a', cid], stdout=log, stderr=sp.STDOUT, timeout=120)
+            result = sp.run(docker + ['start', '-a', cid], stdout=log, stderr=sp.STDOUT, timeout=420)
         (out / 'exit.json').write_text(json.dumps({'exit': result.returncode}))
     finally:
         (out / 'container.json').write_bytes(sp.check_output(docker + ['inspect', cid]))
