@@ -69,6 +69,9 @@ class NativeControls(unittest.TestCase):
         for caller,kind,result in [('FindDestGroundZ','FindBestZ',0),('AdjustRoute','FindBestZ',0),('AdjustRoute','node',1.2),('UpdatePathGround','admission',3),('MoveToCommand','dispatch',20),('FixZ','pose',1.2)]:
             native(caller,kind,'0,0,0','0,0,0',result)
         start,end=config['points'][0],config['points'][-1]
+        for point in (start,end):
+            xyz=','.join(map(str,[point[0],point[1],1.2]))
+            native('AdjustRoute','node',xyz,xyz,1.2)
         for i,t in enumerate((0.2,0.5,1,1,1)):
             x,y=[start[j]+t*(end[j]-start[j]) for j in (0,1)]
             lines.append(f'SERVER_COLLISION_POSE tick={i+1} xyz={x},{y},1.2 ground=0 moving=0')

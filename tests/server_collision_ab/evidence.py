@@ -133,9 +133,20 @@ def parse_route(text, backend, fixture=None):
     positions=[list(map(float,r['xyz'].split(','))) for r in poses]
     if not any(math.dist(p[:2],fixture['points'][0][:2])>5 and math.dist(p[:2],fixture['points'][-1][:2])>5 for p in positions[:-3]):
         raise ValueError('intermediate route progress absent')
-    for point in positions:
+    nodes=[list(map(float,r['to'].split(','))) for r in records if r['caller']=='AdjustRoute' and r['kind']=='node']
+    for point,row in zip(positions,poses):
         if min(distance_to_segment(point,a,b) for a,b in zip(fixture['points'],fixture['points'][1:]))>2:
             raise ValueError('pose outside frozen route corridor')
+        expected=[]
+        for a,b in zip(nodes,nodes[1:]):
+            dx,dy=b[0]-a[0],b[1]-a[1]
+            if dx*dx+dy*dy==0: continue
+            t=max(0,min(1,((point[0]-a[0])*dx+(point[1]-a[1])*dy)/(dx*dx+dy*dy)))
+            if distance_to_segment(point,a,b)<=0.05:
+                expected.append(a[2]+t*(b[2]-a[2]))
+        if not expected or min(abs(point[2]-z) for z in expected)>0.05:
+            if abs(point[2]-float(row['ground'])-offsets[-1])>0.05:
+                raise ValueError('pose outside native interpolation and FixZ')
     return {'fixed_native':fixed, 'native':records,'floors':floors,'poses':poses}
 
 
