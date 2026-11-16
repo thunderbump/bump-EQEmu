@@ -64,6 +64,11 @@ def memory():
 
 receipt = {'ready': False, 'cleanup': False, 'memory_before':memory()}
 started=time.monotonic()
+# Optional task-owned extension, absent in all existing validation runs.
+scenario = None
+if os.environ.get('EQEMU_SERVER_COLLISION_SCENARIO') == '1':
+    import scenario
+
 try:
     manifest = json.loads((fixture.parent/"fixture-manifest.json").read_text())
     for item in manifest["files"]:
@@ -89,6 +94,8 @@ try:
     checked = command(['mariadb','--no-defaults','--socket='+str(root/'mysql.sock'),'-uroot','--batch','--skip-column-names','smoke'], input=b'SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE(); SELECT version,bots_version,custom_version FROM db_version;', capture_output=True).stdout.decode().strip()
     assert checked == '221\n9328\t0\t0', 'public fixture schema/version mismatch'
     receipt['imported_schema'] = checked
+    if scenario:
+        scenario.inventory(globals())
     query("USE smoke; DELETE FROM spawn2 WHERE zone='poknowledge'; DELETE FROM spawn2 WHERE zone='qeynos2' AND id<>10863; UPDATE zone SET idle_when_empty=0 WHERE zoneidnumber IN (2,202) AND version=0; UPDATE rule_values SET rule_value='false' WHERE rule_name IN ('Zone:UseZoneController','Bots:Enabled','Analytics:CrashReporting','Zone:StateSavingOnShutdown');")
     for name in ('opcodes',):
         shutil.copytree(fixture/name, root/name)
@@ -107,9 +114,13 @@ try:
         (root/name).mkdir()
     config = {'server': {'auto_database_updates':'false', 'world': {'shortname':'smoke','longname':'Disposable smoke','address':'127.0.0.1','localaddress':'127.0.0.1','key':'disposable-smoke','tcp':{'ip':'127.0.0.1','port':'9000'},'telnet':{'ip':'127.0.0.1','port':'9001','enabled':'true'},'loginserver':{'host':'127.0.0.1','port':'5998'}}, 'database':{'host':'127.0.0.1','port':'3306','username':'smoke','password':'','db':'smoke'}, 'directories':{'quests':'quests','plugins':'quests/plugins','lua_modules':'quests/lua_modules','maps':'maps','patches':'opcodes/','opcodes':'opcodes/','shared_memory':'shared/','logs':'logs/'}}}
     (root/'eqemu_config.json').write_text(json.dumps(config))
+    if scenario:
+        scenario.configure(globals())
     command(['/binaries/shared_memory'], cwd=root)
     world = start('world', ['/binaries/world'])
-    if os.environ.get('EQEMU_MAP_INSERVER_CHECK') == '1':
+    if scenario:
+        scenario.run(globals())
+    elif os.environ.get('EQEMU_MAP_INSERVER_CHECK') == '1':
         run_id=os.urandom(16).hex()
         report=results/'inserver.json'
         env=dict(os.environ, EQEMU_INSERVER_TEST_RUN=run_id, EQEMU_INSERVER_TEST_RESULT=str(report))
@@ -232,6 +243,9 @@ finally:
             p.kill()
             exits[name] = p.wait()
     receipt['exits'] = exits
+    if scenario:
+        receipt['collision_verdict'] = receipt.get('fixed_queries_complete', False) and receipt.get('route_callers_complete', False)
+        receipt['shutdown_verdict'] = all(rc == 0 for rc in exits.values())
     receipt['memory_after']=memory()
     receipt['seconds']=time.monotonic()-started
     receipt['child_maxrss_kib']=resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
@@ -239,4 +253,4 @@ finally:
     (results/'smoke.json').write_text(json.dumps(receipt))
 assert receipt['cleanup'], receipt
 
-assert receipt.get('inserver_tests',{}).get('passed') or receipt.get('failed_reload_engine_retention'), 'failed reload did not retain query engine'
+assert receipt.get('collision_verdict') if scenario else receipt.get('inserver_tests',{}).get('passed') or receipt.get('failed_reload_engine_retention'), 'failed reload did not retain query engine'
