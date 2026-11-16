@@ -102,7 +102,7 @@ def parse_route(text, backend, fixture=None):
         if ground['from'] != q['adjusted'] or float(ground['result']) != float(q['ground']) or los['from'] != q['eyes'] or los['to'] != q['target_eyes'] or los['result'] != q['los']:
             # Compare float values, independent of Perl's decimal formatting.
             same=lambda a,b: [struct.pack('f',float(x)) for x in a.split(',')] == [struct.pack('f',float(x)) for x in b.split(',')]
-            if not (same(ground['from'],q['adjusted']) and float(ground['result'])==float(q['ground']) and same(los['from'],q['eyes']) and same(los['to'],q['target_eyes']) and los['result']==q['los']):
+            if not (same(ground['from'],q['adjusted']) and same(ground['result'],q['ground']) and same(los['from'],q['eyes']) and same(los['to'],q['target_eyes']) and los['result']==q['los']):
                 raise ValueError('native fixed query differs from request')
     same=lambda a,b: [struct.pack('f',float(x)) for x in a.split(',')] == [struct.pack('f',float(x)) for x in b.split(',')]
     for native,name,point in zip(fixed[6:],('route_start','transition','destination'),fixture['points']):
