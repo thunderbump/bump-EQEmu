@@ -14,9 +14,9 @@ From clean committed source:
 ```sh
 python3 -B -m unittest discover -s tests/server_collision_ab -v
 python3 -B tests/server_collision_ab/build.py
-python3 -B tests/server_collision_ab/run.py --arm OFF --label native-v3
-python3 -B tests/server_collision_ab/run.py --arm ON --label native-v3
-python3 -B tests/server_collision_ab/run.py --arm OFF-repeat --label native-v3
+python3 -B tests/server_collision_ab/run.py --arm OFF --label native-v5
+python3 -B tests/server_collision_ab/run.py --arm ON --label native-v5
+python3 -B tests/server_collision_ab/run.py --arm OFF-repeat --label native-v5
 ```
 
 `build.py` copies retained matched dependency/source/build closures, overlays
@@ -53,7 +53,10 @@ Artifacts: `~/.local/state/eqemu-map-translation/server-collision-npc-completion
 Private DB/runtime logs and large derived data stay outside Git. Child exits,
 collision verdict and cleanup are separate. Known full-topology central-866g is
 not resolved by reduced world/zone/DB success. Stop the owned daemon after runs.
-PoK is gated on complete Qeynos2 collision parity and cleanup.
+PoK is gated on complete Qeynos2 collision parity and cleanup. Then run the same
+three arms with `--zone poknowledge --label native-v3`. Its private NPC uses public
+grid 3 entries 41,42,43 and a separate pinned quest/config. `summarize.py` regenerates
+the small public JSON receipt from the retained six qualification directories.
 
 Fast regressions: Python adversarial controls and focused synthetic map/bridge
 checks. Affected integration: this explicit matched suite, bridge/reload checks.

@@ -92,3 +92,11 @@ class NativeControls(unittest.TestCase):
         after=copy.deepcopy(before)
         after['fixed_native'][1]['to']='1,2,3'
         with self.assertRaises(ValueError): compare_route(before,after)
+
+    def test_decimal_ground_binding_is_exact_float32(self):
+        text,config=self.trace()
+        text=text.replace('ground=0 los=1','ground=3.34708261489868 los=1',1)
+        text=text.replace('result=0 remaining','result=3.34708261 remaining',1)
+        self.assertTrue(parse_route(text,'OFF',config))
+        with self.assertRaises(ValueError):
+            parse_route(text.replace('result=3.34708261 remaining','result=3.34708285 remaining',1),'OFF',config)
