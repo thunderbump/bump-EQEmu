@@ -95,7 +95,7 @@ try:
     assert checked == '221\n9328\t0\t0', 'public fixture schema/version mismatch'
     receipt['imported_schema'] = checked
     if scenario:
-        scenario.inventory(globals())
+        scenario.inventory({'command': command, 'results': results})
     query("USE smoke; DELETE FROM spawn2 WHERE zone='poknowledge'; DELETE FROM spawn2 WHERE zone='qeynos2' AND id<>10863; UPDATE zone SET idle_when_empty=0 WHERE zoneidnumber IN (2,202) AND version=0; UPDATE rule_values SET rule_value='false' WHERE rule_name IN ('Zone:UseZoneController','Bots:Enabled','Analytics:CrashReporting','Zone:StateSavingOnShutdown');")
     for name in ('opcodes',):
         shutil.copytree(fixture/name, root/name)
@@ -115,11 +115,11 @@ try:
     config = {'server': {'auto_database_updates':'false', 'world': {'shortname':'smoke','longname':'Disposable smoke','address':'127.0.0.1','localaddress':'127.0.0.1','key':'disposable-smoke','tcp':{'ip':'127.0.0.1','port':'9000'},'telnet':{'ip':'127.0.0.1','port':'9001','enabled':'true'},'loginserver':{'host':'127.0.0.1','port':'5998'}}, 'database':{'host':'127.0.0.1','port':'3306','username':'smoke','password':'','db':'smoke'}, 'directories':{'quests':'quests','plugins':'quests/plugins','lua_modules':'quests/lua_modules','maps':'maps','patches':'opcodes/','opcodes':'opcodes/','shared_memory':'shared/','logs':'logs/'}}}
     (root/'eqemu_config.json').write_text(json.dumps(config))
     if scenario:
-        scenario.configure(globals())
+        scenario.configure({'query': query, 'command': command, 'root': root, 'results': results})
     command(['/binaries/shared_memory'], cwd=root)
     world = start('world', ['/binaries/world'])
     if scenario:
-        scenario.run(globals())
+        scenario.run({'start': start, 'processes': processes, 'receipt': receipt, 'results': results, 'root': root})
     elif os.environ.get('EQEMU_MAP_INSERVER_CHECK') == '1':
         run_id=os.urandom(16).hex()
         report=results/'inserver.json'

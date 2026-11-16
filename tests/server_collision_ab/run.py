@@ -94,6 +94,7 @@ def main():
         assert baseline.get('fixed_queries_complete'), 'OFF positive controls required'
         assert json.loads((reference/'cleanup.json').read_text())['removed']
     (out/'inputs.json').write_text(json.dumps(inputs, indent=2)+'\n')
+    mounts.append((out/'inputs.json', '/inputs.json', True))
     for name, guest in [('runtime','/runtime'), ('results','/runtime-results')]:
         (out/name).mkdir(mode=0o700)
         mounts.append((out/name, guest, False))
@@ -110,10 +111,14 @@ def main():
             result = sp.run(docker+['start','-a',cid],stdout=log,stderr=sp.STDOUT,timeout=420)
         (out/'exit.json').write_text(json.dumps({'exit': result.returncode}))
     finally:
-        (out/'container.json').write_bytes(sp.check_output(docker+['inspect',cid]))
-        sp.run(docker+['rm','-f',cid],check=True,stdout=sp.DEVNULL)
-        assert not sp.check_output(docker+['ps','-aq','--filter','id='+cid]).strip()
-        (out/'cleanup.json').write_text(json.dumps({'removed':cid}))
+        try:
+            inspected = sp.run(docker+['inspect',cid], capture_output=True)
+            (out/'container.json').write_bytes(inspected.stdout)
+            (out/'inspect.stderr').write_bytes(inspected.stderr)
+        finally:
+            sp.run(docker+['rm','-f',cid],check=True,stdout=sp.DEVNULL)
+            assert not sp.check_output(docker+['ps','-aq','--filter','id='+cid]).strip()
+            (out/'cleanup.json').write_text(json.dumps({'removed':cid}))
     receipt = json.loads((out/'results/smoke.json').read_text())
     phases = verdict(receipt)
     if args.arm != 'OFF':
