@@ -36,6 +36,7 @@ def main():
         raise SystemExit('owned rootless daemon required')
     image = json.loads(sp.check_output(docker+['image', 'inspect', shared.IMAGE]))[0]
     assert image['Id'] == shared.IMAGE
+    assert not sp.check_output(docker+['ps','-q']).strip(), 'owned daemon must be idle'
     out = ROOT/(args.arm+'-'+args.label)
     out.mkdir(mode=0o700)  # Never overwrite an original failure.
     files, mounts = [], []

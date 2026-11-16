@@ -5578,6 +5578,7 @@ float Mob::FindGroundZ(float new_x, float new_y, float z_offset)
 // Copy of above function that isn't protected to be exported to Perl::Mob
 float Mob::GetGroundZ(float new_x, float new_y, float z_offset)
 {
+	CollisionObservation::Scope observation("GetGroundZ", GetNPCTypeID(), GetID());
 	float ret = BEST_Z_INVALID;
 	if (zone->zonemap != 0)
 	{

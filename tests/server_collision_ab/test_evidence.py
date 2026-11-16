@@ -60,12 +60,12 @@ class NativeControls(unittest.TestCase):
         def native(caller,kind,origin,target,result):
             lines.append(f'SERVER_COLLISION_NATIVE caller={caller} kind={kind} entity=7 backend=OFF from={origin} to={target} result={result} remaining=4000')
         for row in parse_queries(fixture()).values():
-            native('FindGroundZ','FindBestZ',row['adjusted'],'0,0,-99999',row['ground'])
+            native('GetGroundZ','FindBestZ',row['adjusted'],'0,0,-99999',row['ground'])
             native('CheckLosFN','CheckLoS',row['eyes'],row['target_eyes'],row['los'])
         for i,(name,point) in enumerate(zip(('route_start','transition','destination'),config['points'])):
             xyz=','.join(map(str,point))
             lines.append(f'SERVER_COLLISION_FLOOR id={name} xyz={xyz} ground={i/2}')
-            native('FindGroundZ','FindBestZ',xyz,'0,0,-99999',i/2)
+            native('GetGroundZ','FindBestZ',','.join(map(str,[point[0],point[1],point[2]+1])),'0,0,-99999',i/2)
         for caller,kind,result in [('FindDestGroundZ','FindBestZ',0),('AdjustRoute','FindBestZ',0),('AdjustRoute','node',1.2),('UpdatePathGround','admission',3),('MoveToCommand','dispatch',20),('FixZ','pose',1.2)]:
             native(caller,kind,'0,0,0','0,0,0',result)
         start,end=config['points'][0],config['points'][-1]

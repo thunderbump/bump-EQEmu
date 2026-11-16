@@ -73,7 +73,7 @@ def parse_route(text, backend, fixture=None):
         raise ValueError('wrong native entity')
     if any(r['kind']=='teleport' for r in records):
         raise ValueError('teleport dispatched')
-    required = {('FindGroundZ','FindBestZ'), ('CheckLosFN','CheckLoS'),
+    required = {('GetGroundZ','FindBestZ'), ('CheckLosFN','CheckLoS'),
                 ('FindDestGroundZ','FindBestZ'), ('AdjustRoute','FindBestZ'),
                 ('MoveToCommand','dispatch'), ('AdjustRoute','node'), ('UpdatePathGround','admission'), ('FixZ','pose')}
     if not required <= {(r['caller'],r['kind']) for r in records}:
@@ -93,7 +93,7 @@ def parse_route(text, backend, fixture=None):
     heights = [float(r['ground']) for r in floors.values()]
     if not all(math.isfinite(z) and z != -99999 for z in heights) or max(heights)-min(heights)<0.1:
         raise ValueError('no valid height transition')
-    fixed = [r for r in records if r['caller'] in ('FindGroundZ','CheckLosFN')][:9]
+    fixed = [r for r in records if r['caller'] in ('GetGroundZ','CheckLosFN')][:9]
     if [r['kind'] for r in fixed] != ['FindBestZ','CheckLoS']*3+['FindBestZ']*3:
         raise ValueError('fixed native call order')
     for index,name in enumerate(('start','clear','blocked')):
@@ -104,6 +104,11 @@ def parse_route(text, backend, fixture=None):
             same=lambda a,b: [struct.pack('f',float(x)) for x in a.split(',')] == [struct.pack('f',float(x)) for x in b.split(',')]
             if not (same(ground['from'],q['adjusted']) and float(ground['result'])==float(q['ground']) and same(los['from'],q['eyes']) and same(los['to'],q['target_eyes']) and los['result']==q['los']):
                 raise ValueError('native fixed query differs from request')
+    same=lambda a,b: [struct.pack('f',float(x)) for x in a.split(',')] == [struct.pack('f',float(x)) for x in b.split(',')]
+    for native,name,point in zip(fixed[6:],('route_start','transition','destination'),fixture['points']):
+        adjusted=','.join(map(str,[point[0],point[1],point[2]+1]))
+        if not same(native['from'],adjusted) or not same(native['result'],floors[name]['ground']):
+            raise ValueError('actual floor query differs')
     poses = []
     for payload in re.findall(r'SERVER_COLLISION_POSE ([^\r\n]+)', text):
         row = dict(re.findall(r'(\w+)=([^\s]+)', payload))
@@ -112,8 +117,8 @@ def parse_route(text, backend, fixture=None):
             raise ValueError('invalid pose/ground')
         # Use the observed model-dependent native GetZOffset.
         offsets = [float(r['result']) for r in records if r['caller']=='FixZ' and r['kind']=='pose']
-        if abs(values[2]-values[3]-offsets[-1]) > 0.05:
-            raise ValueError('pose not ground relative')
+        if row['moving']=='0' and abs(values[2]-values[3]-offsets[-1]) > fixture['pose_ground_tolerance']:
+            raise ValueError('stopped pose not ground relative')
         poses.append(row)
     if len(poses)<3 or 'SERVER_COLLISION_ROUTE_DONE' not in text:
         raise ValueError('missing stopped route')
