@@ -1,0 +1,11 @@
+{
+  "provenance": "Public qeynos2 grid 1 entries 1,4,7 from preserved OFF-survey-v1 public-fixture.tsv",
+  "npc": 2011,
+  "size": 6,
+  "speed": 1.25,
+  "points": [[-408.5,-114.38,-10],[-457.5,-116.88,-10.5],[-490.38,-118,-10.88]],
+  "query_numeric_tolerance": 0,
+  "route_node_numeric_tolerance": 0,
+  "pose_ground_tolerance": 0.05,
+  "final_xy_tolerance": 0.5
+}

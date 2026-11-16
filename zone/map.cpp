@@ -15,6 +15,8 @@
 	You should have received a copy of the GNU General Public License
 	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
+#include "glm/vec3.hpp"
+#include "collision_observation.h"
 #include "common/compression.h"
 #include "common/file.h"
 #include "common/memory/ksm.h"
@@ -72,6 +74,7 @@ float Map::FindBestZ(glm::vec3 &start, glm::vec3 *result) const {
 	}
 
 	if (hit) {
+		CollisionObservation::Query("FindBestZ", from, to, result->z);
 		return result->z;
 	}
 
@@ -83,9 +86,11 @@ float Map::FindBestZ(glm::vec3 &start, glm::vec3 *result) const {
 	}
 
 	if (hit) {
+		CollisionObservation::Query("FindBestZ", from, to, result->z);
 		return result->z;
 	}
 
+	CollisionObservation::Query("FindBestZ", from, to, BEST_Z_INVALID);
 	return BEST_Z_INVALID;
 }
 
@@ -277,7 +282,9 @@ bool Map::CheckLoS(glm::vec3 myloc, glm::vec3 oloc) const {
 	if(!imp)
 		return false;
 
-	return !imp->rm->raycast((const RmReal*)&myloc, (const RmReal*)&oloc, nullptr, nullptr, nullptr);
+	const bool clear = !imp->rm->raycast((const RmReal*)&myloc, (const RmReal*)&oloc, nullptr, nullptr, nullptr);
+	CollisionObservation::Query("CheckLoS", myloc, oloc, clear);
+	return clear;
 }
 
 // returns true if a collision happens

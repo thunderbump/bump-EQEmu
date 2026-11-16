@@ -1,6 +1,8 @@
 # Task-owned stationary production queries. Reuses the qualified Rat origin/LoS pair.
 use Time::HiRes qw(time);
 my $finished = 0;
+my $ticks = 0;
+my $stable = 0;
 sub EVENT_SPAWN { quest::settimer("server_collision", 1); }
 sub EVENT_TIMER {
     return unless $timer eq "server_collision";
@@ -9,7 +11,15 @@ sub EVENT_TIMER {
         quest::debug("MAP_SERVER_PROBE_STOPPED");
         return;
     }
-    return if $finished;
+    if ($finished) {
+        ++$ticks;
+        my ($x,$y,$z)=($npc->GetX(),$npc->GetY(),$npc->GetZ());
+        my $g=$npc->FindGroundZ($x,$y,0);
+        quest::debug("SERVER_COLLISION_POSE tick=$ticks xyz=$x,$y,$z ground=$g moving=".$npc->IsMoving());
+        if (abs($x+490.38)<0.5 && abs($y+118)<0.5 && !$npc->IsMoving()) { ++$stable; } else { $stable=0; }
+        if ($stable>=3) { quest::debug("SERVER_COLLISION_ROUTE_DONE"); quest::stoptimer("server_collision"); }
+        return;
+    }
     $npc->GMMove(297.75,344,3.75,0,0);
     my ($sx,$sy,$sz,$size)=($npc->GetX(),$npc->GetY(),$npc->GetZ(),$npc->GetSize());
     # Offset zero plus FindBestZHeightAdjust=1 searches below the overhead roof.
@@ -22,5 +32,14 @@ sub EVENT_TIMER {
         quest::debug("SERVER_COLLISION_QUERY id=$id time=".time()." npc=".$npc->GetNPCTypeID()." entity=".$npc->GetID()." from=$sx,$sy,$sz size=$size origin=$x,$y,$sz adjusted=$x,$y,".($sz+1)." eyes=$sx,$sy,$eye to=$x,$y,$z target_size=6 target_eyes=$x,$y,5.25 ground=$ground los=$los");
     }
     quest::debug("SERVER_COLLISION_QUERIES_DONE");
+    # Initial placement only. Subsequent displacement is native NavigateTo.
+    $npc->GMMove(-408.5,-114.38,-10,0,0);
+    for my $t (["route_start",-408.5,-114.38,-10], ["transition",-457.5,-116.88,-10.5], ["destination",-490.38,-118,-10.88]) {
+        my ($id,$x,$y,$z)=@$t;
+        my $g=$npc->FindGroundZ($x,$y,$z-$npc->GetZ());
+        quest::debug("SERVER_COLLISION_FLOOR id=$id xyz=$x,$y,$z ground=$g");
+    }
+    quest::debug("SERVER_COLLISION_REQUEST caller=Perl_Mob_NavigateTo to=-490.38,-118,-10.88");
+    $npc->NavigateTo(-490.38,-118,-10.88);
     $finished=1;
 }
