@@ -1,4 +1,4 @@
-# Task-owned stationary production queries. Reuses the qualified Rat origin/LoS pair.
+# Task-owned fixed queries followed by ordinary NPC movement.
 use Time::HiRes qw(time);
 my $finished = 0;
 my $done = 0;
@@ -34,7 +34,7 @@ sub EVENT_TIMER {
         quest::debug("SERVER_COLLISION_QUERY id=$id time=".time()." npc=".$npc->GetNPCTypeID()." entity=".$npc->GetID()." from=$sx,$sy,$sz size=$size origin=$x,$y,$sz adjusted=$x,$y,".($sz+1)." eyes=$sx,$sy,$eye to=$x,$y,$z target_size=6 target_eyes=$x,$y,5.25 ground=$ground los=$los");
     }
     quest::debug("SERVER_COLLISION_QUERIES_DONE");
-    # Initial placement only. Subsequent displacement is native NavigateTo.
+    # Initial placement only. Subsequent displacement is native NPC MoveTo.
     $npc->StopNavigation();
     $npc->GMMove(263.037598,214.493774,7.09708166,0,0);
     for my $t (["route_start",263.037598,214.493774,7.09708166], ["transition",262.437592,281.693787,13.8611202], ["destination",264.23761,283.493774,14.1285706]) {

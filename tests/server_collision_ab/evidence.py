@@ -115,9 +115,15 @@ def parse_route(text, backend, fixture=None):
     poses = []
     for payload in re.findall(r'SERVER_COLLISION_POSE ([^\r\n]+)', text):
         row = dict(re.findall(r'(\w+)=([^\s]+)', payload))
+        if row.get('moving') not in ('0','1') or int(row['tick']) != len(poses)+1:
+            raise ValueError('invalid pose state/tick')
         values = [float(n) for n in row['xyz'].split(',')]+[float(row['ground'])]
         if not all(math.isfinite(n) for n in values) or values[3] == -99999:
             raise ValueError('invalid pose/ground')
+        f32=lambda n: struct.unpack('f',struct.pack('f',n))[0]
+        adjusted=','.join(map(str,[values[0],values[1],f32(f32(values[2])+1)]))
+        if not any(r['caller']=='GetGroundZ' and same(r['from'],adjusted) and same(r['result'],row['ground']) for r in records):
+            raise ValueError('pose ground lacks matching actual query')
         # Use the observed model-dependent native GetZOffset.
         offsets = [float(r['result']) for r in records if r['caller']=='FixZ' and r['kind']=='pose']
         if row['moving']=='0' and abs(values[2]-values[3]-offsets[-1]) > fixture['pose_ground_tolerance']:

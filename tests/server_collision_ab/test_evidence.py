@@ -78,6 +78,7 @@ class NativeControls(unittest.TestCase):
             native('AdjustRoute','node',xyz,xyz,1.2)
         for i,t in enumerate((0.2,0.5,1,1,1)):
             x,y=[start[j]+t*(end[j]-start[j]) for j in (0,1)]
+            native('GetGroundZ','FindBestZ',f'{x},{y},{f32(f32(1.2)+1)}','0,0,-99999',0)
             lines.append(f'SERVER_COLLISION_POSE tick={i+1} xyz={x},{y},1.2 ground=0 moving=0')
         lines.append('SERVER_COLLISION_ROUTE_DONE')
         return '\n'.join(lines),config
@@ -86,7 +87,7 @@ class NativeControls(unittest.TestCase):
         text,config=self.trace()
         before=parse_route(text,'OFF',config)
         self.assertTrue(compare_route(before,copy.deepcopy(before)))
-        for broken in (text.replace('caller=FixZ','caller=Wrong'),text.replace('entity=7 backend','entity=8 backend'),text.replace('backend=OFF','backend=ON'),text.replace('moving=0','moving=1'),text.replace('kind=dispatch','kind=teleport'),text.replace('ground=0 moving','ground=nan moving'),text.replace('xyz=263.037598','xyz=263.1'),text.replace('caller=CheckLosFN kind=CheckLoS','caller=Wrong kind=CheckLoS')):
+        for broken in (text.replace('caller=FixZ','caller=Wrong'),text.replace('entity=7 backend','entity=8 backend'),text.replace('backend=OFF','backend=ON'),text.replace('moving=0','moving=1'),text.replace('moving=0','moving=garbage'),text.replace('tick=1','tick=9'),text.replace('ground=0 moving','ground=123 moving'),text.replace('kind=dispatch','kind=teleport'),text.replace('ground=0 moving','ground=nan moving'),text.replace('xyz=263.037598','xyz=263.1'),text.replace('caller=CheckLosFN kind=CheckLoS','caller=Wrong kind=CheckLoS')):
             with self.assertRaises(ValueError): parse_route(broken,'OFF',config)
         after=copy.deepcopy(before)
         after['fixed_native'][1]['to']='1,2,3'
