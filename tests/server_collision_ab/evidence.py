@@ -110,7 +110,7 @@ def parse_route(text, backend, fixture=None):
         values = [float(n) for n in row['xyz'].split(',')]+[float(row['ground'])]
         if not all(math.isfinite(n) for n in values) or values[3] == -99999:
             raise ValueError('invalid pose/ground')
-        # Rat model=36, size=6 uses GetZOffset=1*size*.2=1.2.
+        # Use the observed model-dependent native GetZOffset.
         offsets = [float(r['result']) for r in records if r['caller']=='FixZ' and r['kind']=='pose']
         if abs(values[2]-values[3]-offsets[-1]) > 0.05:
             raise ValueError('pose not ground relative')
@@ -119,14 +119,17 @@ def parse_route(text, backend, fixture=None):
         raise ValueError('missing stopped route')
     for row in poses[-3:]:
         x,y,z=map(float,row['xyz'].split(','))
-        if abs(x+490.38)>=0.5 or abs(y+118)>=0.5 or row['moving']!='0':
+        if abs(x-fixture['points'][-1][0])>=0.5 or abs(y-fixture['points'][-1][1])>=0.5 or row['moving']!='0':
             raise ValueError('wrong final pose/state')
-    xs=[float(r['xyz'].split(',')[0]) for r in poses[:-3]]
-    if len(xs)<2 or not any(-480 < x < -420 for x in xs):
+    def distance_to_segment(point, a, b):
+        dx,dy=b[0]-a[0],b[1]-a[1]
+        t=max(0,min(1,((point[0]-a[0])*dx+(point[1]-a[1])*dy)/(dx*dx+dy*dy)))
+        return math.hypot(point[0]-a[0]-t*dx,point[1]-a[1]-t*dy)
+    positions=[list(map(float,r['xyz'].split(','))) for r in poses]
+    if not any(math.dist(p[:2],fixture['points'][0][:2])>5 and math.dist(p[:2],fixture['points'][-1][:2])>5 for p in positions[:-3]):
         raise ValueError('intermediate route progress absent')
-    for row in poses:
-        x,y,z=map(float,row['xyz'].split(','))
-        if not (-491 <= x <= -408) or abs(y-(-114.38+(x+408.5)*(-3.62)/(-81.88)))>2:
+    for point in positions:
+        if min(distance_to_segment(point,a,b) for a,b in zip(fixture['points'],fixture['points'][1:]))>2:
             raise ValueError('pose outside frozen route corridor')
     return {'fixed_native':fixed, 'native':records,'floors':floors,'poses':poses}
 

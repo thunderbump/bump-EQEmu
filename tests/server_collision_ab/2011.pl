@@ -18,7 +18,7 @@ sub EVENT_TIMER {
         my ($x,$y,$z)=($npc->GetX(),$npc->GetY(),$npc->GetZ());
         my $g=$npc->FindGroundZ($x,$y,0);
         quest::debug("SERVER_COLLISION_POSE tick=$ticks xyz=$x,$y,$z ground=$g moving=".($npc->IsMoving()?1:0));
-        if (abs($x+490.38)<0.5 && abs($y+118)<0.5 && !$npc->IsMoving()) { ++$stable; } else { $stable=0; }
+        if (abs($x-264.23761)<0.5 && abs($y-283.493774)<0.5 && !$npc->IsMoving()) { ++$stable; } else { $stable=0; }
         if ($stable>=3) { quest::debug("SERVER_COLLISION_ROUTE_DONE"); $done=1; }
         return;
     }
@@ -35,13 +35,14 @@ sub EVENT_TIMER {
     }
     quest::debug("SERVER_COLLISION_QUERIES_DONE");
     # Initial placement only. Subsequent displacement is native NavigateTo.
-    $npc->GMMove(-408.5,-114.38,-10,0,0);
-    for my $t (["route_start",-408.5,-114.38,-10], ["transition",-457.5,-116.88,-10.5], ["destination",-490.38,-118,-10.88]) {
+    $npc->StopNavigation();
+    $npc->GMMove(263.037598,214.493774,7.09708166,0,0);
+    for my $t (["route_start",263.037598,214.493774,7.09708166], ["transition",262.437592,281.693787,13.8611202], ["destination",264.23761,283.493774,14.1285706]) {
         my ($id,$x,$y,$z)=@$t;
         my $g=$npc->FindGroundZ($x,$y,$z-$npc->GetZ());
         quest::debug("SERVER_COLLISION_FLOOR id=$id xyz=$x,$y,$z ground=$g");
     }
-    quest::debug("SERVER_COLLISION_REQUEST caller=Perl_Mob_NavigateTo to=-490.38,-118,-10.88");
-    $npc->NavigateTo(-490.38,-118,-10.88);
+    quest::debug("SERVER_COLLISION_REQUEST caller=Perl_NPC_MoveTo to=264.23761,283.493774,14.1285706");
+    $npc->MoveTo(264.23761,283.493774,14.1285706,0,1);
     $finished=1;
 }

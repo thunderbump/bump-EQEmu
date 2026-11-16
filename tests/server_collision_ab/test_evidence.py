@@ -68,8 +68,9 @@ class NativeControls(unittest.TestCase):
             native('FindGroundZ','FindBestZ',xyz,'0,0,-99999',i/2)
         for caller,kind,result in [('FindDestGroundZ','FindBestZ',0),('AdjustRoute','FindBestZ',0),('AdjustRoute','node',1.2),('UpdatePathGround','admission',3),('MoveToCommand','dispatch',20),('FixZ','pose',1.2)]:
             native(caller,kind,'0,0,0','0,0,0',result)
-        for i,x in enumerate((-420,-450,-490.38,-490.38,-490.38)):
-            y=-114.38+(x+408.5)*(-3.62)/(-81.88)
+        start,end=config['points'][0],config['points'][-1]
+        for i,t in enumerate((0.2,0.5,1,1,1)):
+            x,y=[start[j]+t*(end[j]-start[j]) for j in (0,1)]
             lines.append(f'SERVER_COLLISION_POSE tick={i+1} xyz={x},{y},1.2 ground=0 moving=0')
         lines.append('SERVER_COLLISION_ROUTE_DONE')
         return '\n'.join(lines),config
@@ -78,7 +79,7 @@ class NativeControls(unittest.TestCase):
         text,config=self.trace()
         before=parse_route(text,'OFF',config)
         self.assertTrue(compare_route(before,copy.deepcopy(before)))
-        for broken in (text.replace('caller=FixZ','caller=Wrong'),text.replace('entity=7 backend','entity=8 backend'),text.replace('backend=OFF','backend=ON'),text.replace('moving=0','moving=1'),text.replace('kind=dispatch','kind=teleport'),text.replace('ground=0 moving','ground=nan moving'),text.replace('xyz=-408.5','xyz=-408.6'),text.replace('caller=CheckLosFN kind=CheckLoS','caller=Wrong kind=CheckLoS')):
+        for broken in (text.replace('caller=FixZ','caller=Wrong'),text.replace('entity=7 backend','entity=8 backend'),text.replace('backend=OFF','backend=ON'),text.replace('moving=0','moving=1'),text.replace('kind=dispatch','kind=teleport'),text.replace('ground=0 moving','ground=nan moving'),text.replace('xyz=263.037598','xyz=263.1'),text.replace('caller=CheckLosFN kind=CheckLoS','caller=Wrong kind=CheckLoS')):
             with self.assertRaises(ValueError): parse_route(broken,'OFF',config)
         after=copy.deepcopy(before)
         after['fixed_native'][1]['to']='1,2,3'
