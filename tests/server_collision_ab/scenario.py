@@ -33,18 +33,21 @@ UPDATE logsys_categories SET log_to_console=1 WHERE log_category_description IN 
     if zone == 'poknowledge':
         env['query']("USE smoke; UPDATE spawn2 SET zone='poknowledge',x=313.068,y=-560.554,z=-155.671 WHERE id=10863;")
     import shutil
-    shutil.copyfile('/probe.pl', env['root'] / ('quests/'+zone+'/v0/2011.pl'))
+    target=env['root'] / ('quests/'+zone+'/v0/2011.pl')
+    target.parent.mkdir(parents=True,exist_ok=True)
+    target.with_suffix('.lua').unlink(missing_ok=True)
+    shutil.copyfile('/probe.pl',target)
 
 
-def run(env):
+def _run(env):
     name = json.loads(Path('/inputs.json').read_text()).get('zone','qeynos2')
     zone = env['start'](name, ['/binaries/zone', name+':7001'])
     env['receipt']['executables'] = {}
     import hashlib
-    for name, process in env['processes']:
+    for process_name, process in env['processes']:
         with Path('/proc', str(process.pid), 'exe').open('rb') as stream:
             digest = hashlib.file_digest(stream, 'sha256').hexdigest()
-        env['receipt']['executables'][name] = {'pid': process.pid, 'sha256': digest}
+        env['receipt']['executables'][process_name] = {'pid': process.pid, 'sha256': digest}
     inputs = json.loads(Path('/inputs.json').read_text())
     expected = next(f['sha256'] for f in inputs['files'] if f['guest_path'] == '/binaries/zone')
     assert env['receipt']['executables'][name]['sha256'] == expected, 'executed zone differs'
@@ -66,10 +69,18 @@ def run(env):
         env['receipt'].update(route=route, route_callers_complete=True, route_state='stopped')
     finally:
         (env['root'] / 'stop-map-validation').touch()
-    # Shared cleanup expects this timer acknowledgement before terminating zone.
-    (env['root'] / 'stop-map-validation').touch()
-    until = time.monotonic() + 3
-    while time.monotonic() < until:
-        if 'MAP_SERVER_PROBE_STOPPED' in log.read_text(errors='replace'):
-            break
-        time.sleep(.1)
+
+
+def run(env):
+    name=json.loads(Path('/inputs.json').read_text()).get('zone','qeynos2')
+    log=env['results']/(name+'-smoke.log')
+    try:
+        _run(env)
+    finally:
+        (env['root']/'stop-map-validation').touch()
+        until=time.monotonic()+3
+        while time.monotonic()<until:
+            if log.exists() and 'MAP_SERVER_PROBE_STOPPED' in log.read_text(errors='replace'):
+                env['receipt']['probe_quiesced']=True
+                break
+            time.sleep(.1)
