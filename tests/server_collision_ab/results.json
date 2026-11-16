@@ -1,0 +1,565 @@
+{
+  "artifact_root": "/home/bump/.local/state/eqemu-map-translation/server-collision-npc-completion-20261115",
+  "cases": [
+    {
+      "zone": "qeynos2",
+      "arm": "OFF",
+      "artifact": "OFF-native-v5",
+      "harness_commit": "eab93ce81d1206a0c9ee21c10cc3090a53f34826",
+      "binary_source": "1bcb08a994568fef84516f94614e463703eca574",
+      "executables": {
+        "database": {
+          "pid": 52,
+          "sha256": "9b44b62ca59523e04fa8c3f8f08850bdbd15f305971241c10a2d92f952fb6efa"
+        },
+        "world": {
+          "pid": 98,
+          "sha256": "c69e02802aa8d177180eef6832066a4d1cbbe22bde3bcf65c27fc5b274df9698"
+        },
+        "qeynos2": {
+          "pid": 99,
+          "sha256": "3c9212c5ecc2d59010c8e6a2ce249dbd6e72536dd52393dfee4d7be1cbd5a483"
+        }
+      },
+      "worker_exit": 0,
+      "verdict": {
+        "fixed_queries": true,
+        "collision": true,
+        "shutdown": true
+      },
+      "exits": {
+        "qeynos2": 0,
+        "world": 0,
+        "database": 0
+      },
+      "removed": true,
+      "timer_retired": true,
+      "memory": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "1290682368",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "queries": {
+        "start": {
+          "ground": "0",
+          "los": "1"
+        },
+        "clear": {
+          "ground": "0",
+          "los": "1"
+        },
+        "blocked": {
+          "ground": "20",
+          "los": "0"
+        }
+      },
+      "native_records": 48,
+      "callers": {
+        "GetGroundZ/FindBestZ": 15,
+        "CheckLosFN/CheckLoS": 3,
+        "FindDestGroundZ/FindBestZ": 11,
+        "UpdatePathGround/admission": 1,
+        "AdjustRoute/FindBestZ": 3,
+        "AdjustRoute/node": 3,
+        "MoveToCommand/dispatch": 2,
+        "FixZ/pose": 10
+      },
+      "floors": {
+        "route_start": {
+          "id": "route_start",
+          "xyz": "263.037598,214.493774,7.09708166",
+          "ground": "3.34708261489868"
+        },
+        "transition": {
+          "id": "transition",
+          "xyz": "262.437592,281.693787,13.8611202",
+          "ground": "10.111120223999"
+        },
+        "destination": {
+          "id": "destination",
+          "xyz": "264.23761,283.493774,14.1285706",
+          "ground": "10.3785705566406"
+        }
+      },
+      "poses": 9,
+      "final_pose": {
+        "tick": "9",
+        "xyz": "264.237609863281,283.493774414062,14.1285705566406",
+        "ground": "10.3785705566406",
+        "moving": "0"
+      },
+      "observed_offsets": [
+        "3.75"
+      ]
+    },
+    {
+      "zone": "qeynos2",
+      "arm": "ON",
+      "artifact": "ON-native-v5",
+      "harness_commit": "eab93ce81d1206a0c9ee21c10cc3090a53f34826",
+      "binary_source": "1bcb08a994568fef84516f94614e463703eca574",
+      "executables": {
+        "database": {
+          "pid": 51,
+          "sha256": "9b44b62ca59523e04fa8c3f8f08850bdbd15f305971241c10a2d92f952fb6efa"
+        },
+        "world": {
+          "pid": 102,
+          "sha256": "1a922b6a7b56e052d27e4a841a9e1a02b67779c472860e54897d15eab0b70dec"
+        },
+        "qeynos2": {
+          "pid": 103,
+          "sha256": "825751d410c661c76b24f97e8e8e28ab495cdbb14116b48e115ffd8181a8490b"
+        }
+      },
+      "worker_exit": 0,
+      "verdict": {
+        "fixed_queries": true,
+        "collision": true,
+        "shutdown": true,
+        "fixed_query_parity": true,
+        "route_parity": true
+      },
+      "exits": {
+        "qeynos2": 0,
+        "world": 0,
+        "database": 0
+      },
+      "removed": true,
+      "timer_retired": true,
+      "memory": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "1297235968",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "queries": {
+        "start": {
+          "ground": "0",
+          "los": "1"
+        },
+        "clear": {
+          "ground": "0",
+          "los": "1"
+        },
+        "blocked": {
+          "ground": "20",
+          "los": "0"
+        }
+      },
+      "native_records": 48,
+      "callers": {
+        "GetGroundZ/FindBestZ": 15,
+        "CheckLosFN/CheckLoS": 3,
+        "FindDestGroundZ/FindBestZ": 11,
+        "UpdatePathGround/admission": 1,
+        "AdjustRoute/FindBestZ": 3,
+        "AdjustRoute/node": 3,
+        "MoveToCommand/dispatch": 2,
+        "FixZ/pose": 10
+      },
+      "floors": {
+        "route_start": {
+          "id": "route_start",
+          "xyz": "263.037598,214.493774,7.09708166",
+          "ground": "3.34708261489868"
+        },
+        "transition": {
+          "id": "transition",
+          "xyz": "262.437592,281.693787,13.8611202",
+          "ground": "10.111120223999"
+        },
+        "destination": {
+          "id": "destination",
+          "xyz": "264.23761,283.493774,14.1285706",
+          "ground": "10.3785705566406"
+        }
+      },
+      "poses": 9,
+      "final_pose": {
+        "tick": "9",
+        "xyz": "264.237609863281,283.493774414062,14.1285705566406",
+        "ground": "10.3785705566406",
+        "moving": "0"
+      },
+      "observed_offsets": [
+        "3.75"
+      ]
+    },
+    {
+      "zone": "qeynos2",
+      "arm": "OFF-repeat",
+      "artifact": "OFF-repeat-native-v5",
+      "harness_commit": "eab93ce81d1206a0c9ee21c10cc3090a53f34826",
+      "binary_source": "1bcb08a994568fef84516f94614e463703eca574",
+      "executables": {
+        "database": {
+          "pid": 53,
+          "sha256": "9b44b62ca59523e04fa8c3f8f08850bdbd15f305971241c10a2d92f952fb6efa"
+        },
+        "world": {
+          "pid": 109,
+          "sha256": "c69e02802aa8d177180eef6832066a4d1cbbe22bde3bcf65c27fc5b274df9698"
+        },
+        "qeynos2": {
+          "pid": 110,
+          "sha256": "3c9212c5ecc2d59010c8e6a2ce249dbd6e72536dd52393dfee4d7be1cbd5a483"
+        }
+      },
+      "worker_exit": 0,
+      "verdict": {
+        "fixed_queries": true,
+        "collision": true,
+        "shutdown": true,
+        "fixed_query_parity": true,
+        "route_parity": true
+      },
+      "exits": {
+        "qeynos2": 0,
+        "world": 0,
+        "database": 0
+      },
+      "removed": true,
+      "timer_retired": true,
+      "memory": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "1293811712",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "queries": {
+        "start": {
+          "ground": "0",
+          "los": "1"
+        },
+        "clear": {
+          "ground": "0",
+          "los": "1"
+        },
+        "blocked": {
+          "ground": "20",
+          "los": "0"
+        }
+      },
+      "native_records": 48,
+      "callers": {
+        "GetGroundZ/FindBestZ": 15,
+        "CheckLosFN/CheckLoS": 3,
+        "FindDestGroundZ/FindBestZ": 11,
+        "UpdatePathGround/admission": 1,
+        "AdjustRoute/FindBestZ": 3,
+        "AdjustRoute/node": 3,
+        "MoveToCommand/dispatch": 2,
+        "FixZ/pose": 10
+      },
+      "floors": {
+        "route_start": {
+          "id": "route_start",
+          "xyz": "263.037598,214.493774,7.09708166",
+          "ground": "3.34708261489868"
+        },
+        "transition": {
+          "id": "transition",
+          "xyz": "262.437592,281.693787,13.8611202",
+          "ground": "10.111120223999"
+        },
+        "destination": {
+          "id": "destination",
+          "xyz": "264.23761,283.493774,14.1285706",
+          "ground": "10.3785705566406"
+        }
+      },
+      "poses": 9,
+      "final_pose": {
+        "tick": "9",
+        "xyz": "264.237609863281,283.493774414062,14.1285705566406",
+        "ground": "10.3785705566406",
+        "moving": "0"
+      },
+      "observed_offsets": [
+        "3.75"
+      ]
+    },
+    {
+      "zone": "poknowledge",
+      "arm": "OFF",
+      "artifact": "poknowledge-OFF-native-v3",
+      "harness_commit": "65f9c291b118d575bb53dd3e80a017b6036d1587",
+      "binary_source": "1bcb08a994568fef84516f94614e463703eca574",
+      "executables": {
+        "database": {
+          "pid": 51,
+          "sha256": "9b44b62ca59523e04fa8c3f8f08850bdbd15f305971241c10a2d92f952fb6efa"
+        },
+        "world": {
+          "pid": 101,
+          "sha256": "c69e02802aa8d177180eef6832066a4d1cbbe22bde3bcf65c27fc5b274df9698"
+        },
+        "poknowledge": {
+          "pid": 102,
+          "sha256": "3c9212c5ecc2d59010c8e6a2ce249dbd6e72536dd52393dfee4d7be1cbd5a483"
+        }
+      },
+      "worker_exit": 0,
+      "verdict": {
+        "fixed_queries": true,
+        "collision": true,
+        "shutdown": true
+      },
+      "exits": {
+        "poknowledge": 0,
+        "world": 0,
+        "database": 0
+      },
+      "removed": true,
+      "timer_retired": true,
+      "memory": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "1283903488",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "queries": {
+        "start": {
+          "ground": "-159.466003417969",
+          "los": "1"
+        },
+        "clear": {
+          "ground": "-160",
+          "los": "1"
+        },
+        "blocked": {
+          "ground": "-137.840728759766",
+          "los": "0"
+        }
+      },
+      "native_records": 58,
+      "callers": {
+        "GetGroundZ/FindBestZ": 20,
+        "CheckLosFN/CheckLoS": 3,
+        "FindDestGroundZ/FindBestZ": 15,
+        "UpdatePathGround/admission": 1,
+        "AdjustRoute/FindBestZ": 2,
+        "AdjustRoute/node": 2,
+        "MoveToCommand/dispatch": 1,
+        "FixZ/pose": 14
+      },
+      "floors": {
+        "route_start": {
+          "id": "route_start",
+          "xyz": "313.068,-560.554,-155.671",
+          "ground": "-159.466003417969"
+        },
+        "transition": {
+          "id": "transition",
+          "xyz": "340.242,-561.633,-142.084",
+          "ground": "-145.878997802734"
+        },
+        "destination": {
+          "id": "destination",
+          "xyz": "426.197,-560.964,-116.248",
+          "ground": "-120"
+        }
+      },
+      "poses": 14,
+      "final_pose": {
+        "tick": "14",
+        "xyz": "426.196990966797,-560.963989257812,-116.25",
+        "ground": "-120",
+        "moving": "0"
+      },
+      "observed_offsets": [
+        "3.75"
+      ]
+    },
+    {
+      "zone": "poknowledge",
+      "arm": "ON",
+      "artifact": "poknowledge-ON-native-v3",
+      "harness_commit": "65f9c291b118d575bb53dd3e80a017b6036d1587",
+      "binary_source": "1bcb08a994568fef84516f94614e463703eca574",
+      "executables": {
+        "database": {
+          "pid": 51,
+          "sha256": "9b44b62ca59523e04fa8c3f8f08850bdbd15f305971241c10a2d92f952fb6efa"
+        },
+        "world": {
+          "pid": 105,
+          "sha256": "1a922b6a7b56e052d27e4a841a9e1a02b67779c472860e54897d15eab0b70dec"
+        },
+        "poknowledge": {
+          "pid": 106,
+          "sha256": "825751d410c661c76b24f97e8e8e28ab495cdbb14116b48e115ffd8181a8490b"
+        }
+      },
+      "worker_exit": 0,
+      "verdict": {
+        "fixed_queries": true,
+        "collision": true,
+        "shutdown": true,
+        "fixed_query_parity": true,
+        "route_parity": true
+      },
+      "exits": {
+        "poknowledge": 0,
+        "world": 0,
+        "database": 0
+      },
+      "removed": true,
+      "timer_retired": true,
+      "memory": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "1294229504",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "queries": {
+        "start": {
+          "ground": "-159.466003417969",
+          "los": "1"
+        },
+        "clear": {
+          "ground": "-160",
+          "los": "1"
+        },
+        "blocked": {
+          "ground": "-137.840728759766",
+          "los": "0"
+        }
+      },
+      "native_records": 58,
+      "callers": {
+        "GetGroundZ/FindBestZ": 20,
+        "CheckLosFN/CheckLoS": 3,
+        "FindDestGroundZ/FindBestZ": 15,
+        "UpdatePathGround/admission": 1,
+        "AdjustRoute/FindBestZ": 2,
+        "AdjustRoute/node": 2,
+        "MoveToCommand/dispatch": 1,
+        "FixZ/pose": 14
+      },
+      "floors": {
+        "route_start": {
+          "id": "route_start",
+          "xyz": "313.068,-560.554,-155.671",
+          "ground": "-159.466003417969"
+        },
+        "transition": {
+          "id": "transition",
+          "xyz": "340.242,-561.633,-142.084",
+          "ground": "-145.878997802734"
+        },
+        "destination": {
+          "id": "destination",
+          "xyz": "426.197,-560.964,-116.248",
+          "ground": "-120"
+        }
+      },
+      "poses": 14,
+      "final_pose": {
+        "tick": "14",
+        "xyz": "426.196990966797,-560.963989257812,-116.25",
+        "ground": "-120",
+        "moving": "0"
+      },
+      "observed_offsets": [
+        "3.75"
+      ]
+    },
+    {
+      "zone": "poknowledge",
+      "arm": "OFF-repeat",
+      "artifact": "poknowledge-OFF-repeat-native-v3",
+      "harness_commit": "1663c099a1c700da8cb157dec79c5b376a218d04",
+      "binary_source": "1bcb08a994568fef84516f94614e463703eca574",
+      "executables": {
+        "database": {
+          "pid": 52,
+          "sha256": "9b44b62ca59523e04fa8c3f8f08850bdbd15f305971241c10a2d92f952fb6efa"
+        },
+        "world": {
+          "pid": 118,
+          "sha256": "c69e02802aa8d177180eef6832066a4d1cbbe22bde3bcf65c27fc5b274df9698"
+        },
+        "poknowledge": {
+          "pid": 119,
+          "sha256": "3c9212c5ecc2d59010c8e6a2ce249dbd6e72536dd52393dfee4d7be1cbd5a483"
+        }
+      },
+      "worker_exit": 0,
+      "verdict": {
+        "fixed_queries": true,
+        "collision": true,
+        "shutdown": true,
+        "fixed_query_parity": true,
+        "route_parity": true
+      },
+      "exits": {
+        "poknowledge": 0,
+        "world": 0,
+        "database": 0
+      },
+      "removed": true,
+      "timer_retired": true,
+      "memory": {
+        "memory.max": "2147483648",
+        "memory.swap.max": "0",
+        "memory.peak": "1294299136",
+        "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\nsock_throttled 0"
+      },
+      "queries": {
+        "start": {
+          "ground": "-159.466003417969",
+          "los": "1"
+        },
+        "clear": {
+          "ground": "-160",
+          "los": "1"
+        },
+        "blocked": {
+          "ground": "-137.840728759766",
+          "los": "0"
+        }
+      },
+      "native_records": 58,
+      "callers": {
+        "GetGroundZ/FindBestZ": 20,
+        "CheckLosFN/CheckLoS": 3,
+        "FindDestGroundZ/FindBestZ": 15,
+        "UpdatePathGround/admission": 1,
+        "AdjustRoute/FindBestZ": 2,
+        "AdjustRoute/node": 2,
+        "MoveToCommand/dispatch": 1,
+        "FixZ/pose": 14
+      },
+      "floors": {
+        "route_start": {
+          "id": "route_start",
+          "xyz": "313.068,-560.554,-155.671",
+          "ground": "-159.466003417969"
+        },
+        "transition": {
+          "id": "transition",
+          "xyz": "340.242,-561.633,-142.084",
+          "ground": "-145.878997802734"
+        },
+        "destination": {
+          "id": "destination",
+          "xyz": "426.197,-560.964,-116.248",
+          "ground": "-120"
+        }
+      },
+      "poses": 14,
+      "final_pose": {
+        "tick": "14",
+        "xyz": "426.196990966797,-560.963989257812,-116.25",
+        "ground": "-120",
+        "moving": "0"
+      },
+      "observed_offsets": [
+        "3.75"
+      ]
+    }
+  ]
+}

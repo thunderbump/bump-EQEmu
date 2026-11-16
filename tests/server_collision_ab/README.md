@@ -1,66 +1,65 @@
-# Standalone server collision evidence
+# Server-owned collision A/B
 
-This opt-in suite is an **incomplete implementation of the server-first scenario**.
-It captures fixed production Perl GetGroundZ/CheckLosFN queries without a client,
-using the existing fresh public PEQ DB runtime. It does not request NPC movement.
-No CMake, default utility test, or CI target invokes it.
+Standalone, opt-in ordinary NPC suite. No default CMake, CI or utility hookup.
+Rust remains OFF by default. ON bypasses native MMF; OFF retains native cache
+semantics with fresh private map copies. No client, combat or actor-stop claim.
 
-The retained Rat model origin and size are 297.75,344,3.75 and 6. Clear and wall
-endpoints are the previously observed 288,344,3.75 and 320,344,3.75. A third query
-samples the start. Ground offset is zero, yielding FindBestZ input Z=4.75 after
-the default +1 rule. This deliberately avoids the previous +100 roof selection.
-These are fixed floor samples, not a height-transition route. Acceptance requires
-exact query identity, exact clear/blocked decisions, finite ground and exact
-numeric equality, with zero tolerance declared before ON. OFF freezes observed
-results; ON and OFF-repeat require the same scripts, assets and transport.
+Use Stack's `validation/rootless-prototype/run` user-systemd recipe with unique
+unit/socket/store `eqemu-server-collision-npc-completion-20261115`. Never bypass
+NoNewPrivs with direct newuidmap or use sudo. Verify every OCI blob before offline
+import of the immutable builder/runtime image IDs in `build.py`/`run.py`.
 
-`scenario.py` inventories original public spawn/NPC/grid/Map-rule rows before
-fixture mutation. Only one private Rat remains, with roaming and aggro disabled.
-The existing bindings do not export ordinary NPC route nodes or GetZOffset.
-Fix Z logging can expose GetFixedZ results, but does not prove each particular
-movement caller ran. Missing route, model-offset and movement-caller evidence
-forces collision=false and overall exit 1 even when fixed queries agree. No actor
-stop is labeled FixZ. PoK is blocked until Qeynos2 collision gates pass.
-
-No production diagnostic seam was added. Completing route qualification needs a
-bounded opt-in route/caller observation seam and matched OFF/ON rebuilds, or a
-supported interface that supplies those observations. No combat, body sweep,
-sanitizer, stability, player movement or full gameplay claim follows.
-
-## Reproduction
-
-Read Stack's `validation/rootless-prototype/run` first. Start a task-owned systemd
-user-manager daemon, unique store/socket/unit, 2 GiB and no swap. Do not use staging
-or another task's daemon. Verify the complete offline runtime OCI closure before
-import. Runtime image is the inherited immutable 93429ed… image in
-`tests/client_collision_ab/run.py`; retained binaries are from production source
-4ce5d7391a048f609b037817b772d6c15ea482d6, not this harness HEAD. The production
-source delta is retained separately. Rust is OFF by default; ON bypasses native
-MMF, and OFF follows unchanged native cache behavior with a fresh private map copy.
-
-Run from a clean committed checkout, using a new label to preserve first failures:
+From clean committed source:
 
 ```sh
 python3 -B -m unittest discover -s tests/server_collision_ab -v
-python3 -B tests/server_collision_ab/run.py --arm OFF --label survey-v1
-python3 -B tests/server_collision_ab/run.py --arm ON --label survey-v1
-python3 -B tests/server_collision_ab/run.py --arm OFF-repeat --label survey-v1
+python3 -B tests/server_collision_ab/build.py
+python3 -B tests/server_collision_ab/run.py --arm OFF --label native-v5
+python3 -B tests/server_collision_ab/run.py --arm ON --label native-v5
+python3 -B tests/server_collision_ab/run.py --arm OFF-repeat --label native-v5
 ```
 
-All three currently return nonzero because route evidence is incomplete. Raw child
-exits and shutdown verdict remain separate. The known world shutdown failure
-central-866g is never suppressed. The host wrapper removes its owned container on
-failure and retains inspect/exit/cgroup receipts. Stop its daemon after execution.
-Artifacts belong under
-`~/.local/state/eqemu-map-translation/server-collision-scenarios-20261115`.
-Private database/runtime logs must not be published.
+`build.py` copies retained matched dependency/source/build closures, overlays
+tracked changed bytes while preserving identical mtimes, then runs complete
+OFF/ON default targets and utilities serially. This is an incremental full-target
+build, not a clean build. Both successful build phases and actual binary hashes
+are required. Production changes require new matched builds. Preserve previous
+build directories and failed runs before another attempt.
 
-## Test tiers
+Runtime uses fresh private DB/maps/rules and NPC 2011, size 6, speed 1.25. Initial
+GMMove positions the fixture only. Ordinary `NPC::MoveTo` with saveguardspot sets
+the destination; native AI/pathfinding/interpolation owns subsequent movement.
+`route.json` pins route inputs derived from actual OFF observations before ON.
+The original grid candidate was flat and bare NavigateTo was overridden by guard
+AI; both failures remain outside Git.
 
-Fast: adversarial comparator controls here, existing Python client controls and
-focused synthetic map/bridge regression tests. Run native tests only in disposable
-workers. Affected-code integration: explicit matching-backend query/route suites,
-map bridge and reload qualification. Full rewrite/corpus: explicit full native and
-Rust regressions plus complete map corpus replay. Keep that expensive tier opt-in.
-Reuse qualified reload/NaN/empty evidence in `tests/map_reload` and
-`tests/map_server_validation`; this suite does not recertify it.
+`EQEMU_COLLISION_OBSERVE=server-collision-npc-2011` explicitly enables a native
+4096-record budget for this NPC. It records actual GetGroundZ/FindDestGroundZ,
+CheckLosFN, AdjustRoute, ground-route admission, movement dispatch/teleport and
+FixZ observations. Absent/wrong callers, backend/entity/input changes, exhausted
+budgets, nonfinite evidence, teleports and invalid final state fail qualification.
+Omit the environment variable to disable diagnostics. No gameplay rollback needed.
+
+Queries, actual endpoints/results, floors, route nodes and final pose compare
+exactly. Decimal observations canonicalize to float32 only to bind Perl and native
+formatting. Timing may vary. Sampled poses must stay within 2 units of the frozen
+route corridor and within 0.05 Z of native interpolation or observed FixZ. Stopped
+poses must be within 0.05 of floor plus observed model-dependent GetZOffset, and
+within 0.5 XY of destination. Moving poses can cross discrete stair geometry by
+linear interpolation; they are not required to be perfectly floor-grounded.
+All tolerances are declared before ON. No sanitizer execution.
+
+Artifacts: `~/.local/state/eqemu-map-translation/server-collision-npc-completion-20261115`.
+Private DB/runtime logs and large derived data stay outside Git. Child exits,
+collision verdict and cleanup are separate. Known full-topology central-866g is
+not resolved by reduced world/zone/DB success. Stop the owned daemon after runs.
+PoK is gated on complete Qeynos2 collision parity and cleanup. Then run the same
+three arms with `--zone poknowledge --label native-v3`. Its private NPC uses public
+grid 3 entries 41,42,43 and a separate pinned quest/config. `summarize.py` regenerates
+the small public JSON receipt from the retained six qualification directories.
+
+Fast regressions: Python adversarial controls and focused synthetic map/bridge
+checks. Affected integration: this explicit matched suite, bridge/reload checks.
+Rewrite/corpus: explicit full native/Rust regressions and complete corpus replay.
+Reuse prior `map_reload` and `map_server_validation` qualified coverage; this suite
+does not recertify reload/NaN/empty-map behavior or player/client collision.

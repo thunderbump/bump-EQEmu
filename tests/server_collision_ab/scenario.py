@@ -2,7 +2,7 @@
 import json
 import time
 from pathlib import Path
-from evidence import parse_queries
+from evidence import parse_queries, parse_route
 
 
 def inventory(env):
@@ -21,7 +21,7 @@ SELECT rule_name,rule_value FROM rule_values WHERE rule_name LIKE 'Map:%';
 def configure(env):
     env['query']("""USE smoke;
 UPDATE spawn2 SET x=297.75,y=344,z=3.75,pathgrid=0 WHERE id=10863;
-UPDATE npc_types SET size=6,aggroradius=0,assistradius=0,npc_faction_id=0,runspeed=0 WHERE id=2011;
+UPDATE npc_types SET size=6,aggroradius=0,assistradius=0,npc_faction_id=0,runspeed=1.25 WHERE id=2011;
 UPDATE rule_values SET rule_value='1' WHERE rule_name='Map:FindBestZHeightAdjust';
 UPDATE rule_values SET rule_value='true' WHERE rule_name='Map:FixZWhenPathing';
 UPDATE logsys_categories SET log_to_console=1 WHERE log_category_description IN ('Fix Z','Pathing');
@@ -29,27 +29,34 @@ UPDATE logsys_categories SET log_to_console=1 WHERE log_category_description IN 
     active = env['command'](['mariadb', '--no-defaults', '--socket=/runtime/mysql.sock',
                              '-uroot', '--batch'], input=b"USE smoke; SELECT rule_name,rule_value FROM rule_values WHERE rule_name LIKE 'Map:%';", capture_output=True)
     (env['results'] / 'configured-map-rules.tsv').write_bytes(active.stdout)
+    zone = json.loads(Path('/inputs.json').read_text()).get('zone','qeynos2')
+    if zone == 'poknowledge':
+        env['query']("USE smoke; UPDATE spawn2 SET zone='poknowledge',x=313.068,y=-560.554,z=-155.671 WHERE id=10863;")
     import shutil
-    shutil.copyfile('/probe.pl', env['root'] / 'quests/qeynos2/v0/2011.pl')
+    target=env['root'] / ('quests/'+zone+'/v0/2011.pl')
+    target.parent.mkdir(parents=True,exist_ok=True)
+    target.with_suffix('.lua').unlink(missing_ok=True)
+    shutil.copyfile('/probe.pl',target)
 
 
-def run(env):
-    zone = env['start']('qeynos2', ['/binaries/zone', 'qeynos2:7001'])
+def _run(env):
+    name = json.loads(Path('/inputs.json').read_text()).get('zone','qeynos2')
+    zone = env['start'](name, ['/binaries/zone', name+':7001'])
     env['receipt']['executables'] = {}
     import hashlib
-    for name, process in env['processes']:
+    for process_name, process in env['processes']:
         with Path('/proc', str(process.pid), 'exe').open('rb') as stream:
             digest = hashlib.file_digest(stream, 'sha256').hexdigest()
-        env['receipt']['executables'][name] = {'pid': process.pid, 'sha256': digest}
+        env['receipt']['executables'][process_name] = {'pid': process.pid, 'sha256': digest}
     inputs = json.loads(Path('/inputs.json').read_text())
     expected = next(f['sha256'] for f in inputs['files'] if f['guest_path'] == '/binaries/zone')
-    assert env['receipt']['executables']['qeynos2']['sha256'] == expected, 'executed zone differs'
-    deadline = time.monotonic() + 90
-    log = env['results'] / 'qeynos2-smoke.log'
+    assert env['receipt']['executables'][name]['sha256'] == expected, 'executed zone differs'
+    deadline = time.monotonic() + 120
+    log = env['results'] / (name+'-smoke.log')
     while time.monotonic() < deadline:
         assert all(p.poll() is None for _, p in env['processes']), 'owned child exited'
         text = log.read_text(errors='replace')
-        if 'SERVER_COLLISION_QUERIES_DONE' in text:
+        if 'SERVER_COLLISION_ROUTE_DONE' in text:
             assert 'Loaded V2 Map File' in text or 'Loaded .MMF Map File' in text, 'map load not observed'
             queries = parse_queries(text)
             env['receipt'].update(ready=True, fixed_queries_complete=True, queries=queries)
@@ -57,16 +64,23 @@ def run(env):
         time.sleep(.2)
     else:
         raise RuntimeError('production fixed query deadline expired')
-    env['receipt']['route_callers_complete'] = False
-    env['receipt']['route_state'] = 'incomplete'
-    env['receipt']['coverage_gap'] = (
-        'No exported ordinary NPC route-node or GetZOffset observation. '
-        'Fixed Perl GetGroundZ/CheckLosFN queries do not prove AdjustRoute or movement FixZ. '
-        'No movement requested; no height-transition route qualified; PoK blocked.')
-    # Shared cleanup expects this timer acknowledgement before terminating zone.
-    (env['root'] / 'stop-map-validation').touch()
-    until = time.monotonic() + 3
-    while time.monotonic() < until:
-        if 'MAP_SERVER_PROBE_STOPPED' in log.read_text(errors='replace'):
-            break
-        time.sleep(.1)
+    try:
+        route = parse_route(text, json.loads(Path('/inputs.json').read_text())['backend'])
+        env['receipt'].update(route=route, route_callers_complete=True, route_state='stopped')
+    finally:
+        (env['root'] / 'stop-map-validation').touch()
+
+
+def run(env):
+    name=json.loads(Path('/inputs.json').read_text()).get('zone','qeynos2')
+    log=env['results']/(name+'-smoke.log')
+    try:
+        _run(env)
+    finally:
+        (env['root']/'stop-map-validation').touch()
+        until=time.monotonic()+3
+        while time.monotonic()<until:
+            if log.exists() and 'MAP_SERVER_PROBE_STOPPED' in log.read_text(errors='replace'):
+                env['receipt']['probe_quiesced']=True
+                break
+            time.sleep(.1)

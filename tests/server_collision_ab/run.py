@@ -11,32 +11,39 @@ import sys
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from evidence import compare, verdict
+from evidence import compare, compare_route, verdict
 spec = importlib.util.spec_from_file_location('client_transport', HERE.parent/'client_collision_ab/run.py')
 shared = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(shared)
-ROOT = shared.ROOT.parent/'server-collision-scenarios-20261115'
+ROOT = shared.ROOT.parent/'server-collision-npc-completion-20261115'
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--arm', choices=['OFF', 'ON', 'OFF-repeat'], required=True)
     parser.add_argument('--label', required=True)
+    parser.add_argument('--zone', choices=['qeynos2','poknowledge'], default='qeynos2')
     args = parser.parse_args()
+    prefix = '' if args.zone == 'qeynos2' else 'poknowledge-'
     import re
     if not re.fullmatch('[a-z0-9][a-z0-9-]{0,48}', args.label):
         raise SystemExit('invalid label')
     if sp.check_output(['git', 'status', '--porcelain']).strip():
         raise SystemExit('commit all harness inputs before execution')
     backend = 'ON' if args.arm == 'ON' else 'OFF'
-    socket = f'unix:///run/user/{os.getuid()}/eqemu-server-collision-scenarios-20261115.sock'
+    socket = f'unix:///run/user/{os.getuid()}/eqemu-server-collision-npc-completion-20261115.sock'
     docker = ['docker', '--host', socket]
     security = json.loads(sp.check_output(docker+['info', '--format', '{{json .SecurityOptions}}']))
     if 'name=rootless' not in security:
         raise SystemExit('owned rootless daemon required')
     image = json.loads(sp.check_output(docker+['image', 'inspect', shared.IMAGE]))[0]
     assert image['Id'] == shared.IMAGE
-    out = ROOT/(args.arm+'-'+args.label)
+    assert not sp.check_output(docker+['ps','-q']).strip(), 'owned daemon must be idle'
+    if args.zone == 'poknowledge':
+        for arm in ('OFF','ON','OFF-repeat'):
+            assert all(json.loads((ROOT/(arm+'-native-v5/verdict.json')).read_text()).values()), 'Qeynos2 first'
+            assert json.loads((ROOT/(arm+'-native-v5/cleanup.json')).read_text())['removed']
+    out = ROOT/(prefix+args.arm+'-'+args.label)
     out.mkdir(mode=0o700)  # Never overwrite an original failure.
     files, mounts = [], []
 
@@ -48,9 +55,9 @@ def main():
         mounts.append((path, guest, True))
 
     for binary in ('zone', 'world', 'shared_memory'):
-        recorded = json.loads((shared.PRIOR/'results'/f'{backend}-new-binaries.json').read_text())
-        pin(shared.PRIOR/'results'/backend/'bin'/binary, '/binaries/'+binary,
-            shared.ZONE_SHA[backend] if binary == 'zone' else recorded[binary])
+        recorded = json.loads((ROOT/'results'/f'{backend}-new-binaries.json').read_text())
+        pin(ROOT/'results'/backend/'bin'/binary, '/binaries/'+binary,
+            recorded[binary])
     fixture_manifest = ROOT.parent/'rust-map-server-validation-20261111/fixture-manifest-v2.json'
     for item in json.loads(fixture_manifest.read_text())['files']:
         digest = shared.sha(shared.FIXTURE/item['path'])
@@ -63,27 +70,23 @@ def main():
         pin(originals/(name+'.map'), '/originals/'+name+'.map',
             shared.sha(shared.FIXTURE/'maps/base'/(name+'.map')))
     for path, guest in [(HERE/'scenario.py','/scenario.py'), (HERE/'evidence.py','/evidence.py'),
-                        (HERE/'2011.pl','/probe.pl'),
+                        (HERE/('2011.pl' if args.zone=='qeynos2' else 'pok-2011.pl'),'/probe.pl'), (HERE/('route.json' if args.zone=='qeynos2' else 'pok-route.json'),'/route.json'),
                         (HERE.parent/'map_server_validation/runtime.py','/worker.py')]:
         pin(path, guest)
     # Pin host transport and inherited source relationship as evidence too.
     transport = {str(p.relative_to(HERE.parent.parent)): shared.sha(p) for p in
                  (HERE/'run.py', HERE.parent/'client_collision_ab/run.py')}
     head = sp.check_output(['git','rev-parse','HEAD']).decode().strip()
-    source_delta = sp.check_output(['git','diff',shared.BINARY_SOURCE,head,'--','zone','common','CMakeLists.txt'])
-    changed = sp.check_output(['git','diff','--name-only',shared.BINARY_SOURCE,head,
-                               '--','zone','common','CMakeLists.txt']).decode().splitlines()
-    assert set(changed) == {'zone/replace_collision_map.h', 'zone/zone.cpp'}, 'production changed; rebuild both arms'
-    old = sp.check_output(['git','show',shared.BINARY_SOURCE+':tests/map_reload/replace_collision_map.h'])
-    assert old == Path('zone/replace_collision_map.h').read_bytes(), 'helper relocation differs'
-    old_zone = sp.check_output(['git','show',shared.BINARY_SOURCE+':zone/zone.cpp'])
-    assert old_zone.replace(b'tests/map_reload/replace_collision_map.h', b'zone/replace_collision_map.h') == Path('zone/zone.cpp').read_bytes()
-    (out/'production-source-delta.patch').write_bytes(source_delta)
-    inputs = {'arm': args.arm, 'backend': backend, 'harness_commit': head,
-              'binary_source': shared.BINARY_SOURCE, 'image': shared.IMAGE,
+    assert json.loads((ROOT/'build/exit.json').read_text())['exit'] == 0, 'matched build failed'
+    phases = json.loads((ROOT/'results/runs.json').read_text())
+    assert {r['name'] for r in phases if r['exit'] == 0} >= {'OFF-incremental-full-build','ON-incremental-full-build','OFF-utility','ON-utility'}
+    build = json.loads((ROOT/'build/inputs.json').read_text())
+    assert not sp.check_output(['git','diff',build['source'],head,'--','zone','common','cmake','CMakeLists.txt','rust']), 'production changed; rebuild both arms'
+    inputs = {'arm': args.arm, 'backend': backend, 'zone': args.zone, 'harness_commit': head,
+              'binary_source': build['source'], 'image': shared.IMAGE,
               'files': files, 'transport': transport, 'numeric_tolerance': 0,
-              'scope': 'fixed queries; route evidence required but unavailable'}
-    reference = ROOT/('OFF-'+args.label)
+              'scope': 'fixed native queries and ordinary NPC route'}
+    reference = ROOT/(prefix+'OFF-'+args.label)
     if args.arm != 'OFF':
         before = json.loads((reference/'inputs.json').read_text())
         # Binary differences are intentional. Everything else is frozen before ON.
@@ -91,7 +94,7 @@ def main():
                                if not f['guest_path'].startswith('/binaries/')}
         assert stable(before) == stable(inputs) and before['transport'] == transport
         baseline = json.loads((reference/'results/smoke.json').read_text())
-        assert baseline.get('fixed_queries_complete'), 'OFF positive controls required'
+        assert baseline.get('fixed_queries_complete') and baseline.get('route_callers_complete'), 'OFF positive controls required'
         assert json.loads((reference/'cleanup.json').read_text())['removed']
     (out/'inputs.json').write_text(json.dumps(inputs, indent=2)+'\n')
     mounts.append((out/'inputs.json', '/inputs.json', True))
@@ -100,7 +103,7 @@ def main():
         mounts.append((out/name, guest, False))
     cmd = docker+['create', '--name', 'eqemu-server-collision-'+args.arm.lower()+'-'+args.label,
                   '--network','none','--memory','2g','--memory-swap','2g','--cpus','1',
-                  '--pids-limit','128','--user','0','--env','EQEMU_SERVER_COLLISION_SCENARIO=1']
+                  '--pids-limit','128','--user','0','--env','EQEMU_SERVER_COLLISION_SCENARIO=1','--env','EQEMU_COLLISION_OBSERVE=server-collision-npc-2011']
     for src, dst, readonly in mounts:
         cmd += ['--mount', f'type=bind,src={src},dst={dst}'+(',readonly' if readonly else '')]
     cmd += ['--entrypoint','python3',shared.IMAGE,'/worker.py']
@@ -123,6 +126,7 @@ def main():
     phases = verdict(receipt)
     if args.arm != 'OFF':
         phases['fixed_query_parity'] = compare(baseline['queries'], receipt['queries'])
+        phases['route_parity'] = compare_route(baseline['route'], receipt['route'])
     (out/'verdict.json').write_text(json.dumps(phases,indent=2)+'\n')
     return 0 if result.returncode == 0 and all(phases.values()) else 1
 

@@ -1,7 +1,10 @@
 """Adversarial comparator controls; no native execution."""
 import copy
 import unittest
-from evidence import parse_queries, compare, verdict
+from evidence import parse_queries, parse_route, compare_route, compare, verdict
+import json
+import struct
+from pathlib import Path
 
 
 def fixture():
@@ -49,3 +52,51 @@ class Controls(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class NativeControls(unittest.TestCase):
+    def trace(self):
+        config=json.loads(Path(__file__).with_name('route.json').read_text())
+        lines=[fixture()]
+        def native(caller,kind,origin,target,result):
+            lines.append(f'SERVER_COLLISION_NATIVE caller={caller} kind={kind} entity=7 backend=OFF from={origin} to={target} result={result} remaining=4000')
+        for row in parse_queries(fixture()).values():
+            native('GetGroundZ','FindBestZ',row['adjusted'],'0,0,-99999',row['ground'])
+            native('CheckLosFN','CheckLoS',row['eyes'],row['target_eyes'],row['los'])
+        for i,(name,point) in enumerate(zip(('route_start','transition','destination'),config['points'])):
+            xyz=','.join(map(str,point))
+            lines.append(f'SERVER_COLLISION_FLOOR id={name} xyz={xyz} ground={i/2}')
+            f32=lambda n: struct.unpack('f',struct.pack('f',n))[0]
+            start_z=f32(config['points'][0][2])
+            origin=f32(start_z+f32(point[2]-start_z))
+            native('GetGroundZ','FindBestZ',','.join(map(str,[point[0],point[1],f32(origin+1)])),'0,0,-99999',i/2)
+        for caller,kind,result in [('FindDestGroundZ','FindBestZ',0),('AdjustRoute','FindBestZ',0),('AdjustRoute','node',1.2),('UpdatePathGround','admission',3),('MoveToCommand','dispatch',20),('FixZ','pose',1.2)]:
+            native(caller,kind,'0,0,0','0,0,0',result)
+        start,end=config['points'][0],config['points'][-1]
+        for point in (start,end):
+            xyz=','.join(map(str,[point[0],point[1],1.2]))
+            native('AdjustRoute','node',xyz,xyz,1.2)
+        for i,t in enumerate((0.2,0.5,1,1,1)):
+            x,y=[start[j]+t*(end[j]-start[j]) for j in (0,1)]
+            native('GetGroundZ','FindBestZ',f'{x},{y},{f32(f32(1.2)+1)}','0,0,-99999',0)
+            lines.append(f'SERVER_COLLISION_POSE tick={i+1} xyz={x},{y},1.2 ground=0 moving=0')
+        lines.append('SERVER_COLLISION_ROUTE_DONE')
+        return '\n'.join(lines),config
+
+    def test_native_route_and_adversarial_controls(self):
+        text,config=self.trace()
+        before=parse_route(text,'OFF',config)
+        self.assertTrue(compare_route(before,copy.deepcopy(before)))
+        for broken in (text.replace('caller=FixZ','caller=Wrong'),text.replace('entity=7 backend','entity=8 backend'),text.replace('backend=OFF','backend=ON'),text.replace('moving=0','moving=1'),text.replace('moving=0','moving=garbage'),text.replace('tick=1','tick=9'),text.replace('ground=0 moving','ground=123 moving'),text.replace('kind=dispatch','kind=teleport'),text.replace('ground=0 moving','ground=nan moving'),text.replace('xyz=263.037598','xyz=263.1'),text.replace('caller=CheckLosFN kind=CheckLoS','caller=Wrong kind=CheckLoS')):
+            with self.assertRaises(ValueError): parse_route(broken,'OFF',config)
+        after=copy.deepcopy(before)
+        after['fixed_native'][1]['to']='1,2,3'
+        with self.assertRaises(ValueError): compare_route(before,after)
+
+    def test_decimal_ground_binding_is_exact_float32(self):
+        text,config=self.trace()
+        text=text.replace('ground=0 los=1','ground=3.34708261489868 los=1',1)
+        text=text.replace('result=0 remaining','result=3.34708261 remaining',1)
+        self.assertTrue(parse_route(text,'OFF',config))
+        with self.assertRaises(ValueError):
+            parse_route(text.replace('result=3.34708261 remaining','result=3.34708285 remaining',1),'OFF',config)
