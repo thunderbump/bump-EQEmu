@@ -3,6 +3,7 @@ import copy
 import unittest
 from evidence import parse_queries, parse_route, compare_route, compare, verdict
 import json
+import struct
 from pathlib import Path
 
 
@@ -65,7 +66,10 @@ class NativeControls(unittest.TestCase):
         for i,(name,point) in enumerate(zip(('route_start','transition','destination'),config['points'])):
             xyz=','.join(map(str,point))
             lines.append(f'SERVER_COLLISION_FLOOR id={name} xyz={xyz} ground={i/2}')
-            native('GetGroundZ','FindBestZ',','.join(map(str,[point[0],point[1],point[2]+1])),'0,0,-99999',i/2)
+            f32=lambda n: struct.unpack('f',struct.pack('f',n))[0]
+            start_z=f32(config['points'][0][2])
+            origin=f32(start_z+f32(point[2]-start_z))
+            native('GetGroundZ','FindBestZ',','.join(map(str,[point[0],point[1],f32(origin+1)])),'0,0,-99999',i/2)
         for caller,kind,result in [('FindDestGroundZ','FindBestZ',0),('AdjustRoute','FindBestZ',0),('AdjustRoute','node',1.2),('UpdatePathGround','admission',3),('MoveToCommand','dispatch',20),('FixZ','pose',1.2)]:
             native(caller,kind,'0,0,0','0,0,0',result)
         start,end=config['points'][0],config['points'][-1]

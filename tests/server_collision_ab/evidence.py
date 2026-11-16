@@ -106,7 +106,10 @@ def parse_route(text, backend, fixture=None):
                 raise ValueError('native fixed query differs from request')
     same=lambda a,b: [struct.pack('f',float(x)) for x in a.split(',')] == [struct.pack('f',float(x)) for x in b.split(',')]
     for native,name,point in zip(fixed[6:],('route_start','transition','destination'),fixture['points']):
-        adjusted=','.join(map(str,[point[0],point[1],point[2]+1]))
+        f32=lambda n: struct.unpack('f',struct.pack('f',n))[0]
+        start_z=f32(fixture['points'][0][2])
+        origin=f32(start_z+f32(point[2]-start_z))
+        adjusted=','.join(map(str,[point[0],point[1],f32(origin+1)]))
         if not same(native['from'],adjusted) or not same(native['result'],floors[name]['ground']):
             raise ValueError('actual floor query differs')
     poses = []
