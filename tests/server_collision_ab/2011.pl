@@ -17,7 +17,7 @@ sub EVENT_TIMER {
         ++$ticks;
         my ($x,$y,$z)=($npc->GetX(),$npc->GetY(),$npc->GetZ());
         my $g=$npc->FindGroundZ($x,$y,0);
-        quest::debug("SERVER_COLLISION_POSE tick=$ticks xyz=$x,$y,$z ground=$g moving=".$npc->IsMoving());
+        quest::debug("SERVER_COLLISION_POSE tick=$ticks xyz=$x,$y,$z ground=$g moving=".($npc->IsMoving()?1:0));
         if (abs($x+490.38)<0.5 && abs($y+118)<0.5 && !$npc->IsMoving()) { ++$stable; } else { $stable=0; }
         if ($stable>=3) { quest::debug("SERVER_COLLISION_ROUTE_DONE"); $done=1; }
         return;
