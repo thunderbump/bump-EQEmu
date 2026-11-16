@@ -29,12 +29,16 @@ UPDATE logsys_categories SET log_to_console=1 WHERE log_category_description IN 
     active = env['command'](['mariadb', '--no-defaults', '--socket=/runtime/mysql.sock',
                              '-uroot', '--batch'], input=b"USE smoke; SELECT rule_name,rule_value FROM rule_values WHERE rule_name LIKE 'Map:%';", capture_output=True)
     (env['results'] / 'configured-map-rules.tsv').write_bytes(active.stdout)
+    zone = json.loads(Path('/inputs.json').read_text()).get('zone','qeynos2')
+    if zone == 'poknowledge':
+        env['query']("USE smoke; UPDATE spawn2 SET zone='poknowledge',x=313.068,y=-560.554,z=-155.671 WHERE id=10863;")
     import shutil
-    shutil.copyfile('/probe.pl', env['root'] / 'quests/qeynos2/v0/2011.pl')
+    shutil.copyfile('/probe.pl', env['root'] / ('quests/'+zone+'/v0/2011.pl'))
 
 
 def run(env):
-    zone = env['start']('qeynos2', ['/binaries/zone', 'qeynos2:7001'])
+    name = json.loads(Path('/inputs.json').read_text()).get('zone','qeynos2')
+    zone = env['start'](name, ['/binaries/zone', name+':7001'])
     env['receipt']['executables'] = {}
     import hashlib
     for name, process in env['processes']:
@@ -43,9 +47,9 @@ def run(env):
         env['receipt']['executables'][name] = {'pid': process.pid, 'sha256': digest}
     inputs = json.loads(Path('/inputs.json').read_text())
     expected = next(f['sha256'] for f in inputs['files'] if f['guest_path'] == '/binaries/zone')
-    assert env['receipt']['executables']['qeynos2']['sha256'] == expected, 'executed zone differs'
+    assert env['receipt']['executables'][name]['sha256'] == expected, 'executed zone differs'
     deadline = time.monotonic() + 120
-    log = env['results'] / 'qeynos2-smoke.log'
+    log = env['results'] / (name+'-smoke.log')
     while time.monotonic() < deadline:
         assert all(p.poll() is None for _, p in env['processes']), 'owned child exited'
         text = log.read_text(errors='replace')
@@ -57,8 +61,11 @@ def run(env):
         time.sleep(.2)
     else:
         raise RuntimeError('production fixed query deadline expired')
-    route = parse_route(text, json.loads(Path('/inputs.json').read_text())['backend'])
-    env['receipt'].update(route=route, route_callers_complete=True, route_state='stopped')
+    try:
+        route = parse_route(text, json.loads(Path('/inputs.json').read_text())['backend'])
+        env['receipt'].update(route=route, route_callers_complete=True, route_state='stopped')
+    finally:
+        (env['root'] / 'stop-map-validation').touch()
     # Shared cleanup expects this timer acknowledgement before terminating zone.
     (env['root'] / 'stop-map-validation').touch()
     until = time.monotonic() + 3

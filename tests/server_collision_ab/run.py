@@ -22,7 +22,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--arm', choices=['OFF', 'ON', 'OFF-repeat'], required=True)
     parser.add_argument('--label', required=True)
+    parser.add_argument('--zone', choices=['qeynos2','poknowledge'], default='qeynos2')
     args = parser.parse_args()
+    prefix = '' if args.zone == 'qeynos2' else 'poknowledge-'
     import re
     if not re.fullmatch('[a-z0-9][a-z0-9-]{0,48}', args.label):
         raise SystemExit('invalid label')
@@ -37,7 +39,11 @@ def main():
     image = json.loads(sp.check_output(docker+['image', 'inspect', shared.IMAGE]))[0]
     assert image['Id'] == shared.IMAGE
     assert not sp.check_output(docker+['ps','-q']).strip(), 'owned daemon must be idle'
-    out = ROOT/(args.arm+'-'+args.label)
+    if args.zone == 'poknowledge':
+        for arm in ('OFF','ON','OFF-repeat'):
+            assert all(json.loads((ROOT/(arm+'-native-v5/verdict.json')).read_text()).values()), 'Qeynos2 first'
+            assert json.loads((ROOT/(arm+'-native-v5/cleanup.json')).read_text())['removed']
+    out = ROOT/(prefix+args.arm+'-'+args.label)
     out.mkdir(mode=0o700)  # Never overwrite an original failure.
     files, mounts = [], []
 
@@ -64,7 +70,7 @@ def main():
         pin(originals/(name+'.map'), '/originals/'+name+'.map',
             shared.sha(shared.FIXTURE/'maps/base'/(name+'.map')))
     for path, guest in [(HERE/'scenario.py','/scenario.py'), (HERE/'evidence.py','/evidence.py'),
-                        (HERE/'2011.pl','/probe.pl'), (HERE/'route.json','/route.json'),
+                        (HERE/('2011.pl' if args.zone=='qeynos2' else 'pok-2011.pl'),'/probe.pl'), (HERE/('route.json' if args.zone=='qeynos2' else 'pok-route.json'),'/route.json'),
                         (HERE.parent/'map_server_validation/runtime.py','/worker.py')]:
         pin(path, guest)
     # Pin host transport and inherited source relationship as evidence too.
@@ -76,11 +82,11 @@ def main():
     assert {r['name'] for r in phases if r['exit'] == 0} >= {'OFF-incremental-full-build','ON-incremental-full-build','OFF-utility','ON-utility'}
     build = json.loads((ROOT/'build/inputs.json').read_text())
     assert not sp.check_output(['git','diff',build['source'],head,'--','zone','common','cmake','CMakeLists.txt','rust']), 'production changed; rebuild both arms'
-    inputs = {'arm': args.arm, 'backend': backend, 'harness_commit': head,
+    inputs = {'arm': args.arm, 'backend': backend, 'zone': args.zone, 'harness_commit': head,
               'binary_source': build['source'], 'image': shared.IMAGE,
               'files': files, 'transport': transport, 'numeric_tolerance': 0,
               'scope': 'fixed native queries and ordinary NPC route'}
-    reference = ROOT/('OFF-'+args.label)
+    reference = ROOT/(prefix+'OFF-'+args.label)
     if args.arm != 'OFF':
         before = json.loads((reference/'inputs.json').read_text())
         # Binary differences are intentional. Everything else is frozen before ON.
