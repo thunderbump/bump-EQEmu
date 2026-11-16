@@ -1,6 +1,7 @@
 # Task-owned stationary production queries. Reuses the qualified Rat origin/LoS pair.
 use Time::HiRes qw(time);
 my $finished = 0;
+my $done = 0;
 my $ticks = 0;
 my $stable = 0;
 sub EVENT_SPAWN { quest::settimer("server_collision", 1); }
@@ -11,13 +12,14 @@ sub EVENT_TIMER {
         quest::debug("MAP_SERVER_PROBE_STOPPED");
         return;
     }
+    return if $done;
     if ($finished) {
         ++$ticks;
         my ($x,$y,$z)=($npc->GetX(),$npc->GetY(),$npc->GetZ());
         my $g=$npc->FindGroundZ($x,$y,0);
         quest::debug("SERVER_COLLISION_POSE tick=$ticks xyz=$x,$y,$z ground=$g moving=".$npc->IsMoving());
         if (abs($x+490.38)<0.5 && abs($y+118)<0.5 && !$npc->IsMoving()) { ++$stable; } else { $stable=0; }
-        if ($stable>=3) { quest::debug("SERVER_COLLISION_ROUTE_DONE"); quest::stoptimer("server_collision"); }
+        if ($stable>=3) { quest::debug("SERVER_COLLISION_ROUTE_DONE"); $done=1; }
         return;
     }
     $npc->GMMove(297.75,344,3.75,0,0);

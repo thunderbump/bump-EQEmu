@@ -70,12 +70,15 @@ def main():
     transport = {str(p.relative_to(HERE.parent.parent)): shared.sha(p) for p in
                  (HERE/'run.py', HERE.parent/'client_collision_ab/run.py')}
     head = sp.check_output(['git','rev-parse','HEAD']).decode().strip()
+    assert json.loads((ROOT/'build/exit.json').read_text())['exit'] == 0, 'matched build failed'
+    phases = json.loads((ROOT/'results/runs.json').read_text())
+    assert {r['name'] for r in phases if r['exit'] == 0} >= {'OFF-incremental-full-build','ON-incremental-full-build','OFF-utility','ON-utility'}
     build = json.loads((ROOT/'build/inputs.json').read_text())
     assert not sp.check_output(['git','diff',build['source'],head,'--','zone','common','cmake','CMakeLists.txt','rust']), 'production changed; rebuild both arms'
     inputs = {'arm': args.arm, 'backend': backend, 'harness_commit': head,
               'binary_source': build['source'], 'image': shared.IMAGE,
               'files': files, 'transport': transport, 'numeric_tolerance': 0,
-              'scope': 'fixed queries; route evidence required but unavailable'}
+              'scope': 'fixed native queries and ordinary NPC route'}
     reference = ROOT/('OFF-'+args.label)
     if args.arm != 'OFF':
         before = json.loads((reference/'inputs.json').read_text())

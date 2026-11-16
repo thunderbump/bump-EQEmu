@@ -24,6 +24,9 @@ for name in sp.check_output(['git','ls-files','-z']).decode().split('\0'):
         dst.parent.mkdir(parents=True,exist_ok=True)
         dst.write_bytes(Path(name).read_bytes())
         delta.append(name)
+for mode in ('OFF','ON'):
+    (ROOT/'results'/(mode+'-new-binaries.json')).unlink(missing_ok=True)
+(ROOT/'results/runs.json').unlink(missing_ok=True)
 head=sp.check_output(['git','rev-parse','HEAD']).decode().strip()
 (out/'source-delta.json').write_text(json.dumps(delta,indent=2))
 (out/'production.patch').write_bytes(sp.check_output(['git','diff','e876fcad518567ceb7fe4164badaeae096700c53',head,'--','zone','common','cmake','CMakeLists.txt','rust']))
@@ -38,7 +41,9 @@ try:
         result=sp.run(DOCKER+['start','-a',cid],stdout=log,stderr=sp.STDOUT,timeout=30000)
     (out/'exit.json').write_text(json.dumps({'exit':result.returncode}))
 finally:
-    (out/'container.json').write_bytes(sp.check_output(DOCKER+['inspect',cid]))
-    sp.run(DOCKER+['rm','-f',cid],check=True)
-    (out/'cleanup.json').write_text(json.dumps({'removed':cid}))
+    try:
+        (out/'container.json').write_bytes(sp.check_output(DOCKER+['inspect',cid]))
+    finally:
+        sp.run(DOCKER+['rm','-f',cid],check=True)
+        (out/'cleanup.json').write_text(json.dumps({'removed':cid}))
 raise SystemExit(result.returncode)

@@ -178,6 +178,9 @@ public:
 		}
 
 		if (!m_started) {
+            CollisionObservation::Scope observation("MoveToCommand", mob->GetNPCTypeID(), mob->GetID());
+            CollisionObservation::Query("dispatch", mob->GetPosition(), glm::vec3(m_move_to_x,m_move_to_y,m_move_to_z), current_speed);
+
 			m_started = true;
 			//rotate to the point
 			mob->SetMoving(true);
@@ -537,6 +540,9 @@ public:
 
 	virtual bool Process(MobMovementManager *mob_movement_manager, Mob *mob)
 	{
+        CollisionObservation::Scope observation("TeleportToCommand", mob->GetNPCTypeID(), mob->GetID());
+        CollisionObservation::Query("teleport", mob->GetPosition(), glm::vec3(m_teleport_to_x,m_teleport_to_y,m_teleport_to_z), 1);
+
 		if (!mob->IsAIControlled()) {
 			return true;
 		}

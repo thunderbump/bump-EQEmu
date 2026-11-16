@@ -1,5 +1,6 @@
 """Strict fixed-query comparator. Missing movement evidence never passes collision."""
 import math
+import struct
 import re
 
 IDENTITY = ('id', 'npc', 'from', 'size', 'origin', 'adjusted', 'eyes', 'to',
@@ -51,7 +52,10 @@ def verdict(receipt):
             'shutdown': bool(receipt.get('exits')) and all(v == 0 for v in receipt['exits'].values())}
 
 
-def parse_route(text, backend):
+def parse_route(text, backend, fixture=None):
+    import json
+    from pathlib import Path
+    fixture = fixture or json.loads(Path('/route.json').read_text())
     """Require actual native calls, finite adjusted endpoints, ground and stopped pose."""
     records = []
     for payload in re.findall(r'SERVER_COLLISION_NATIVE ([^\r\n]+)', text):
@@ -64,9 +68,14 @@ def parse_route(text, backend):
         if int(row['remaining']) == 0:
             raise ValueError('native observation budget exhausted')
         records.append(row)
+    queries = parse_queries(text)
+    if {r['entity'] for r in records} != {queries['start']['entity']}:
+        raise ValueError('wrong native entity')
+    if any(r['kind']=='teleport' for r in records):
+        raise ValueError('teleport dispatched')
     required = {('FindGroundZ','FindBestZ'), ('CheckLosFN','CheckLoS'),
                 ('FindDestGroundZ','FindBestZ'), ('AdjustRoute','FindBestZ'),
-                ('AdjustRoute','node'), ('UpdatePathGround','admission'), ('FixZ','pose')}
+                ('MoveToCommand','dispatch'), ('AdjustRoute','node'), ('UpdatePathGround','admission'), ('FixZ','pose')}
     if not required <= {(r['caller'],r['kind']) for r in records}:
         raise ValueError('required native caller absent')
     if any(float(r['result']) <= 0 for r in records if r['kind']=='admission'):
@@ -78,9 +87,23 @@ def parse_route(text, backend):
         floors[row['id']] = row
     if set(floors) != {'route_start','transition','destination'}:
         raise ValueError('route floor samples absent')
+    for name,point in zip(('route_start','transition','destination'), fixture['points']):
+        if list(map(float, floors[name]['xyz'].split(','))) != point:
+            raise ValueError('wrong route input')
     heights = [float(r['ground']) for r in floors.values()]
     if not all(math.isfinite(z) and z != -99999 for z in heights) or max(heights)-min(heights)<0.1:
         raise ValueError('no valid height transition')
+    fixed = [r for r in records if r['caller'] in ('FindGroundZ','CheckLosFN')][:9]
+    if [r['kind'] for r in fixed] != ['FindBestZ','CheckLoS']*3+['FindBestZ']*3:
+        raise ValueError('fixed native call order')
+    for index,name in enumerate(('start','clear','blocked')):
+        q=queries[name]
+        ground,los=fixed[index*2:index*2+2]
+        if ground['from'] != q['adjusted'] or float(ground['result']) != float(q['ground']) or los['from'] != q['eyes'] or los['to'] != q['target_eyes'] or los['result'] != q['los']:
+            # Compare float values, independent of Perl's decimal formatting.
+            same=lambda a,b: [struct.pack('f',float(x)) for x in a.split(',')] == [struct.pack('f',float(x)) for x in b.split(',')]
+            if not (same(ground['from'],q['adjusted']) and float(ground['result'])==float(q['ground']) and same(los['from'],q['eyes']) and same(los['to'],q['target_eyes']) and los['result']==q['los']):
+                raise ValueError('native fixed query differs from request')
     poses = []
     for payload in re.findall(r'SERVER_COLLISION_POSE ([^\r\n]+)', text):
         row = dict(re.findall(r'(\w+)=([^\s]+)', payload))
@@ -98,11 +121,20 @@ def parse_route(text, backend):
         x,y,z=map(float,row['xyz'].split(','))
         if abs(x+490.38)>=0.5 or abs(y+118)>=0.5 or row['moving']!='0':
             raise ValueError('wrong final pose/state')
-    return {'native':records,'floors':floors,'poses':poses}
+    xs=[float(r['xyz'].split(',')[0]) for r in poses[:-3]]
+    if len(xs)<2 or not any(-480 < x < -420 for x in xs):
+        raise ValueError('intermediate route progress absent')
+    for row in poses:
+        x,y,z=map(float,row['xyz'].split(','))
+        if not (-491 <= x <= -408) or abs(y-(-114.38+(x+408.5)*(-3.62)/(-81.88)))>2:
+            raise ValueError('pose outside frozen route corridor')
+    return {'fixed_native':fixed, 'native':records,'floors':floors,'poses':poses}
 
 
 def compare_route(before, after):
     """Exact fixed callers and nodes. Movement cadence is intentionally unconstrained."""
+    if [{k:v for k,v in r.items() if k not in ('backend','entity','remaining')} for r in before['fixed_native']] != [{k:v for k,v in r.items() if k not in ('backend','entity','remaining')} for r in after['fixed_native']]:
+        raise ValueError('actual fixed queries changed')
     if before['floors'] != after['floors']:
         raise ValueError('fixed route ground changed')
     def stable(route):
