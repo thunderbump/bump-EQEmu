@@ -114,6 +114,17 @@ extern void MapOpcodes();
 bool CheckForCompatibleQuestPlugins();
 int main(int argc, char **argv)
 {
+	// Refuse the retired converter before any normal zone startup.
+	const bool convert_map = argc > 1 && strcasecmp(argv[1], "convert_map") == 0;
+	if (convert_map) {
+		if (argc != 3 || argv[2][0] == '\0') {
+			std::fputs("Usage: zone convert_map <filename.map>\n", stderr);
+			return 1;
+		}
+		std::fputs("convert_map is retired: stock .map files load directly; no conversion is needed.\n", stderr);
+		return 1;
+	}
+
 #ifdef EQEMU_BUILD_TESTS
 	if (!InserverTests::Configure()) {
 		return 1;
@@ -168,26 +179,6 @@ int main(int argc, char **argv)
 	}
 
 	PathManager::Instance()->Init();
-
-#ifdef USE_MAP_MMFS
-	if (argc == 3 && strcasecmp(argv[1], "convert_map") == 0) {
-		if (!ZoneConfig::LoadConfig())
-			return 1;
-		Config = ZoneConfig::get();
-
-		std::string mapfile = argv[2];
-		std::transform(mapfile.begin(), mapfile.end(), mapfile.begin(), ::tolower);
-		std::string filename = Config->MapDir;
-		filename += mapfile;
-
-		auto m = new Map();
-		auto success = m->Load(filename, true);
-		delete m;
-		std::cout << mapfile.c_str() << " conversion " << (success ? "succeeded" : "failed") << std::endl;
-
-		return 0;
-	}
-#endif /*USE_MAP_MMFS*/
 
 	QServ = new QueryServ;
 
