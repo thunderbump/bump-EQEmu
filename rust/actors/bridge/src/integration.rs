@@ -765,7 +765,10 @@ pub fn bind_session(session: &str) {
             return;
         }
         trace.session = session.into();
-        let ack = encoded(&trace.acknowledgement(&trace.empty_request(), 0, "0".repeat(64), 0));
+        let mut ready = trace.acknowledgement(&trace.empty_request(), 0, "0".repeat(64), 0);
+        // READY publishes no shard. Preserve buffered startup facts for the first flush.
+        ready.last_seq = 0;
+        let ack = encoded(&ready);
         if ack.and_then(|bytes| trace.ack_write(&bytes)).is_err() {
             trace.invalid();
         }
@@ -1414,6 +1417,38 @@ mod tests {
             }],
             false,
         );
+    }
+    #[test]
+    fn ready_ack_has_no_published_prefix_and_first_flush_retains_startup_custody() {
+        let fixture = Fixture::new();
+        fixture.seed();
+        TRACE.with(|cell| cell.borrow_mut().as_mut().unwrap().session.clear());
+        let mut store = Store::open(fixture.0.to_str().unwrap(), 2).unwrap();
+        store.load().unwrap();
+        let startup = events();
+        assert!(startup.iter().any(|event| event[3] == 11 && event[6][0] == 6));
+        assert!(startup.iter().any(|event| event[3] == 5));
+        bind_session("test-session");
+        let ack: Value =
+            serde_json::from_slice(&fs::read(fixture.0.join("integration/p0/ack.json")).unwrap())
+                .unwrap();
+        assert_eq!(ack["request"], "0");
+        assert_eq!(ack["barrier"], 0);
+        assert_eq!(ack["result"], 0);
+        assert_eq!(ack["last_seq"], 0);
+        assert_eq!(ack["shard_sha256"], "0".repeat(64));
+        assert_eq!(ack["snapshot_sequence"], 0);
+        assert_eq!(events(), startup);
+        let flushed = invoke(&request(1, 0, 0));
+        assert_eq!(flushed["result"], 1);
+        assert_eq!(flushed["last_seq"], startup.len() + 1);
+        let raw = fs::read(fixture.0.join("integration/p0").join(NAME)).unwrap();
+        assert_eq!(flushed["shard_sha256"], sha256(&raw).unwrap());
+        let shard: Value = serde_json::from_slice(&raw).unwrap();
+        let recorded = shard["events"].as_array().unwrap();
+        assert_eq!(&recorded[..startup.len()], startup.as_slice());
+        assert_eq!(recorded.len(), startup.len() + 1);
+        drop(store);
     }
     #[test]
     fn sha256_matches_known_vectors_and_streaming_bytes() {
