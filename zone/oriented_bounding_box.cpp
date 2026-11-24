@@ -17,6 +17,9 @@
 */
 
 #include "oriented_bounding_box.h"
+#include <algorithm>
+#include <cmath>
+#include <limits>
 
 #include "glm/gtc/matrix_transform.hpp"
 #include "glm/gtx/transform.hpp"
@@ -111,4 +114,25 @@ bool OrientedBoundingBox::ContainsPoint(const glm::vec3 &p) const {
 	}
 	
 	return false;
+}
+
+bool OrientedBoundingBox::ClipSegment(const glm::vec3 &from, const glm::vec3 &to, double &begin, double &end) const {
+    const auto a = inverted_transformation * glm::vec4(from, 1);
+    const auto b = inverted_transformation * glm::vec4(to, 1);
+    const float minimum[] = {min_x, min_y, min_z}, maximum[] = {max_x, max_y, max_z};
+    begin = 0; end = 1;
+    for (int axis = 0; axis < 3; ++axis) {
+        if (!std::isfinite(a[axis]) || !std::isfinite(b[axis]) || !std::isfinite(minimum[axis]) || !std::isfinite(maximum[axis])) {
+            begin = end = std::numeric_limits<double>::quiet_NaN();
+            return true;
+        }
+        const double delta = double(b[axis]) - a[axis];
+        if (delta == 0) { if (a[axis] < minimum[axis] || a[axis] > maximum[axis]) { return false; } continue; }
+        auto first = (minimum[axis] - double(a[axis])) / delta;
+        auto last = (maximum[axis] - double(a[axis])) / delta;
+        if (first > last) { std::swap(first, last); }
+        begin = std::max(begin, first); end = std::min(end, last);
+        if (begin > end) { return false; }
+    }
+    return true;
 }

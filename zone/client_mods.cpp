@@ -296,6 +296,11 @@ int64 Client::CalcHPRegen(bool bCombat)
 
 int64 Client::CalcHPRegenCap()
 {
+	return PlayerCalcHPRegenCap();
+}
+
+int64 Mob::PlayerCalcHPRegenCap()
+{
 	int64 cap = RuleI(Character, ItemHealthRegenCap);
 	if (GetLevel() > 60) {
 		cap = std::max(cap, static_cast<int64>(GetLevel() - 30)); // if the rule is set greater than normal I guess
@@ -713,6 +718,11 @@ int64 Client::CalcManaRegen(bool bCombat)
 
 int64 Client::CalcManaRegenCap()
 {
+	return PlayerCalcManaRegenCap();
+}
+
+int64 Mob::PlayerCalcManaRegenCap()
+{
 	int64 cap = RuleI(Character, ItemManaRegenCap) + aabonuses.ItemManaRegenCap + itembonuses.ItemManaRegenCap + spellbonuses.ItemManaRegenCap;
 	return (cap * RuleI(Character, ManaRegenMultiplier) / 100);
 }
@@ -926,6 +936,12 @@ int32 Client::CalcCHA()
 
 int Client::CalcHaste()
 {
+	Haste = CalculatePlayerHaste();
+	return Haste;
+}
+
+int Mob::CalculatePlayerHaste()
+{
 	/*  Tests: (based on results in newer char window)
 	    68 v1 + 46 item + 25 over + 35 inhib = 204%
 	    46 item + 5 v2 + 25 over + 35 inhib = 65%
@@ -941,17 +957,15 @@ int Client::CalcHaste()
 	// slow beats all! Besides a better inhibit
 	if (spellbonuses.haste < 0) {
 		if (-spellbonuses.haste <= spellbonuses.inhibitmelee) {
-			Haste = 100 - spellbonuses.inhibitmelee;
+			return 100 - spellbonuses.inhibitmelee;
 		}
 		else {
-			Haste = 100 + spellbonuses.haste;
+			return 100 + spellbonuses.haste;
 		}
-		return Haste;
 	}
 	// No haste and inhibit, kills all other hastes
 	if (spellbonuses.haste == 0 && spellbonuses.inhibitmelee) {
-		Haste = 100 - spellbonuses.inhibitmelee;
-		return Haste;
+		return 100 - spellbonuses.inhibitmelee;
 	}
 	int h = 0;
 	int cap = 0;
@@ -996,8 +1010,7 @@ int Client::CalcHaste()
 		h += spellbonuses.hastetype3 > 10 ? 10 : spellbonuses.hastetype3;
 	}
 	h += extra_haste;	//GM granted haste.
-	Haste = 100 + h;
-	return Haste;
+	return 100 + h;
 }
 
 //The AA multipliers are set to be 5, but were 2 on WR
@@ -1741,11 +1754,21 @@ int64 Client::CalcEnduranceRegen(bool bCombat)
 
 int64 Client::CalcEnduranceRegenCap()
 {
+	return PlayerCalcEnduranceRegenCap();
+}
+
+int64 Mob::PlayerCalcEnduranceRegenCap()
+{
 	int64 cap = RuleI(Character, ItemEnduranceRegenCap) + aabonuses.ItemEnduranceRegenCap + itembonuses.ItemEnduranceRegenCap + spellbonuses.ItemEnduranceRegenCap;
 	return (cap * RuleI(Character, EnduranceRegenMultiplier) / 100);
 }
 
 int32 Client::CalcItemATKCap()
+{
+	return PlayerCalcItemATKCap();
+}
+
+int32 Mob::PlayerCalcItemATKCap()
 {
 	int cap = RuleI(Character, ItemATKCap) + itembonuses.ItemATKCap + spellbonuses.ItemATKCap + aabonuses.ItemATKCap;
 	return cap;

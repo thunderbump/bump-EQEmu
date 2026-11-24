@@ -50,6 +50,8 @@ public:
 	virtual bool InVWater(const glm::vec3& location) const = 0;
 	virtual bool InLava(const glm::vec3& location) const = 0;
 	virtual bool InLiquid(const glm::vec3& location) const = 0;
+	// Conservative full-segment query. Unknown map implementations cannot prove dry travel.
+	virtual bool SegmentInLiquid(const glm::vec3& from, const glm::vec3& to) const { return true; }
 	virtual bool InPvP(const glm::vec3& location) const = 0;
 	virtual bool InZoneLine(const glm::vec3& location) const = 0;
 

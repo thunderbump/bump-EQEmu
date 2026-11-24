@@ -1,4 +1,5 @@
 #include "actor_body.h"
+#include "actor_integration.h"
 #include "actor_demo.h"
 #include "actor_hunt_state.h"
 #include "actor_population.h"
@@ -118,7 +119,7 @@ eqemu_proof::Report Adapter::StartMelee(const std::vector<uint16_t> &scope)
     return StartGoal(scope, true);
 }
 
-bool IsPublicHuntPrey(NPC *npc, bool population)
+bool IsPublicHuntPrey(NPC *npc, bool population, NPC *actor)
 {
     if (!npc || !npc->IsNPC() || npc->IsBot() || npc->IsMerc() || !npc->GetSpawn() ||
         npc->GetSpawn()->GetNPC() != npc || !npc->GetSpawnPointID() ||
@@ -127,7 +128,13 @@ bool IsPublicHuntPrey(NPC *npc, bool population)
         npc->IsRustActor() || npc->GetOwnerID() || npc->GetPetType() != PetType::None ||
         npc->GetSwarmInfo() || npc->Charmed() || !npc->IsTargetable() || npc->GetDepop() || npc->GetHP() <= 0) { return false; }
     const auto type = npc->GetNPCTypeID();
-    if (population) { return eqemu_population::prey_profile(type, npc->GetLevel(), npc->GetRawNPCTypeName()); }
+    if (population) {
+        if (!actor) { return true; } // shared scan projects safety, not one actor's policy
+        if (actor->GetLevel() > 1) {
+            return ActorPopulation::PlayerHostile(actor, npc);
+        }
+        return eqemu_population::prey_profile(type, npc->GetLevel(), npc->GetRawNPCTypeName());
+    }
     return (type == 2011 && npc->GetLevel() == 1 && npc->GetRace() == 36 && npc->GetBodyType() == 21 &&
             std::strcmp(npc->GetRawNPCTypeName(), "a_large_rat") == 0) ||
         (((type == 2104 && npc->GetLevel() == 1) || (type == 2000 && npc->GetLevel() == 2)) &&
@@ -162,16 +169,35 @@ eqemu_proof::Report Adapter::CreateVisibleMeleeBody(int32_t x, int32_t y, int32_
     return report;
 }
 
-bool Adapter::RestorePopulationBody(unsigned hunter, double x, double y, double z, int64_t hp)
+eqemu_proof::Report Adapter::StartTransferMove(int32_t x, int32_t y, int32_t z)
 {
-    if (!population_ || hunter >= 3 || Inspect().alive || Body() || hp < 1 || hp > 100 || !zone ||
-        zone->GetZoneID() != 2 || zone->GetInstanceID() || zone->GetInstanceVersion() ||
+    const auto state = Inspect();
+    eqemu_proof::Report refused{};
+    refused.status = eqemu_proof::Status::InvalidInput;
+    if (!population_ || !Body() || Body()->GetLevel() <= 1 || !state.next_operation ||
+        state.phase != eqemu_proof::Phase::Idle || state.approach != eqemu_proof::Approach::Disabled) { return refused; }
+    transfer_move_ = true;
+    auto result = Send({eqemu_proof::Kind::Move, state.epoch, state.generation, state.next_operation, x, y, z});
+    if (result.status != eqemu_proof::Status::Ok) { transfer_move_ = false; }
+    return result;
+}
+
+bool Adapter::RestorePopulationBody(unsigned hunter, double x, double y, double z, int64_t hp, uint8_t level)
+{
+    if (!population_ || hunter >= 3 || Inspect().alive || Body() || hp < 1 || level < 1 || level > 127 || !zone ||
+        !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z) ||
+        (level == 1 && zone->GetZoneID() != 2) || zone->GetInstanceID() || zone->GetInstanceVersion() ||
         !zone->zonemap || !zone->pathing || !zone->watermap ||
-        !ActorDemo::InsideHuntArea({x,y,z}, {ActorDemo::HuntHomeX,ActorDemo::HuntHomeY,3.75}, ActorDemo::HuntLeash)) { return false; }
+        (level == 1 && !ActorDemo::InsideHuntArea({x,y,z}, {ActorDemo::HuntHomeX,ActorDemo::HuntHomeY,3.75}, ActorDemo::HuntLeash))) { return false; }
     glm::vec3 point(x,y,z), probe = point + glm::vec3(0,0,20);
     const auto floor = zone->zonemap->FindBestZ(probe,nullptr);
-    if (floor == BEST_Z_INVALID || !std::isfinite(floor) || std::abs(z-floor-3.75) > 2 || zone->watermap->InLiquid(point)) { return false; }
-    hunter_ = hunter + 1; restore_x_ = x; restore_y_ = y; restore_z_ = z; restore_hp_ = hp;
+    if (floor == BEST_Z_INVALID || !std::isfinite(floor) || (level == 1 && std::abs(z-floor-3.75) > 2) || zone->watermap->InLiquid(point)) { return false; }
+    if (level > 1) { z = floor + 3.75; }
+    // Floor correction is a new placement. The supplied arrival can be dry
+    // above submerged terrain, so validate the actual feet/body before spawn.
+    if (zone->watermap->SegmentInLiquid({x,y,floor}, {x,y,z})) { return false; }
+    transfer_move_ = false;
+    hunter_ = hunter + 1; restore_x_ = x; restore_y_ = y; restore_z_ = z; restore_hp_ = hp; restore_level_ = level;
     return CreateVisibleMeleeBody(std::lround(x),std::lround(y),std::lround(z)).event == eqemu_proof::Event::BodyRequested;
 }
 
@@ -181,13 +207,13 @@ eqemu_proof::Report Adapter::StartGoal(const std::vector<uint16_t> &scope, bool 
     Report refused{};
     refused.status = closing_ ? Status::Closed : Status::InvalidInput;
     if (closing_ || scope.size() > scope_.size()) { return refused; }
-    if (public_hunt && (!zone || zone->GetZoneID() != 2 || zone->GetInstanceID() ||
+    if (public_hunt && (!zone || (!(population_ && Body() && Body()->GetLevel() > 1) && zone->GetZoneID() != 2) || zone->GetInstanceID() ||
         zone->GetInstanceVersion() || scope.size() != 1)) { return refused; }
     std::array<Subject, 4> subjects{};
     for (size_t i = 0; i < scope.size(); ++i) {
         auto *npc = entity_list.GetNPCByID(scope[i]);
         if (!npc || entity_list.GetMob(scope[i]) != npc) { return refused; }
-        if (public_hunt && (!IsPublicHuntPrey(npc, population_) || npc->IsEngaged())) { return refused; }
+        if (public_hunt && (!IsPublicHuntPrey(npc, population_, Body()) || npc->IsEngaged())) { return refused; }
         for (size_t j = 0; j < i; ++j) {
             if (scope[i] == scope[j]) { return refused; }
         }
@@ -196,6 +222,7 @@ eqemu_proof::Report Adapter::StartGoal(const std::vector<uint16_t> &scope, bool 
     const auto state = Inspect();
     // Only this production opt-in can install scope. Send cannot inject facts
     // or start this mode without validated registered native instances.
+    transfer_move_ = false;
     const auto kind = public_hunt ? Kind::StartPublicHunt : (melee ? Kind::StartMelee : Kind::StartApproach);
     auto report = Advance({kind, state.epoch, state.generation, 0, 0, 0, 0});
     if (report.status == Status::Ok) { scope_ = subjects; scope_size_ = scope.size(); }
@@ -244,9 +271,11 @@ void Adapter::Observe()
             fact.self_body = npc == body;
             fact.type_id = npc->GetNPCTypeID();
             fact.level = npc->GetLevel();
+            fact.actor_level = body ? body->GetLevel() : 0;
+            fact.hostile = body && ActorPopulation::PlayerHostile(body, npc);
             fact.service = npc->GetClass() != 1 || npc->GetBodyType() != 21 ||
                 npc->MerchantType != 0 || npc->IsQuestNPC();
-            if (state.public_hunt) { fact.service = !IsPublicHuntPrey(npc, population_); }
+            if (state.public_hunt) { fact.service = !IsPublicHuntPrey(npc, population_, Body()); }
             if (state.melee && state.target == fact.incarnation && npc->GetHateListCount() == 1 &&
                 npc->CheckAggro(body)) { fact.engaged = false; }
         }
@@ -288,6 +317,8 @@ void Adapter::Apply(const eqemu_proof::Report &report)
         if (population_) {
             std::snprintf(type->name, sizeof(type->name), "Hunter_%u", hunter_);
             type->current_hp = restore_hp_;
+            type->level = restore_level_;
+            type->deity = 140; // human warrior, agnostic player identity
         }
         if (Inspect().combat_body) {
             // Explicit ordinary melee body; original noncombat profile is unchanged.
@@ -307,6 +338,7 @@ void Adapter::Apply(const eqemu_proof::Report &report)
         }
         npc->actor_epoch_ = report.epoch;
         npc->actor_generation_ = report.generation;
+        npc->actor_player_inventory_ = population_;
         // Do not AI_Stop or clear IsAIControlled: the explicit gate owns decisions.
         entity_list.AddNPC(npc, visible_creation_, visible_creation_);
         id_ = npc->GetID();
@@ -374,11 +406,11 @@ bool Adapter::CombatAllowed(NPC *body, NPC *target) const
     const auto state = Inspect();
     if (!state.attacking || state.epoch != combat_.epoch || state.generation != combat_.generation ||
         state.goal != combat_.goal || state.operation != combat_.operation || state.target != combat_.target) { return false; }
-    if (!zone || zone->GetZoneID() != 2 || zone->GetInstanceVersion() != 0 ||
+    if (!zone || (!(population_ && body && body->GetLevel() > 1) && zone->GetZoneID() != 2) || zone->GetInstanceVersion() != 0 ||
         !zone->CanDoCombat() || !body || !target || !state.combat_body ||
         entity_list.GetNPCByID(combat_.id) != target || entity_list.GetMob(combat_.id) != target ||
         target->NativeIncarnation() != combat_.target ||
-        (state.public_hunt ? !IsPublicHuntPrey(target, population_) :
+        (state.public_hunt ? !IsPublicHuntPrey(target, population_, body) :
             (target->GetNPCTypeID() != 2011 || target->GetLevel() != 1 ||
              target->GetClass() != 1 || target->GetBodyType() != 21)) ||
         target->IsRustActor() || !target->IsTargetable() || target->GetHP() <= 0 || target->GetDepop() ||
@@ -422,7 +454,23 @@ void Adapter::ObserveDeath(NPC *victim, Mob *killer)
     if (victim->NativeIncarnation() == combat_.target && body &&
         body->MatchesRustActor(combat_.epoch, combat_.generation) &&
         body->NativeIncarnation() == combat_.actor_incarnation &&
-        body->actor_swing_authorized_) { combat_.killed = true; }
+        body->actor_swing_authorized_ && !combat_.killed) {
+        combat_.killed = true;
+        if (population_) {
+            const auto con = body->GetLevelCon(victim->GetLevel());
+            const auto base = body->GetBaseExperienceForKill(victim);
+            const auto scaled = body->ScaleNormalExperience(base, con);
+            const auto delta = body->GetBaseExperienceForLevel(body->GetLevel() + 1) -
+                body->GetBaseExperienceForLevel(body->GetLevel());
+            // Actors have no per-character XP override or AA/leadership allocation.
+            // The same native normal-XP stages are used by Client::CalculateExp.
+            combat_.experience = body->FinishNormalExperience(scaled, 0, delta, 1.0f);
+            combat_.factions = ActorPopulation::FactionAwards(body, victim);
+            const auto award_ref=ActorIntegration::Award(body,victim,base,scaled,combat_.experience,
+                body->GetBaseExperienceForLevel(body->GetLevel()+1),combat_.factions.size());
+            for(const auto &f:combat_.factions){ActorIntegration::Faction(body,victim,award_ref,f.id,f.before,f.after);}
+        }
+    }
 }
 
 void Adapter::ProcessCombat()
@@ -456,9 +504,22 @@ void Adapter::ProcessCombat()
     const auto before = target->GetHP();
     body->SetTarget(target);
     body->actor_swing_authorized_ = true;
-    body->Attack(target);
-    body->actor_swing_authorized_ = false;
-    const auto loss = std::max<int64_t>(0, before - std::max<int64_t>(0, target->GetHP()));
+    auto revoke = [](NPC *actor) { actor->actor_swing_authorized_ = false; };
+    std::unique_ptr<NPC, decltype(revoke)> authorization(body, revoke);
+    if (population_) {
+        // Player attack rounds run weapon/augment/buff procs before the swing.
+        body->TryCombatProcs(body->GetInv().GetItem(EQ::invslot::slotPrimary), target, EQ::invslot::slotPrimary);
+        body->TriggerDefensiveProcs(target, EQ::invslot::slotPrimary, false);
+    }
+    auto *current = entity_list.GetNPCByID(combat_.id);
+    if (!combat_.killed && current == target && current->NativeIncarnation() == combat_.target &&
+        current->GetHP() > 0 && !current->GetDepop() && body->GetHP() > 0 && CombatAllowed(body, current)) {
+        body->Attack(current);
+    }
+    current = entity_list.GetNPCByID(combat_.id);
+    const auto after = combat_.killed ? int64_t{0} : current && current == target && current->NativeIncarnation() == combat_.target ? current->GetHP() : before;
+    authorization.reset();
+    const auto loss = std::max<int64_t>(0, before - std::max<int64_t>(0, after));
     const auto actual = static_cast<uint32_t>(std::min<int64_t>(loss, std::numeric_limits<uint32_t>::max()));
     CombatFact(actual ? Kind::SwingHit : Kind::SwingMiss, actual);
 }
@@ -477,7 +538,7 @@ void Adapter::Process()
             const bool admitted = !closing_ &&
                 (state.patrol == Patrol::Disabled || state.patrol == Patrol::Running) &&
                 (state.approach == Approach::Disabled || state.approach == Approach::Travelling) && npc &&
-                movement.NavigateActorTo(npc, target_x_, target_y_, target_z_, state.public_hunt);
+                movement.NavigateActorTo(npc, target_x_, target_y_, target_z_, transfer_move_ ? MobMovementManager::ActorRoutePurpose::Transfer : state.public_hunt ? MobMovementManager::ActorRoutePurpose::Hunt : MobMovementManager::ActorRoutePurpose::Proof);
             Advance({admitted ? Kind::Admitted : Kind::Rejected,
                 state.epoch, state.generation, state.operation, 0, 0, 0});
         } else {
@@ -487,7 +548,7 @@ void Adapter::Process()
             // Empty native command queue is not alone proof of arrival. Observe
             // the real body coordinates, never the Rust request/snapshot.
             const bool arrived = npc && travel == MobMovementManager::ActorTravel::Completed &&
-                std::hypot(npc->GetX() - target_x_, npc->GetY() - target_y_) <= 2.0f &&
+                std::hypot(npc->GetX() - target_x_, npc->GetY() - target_y_) <= (transfer_move_ ? 5.0f : 2.0f) &&
                 std::abs(npc->GetZ() - target_z_) <= 6.0f;
             Advance({arrived ? Kind::Completed : Kind::Interrupted,
                 state.epoch, state.generation, state.operation, 0, 0, 0});
@@ -579,6 +640,7 @@ void Process() {
 }
 void ObserveDeath(NPC *victim, Mob *killer)
 {
+    ActorIntegration::Death(victim);
     if (adapter) { adapter->ObserveDeath(victim, killer); }
     for (auto &entry : population_adapters) { if (entry) { entry->ObserveDeath(victim,killer); } }
     ActorPopulation::ObserveDeath(victim);

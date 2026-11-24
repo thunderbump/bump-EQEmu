@@ -163,3 +163,32 @@ bool IsOfIndiffRace(int r1, int r2)
 	}
 	return false;
 }
+
+FACTION_VALUE CalculatePlayerSpecialFaction(int32 primary_faction)
+{
+	switch (primary_faction) {
+		case -3:
+		case -6:
+		case -9:
+		case -12:
+			return FACTION_DUBIOUSLY;
+		case -4:
+		case -7:
+		case -10:
+		case -13:
+			return FACTION_SCOWLS;
+		default:
+			return FACTION_INDIFFERENTLY;
+	}
+}
+
+FACTION_VALUE AdjustPlayerFaction(FACTION_VALUE faction, bool merchant, bool aggro)
+{
+	if (merchant && (faction == FACTION_THREATENINGLY || faction == FACTION_SCOWLS)) {
+		faction = FACTION_DUBIOUSLY;
+	}
+	if (aggro && faction != FACTION_SCOWLS) {
+		faction = FACTION_THREATENINGLY;
+	}
+	return faction;
+}

@@ -28,6 +28,8 @@ public:
 	~OrientedBoundingBox() = default;
 
 	bool ContainsPoint(const glm::vec3 &p) const;
+	// Clip the complete segment to this box. Invalid geometry returns NaN bounds.
+	bool ClipSegment(const glm::vec3 &from, const glm::vec3 &to, double &begin, double &end) const;
 private:
 	float min_x, max_x;
 	float min_y, max_y;

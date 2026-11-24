@@ -16,6 +16,8 @@
 	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 #include "zoneserver.h"
+#include <cstdlib>
+#include <cstring>
 
 #include "common/content/world_content_service.h"
 #include "common/events/player_event_logs.h"
@@ -752,6 +754,23 @@ void ZoneServer::HandleMessage(uint16 opcode, const EQ::Net::Packet &p) {
 				zs->SendPacket(pack);
 			}
 
+			break;
+		}
+		case ServerOP_ActorZoneBoot: {
+			if (pack->size != sizeof(ServerActorZoneBoot_Struct)) { break; }
+			const auto *scenario = std::getenv("EQEMU_STAGING_ACTOR_SCENARIO");
+			const auto *enabled = std::getenv("EQEMU_STAGING_ACTOR_DEMO");
+			if (!enabled || std::strcmp(enabled, "1") || !scenario || std::strcmp(scenario, "population-hunt-v1")) { break; }
+			const auto *request = reinterpret_cast<const ServerActorZoneBoot_Struct *>(pack->pBuffer);
+			if (request->actor >= 3 || !request->owner_epoch || !request->destination || !ZoneName(request->destination) || !GetZoneID() || GetInstanceID()) { break; }
+			auto *destination = ZSList::Instance()->FindByZoneID(request->destination);
+			if (destination && !destination->GetInstanceID()) {
+				ServerPacket ready(ServerOP_ActorZoneReady, sizeof(*request));
+				std::memcpy(ready.pBuffer, request, sizeof(*request));
+				SendPacket(&ready);
+			} else {
+				ZSList::Instance()->TriggerBootup(request->destination, 0);
+			}
 			break;
 		}
 		case ServerOP_ZoneBootup: {

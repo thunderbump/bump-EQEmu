@@ -16,6 +16,7 @@
 	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 #include "entity.h"
+#include "actor_integration.h"
 
 #include "common/data_verification.h"
 #include "common/features.h"
@@ -681,6 +682,7 @@ void EntityList::AddNPC(NPC *npc, bool send_spawn_packet, bool dont_queue)
 
 	npc_list.emplace(std::pair<uint16, NPC *>(npc->GetID(), npc));
 	mob_list.emplace(std::pair<uint16, Mob *>(npc->GetID(), npc));
+	ActorIntegration::Registered(npc);
 
 	entity_list.ScanCloseMobs(npc);
 
@@ -2807,6 +2809,7 @@ bool EntityList::RemoveNPC(uint16 delete_id)
 		NPC *npc = it->second;
 		RemoveProximity(delete_id);
 		npc_list.erase(it);
+		ActorIntegration::Removed(npc);
 
 		if (npc_limit_list.count(delete_id)) {
 			npc_limit_list.erase(delete_id);

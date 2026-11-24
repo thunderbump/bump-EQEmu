@@ -8188,55 +8188,8 @@ FACTION_VALUE Client::GetFactionLevel(uint32 char_id, uint32 npc_id, uint32 p_ra
 {
 	if (pFaction < 0)
 		return GetSpecialFactionCon(tnpc);
-	FACTION_VALUE fac = FACTION_INDIFFERENTLY;
-	int32 tmpFactionValue;
-	FactionMods fmods;
-
-	// few optimizations
-	if (GetFeigned())
-		return FACTION_INDIFFERENTLY;
-	if(!zone->CanDoCombat())
-		return FACTION_INDIFFERENTLY;
-	if (invisible_undead && tnpc && !tnpc->SeeInvisibleUndead())
-		return FACTION_INDIFFERENTLY;
-	if (IsInvisible(tnpc))
-		return FACTION_INDIFFERENTLY;
-	if (tnpc && tnpc->GetOwnerID() != 0) // pets con amiably to owner and indiff to rest
-	{
-		if (char_id == tnpc->GetOwner()->CastToClient()->CharacterID())
-			return FACTION_AMIABLY;
-		else
-			return FACTION_INDIFFERENTLY;
-	}
-
-	//First get the NPC's Primary faction
-	if(pFaction > 0)
-	{
-		//Get the faction data from the database
-		if(content_db.GetFactionData(&fmods, p_class, p_race, p_deity, pFaction))
-		{
-			//Get the players current faction with pFaction
-			tmpFactionValue = GetCharacterFactionLevel(pFaction);
-			//Tack on any bonuses from Alliance type spell effects
-			tmpFactionValue += GetFactionBonus(pFaction);
-			tmpFactionValue += GetItemFactionBonus(pFaction);
-			//Return the faction to the client
-			fac = CalculateFaction(&fmods, tmpFactionValue);
-		}
-	}
-	else
-	{
-		return(FACTION_INDIFFERENTLY);
-	}
-
-	// merchant fix
-	if (tnpc && tnpc->IsNPC() && tnpc->CastToNPC()->MerchantType && (fac == FACTION_THREATENINGLY || fac == FACTION_SCOWLS))
-		fac = FACTION_DUBIOUSLY;
-
-	if (tnpc != 0 && fac != FACTION_SCOWLS && tnpc->CastToNPC()->CheckAggro(this))
-		fac = FACTION_THREATENINGLY;
-
-	return fac;
+	return GetPlayerFactionLevel(tnpc, pFaction, p_race, p_class, p_deity,
+		char_id, pFaction > 0 ? GetCharacterFactionLevel(pFaction) : 0);
 }
 
 //Sets the characters faction standing with the specified NPC.
@@ -8396,54 +8349,9 @@ int32 Client::GetCharacterFactionLevel(int32 faction_id)
 
 void Client::UpdatePersonalFaction(int32 char_id, int32 npc_value, int32 faction_id, int32 *current_value, int32 temp, int32 this_faction_min, int32 this_faction_max)
 {
-	bool repair = false;
-	bool change = false;
-
-	if (itembonuses.HeroicCHA)
-	{
-		int faction_mod = itembonuses.HeroicCHA / 5;
-		// If our result isn't truncated, then just do that
-		if (npc_value * faction_mod / 100 != 0)
-			npc_value += npc_value * faction_mod / 100;
-		// If our result is truncated, then double a mob's value every once and a while to equal what they would have got
-		else
-		{
-			if (zone->random.Int(0, 100) < faction_mod)
-				npc_value *= 2;
-		}
-	}
-
-	// Set flag when to update db
-	// Repair needed, as db changes could modify a base value for a faction
-	// and we need to auto correct when that happens.
-	if (*current_value > this_faction_max)
-	{
-		*current_value = this_faction_max;
-		repair = true;
-	}
-	else if (*current_value < this_faction_min)
-	{
-		*current_value = this_faction_min;
-		repair = true;
-	}
-	else if ((m_pp.gm != 1) && (npc_value != 0) &&
-		((npc_value > 0 && *current_value != this_faction_max) ||
-		((npc_value < 0 && *current_value != this_faction_min))))
-		change = true;
-
-	if (change || repair)
-	{
-		*current_value += npc_value;
-
-		if (*current_value > this_faction_max)
-			*current_value = this_faction_max;
-		else if (*current_value < this_faction_min)
-			*current_value = this_faction_min;
-
+	if (ApplyPersonalFaction(*current_value, npc_value, this_faction_min, this_faction_max, m_pp.gm == 1)) {
 		database.SetCharacterFactionLevel(char_id, faction_id, *current_value, temp, factionvalues);
 	}
-
-return;
 }
 
 // returns the character's faction level, adjusted for racial, class, and deity modifiers
@@ -8976,6 +8884,11 @@ void Client::ExpeditionSay(const char *str, int ExpID) {
 }
 
 int Client::GetQuiverHaste(int delay)
+{
+	return PlayerQuiverHaste(delay);
+}
+
+int Mob::PlayerQuiverHaste(int delay)
 {
 	const EQ::ItemInstance *pi = nullptr;
 	for (int r = EQ::invslot::GENERAL_BEGIN; r <= EQ::invslot::GENERAL_END; r++) {

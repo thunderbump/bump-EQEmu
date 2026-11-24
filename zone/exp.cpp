@@ -197,6 +197,11 @@ uint64 Client::GetExperienceForKill(Mob *against)
 	}
 #endif
 
+	return GetBaseExperienceForKill(against);
+}
+
+uint64 Mob::GetBaseExperienceForKill(Mob *against)
+{
 	if (against && against->IsNPC()) {
 		uint32 level = (uint32)against->GetLevel();
 		uint64 ret = EXP_FORMULA;
@@ -399,6 +404,83 @@ void Client::CalculateLeadershipExp(uint64 &add_exp, uint8 conlevel)
 	}
 }
 
+// Shared rule stages for normal player and solo actor awards. The caller owns
+// AA allocation, leadership, quest hooks and its persistent experience total.
+uint64 Mob::ScaleNormalExperience(uint64 add_exp, uint8 conlevel)
+{
+	float totalmod = 1.0;
+	float zemmod = 1.0;
+
+	//get modifiers
+	if (RuleR(Character, ExpMultiplier) >= 0) {
+		totalmod *= RuleR(Character, ExpMultiplier);
+	}
+
+	//add the zone exp modifier.
+	if (zone->newzone_data.zone_exp_multiplier >= 0) {
+		zemmod *= zone->newzone_data.zone_exp_multiplier;
+	}
+
+	if (RuleB(Character, UseRaceClassExpBonuses))
+	{
+		if (GetBaseRace() == Race::Halfling) {
+			totalmod *= 1.05;
+		}
+
+		if (GetClass() == Class::Rogue || GetClass() == Class::Warrior) {
+			totalmod *= 1.05;
+		}
+	}
+
+	//add hotzone modifier if one has been set.
+	if (zone->IsHotzone())
+	{
+		totalmod += RuleR(Zone, HotZoneBonus);
+	}
+
+	add_exp = uint64(float(add_exp) * totalmod * zemmod);
+
+	//if XP scaling is based on the con of a monster, do that now.
+	if (RuleB(Character, UseXPConScaling))
+	{
+		if (conlevel != 0xFF)
+		{
+			add_exp = add_exp * GetConLevelModifierPercent(conlevel);
+		}
+	}
+
+	return add_exp;
+}
+
+uint64 Mob::FinishNormalExperience(uint64 add_exp, uint64 current_exp,
+	uint32 experience_for_level, float character_modifier)
+{
+	if (RuleB(Zone, LevelBasedEXPMods)) {
+		if (zone->level_exp_mod[GetLevel()].ExpMod) {
+			add_exp *= zone->level_exp_mod[GetLevel()].ExpMod;
+		}
+	}
+
+	if (RuleR(Character, FinalExpMultiplier) >= 0) {
+		add_exp *= RuleR(Character, FinalExpMultiplier);
+	}
+
+	if (RuleB(Character, EnableCharacterEXPMods)) {
+		add_exp *= character_modifier;
+	}
+
+	//Enforce Percent XP Cap per kill, if rule is enabled
+	int kill_percent_xp_cap = RuleI(Character, ExperiencePercentCapPerKill);
+	if (kill_percent_xp_cap >= 0) {
+		float exp_percent = (float)((float)add_exp / (float)experience_for_level) * (float)100; //EXP needed for level
+		if (exp_percent > kill_percent_xp_cap) {
+			return current_exp + static_cast<uint64>(std::floor(experience_for_level * (kill_percent_xp_cap / 100.0f)));
+		}
+	}
+
+	return current_exp + add_exp;
+}
+
 void Client::CalculateExp(uint64 in_add_exp, uint64 &add_exp, uint64 &add_aaxp, uint8 conlevel, bool resexp)
 {
 	add_exp = in_add_exp;
@@ -419,77 +501,16 @@ void Client::CalculateExp(uint64 in_add_exp, uint64 &add_exp, uint64 &add_aaxp, 
 		//take that amount away from regular exp
 		add_exp -= add_aaxp;
 
-		float totalmod = 1.0;
-		float zemmod = 1.0;
-
-		//get modifiers
-		if (RuleR(Character, ExpMultiplier) >= 0) {
-			totalmod *= RuleR(Character, ExpMultiplier);
-		}
-
-		//add the zone exp modifier.
-		if (zone->newzone_data.zone_exp_multiplier >= 0) {
-			zemmod *= zone->newzone_data.zone_exp_multiplier;
-		}
-
-		if (RuleB(Character, UseRaceClassExpBonuses))
-		{
-			if (GetBaseRace() == Race::Halfling) {
-				totalmod *= 1.05;
-			}
-
-			if (GetClass() == Class::Rogue || GetClass() == Class::Warrior) {
-				totalmod *= 1.05;
-			}
-		}
-
-		//add hotzone modifier if one has been set.
-		if (zone->IsHotzone())
-		{
-			totalmod += RuleR(Zone, HotZoneBonus);
-		}
-
-		add_exp = uint64(float(add_exp) * totalmod * zemmod);
-
-		//if XP scaling is based on the con of a monster, do that now.
-		if (RuleB(Character, UseXPConScaling))
-		{
-			if (conlevel != 0xFF && !resexp)
-			{
-				add_exp = add_exp * GetConLevelModifierPercent(conlevel);
-			}
-		}
+		add_exp = ScaleNormalExperience(add_exp, conlevel);
 
 		// Calculate any changes to leadership experience.
 		CalculateLeadershipExp(add_exp, conlevel);
 	}	//end !resexp
 
-	if (RuleB(Zone, LevelBasedEXPMods)) {
-		if (zone->level_exp_mod[GetLevel()].ExpMod) {
-			add_exp *= zone->level_exp_mod[GetLevel()].ExpMod;
-		}
-	}
-
-	if (RuleR(Character, FinalExpMultiplier) >= 0) {
-		add_exp *= RuleR(Character, FinalExpMultiplier);
-	}
-
-	if (RuleB(Character, EnableCharacterEXPMods)) {
-		add_exp *= zone->GetEXPModifier(this);
-	}
-
-	//Enforce Percent XP Cap per kill, if rule is enabled
-	int kill_percent_xp_cap = RuleI(Character, ExperiencePercentCapPerKill);
-	if (kill_percent_xp_cap >= 0) {
-		auto experience_for_level = (GetEXPForLevel(GetLevel() + 1) - GetEXPForLevel(GetLevel()));
-		float exp_percent = (float)((float)add_exp / (float)(GetEXPForLevel(GetLevel() + 1) - GetEXPForLevel(GetLevel()))) * (float)100; //EXP needed for level
-		if (exp_percent > kill_percent_xp_cap) {
-			add_exp = GetEXP() + static_cast<uint64>(std::floor(experience_for_level * (kill_percent_xp_cap / 100.0f)));
-			return;
-		}
-	}
-
-	add_exp = GetEXP() + add_exp;
+	add_exp = FinishNormalExperience(add_exp, GetEXP(),
+		RuleI(Character, ExperiencePercentCapPerKill) >= 0
+			? GetEXPForLevel(GetLevel() + 1) - GetEXPForLevel(GetLevel()) : 0,
+		RuleB(Character, EnableCharacterEXPMods) ? zone->GetEXPModifier(this) : 1.0f);
 }
 
 void Client::AddEXP(ExpSource exp_source, uint64 in_add_exp, uint8 conlevel, bool resexp, NPC* npc) {
@@ -1010,6 +1031,11 @@ uint32 Client::GetEXPForLevel(uint16 check_level)
 	}
 #endif
 
+	return GetBaseExperienceForLevel(check_level);
+}
+
+uint32 Mob::GetBaseExperienceForLevel(uint16 check_level)
+{
 	uint16 check_levelm1 = check_level-1;
 	float mod;
 	if (check_level < 31)

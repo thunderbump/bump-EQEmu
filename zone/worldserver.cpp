@@ -16,6 +16,7 @@
 	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 #include "worldserver.h"
+#include "actor_population.h"
 
 #include "common/eq_packet_structs.h"
 #include "common/events/player_event_logs.h"
@@ -583,6 +584,15 @@ void WorldServer::HandleMessage(uint16 opcode, const EQ::Net::Packet &p)
 			LogInfo("Zone shutdown by {}.", s->admin_name);
 			zone->Shutdown();
 		}
+		break;
+	}
+	case ServerOP_ActorZoneReady: {
+#ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+		if (pack->size == sizeof(ServerActorZoneBoot_Struct)) {
+			const auto *ready = reinterpret_cast<const ServerActorZoneBoot_Struct *>(pack->pBuffer);
+			ActorPopulation::DestinationReady(ready->actor, ready->owner_epoch, ready->generation, ready->incarnation, ready->destination);
+		}
+#endif
 		break;
 	}
 	case ServerOP_ZoneBootup: {

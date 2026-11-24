@@ -70,8 +70,13 @@ public:
 	void NavigateTo(Mob *who, float x, float y, float z, MobMovementMode mode = MovementRunning);
 	void StopNavigation(Mob *who);
 
-	// Narrow native-actor lane: complete short dry routes only, no stuck/warp fallback.
+	// Native actor routes retain explicit proof/hunt limits. Transfer uses bounded
+    // complete dry navmesh routes; every mode excludes stuck/warp fallback.
 	enum class ActorTravel { Idle, Moving, Completed, Interrupted };
+    enum class ActorRoutePurpose { Proof, Hunt, Transfer };
+    bool NavigateActorTo(Mob *who, float x, float y, float z, ActorRoutePurpose purpose);
+    bool CanNavigateActorTo(Mob *who, float x, float y, float z, ActorRoutePurpose purpose,
+        ActorDemo::HuntRouteEvidence *evidence = nullptr);
 	bool NavigateActorTo(Mob *who, float x, float y, float z, bool public_hunt = false);
     bool CanNavigateActorTo(Mob *who, float x, float y, float z, bool public_hunt = false,
         ActorDemo::HuntRouteEvidence *evidence = nullptr);

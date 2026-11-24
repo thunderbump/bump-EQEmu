@@ -10,7 +10,13 @@ use std::{
     time::Instant,
 };
 
-pub const LIMIT: u64 = 65_536;
+pub const LIMIT: u64 = 1_048_576;
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Inventory {
+    initialized: bool,
+    items: Vec<actor_core::inventory::Item>,
+}
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Record {
@@ -19,7 +25,17 @@ struct Record {
     home: [f64; 3],
     position: [f64; 3],
     hp: i64,
+    #[serde(default)]
+    max_hp: Option<i64>,
     rest_ms: u64,
+    #[serde(default)]
+    experience: Option<u64>,
+    #[serde(default)]
+    level: Option<u8>,
+    #[serde(default)]
+    reputation: Option<std::collections::BTreeMap<i32, i32>>,
+    #[serde(default)]
+    inventory: Option<Inventory>,
     completed: u64,
     yielded: u64,
     failed: u64,
@@ -109,7 +125,7 @@ impl Store {
             return Err("invalid_native_checkpoint_facts".into());
         }
         let disk = Disk {
-            schema: 1,
+            schema: 2,
             zone: 2,
             profile: PROFILE.into(),
             revision,
@@ -123,7 +139,15 @@ impl Store {
                     home: [HOME.x, HOME.y, HOME.z],
                     position: [s.point.x, s.point.y, s.point.z],
                     hp: s.hp,
+                    max_hp: Some(s.max_hp),
                     rest_ms: s.rest_ms,
+                    experience: Some(s.experience),
+                    level: Some(s.level),
+                    reputation: Some(s.reputation.clone()),
+                    inventory: Some(Inventory {
+                        initialized: s.inventory.is_some(),
+                        items: s.inventory.clone().unwrap_or_default(),
+                    }),
                     completed: s.completed,
                     yielded: s.yielded,
                     failed: s.failed,
@@ -144,7 +168,7 @@ fn decode(bytes: &[u8]) -> Result<Loaded, String> {
     let disk: Disk =
         serde_json::from_slice(bytes).map_err(|e| format!("checkpoint_schema: {e}"))?;
     if disk.revision == 0
-        || disk.schema != 1
+        || !matches!(disk.schema, 1 | 2)
         || disk.zone != 2
         || disk.profile != PROFILE
         || disk.actors.len() != COUNT
@@ -162,15 +186,41 @@ fn decode(bytes: &[u8]) -> Result<Loaded, String> {
             "dead" => Desired::Dead,
             _ => return Err("checkpoint_actor_state".into()),
         };
+        let (experience, level, reputation) =
+            match (disk.schema, r.experience, r.level, r.reputation) {
+                (1, None, None, None) => (0, 1, std::collections::BTreeMap::new()),
+                (2, Some(value), Some(level), Some(reputation)) => (value, level, reputation),
+                _ => return Err("checkpoint_experience_schema".into()),
+            };
+        let max_hp = match (disk.schema, r.max_hp) {
+            (1, None) => 100,
+            (2, Some(value)) if value > 0 => value,
+            _ => return Err("checkpoint_max_hp_schema".into()),
+        };
+        let inventory = match (disk.schema, r.inventory) {
+            (1, None) => None,
+            (2, Some(inventory)) if inventory.initialized => Some(inventory.items),
+            (2, Some(inventory)) if inventory.items.is_empty() => None,
+            _ => return Err("checkpoint_inventory_schema".into()),
+        };
         saved[i] = Saved {
             desired,
+            zone: 2,
+            previous_zone: 0,
+            owner_epoch: 0,
+            transfer: None,
             point: Point {
                 x: r.position[0],
                 y: r.position[1],
                 z: r.position[2],
             },
             hp: r.hp,
+            max_hp,
             rest_ms: r.rest_ms,
+            experience,
+            level,
+            reputation,
+            inventory,
             completed: r.completed,
             yielded: r.yielded,
             failed: r.failed,
@@ -230,6 +280,32 @@ mod tests {
         s[0].desired = Desired::Enabled;
         s[0].hp = 47;
         s[0].rest_ms = 6172;
+        s[0].experience = 12345;
+        s[0].level = 3;
+        s[0].reputation.insert(203, -10);
+        s[0].inventory = Some(vec![
+            actor_core::inventory::Item {
+                parent: -1,
+                kind: 0,
+                slot: 23,
+                id: 17005,
+                serial: 41,
+                custom: "actor^bag^".into(),
+                charges: -1,
+                ..actor_core::inventory::Item::default()
+            },
+            actor_core::inventory::Item {
+                parent: 0,
+                kind: 1,
+                slot: 2,
+                id: 1001,
+                serial: 42,
+                charges: 3,
+                color: 0x123456,
+                attuned: true,
+                ..actor_core::inventory::Item::default()
+            },
+        ]);
         s[1].desired = Desired::Dead;
         s[1].hp = 0;
         for revision in 1..4 {
@@ -237,6 +313,10 @@ mod tests {
             let l = store.load().unwrap();
             assert_eq!(l.saved[0].hp, 47);
             assert_eq!(l.saved[0].rest_ms, 6172);
+            assert_eq!(l.saved[0].experience, 12345);
+            assert_eq!(l.saved[0].level, 3);
+            assert_eq!(l.saved[0].reputation.get(&203), Some(&-10));
+            assert_eq!(l.saved[0].inventory, s[0].inventory);
             assert_eq!(l.saved[1].desired, Desired::Dead);
             assert_eq!(l.revision, revision);
         }
@@ -248,6 +328,38 @@ mod tests {
         fs::remove_dir_all(p).unwrap();
     }
     #[test]
+    fn legacy_upgrade_is_explicit_and_new_progression_cannot_disappear() {
+        let p = directory();
+        let mut store = Store::open(p.to_str().unwrap()).unwrap();
+        store
+            .write(&std::array::from_fn(Saved::initial), 1, true)
+            .unwrap();
+        let mut json: serde_json::Value =
+            serde_json::from_slice(&fs::read(p.join("checkpoint.json")).unwrap()).unwrap();
+        // Missing progression in v2 is corruption, never a reset to zero.
+        for actor in json["actors"].as_array_mut().unwrap() {
+            actor.as_object_mut().unwrap().remove("experience");
+            actor.as_object_mut().unwrap().remove("level");
+            actor.as_object_mut().unwrap().remove("reputation");
+            actor.as_object_mut().unwrap().remove("inventory");
+            actor.as_object_mut().unwrap().remove("max_hp");
+        }
+        assert!(decode(&serde_json::to_vec(&json).unwrap()).is_err());
+        json["schema"] = 1.into();
+        let loaded = decode(&serde_json::to_vec(&json).unwrap()).unwrap();
+        assert!(loaded.saved.iter().all(|s| s.experience == 0));
+        // The migration is read-only until normal checkpoint publication.
+        store.write(&loaded.saved, 2, true).unwrap();
+        let published: serde_json::Value =
+            serde_json::from_slice(&fs::read(p.join("checkpoint.json")).unwrap()).unwrap();
+        assert_eq!(published["schema"], 2);
+        assert_eq!(published["actors"][0]["experience"], 0);
+        json["actors"][0]["experience"] = 900.into();
+        assert!(decode(&serde_json::to_vec(&json).unwrap()).is_err());
+        fs::remove_dir_all(p).unwrap();
+    }
+
+    #[test]
     fn corruption_schema_ids_and_io_failures_preserve_evidence() {
         let p = directory();
         let mut store = Store::open(p.to_str().unwrap()).unwrap();
@@ -258,7 +370,7 @@ mod tests {
             b"not json".to_vec(),
             String::from_utf8(valid.clone())
                 .unwrap()
-                .replace("\"schema\":1", "\"schema\":2")
+                .replace("\"schema\":2", "\"schema\":3")
                 .into_bytes(),
             String::from_utf8(valid.clone())
                 .unwrap()

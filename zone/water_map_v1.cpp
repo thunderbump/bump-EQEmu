@@ -16,6 +16,7 @@
 	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 #include "water_map_v1.h"
+#include <cmath>
 
 WaterMapV1::WaterMapV1() {
 	BSP_Root = nullptr;
@@ -69,6 +70,7 @@ bool WaterMapV1::Load(FILE *fp) {
 	if (fread(BSP_Root, sizeof(ZBSP_Node), bsp_tree_size, fp) != bsp_tree_size) {
 		return false;
 	}
+	node_count_ = bsp_tree_size;
 
 	return true;
 }
@@ -104,4 +106,30 @@ WaterRegionType WaterMapV1::BSPReturnRegionType(int32 node_number, const glm::ve
 	}
 
 	return BSPReturnRegionType(current_node->right, location);
+}
+
+bool WaterMapV1::SegmentInLiquid(const glm::vec3 &from, const glm::vec3 &to) const {
+    auto budget = node_count_;
+    return SegmentInLiquid(1, {from.y, from.x, from.z}, {to.y, to.x, to.z}, budget, 0);
+}
+bool WaterMapV1::SegmentInLiquid(int32 number, const glm::vec3 &from, const glm::vec3 &to, uint32 &budget, unsigned depth) const {
+    if (!number) { return false; } // Same untagged branch interpretation as the point query.
+    if (!budget || depth > 256 || number < 1 || uint32(number) > node_count_) { return true; }
+    --budget;
+    const auto &node = BSP_Root[number - 1];
+    if (!node.left && !node.right) {
+        return node.special == RegionTypeWater || node.special == RegionTypeLava || node.special == RegionTypeVWater;
+    }
+    const auto distance = [&](const glm::vec3 &p) { return p.x*node.normal[0] + p.y*node.normal[1] + p.z*node.normal[2] + node.splitdistance; };
+    const auto a = distance(from), b = distance(to);
+    if (!std::isfinite(a) || !std::isfinite(b)) { return true; }
+    if (a >= 0 && b >= 0 && (a > 0 || b > 0)) { return SegmentInLiquid(node.left, from, to, budget, depth+1); }
+    if (a <= 0 && b <= 0 && (a < 0 || b < 0)) { return SegmentInLiquid(node.right, from, to, budget, depth+1); }
+    if (a == 0 && b == 0) {
+        return SegmentInLiquid(node.left, from, to, budget, depth+1) || SegmentInLiquid(node.right, from, to, budget, depth+1);
+    }
+    const auto middle = from + (to-from) * (a/(a-b));
+    const auto first = a > 0 ? node.left : node.right;
+    const auto second = b > 0 ? node.left : node.right;
+    return SegmentInLiquid(first, from, middle, budget, depth+1) || SegmentInLiquid(second, middle, to, budget, depth+1);
 }

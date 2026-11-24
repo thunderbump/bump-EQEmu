@@ -1,4 +1,4 @@
-use crate::checkpoint::Store;
+use crate::custody::Store;
 use actor_core::population as core;
 use std::{
     fs::{self, File},
@@ -6,7 +6,31 @@ use std::{
 };
 
 #[cxx::bridge(namespace = "eqemu_population")]
-mod ffi {
+pub(crate) mod ffi {
+    struct HuntBounds {
+        minimum: u8,
+        maximum: u8,
+    }
+    struct Route {
+        id: u32,
+        zone: u32,
+        x: f64,
+        y: f64,
+        z: f64,
+        arrival_x: f64,
+        arrival_y: f64,
+        arrival_z: f64,
+        hint_distance: f64,
+    }
+    struct FactionChange {
+        id: i32,
+        before: i32,
+        after: i32,
+    }
+    struct Standing {
+        id: i32,
+        value: i32,
+    }
     #[derive(Default)]
     struct Body {
         actor: u8,
@@ -23,6 +47,7 @@ mod ffi {
         y: f64,
         z: f64,
         hp: i64,
+        max_hp: i64,
         idle: bool,
         moving: bool,
         sitting: bool,
@@ -31,6 +56,17 @@ mod ffi {
         contested: bool,
         target_viable: bool,
         pending_kill: bool,
+        kill_experience: u64,
+        factions: Vec<FactionChange>,
+        level: u8,
+        level_cap: u8,
+        next_level_at: u64,
+        experience_cap: u64,
+        inventory_json: String,
+        routes: Vec<Route>,
+        travel_complete: bool,
+        travel_failed: bool,
+        destination_ready: bool,
         swings: u64,
         hits: u64,
         damage: u64,
@@ -55,6 +91,7 @@ mod ffi {
         name: String,
         safe: bool,
         idle: bool,
+        hostile_mask: u8,
     }
     #[repr(u8)]
     enum Outcome {
@@ -67,6 +104,10 @@ mod ffi {
     #[repr(u8)]
     enum Kind {
         Spawn,
+        LevelUp,
+        Travel,
+        PrepareTransfer,
+        BootDestination,
         Probe,
         Engage,
         Release,
@@ -88,11 +129,26 @@ mod ffi {
         y: f64,
         z: f64,
         hp: i64,
+        level: u8,
+        inventory_json: String,
+        owner_epoch: u64,
+        connection: u32,
+        destination: u32,
+        experience: u64,
+        arrival_x: f64,
+        arrival_y: f64,
+        arrival_z: f64,
     }
     extern "Rust" {
         type Population;
         fn population_open(directory: &str, session: &str) -> Result<Box<Population>>;
+        fn population_open_zone(
+            directory: &str,
+            session: &str,
+            zone: u32,
+        ) -> Result<Box<Population>>;
         fn needs_scan(self: &Population, now: u64) -> bool;
+        fn reputation(self: &Population, actor: u8) -> Vec<Standing>;
         fn step(
             self: &mut Population,
             now: u64,
@@ -103,7 +159,9 @@ mod ffi {
         ) -> Vec<Action>;
         fn begin_shutdown(self: &mut Population);
         fn failed(self: &Population) -> bool;
+        fn active(self: &Population) -> bool;
         fn prey_profile(type_id: u32, level: u8, name: &str) -> bool;
+        fn hunting_bounds(level: u8) -> HuntBounds;
     }
 }
 impl Default for ffi::Outcome {
@@ -115,6 +173,16 @@ fn key(id: u16, incarnation: u64) -> core::Key {
     core::Key { id, incarnation }
 }
 fn body(b: &ffi::Body) -> core::Body {
+    let inventory = if b.inventory_json.is_empty() {
+        Ok(None)
+    } else {
+        serde_json::from_str::<Option<Vec<actor_core::inventory::Item>>>(&b.inventory_json)
+    };
+    let inventory_valid = inventory.as_ref().is_ok_and(|items| {
+        items
+            .as_ref()
+            .is_none_or(|items| actor_core::inventory::valid(items))
+    });
     core::Body {
         lifetime: core::Lifetime {
             key: key(b.id, b.incarnation),
@@ -130,6 +198,7 @@ fn body(b: &ffi::Body) -> core::Body {
             z: b.z,
         },
         hp: b.hp,
+        max_hp: b.max_hp,
         goal: b.goal,
         operation: b.operation,
         idle: b.idle,
@@ -146,6 +215,45 @@ fn body(b: &ffi::Body) -> core::Body {
         contested: b.contested,
         target_viable: b.target_viable,
         pending_kill: b.pending_kill,
+        kill_experience: b.kill_experience,
+        factions: std::array::from_fn(|i| {
+            b.factions
+                .get(i)
+                .map(|f| core::FactionChange {
+                    id: f.id,
+                    before: f.before,
+                    after: f.after,
+                })
+                .unwrap_or_default()
+        }),
+        level: b.level,
+        level_cap: b.level_cap,
+        next_level_at: b.next_level_at,
+        experience_cap: b.experience_cap,
+        inventory: inventory.unwrap_or_default(),
+        routes: b
+            .routes
+            .iter()
+            .take(64)
+            .map(|r| core::Route {
+                id: r.id,
+                zone: r.zone,
+                exit: core::Point {
+                    x: r.x,
+                    y: r.y,
+                    z: r.z,
+                },
+                arrival: core::Point {
+                    x: r.arrival_x,
+                    y: r.arrival_y,
+                    z: r.arrival_z,
+                },
+                distance: (b.x - r.x).hypot(b.y - r.y) + r.hint_distance,
+            })
+            .collect(),
+        travel_complete: b.travel_complete,
+        travel_failed: b.travel_failed,
+        destination_ready: b.destination_ready,
         swings: b.swings,
         hits: b.hits,
         damage: b.damage,
@@ -156,6 +264,9 @@ fn body(b: &ffi::Body) -> core::Body {
         probe_ready: b.probe_ready,
         probe_ok: b.probe_ok,
         error: b.error
+            || b.routes.len() > 64
+            || !inventory_valid
+            || b.factions.len() > 20
             || !matches!(
                 b.outcome,
                 ffi::Outcome::None
@@ -167,11 +278,15 @@ fn body(b: &ffi::Body) -> core::Body {
         refused: b.refused,
     }
 }
-fn action(a: core::Action) -> ffi::Action {
+fn action(a: core::Action, saved: &core::Saved) -> ffi::Action {
     ffi::Action {
         actor: a.actor as u8,
         kind: match a.kind {
             core::ActionKind::Spawn => ffi::Kind::Spawn,
+            core::ActionKind::LevelUp => ffi::Kind::LevelUp,
+            core::ActionKind::Travel => ffi::Kind::Travel,
+            core::ActionKind::PrepareTransfer => ffi::Kind::PrepareTransfer,
+            core::ActionKind::BootDestination => ffi::Kind::BootDestination,
             core::ActionKind::Probe => ffi::Kind::Probe,
             core::ActionKind::Engage => ffi::Kind::Engage,
             core::ActionKind::Release => ffi::Kind::Release,
@@ -190,6 +305,15 @@ fn action(a: core::Action) -> ffi::Action {
         y: a.point.y,
         z: a.point.z,
         hp: a.hp,
+        level: a.level,
+        inventory_json: serde_json::to_string(&saved.inventory).expect("validated inventory"),
+        owner_epoch: a.owner_epoch,
+        connection: a.route.map(|r| r.id).unwrap_or_default(),
+        destination: a.route.map(|r| r.zone).unwrap_or_default(),
+        experience: saved.experience,
+        arrival_x: a.route.map(|r| r.arrival.x).unwrap_or_default(),
+        arrival_y: a.route.map(|r| r.arrival.y).unwrap_or_default(),
+        arrival_z: a.route.map(|r| r.arrival.z).unwrap_or_default(),
     }
 }
 
@@ -207,11 +331,39 @@ pub struct Population {
     latest: [core::Body; core::COUNT],
 }
 fn population_open(directory: &str, session: &str) -> Result<Box<Population>, String> {
-    crate::boundary(|| population_open_inner(directory, session))
+    crate::boundary(|| population_open_inner(directory, session, 2))
 }
-fn population_open_inner(directory: &str, session: &str) -> Result<Box<Population>, String> {
-    let store = Store::open(directory)?;
+fn population_open_zone(
+    directory: &str,
+    session: &str,
+    zone: u32,
+) -> Result<Box<Population>, String> {
+    crate::boundary(|| population_open_inner(directory, session, zone))
+}
+fn control_name(zone: u32) -> String {
+    if zone == 2 {
+        "command".into()
+    } else {
+        format!("command-zone-{zone}")
+    }
+}
+fn status_name(zone: u32) -> String {
+    if zone == 2 {
+        "status.json".into()
+    } else {
+        format!("status-zone-{zone}.json")
+    }
+}
+fn population_open_inner(
+    directory: &str,
+    session: &str,
+    zone: u32,
+) -> Result<Box<Population>, String> {
+    let mut store = Store::open(directory, zone)?;
     let loaded = store.load();
+    if matches!(&loaded, Err(error) if error == "actor_owner_lock_refused") {
+        return Err("actor_owner_lock_refused".into());
+    }
     let (saved, revision, clean, fault) = match loaded {
         Ok(l) => (
             l.saved,
@@ -225,15 +377,19 @@ fn population_open_inner(directory: &str, session: &str) -> Result<Box<Populatio
         ),
         Err(e) => (std::array::from_fn(core::Saved::initial), 0, false, e),
     };
-    let old = store.directory.join("command");
+    let old = store.directory.join(control_name(zone));
     if let Err(e) = fs::remove_file(old)
         && e.kind() != std::io::ErrorKind::NotFound
     {
         return Err(format!("command_cleanup: {e}"));
     }
+    let mut core = core::Population::new(saved);
+    core.zone = zone;
+    core.owned = store.mask();
+    crate::integration::bind_session(session);
     Ok(Box::new(Population {
         store,
-        core: core::Population::new(saved),
+        core,
         session: session.into(),
         revision,
         clean,
@@ -242,16 +398,43 @@ fn population_open_inner(directory: &str, session: &str) -> Result<Box<Populatio
         command_result: "ready",
         io_at: 0,
         save_at: 0,
-        latest: [core::Body {
+        latest: std::array::from_fn(|_| core::Body {
             drained: true,
             ..core::Body::default()
-        }; core::COUNT],
+        }),
     }))
 }
+fn hunting_bounds(level: u8) -> ffi::HuntBounds {
+    let (minimum, maximum) = core::hunting_bounds(level);
+    ffi::HuntBounds { minimum, maximum }
+}
+
 fn prey_profile(type_id: u32, level: u8, name: &str) -> bool {
     core::prey_profile(type_id, level, name)
 }
 impl Population {
+    fn reputation(&self, actor: u8) -> Vec<ffi::Standing> {
+        self.core
+            .actors
+            .get(usize::from(actor))
+            .map(|a| {
+                a.saved
+                    .reputation
+                    .iter()
+                    .map(|(id, value)| ffi::Standing {
+                        id: *id,
+                        value: *value,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+    fn active(&self) -> bool {
+        self.core.actors.iter().enumerate().any(|(i, a)| {
+            self.core.owned & (1 << i) != 0
+                && (a.saved.desired == core::Desired::Enabled || a.phase != core::Phase::Dormant)
+        })
+    }
     fn failed(&self) -> bool {
         !self.fault.is_empty()
     }
@@ -268,9 +451,15 @@ impl Population {
             self.core.drain();
             return false;
         };
-        match self.store.write(&self.core.saved(), revision, clean) {
-            Ok(()) => {
-                self.revision = revision;
+        match self.store.write(
+            &self.core.saved(),
+            revision,
+            clean,
+            std::array::from_fn(|i| self.latest[i].drained),
+        ) {
+            Ok(published) => {
+                self.revision = published;
+                self.core.owned = self.store.mask();
                 self.clean = clean;
                 true
             }
@@ -282,7 +471,7 @@ impl Population {
         }
     }
     fn command(&mut self) {
-        let path = self.store.directory.join("command");
+        let path = self.store.directory.join(control_name(self.core.zone));
         let f = match File::open(&path) {
             Ok(f) => f,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
@@ -312,6 +501,7 @@ impl Population {
             return;
         }
         self.last_request = request;
+        crate::integration::command(request, verb);
         if self.failed() {
             self.command_result = "recovery_required";
             return;
@@ -380,10 +570,35 @@ impl Population {
             self.core.drain();
         } else {
             self.latest = std::array::from_fn(|i| body(&bodies[i]));
+            // Observer admission must not inspect frames rejected by the native
+            // shape guard, including an excess fourth logical actor.
+            for (i, body) in bodies.iter().enumerate() {
+                crate::integration::native_body(i, body, &self.core.actors[i].saved);
+            }
         }
+        let mut pending_boots = Vec::new();
         let io = now >= self.io_at;
         if io {
             self.io_at = now + 1000;
+            if !self.failed() && !self.core.quiescing {
+                match self.store.refresh() {
+                    Ok(adopted) => {
+                        for (index, saved) in adopted {
+                            if !self.latest[index].drained || !self.core.adopt(index, saved) {
+                                self.fault = "actor_adoption_before_native_drain".into();
+                            }
+                        }
+                        self.core.owned = self.store.mask();
+                    }
+                    Err(error) => self.fault = error,
+                }
+            }
+            if !self.failed() {
+                match self.store.pending_boots() {
+                    Ok(records) => pending_boots = records,
+                    Err(error) => self.fault = error,
+                }
+            }
             self.command();
         }
         if self.failed() {
@@ -406,34 +621,69 @@ impl Population {
                     name: p.name,
                     safe: p.safe,
                     idle: p.idle,
+                    hostile_mask: p.hostile_mask,
                 })
                 .collect()
         };
         let before = self.core.saved();
         let mut actions = self.core.tick(now, &self.latest, &candidates, scanned);
-        if actions.iter().any(|a| a.kind == core::ActionKind::Spawn)
-            && self.clean
-            && !self.save(false)
-        {
+        for (i, saved) in pending_boots {
+            actions.push(core::Action {
+                actor: i,
+                kind: core::ActionKind::BootDestination,
+                lifetime: core::Lifetime::default(),
+                target: core::Key::default(),
+                goal: 0,
+                point: saved.point,
+                hp: saved.hp,
+                level: saved.level,
+                owner_epoch: saved.owner_epoch,
+                route: Some(core::Route {
+                    zone: saved.zone,
+                    ..core::Route::default()
+                }),
+            });
+        }
+        if actions.iter().any(|a| a.kind == core::ActionKind::Spawn) && !self.save(false) {
             actions.retain(|a| a.kind != core::ActionKind::Spawn);
         }
         let defeated = before.iter().zip(self.core.actors.iter()).any(|(old, a)| {
             old.desired != core::Desired::Dead && a.saved.desired == core::Desired::Dead
         });
+        let awarded = before.iter().zip(self.core.actors.iter()).any(|(old, a)| {
+            old.completed != a.saved.completed
+                || old.level != a.saved.level
+                || old.inventory != a.saved.inventory
+                || old.transfer != a.saved.transfer
+                || old.zone != a.saved.zone
+        });
+        let transfer_retirement = actions.iter().any(|action| {
+            action.kind == core::ActionKind::Retire
+                && self.core.actors[action.actor].phase == core::Phase::TransferDrain
+        });
         let was_clean = self.clean;
         if !self.failed() {
             let quiet = self.core.drained(&self.latest)
                 && (self.core.quiescing
-                    || self
-                        .core
-                        .actors
-                        .iter()
-                        .all(|a| a.saved.desired != core::Desired::Enabled));
+                    || self.core.actors.iter().enumerate().all(|(i, a)| {
+                        self.core.owned & (1 << i) == 0 || a.saved.desired != core::Desired::Enabled
+                    }));
             if quiet && (!self.clean || self.revision == 0) {
                 self.save(true);
-            } else if !quiet && (defeated || now >= self.save_at) {
+            } else if !quiet && (defeated || awarded || transfer_retirement || now >= self.save_at)
+            {
                 self.save_at = now + 5000;
                 self.save(false);
+            }
+        }
+        if !self.failed() {
+            for action in &actions {
+                if action.kind == core::ActionKind::LevelUp {
+                    crate::integration::level_request(
+                        action.actor,
+                        &self.core.actors[action.actor].saved,
+                    );
+                }
             }
         }
         // Status publication can fail too. All I/O must precede the final
@@ -456,21 +706,30 @@ impl Population {
                         goal: a.goal,
                         point: a.saved.point,
                         hp: a.saved.hp,
+                        level: a.saved.level,
+                        owner_epoch: a.saved.owner_epoch,
+                        route: a.saved.transfer,
                     });
                 }
             }
         }
-        actions.into_iter().map(action).collect()
+        actions
+            .into_iter()
+            .map(|a| {
+                let i = a.actor;
+                action(a, &self.core.actors[i].saved)
+            })
+            .collect()
     }
     fn status(&mut self, now: u64, overflow: bool) {
         let live = self.latest.iter().filter(|b| b.present).count();
         let actors:Vec<_>=self.core.actors.iter().enumerate().map(|(i,a)|{
-            let b=self.latest[i];serde_json::json!({"id":format!("hunter-{}",i+1),"desired":a.saved.desired.name(),"phase":a.phase.name(),
+            let b=&self.latest[i];serde_json::json!({"id":format!("hunter-{}",i+1),"owner_zone":a.saved.zone,"owner_epoch":a.saved.owner_epoch,"owned_here":self.core.owned & (1 << i) != 0,"desired":a.saved.desired.name(),"phase":a.phase.name(),
                 "reason":a.reason,"native_id":b.lifetime.key.id,"incarnation":b.lifetime.key.incarnation,"epoch":b.lifetime.epoch,"generation":b.lifetime.generation,
                 "body_present":b.present,"runtime_alive":b.runtime_alive,"drained":b.drained,"native_hp":if b.present{Some(b.hp)}else{None},
                 "goal":a.goal,"operation":b.operation,"target_id":a.target.id,"target_incarnation":a.target.incarnation,
-                "position":[a.saved.point.x,a.saved.point.y,a.saved.point.z],"hp":a.saved.hp,"rest_remaining_ms":a.saved.rest_ms,
-                "completed":a.saved.completed,"yielded":a.saved.yielded,"failed":a.saved.failed,"eligible":a.eligible,"claim_conflicts":a.claim_conflicts,
+                "position":[a.saved.point.x,a.saved.point.y,a.saved.point.z],"hp":a.saved.hp,"max_hp":a.saved.max_hp,"rest_remaining_ms":a.saved.rest_ms,
+                "level":a.saved.level,"experience":a.saved.experience,"reputation":a.saved.reputation,"completed":a.saved.completed,"yielded":a.saved.yielded,"failed":a.saved.failed,"eligible":a.eligible,"claim_conflicts":a.claim_conflicts,
                 "swings":a.outgoing.swings,"hits":a.outgoing.hits,"damage":a.outgoing.damage,"incoming_swings":a.incoming.swings,"incoming_hits":a.incoming.hits,"incoming_damage":a.incoming.damage,
                 "minimum_hp":a.minimum_hp,"observed_rest_hp_gain":a.rest_hp_gain})
         }).collect();
@@ -484,10 +743,11 @@ impl Population {
             "live_owned":live,"custody_drained":self.core.drained(&self.latest),"actors":actors,"claims":claims,"updated_ms":now});
         let bytes = serde_json::to_vec(&data).expect("finite native status");
         // Status needs atomic visibility, not a disk barrier each second.
-        let tmp = self.store.directory.join("status.json.tmp");
+        let name = status_name(self.core.zone);
+        let tmp = self.store.directory.join(format!("{name}.tmp"));
         if bytes.len() > 65_536
             || fs::write(&tmp, bytes)
-                .and_then(|_| fs::rename(tmp, self.store.directory.join("status.json")))
+                .and_then(|_| fs::rename(tmp, self.store.directory.join(name)))
                 .is_err()
         {
             self.fault = "status_io_failed".into();
@@ -533,6 +793,62 @@ fn parse(bytes: &[u8]) -> Option<(&str, &str, u64, Option<usize>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejected_native_frame_never_indexes_observer_past_actor_count() {
+        for length in [2, 4] {
+            let directory = dir();
+            let mut population =
+                population_open(directory.to_str().unwrap(), "invalid-frame").unwrap();
+            let frames = (0..length)
+                .map(|index| ffi::Body {
+                    actor: index as u8,
+                    ..ffi::Body::default()
+                })
+                .collect();
+            let actions = population.step_inner(1, frames, Vec::new(), false, false);
+            assert_eq!(population.fault, "invalid_native_frame");
+            assert!(actions.is_empty());
+            assert!(population.latest.iter().all(|body| body.drained));
+            drop(population);
+            fs::remove_dir_all(directory).unwrap();
+        }
+    }
+    #[test]
+    fn travel_cost_includes_reaching_the_exit_before_destination_prey() {
+        let mut native = ffi::Body {
+            routes: vec![
+                ffi::Route {
+                    id: 1,
+                    zone: 3,
+                    x: 100.0,
+                    y: 0.0,
+                    z: 0.0,
+                    arrival_x: 0.0,
+                    arrival_y: 0.0,
+                    arrival_z: 0.0,
+                    hint_distance: 1.0,
+                },
+                ffi::Route {
+                    id: 2,
+                    zone: 4,
+                    x: 2.0,
+                    y: 0.0,
+                    z: 0.0,
+                    arrival_x: 0.0,
+                    arrival_y: 0.0,
+                    arrival_z: 0.0,
+                    hint_distance: 20.0,
+                },
+            ],
+            ..ffi::Body::default()
+        };
+        let projected = body(&native);
+        assert!(projected.routes[1].distance < projected.routes[0].distance);
+        native.x = 100.0;
+        let moved = body(&native);
+        assert!(moved.routes[0].distance < moved.routes[1].distance);
+    }
     fn dir() -> std::path::PathBuf {
         use std::os::unix::fs::PermissionsExt;
         let p = std::env::temp_dir().join(format!(
@@ -616,13 +932,55 @@ mod tests {
             .collect()
     }
     #[test]
+    fn kill_credit_save_failure_preserves_dirty_evidence_and_blocks_replay() {
+        let d = dir();
+        let mut p = population_open(d.to_str().unwrap(), "s").unwrap();
+        fs::write(d.join("command"), "start s 1 all").unwrap();
+        p.step(1, bodies(), Vec::new(), false, false);
+        let mut frame = live(false);
+        p.step(2, live(false), Vec::new(), false, false);
+        // A later native victory carries the admitted lifetime/goal and award.
+        p.core.actors[0].target = key(99, 999);
+        p.core.actors[0].goal = 1;
+        p.core.actors[0].phase = core::Phase::Fighting;
+        frame[0].goal = 1;
+        frame[0].outcome = ffi::Outcome::Victory;
+        frame[0].kill_experience = 275;
+        fs::create_dir(d.join("actors-v3/actor-1.json.tmp")).unwrap();
+        // Before the periodic deadline, the award itself must force a save.
+        let actions = p.step(3, frame, Vec::new(), false, false);
+        assert!(p.failed());
+        assert!(actions.iter().all(|a| a.kind == ffi::Kind::Retire));
+        assert_eq!(p.core.actors[0].saved.experience, 275);
+        let evidence = fs::read(d.join("actors-v3/actor-1.json")).unwrap();
+        let loaded = p.store.load().unwrap();
+        assert!(!loaded.clean);
+        assert_eq!(loaded.saved[0].experience, 0);
+        drop(p);
+        let mut restored = population_open(d.to_str().unwrap(), "next").unwrap();
+        fs::write(d.join("command"), "start next 1 all").unwrap();
+        assert!(
+            restored
+                .step(1, bodies(), Vec::new(), false, false)
+                .is_empty()
+        );
+        assert!(restored.failed());
+        assert_eq!(
+            fs::read(d.join("actors-v3/actor-1.json")).unwrap(),
+            evidence
+        );
+        drop(restored);
+        fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
     fn storage_failure_drains_live_actors_and_leaves_dirty_evidence() {
         let d = dir();
         let mut p = population_open(d.to_str().unwrap(), "s").unwrap();
         fs::write(d.join("command"), "start s 1 all").unwrap();
         p.step(1, bodies(), Vec::new(), false, false);
         p.step(2, live(false), Vec::new(), false, false);
-        fs::create_dir(d.join("checkpoint.json.tmp")).unwrap();
+        fs::create_dir(d.join("actors-v3/actor-1.json.tmp")).unwrap();
         let actions = p.step(5001, live(false), Vec::new(), false, false);
         assert!(p.failed());
         assert_eq!(actions.len(), 3);
@@ -646,18 +1004,21 @@ mod tests {
         let mut p = population_open(d.to_str().unwrap(), "s").unwrap();
         p.step(1, bodies(), Vec::new(), false, false);
         drop(p);
-        let good = fs::read_to_string(d.join("checkpoint.json")).unwrap();
+        let good = fs::read_to_string(d.join("actors-v3/actor-1.json")).unwrap();
         fs::write(
-            d.join("checkpoint.json"),
+            d.join("actors-v3/actor-1.json"),
             good.replace("\"hp\":100", "\"hp\":0"),
         )
         .unwrap();
-        let evidence = fs::read(d.join("checkpoint.json")).unwrap();
+        let evidence = fs::read(d.join("actors-v3/actor-1.json")).unwrap();
         let mut p = population_open(d.to_str().unwrap(), "next").unwrap();
         fs::write(d.join("command"), "start next 1 all").unwrap();
         assert!(p.step(1, bodies(), Vec::new(), false, false).is_empty());
         assert!(p.failed());
-        assert_eq!(fs::read(d.join("checkpoint.json")).unwrap(), evidence);
+        assert_eq!(
+            fs::read(d.join("actors-v3/actor-1.json")).unwrap(),
+            evidence
+        );
         drop(p);
         fs::remove_dir_all(d).unwrap();
     }

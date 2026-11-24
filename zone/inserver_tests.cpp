@@ -6,14 +6,23 @@
 #include "common/json/json.hpp"
 #include "common/timer.h"
 #include "common/rulesys.h"
+#include "common/eqemu_config.h"
+#include "common/content/world_content_service.h"
 #include "zone/beacon.h"
 #include "zone/actor_body.h"
+#include "zone/actor_inventory.h"
+#include "zone/actor_integration.h"
+#include "zone/actor_zones.h"
+#include "common/item_instance.h"
+#include <memory>
 #include "zone/npc.h"
 #include "zone/entity.h"
 #include "zone/worldserver.h"
 #include "zone/zone.h"
 #include "zone/zonedb.h"
 #include "zone/water_map.h"
+#include "zone/water_map_v1.h"
+#include "zone/water_map_v2.h"
 #include "zone/mob_movement_manager.h"
 #include <cmath>
 
@@ -35,6 +44,8 @@ extern volatile bool is_zone_loaded;
 
 namespace InserverTests {
 namespace {
+
+#include "water_map_tests.h"
 
 // Exercise the production formatter without depending on ambient zone names.
 // No entities are registered or retained by this scenario.
@@ -60,6 +71,71 @@ Result UniqueNameBounds()
 		}
 	}
 	return {Outcome::Passed, "unique-name empty, short and boundary prefixes preserve bounded suffix and NUL"};
+}
+
+// Rule overrides are local to this synchronous scenario and restored on every
+// return. No actor body, character row or persistent rule is created.
+Result PlayerExperienceRules()
+{
+	struct Restore {
+		std::vector<std::pair<std::string, std::string>> rules;
+		float zone_multiplier = zone->newzone_data.zone_exp_multiplier;
+		decltype(zone->level_exp_mod[1].ExpMod) level_modifier = zone->level_exp_mod[1].ExpMod;
+		~Restore() {
+			for (const auto &r : rules) { RuleManager::Instance()->SetRule(r.first, r.second); }
+			zone->newzone_data.zone_exp_multiplier = zone_multiplier;
+			zone->level_exp_mod[1].ExpMod = level_modifier;
+		}
+		bool Set(const std::string &name, const std::string &value) {
+			std::string old;
+			if (!RuleManager::Instance()->GetRule(name, old)) { return false; }
+			rules.emplace_back(name, old);
+			return RuleManager::Instance()->SetRule(name, value);
+		}
+	} restore;
+	for (const auto &r : std::vector<std::pair<std::string, std::string>>{
+		{"Character:ExpMultiplier", "2"}, {"Character:UseRaceClassExpBonuses", "false"},
+		{"Character:UseXPConScaling", "true"}, {"Character:WhiteModifier", "50"},
+		{"Zone:HotZoneBonus", "0"}, {"Character:FinalExpMultiplier", "3"},
+		{"Character:EnableCharacterEXPMods", "true"}, {"Zone:LevelBasedEXPMods", "true"},
+		{"Character:ExperiencePercentCapPerKill", "-1"},
+		{"Character:UseOldRaceExpPenalties", "false"}, {"Character:UseOldClassExpPenalties", "false"}}) {
+		if (!restore.Set(r.first, r.second)) { return {Outcome::Failed, "XP rule override failed"}; }
+	}
+	zone->newzone_data.zone_exp_multiplier = 1.5f;
+	zone->level_exp_mod[1].ExpMod = 2.0f;
+	auto *type = new NPCType{};
+	std::strcpy(type->name, "ExperienceRuleControl");
+	type->race = 1; type->class_ = 1; type->level = 1;
+	type->current_hp = type->max_hp = 100;
+	auto npc = std::make_unique<NPC>(type, nullptr, glm::vec4(0), GravityBehavior::Flying);
+	npc->GiveNPCTypeData(type);
+	if (npc->GetBaseExperienceForLevel(1) != 0 || npc->GetBaseExperienceForLevel(2) != 1000 ||
+		npc->GetBaseExperienceForLevel(3) != 8000 || npc->GetBaseExperienceForLevel(4) != 27000 ||
+		npc->ScaleNormalExperience(100, ConsiderColor::White) != 150 ||
+		npc->ScaleNormalExperience(100, ConsiderColor::Gray) != 0 ||
+		npc->ScaleNormalExperience(100, 0xFF) != 300 ||
+		npc->FinishNormalExperience(10, 100, 1000, 4.0f) != 340) {
+		return {Outcome::Failed, "shared XP thresholds/modifier order changed"};
+	}
+	if (!RuleManager::Instance()->SetRule("Character:ExperiencePercentCapPerKill", "20") ||
+		npc->FinishNormalExperience(10, 100, 1000, 4.0f) != 300 ||
+		!RuleManager::Instance()->SetRule("Character:ExperiencePercentCapPerKill", "0") ||
+		npc->FinishNormalExperience(10, 100, 1000, 4.0f) != 100) {
+		return {Outcome::Failed, "shared XP percent cap changed"};
+	}
+	int32 standing = 0;
+	if (!npc->ApplyPersonalFaction(standing, -15, -100, 100) || standing != -15 ||
+		!npc->ApplyPersonalFaction(standing, -100, -100, 100) || standing != -100 ||
+		npc->ApplyPersonalFaction(standing, -1, -100, 100) || standing != -100 ||
+		npc->ApplyPersonalFaction(standing, 20, -100, 100, true) || standing != -100) {
+		return {Outcome::Failed, "shared personal faction adjustment or GM immunity changed"};
+	}
+	standing = 500;
+	if (!npc->ApplyPersonalFaction(standing, -10, -100, 100) || standing != 90) {
+		return {Outcome::Failed, "shared faction repair/clamp ordering changed"};
+	}
+	return {Outcome::Passed, "shared normal XP thresholds, con/ZEM/level/final/character modifiers and cap"};
 }
 
 // This scenario observes registration and native timer-driven removal. It does
@@ -1197,6 +1273,8 @@ Result ActorApproach()
 }
 #include "actor_melee_tests.h"
 #include "actor_melee_facing_tests.h"
+#include "actor_inventory_tests.h"
+#include "actor_zone_tests.h"
 #endif
 
 struct Scenario {
@@ -1210,8 +1288,17 @@ struct Scenario {
 // does not select names or interpret actor mechanics.
 constexpr std::array scenarios = {
 	Scenario{"native_beacon_lifetime", BeaconLifetime}
+	, Scenario{"native_player_experience_rules", PlayerExperienceRules}
 	, Scenario{"native_unique_name_bounds", UniqueNameBounds}
+	, Scenario{"native_water_segment_geometry", WaterSegmentGeometry}
 #ifdef EQEMU_RUST_BOOTSTRAP_BRIDGE
+    , Scenario{"rust_native_actor_equipment", ActorEquipment, CleanupMelee, 30000}
+    , Scenario{"rust_native_actor_spawn_hints", ActorSpawnHints}
+    , Scenario{"rust_native_actor_observation_buffer", []() -> Result {
+        return ActorIntegration::CaptureBufferControl()
+            ? Result{Outcome::Passed,"callback POD prefix, 64-bit widths and fail-closed overflow; no Rust or actor authority"}
+            : Result{Outcome::Failed,"callback capture buffer overwrote or lost its complete prefix"};
+    }}
     // Exercises real shutdown, then boots a replacement in the same zone host.
     , Scenario{"rust_native_actor_body_lifetime", ActorBodyLifetime, CleanupActorBody}
     , Scenario{"rust_native_actor_patrol", ActorTravel<TravelCase::Patrol>, CleanupActorBody}

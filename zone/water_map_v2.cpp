@@ -16,6 +16,9 @@
 	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 #include "water_map_v2.h"
+#include <algorithm>
+#include <cmath>
+#include <set>
 
 WaterMapV2::WaterMapV2() {
 }
@@ -137,4 +140,35 @@ bool WaterMapV2::Load(FILE *fp) {
 	}
 
 	return true;
+}
+
+bool WaterMapV2::SegmentInLiquid(const glm::vec3 &from, const glm::vec3 &to) const {
+    struct Event { double at; size_t region; bool entering; };
+    std::vector<Event> events;
+    const glm::vec3 a(from.y, from.x, from.z), b(to.y, to.x, to.z);
+    for (size_t i = 0; i < regions.size(); ++i) {
+        double begin, end;
+        if (!regions[i].second.ClipSegment(a, b, begin, end)) { continue; }
+        if (!std::isfinite(begin) || !std::isfinite(end)) { return true; }
+        events.push_back({begin, i, true}); events.push_back({end, i, false});
+    }
+    std::sort(events.begin(), events.end(), [](const auto &x, const auto &y) { return x.at < y.at; });
+    std::set<size_t> active;
+    auto liquid = [&] {
+        if (active.empty()) { return false; }
+        const auto type = regions[*active.begin()].first;
+        return type == RegionTypeWater || type == RegionTypeLava || type == RegionTypeVWater;
+    };
+    // Region order has the same precedence as ReturnRegionType, including dry
+    // volumes carved out of a larger water box. Endpoints are inclusive.
+    for (size_t i = 0; i < events.size();) {
+        if (liquid()) { return true; }
+        size_t end = i;
+        while (end < events.size() && events[end].at == events[i].at) { ++end; }
+        for (size_t j = i; j < end; ++j) { if (events[j].entering) { active.insert(events[j].region); } }
+        if (liquid()) { return true; }
+        for (size_t j = i; j < end; ++j) { if (!events[j].entering) { active.erase(events[j].region); } }
+        i = end;
+    }
+    return false;
 }

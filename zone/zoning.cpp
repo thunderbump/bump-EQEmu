@@ -15,6 +15,7 @@
 	You should have received a copy of the GNU General Public License
 	along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
+#include "common/player_zone_access.h"
 #include "client.h"
 
 #include "common/eqemu_logsys.h"
@@ -1429,7 +1430,10 @@ bool Client::CanEnterZone(const std::string& zone_short_name, int16 instance_ver
 		return false;
 	}
 
-	if (!GetGM() && GetLevel() < z->min_level) {
+	const bool flag_required = !z->flag_needed.empty() && Strings::IsNumber(z->flag_needed) && Strings::ToBool(z->flag_needed);
+	const auto failure = CheckPlayerZoneAccess(GetLevel(), Admin(), GetGM(), z->min_level, z->max_level,
+		z->min_status, flag_required, !flag_required || HasZoneFlag(z->zoneidnumber));
+	if (failure == PlayerZoneAccessFailure::MinimumLevel) {
 		LogInfo(
 			"Character [{}] does not meet minimum level requirement ([{}] < [{}])!",
 			GetCleanName(),
@@ -1439,7 +1443,7 @@ bool Client::CanEnterZone(const std::string& zone_short_name, int16 instance_ver
 		return false;
 	}
 
-	if (!GetGM() && GetLevel() > z->max_level) {
+	if (failure == PlayerZoneAccessFailure::MaximumLevel) {
 		LogInfo(
 			"Character [{}] does not meet maximum level requirement ([{}] > [{}])!",
 			GetCleanName(),
@@ -1449,7 +1453,7 @@ bool Client::CanEnterZone(const std::string& zone_short_name, int16 instance_ver
 		return false;
 	}
 
-	if (Admin() < z->min_status) {
+	if (failure == PlayerZoneAccessFailure::Status) {
 		LogInfo(
 			"Character [{}] does not meet minimum status requirement ([{}] < [{}])!",
 			GetCleanName(),
@@ -1459,13 +1463,7 @@ bool Client::CanEnterZone(const std::string& zone_short_name, int16 instance_ver
 		return false;
 	}
 
-	if (
-		!GetGM() &&
-		!z->flag_needed.empty() &&
-		Strings::IsNumber(z->flag_needed) &&
-		Strings::ToBool(z->flag_needed) &&
-		!HasZoneFlag(z->zoneidnumber)
-	) {
+	if (failure == PlayerZoneAccessFailure::Flag) {
 		LogInfo(
 			"Character [{}] does not have the flag to be in this zone [{}]!",
 			GetCleanName(),
